@@ -1,0 +1,20 @@
+[user]
+	name = Sébastien Theys
+	email = seb@odoo.com
+[push]
+	default = simple
+
+[diff]
+	external = git-meld
+[filter "lfs"]
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
+	required = true
+	clean = git-lfs clean -- %f
+[cola]
+	tabwidth = 4
+[gui]
+	editor = subl
+	diffcontext = 5
+[merge]
+	verbosity = 5
