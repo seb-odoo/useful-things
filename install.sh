@@ -2,11 +2,10 @@
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-if [ -z "$1" ]
-	then
-		REPO="${DIR}/.."
-	else
-		REPO="$1"
+if [ -z "$1" ]; then
+    REPO="${DIR}/.."
+else
+    REPO="$1"
 fi
 
 ln -s "${DIR}/.odoorc-dev" ~/.odoorc

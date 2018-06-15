@@ -1,0 +1,15 @@
+0_package_control_loader
+All Autocomplete
+BlameHighlighter
+Git blame
+GitGutter
+Outline
+Package Control
+Sass
+Sublime Bookmarks
+SublimeLinter
+SublimeLinter-contrib-bashate
+SublimeLinter-eslint
+SublimeLinter-flake8
+SublimeLinter-json
+SublimeLinter-xmllint
