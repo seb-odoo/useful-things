@@ -1,8 +1,8 @@
 [options]
-addons_path = /home/odoo/odoo/enterprise/,/home/odoo/odoo/odoo/odoo/addons,/home/odoo/odoo/odoo/addons,/home/odoo/odoo/odoo/mymodules
+addons_path = ~/repo/enterprise/,~/repo/odoo/odoo/addons,~/repo/odoo/addons,~/repo/test_modules
 admin_passwd = admin
 csv_internal_sep = ,
-data_dir = /home/odoo/.local/share/Odoo
+data_dir = ~/.local/share/Odoo
 db_host = False
 db_maxconn = 64
 db_name = odoo-master
