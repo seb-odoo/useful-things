@@ -1,5 +1,5 @@
 [options]
-addons_path = ~/repo/enterprise/,~/repo/odoo/odoo/addons,~/repo/odoo/addons,~/repo/test_modules
+addons_path = ~/repo/enterprise/,~/repo/odoo/odoo/addons,~/repo/odoo/addons,~/repo/design-themes
 admin_passwd = admin
 csv_internal_sep = ,
 data_dir = ~/.local/share/Odoo
@@ -9,9 +9,8 @@ db_name = odoo-master
 db_password = False
 db_port = False
 db_sslmode = prefer
-db_template = template1
+db_template = template0
 db_user = False
-dbfilter = odoo-master
 demo = {}
 email_from = False
 geoip_database = /usr/share/GeoIP/GeoLiteCity.dat
@@ -55,4 +54,3 @@ translate_modules = ['all']
 unaccent = False
 without_demo = False
 workers = 0
-dev=all

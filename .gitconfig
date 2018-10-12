@@ -18,3 +18,5 @@
 	diffcontext = 5
 [merge]
 	verbosity = 5
+[alias]
+	checkoutr = checkout
