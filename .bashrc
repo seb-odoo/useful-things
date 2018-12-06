@@ -76,3 +76,6 @@ function killodoo() {
     ps aux | grep 'odoo-bin' | grep -v grep | awk '{print $2}' | xargs -r kill
 }
 
+function killodoo9() {
+    ps aux | grep 'odoo-bin' | grep -v grep | awk '{print $2}' | xargs -r kill -9
+}
