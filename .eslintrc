@@ -8,97 +8,44 @@
         "sourceType": "module"
     },
     "rules": {
-        "max-len": [
-            "warn",
-            100,
-        ],
-        "indent": [
-            "off",
-            4,
-            {
-                "SwitchCase": 1
-            }
-        ],
-        "linebreak-style": [
-            "error",
-            "unix"
-        ],
-        "quotes": [
-            "off",
-            "double"
-        ],
-        "semi": [
-            "error",
-            "always"
-        ],
-        "comma-dangle": [
-            "off"
-        ],
-        "no-console": [
-            "warn",
-            {
-                "allow": ["warn", "error"]
-            }
-        ],
-        "no-unused-vars": [
-            "warn",
-            {
-                "args": "none"
-            }
-        ],
-        "no-empty": [
-            "warn"
-        ],
-        "eqeqeq": [
-            "error",
-            "smart"
-        ],
-        "space-before-function-paren": [
-            "warn",
-            {"anonymous": "always", "named": "never"}
-        ],
-        "keyword-spacing": [
-            "warn"
-        ],
-        "no-use-before-define": [
-            "warn",
-            "nofunc"
-        ]
+        "array-bracket-spacing": ["warn", "never"],
+        "brace-style": "warn",
+        "camelcase": ["warn", {"properties": "never"}],
+        "comma-dangle": ["off"],
+        "comma-spacing": ["warn", {"before": false, "after": true}],
+        "curly": ["warn"],
+        "eol-last": ["error"],
+        "eqeqeq": ["warn", "smart"],
+        "indent": ["off", 4, {"SwitchCase": 1}],
+        "key-spacing": ["warn"],
+        "keyword-spacing": ["warn"],
+        "linebreak-style": ["error", "unix"],
+        "max-len"= ["warn", 100],
+        "no-console": ["warn", {"allow": ["warn", "error"]}],
+        "no-empty": ["warn"],
+        "no-multi-spaces": ["warn"],
+        "no-redeclare": ["warn"],
+        "no-unused-vars": ["warn", {"args": "none"}],
+        "no-use-before-define": ["warn", "nofunc"],
+        "object-curly-spacing": ["warn", "never"],
+        "quotes": ["off", "double"],
+        "semi": ["error", "always"],
+        "semi-spacing": ["warn", {"before": false, "after": true}],
+        "space-before-blocks": ["warn"],
+        "space-before-function-paren": ["warn", {"anonymous": "always", "named": "never"}],
+        "space-infix-ops": ["warn"],
+        "space-in-parens": ["warn", "never"]
     },
     "globals": {
-        "$": false,
-        "jQuery": false,
-        "_": false,
-        "openerp": true,
-        "odoo": true,
-        "CKEDITOR": true,
-        "google": false,
-        "window": false,
-        "setTimeout": false,
-        "clearTimeout": false,
-        "document": false,
-        "console": false,
-        "QUnit": false,
-        "moment": false,
-        "FileReader": false,
-        "nv": false,
-        "d3": false,
-        "ace": false,
-        "Option": false,
-        "py": false,
-        "XMLHttpRequest": false,
-        "setInterval": false,
-        "clearInterval": false,
-        "Image": false,
-        "jstz": false,
-        "ZeroClipboard": false,
-        "sessionStorage": false,
-        "Node": false,
-        "history": false,
-        "gapi": false,
-        "Event": false,
-        "Gravitec": false,
-        "navigator": false,
-        "OneSignal": false
+        "openerp": true, "odoo": true, "CKEDITOR": true,
+
+        "$": false, "jQuery": false, "_": false, "google": false, "window": false,
+        "setTimeout": false, "clearTimeout": false, "document": false, "console": false,
+        "QUnit": false, "moment": false, "FileReader": false, "nv": false, "d3": false,
+        "ace": false, "Option": false, "py": false, "XMLHttpRequest": false,
+        "setInterval": false, "clearInterval": false, "Image": false, "jstz": false,
+        "ZeroClipboard": false, "sessionStorage": false, "Node": false, "history": false,
+        "gapi": false, "Event": false, "Gravitec": false, "navigator": false,
+        "OneSignal": false, "PDFJS": false, "ClipboardJS": false
     }
 }
