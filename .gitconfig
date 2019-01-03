@@ -1,6 +1,7 @@
 [user]
 	name = Sébastien Theys
 	email = seb@odoo.com
+	signingkey = D2272BC007201AC9
 [push]
 	default = simple
 

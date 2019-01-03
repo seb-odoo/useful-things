@@ -20,7 +20,6 @@
         "key-spacing": ["warn"],
         "keyword-spacing": ["warn"],
         "linebreak-style": ["error", "unix"],
-        "max-len": ["warn", 100],
         "no-console": ["warn", {"allow": ["warn", "error"]}],
         "no-empty": ["warn"],
         "no-multi-spaces": ["warn"],
