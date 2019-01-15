@@ -65,6 +65,7 @@ function gnb()
 	FULL_NAME="${BASE}-${BRANCH}-seb"
 	git fetch odoo $BASE
 	git checkout -b $FULL_NAME "odoo/${BASE}" --no-track
+	# we need to push because the upstream branch doesn't exist yet
 	git push -u odoo-dev $FULL_NAME
 }
 
@@ -99,3 +100,36 @@ function otb() { open_github "odoo" "design-themes" "commits" "${1}"; }
 function oobl() { open_github "odoo" "odoo" "blame" "${1}" "${2}"; }
 function oebl() { open_github "odoo" "enterprise" "blame" "${1}" "${2}"; }
 function otbl() { open_github "odoo" "design-themes" "blame" "${1}" "${2}"; }
+
+# pyflame: 1 (time) 2 (interval)
+function oflame() {
+	PIDFile="/var/run/odoo-dev.pid"
+	PID=$(<"$PIDFile")
+	OUTPUT="/tmp/oflame.flame"
+	GRAPH="/tmp/oflame.svg"
+	sudo pyflame --exclude-idle -s ${1-10} -r ${2-0.001} -p ${PID} -o ${OUTPUT}
+	~/FlameGraph/flamegraph.pl --width 1900 ${OUTPUT} > ${GRAPH}
+	webbrowser ${GRAPH}
+}
+
+function odoo-bin() {
+	d=`git branch | grep \* | cut -d ' ' -f2`
+	edition=${1}
+	shift 1
+	rest=$*
+
+	addons_path="~/repo/odoo/odoo/addons,~/repo/odoo/addons"
+	if [[ ${edition} == *"e"* ]]; then
+		addons_path="${addons_path},~/repo/enterprise/"
+		d="${d}-e"
+	fi
+	if [[ ${edition} == *"t"* ]]; then
+		addons_path="${addons_path},~/repo/design-themes/"
+		d="${d}-t"
+	fi
+	if [[ ${edition} == *"d"* ]]; then
+		addons_path="${addons_path},~/repo/big-data/"
+		d="${d}-d"
+	fi
+	./odoo-bin -d ${d} --addons-path ${addons_path} ${rest}
+}
