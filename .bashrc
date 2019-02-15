@@ -107,7 +107,7 @@ function oflame() {
 	PID=$(<"$PIDFile")
 	OUTPUT="/tmp/oflame.flame"
 	GRAPH="/tmp/oflame.svg"
-	sudo pyflame --exclude-idle -s ${1-10} -r ${2-0.001} -p ${PID} -o ${OUTPUT}
+	sudo pyflame --exclude-idle -s ${1-10} -r ${2-0.0001} -p ${PID} -o ${OUTPUT}
 	~/FlameGraph/flamegraph.pl --width 1900 ${OUTPUT} > ${GRAPH}
 	webbrowser ${GRAPH}
 }
