@@ -178,9 +178,10 @@ function logmodules () {
 function ocoverage() {
 	# 1st param: the source to cover
 	SOURCE=$1
-	shift 1
+	CMD=$2
+	shift 2
 
-	RES="coverage run --branch --source=${SOURCE} odoo-bin $(odoo-bin-params $*)"
+	RES="coverage run --branch --source=${SOURCE} ${CMD} $(odoo-bin-params $*)"
 	echo "Executing: ${RES}"
 	eval $RES
 
