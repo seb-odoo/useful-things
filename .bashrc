@@ -113,6 +113,12 @@ function oflame() {
 }
 
 function odoo-bin() {
+	RES="./odoo-bin $(odoo-bin-params $*)"
+	echo "Executing: ${RES}"
+	eval $RES
+}
+
+function odoo-bin-params() {
 	d=`git branch | grep \* | cut -d ' ' -f2`
 	edition=${1}
 	shift 1
@@ -131,5 +137,7 @@ function odoo-bin() {
 		addons_path="${addons_path},~/repo/big-data/"
 		d="${d}-d"
 	fi
-	./odoo-bin -d ${d} --addons-path ${addons_path} ${rest}
+	echo "-d ${d} --addons-path ${addons_path} ${rest}"
+}
+
 }
