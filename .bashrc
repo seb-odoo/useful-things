@@ -140,4 +140,53 @@ function odoo-bin-params() {
 	echo "-d ${d} --addons-path ${addons_path} ${rest}"
 }
 
+function clearsqllog() {
+	sudo rm /var/log/postgresql/postgresql-9.5-main.log*
+	sudo service postgresql restart
+}
+
+function obadger() {
+	pgbadger /var/log/postgresql/postgresql-9.5-main.log -o /tmp/postgresql.html
+	webbrowser /tmp/postgresql.html
+}
+
+
+function curltime() {
+	curl -so /dev/null -w '%{time_total}\n' $*
+}
+
+function manycurltime() {
+	max=${1}
+	shift 1
+	for((i=0; i<= ${max}; i++))
+	do
+		curltime $*
+	done
+}
+
+function gogogo() {
+	tog
+	tos
+	subl
+	firefox &
+}
+
+function logmodules () {
+	cat ${1} | grep "creating or updating database tables" | sed 's/.*registry\: module \(.*\):.*/\1/' > mod.log
+}
+
+function ocoverage() {
+	# 1st param: the source to cover
+	SOURCE=$1
+	shift 1
+
+	RES="coverage run --branch --source=${SOURCE} odoo-bin $(odoo-bin-params $*)"
+	echo "Executing: ${RES}"
+	eval $RES
+
+	# report
+	htmldir=/tmp/htmlcov
+	rm -r $htmldir
+	coverage html -d $htmldir
+	webbrowser "${htmldir}/index.html"
 }
