@@ -1,15 +1,18 @@
 0_package_control_loader
+Advanced CSV
 All Autocomplete
-BlameHighlighter
 Git blame
 GitGutter
-Outline
+Highlight Trailing Whitespace
 Package Control
+PackageResourceViewer
+requirementstxt
 Sass
-Sublime Bookmarks
+SideBarEnhancements
 SublimeLinter
 SublimeLinter-contrib-bashate
 SublimeLinter-eslint
 SublimeLinter-flake8
+SublimeLinter-javac
 SublimeLinter-json
 SublimeLinter-xmllint
