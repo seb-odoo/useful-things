@@ -177,9 +177,10 @@ function logmodules () {
 
 function ocoverage() {
 	# 1st param: the source to cover
-	SOURCE=$1
-	CMD=$2
-	shift 2
+	OPEN=$1
+	SOURCE=$2
+	CMD=$3
+	shift 3
 
 	RES="coverage run --branch --source=${SOURCE} ${CMD} $(odoo-bin-params $*)"
 	echo "Executing: ${RES}"
@@ -189,5 +190,7 @@ function ocoverage() {
 	htmldir=/tmp/htmlcov
 	rm -r $htmldir
 	coverage html -d $htmldir
-	webbrowser "${htmldir}/index.html"
+	if [ "$OPEN" -eq "1" ]; then
+		webbrowser "${htmldir}/index.html"
+	fi
 }
