@@ -34,8 +34,9 @@ _git_checkout ()
 
 alias gis="git status"
 alias gil="git log"
-alias gfo='git fetch odoo'
-alias gfa='git fetch --all'
+alias gfo='git fetch odoo -p'
+alias gfa='git fetch --all -p'
+alias gfod='git fetch odoo-dev -p'
 alias grm='git rebase odoo/master'
 alias gr10='git rebase odoo/10.0'
 alias gr11='git rebase odoo/11.0'
