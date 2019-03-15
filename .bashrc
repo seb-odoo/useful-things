@@ -120,7 +120,11 @@ function odoo-bin() {
 }
 
 function odoo-bin-params() {
-	d=`git branch | grep \* | cut -d ' ' -f2`
+	branch=`git branch | grep \*`
+	branch=${branch/\(HEAD detached at odoo-dev\/}
+	branch=${branch/\(HEAD detached from odoo-dev\/}
+	branch=${branch/\)}
+	d=${branch/\* }
 	edition=${1}
 	shift 1
 	rest=$*
