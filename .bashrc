@@ -66,8 +66,10 @@ function gnb()
 	FULL_NAME="${BASE}-${BRANCH}-seb"
 	git fetch odoo $BASE
 	git checkout -b $FULL_NAME "odoo/${BASE}" --no-track
-	# we need to push because the upstream branch doesn't exist yet
-	git push -u odoo-dev $FULL_NAME
+	if [ ! -z "$FULL_NAME" ]; then
+		# we need to push because the upstream branch doesn't exist yet
+		git push -u odoo-dev $FULL_NAME
+	fi
 }
 
 # checkout an existing branch
