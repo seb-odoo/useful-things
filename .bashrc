@@ -130,6 +130,7 @@ function odoo-bin-params() {
 	branch=`git branch | grep \*`
 	branch=${branch/\(HEAD detached at odoo-dev\/}
 	branch=${branch/\(HEAD detached from odoo-dev\/}
+	branch=${branch/\(no branch, rebasing }
 	branch=${branch/\)}
 	d=${branch/\* }
 	edition=${1}
