@@ -217,3 +217,29 @@ function killotunnel() {
 	ps aux | grep 'ssh odoo-dev@stheys.com' | grep -v grep | awk '{print $2}' | xargs -r kill;
 }
 
+GIT_PROMPT_ONLY_IN_REPO=1
+GIT_PROMPT_THEME=Single_line_Ubuntu
+
+GIT_PROMPT_PREFIX="["
+GIT_PROMPT_SUFFIX="]"
+GIT_PROMPT_SEPARATOR="|"
+GIT_PROMPT_STAGED="${Red}●${ResetColor}"
+GIT_PROMPT_CONFLICTS="${Red}✖${ResetColor}"
+GIT_PROMPT_CHANGED="${Blue}✚${ResetColor}"
+GIT_PROMPT_UNTRACKED="${Cyan}…${ResetColor}"
+GIT_PROMPT_STASHED="${BoldBlue}⚑${ResetColor}"
+GIT_PROMPT_CLEAN="${BoldGreen}✔${ResetColor}"
+
+GIT_PROMPT_COMMAND_OK="${Green}✔"
+GIT_PROMPT_COMMAND_FAIL="${Red}✘"
+
+GIT_PROMPT_END_USER="${ResetColor} $ "
+GIT_PROMPT_START_USER="${Cyan}${PathShort}${ResetColor}"
+GIT_PROMPT_END_ROOT="${BoldRed} # "
+
+GIT_PROMPT_IGNORE_STASH="1"
+GIT_PROMPT_BRANCH="${BoldBlue}"
+GIT_PROMPT_SYMBOLS_AHEAD="${BoldGreen}↑ "
+GIT_PROMPT_SYMBOLS_BEHIND="${BoldRed}↓ "
+
+source ~/.bash-git-prompt/gitprompt.sh
