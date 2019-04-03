@@ -3,4 +3,4 @@ data_dir = ~/.local/share/Odoo
 limit_memory_hard = 5368709120
 limit_memory_soft = 4294967296
 limit_time_real = 0
-pidfile = /var/run/odoo-dev.pid
+pidfile = /tmp/odoo-dev.pid

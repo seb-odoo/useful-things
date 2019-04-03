@@ -104,7 +104,7 @@ function otbl() { open_github "odoo" "design-themes" "blame" "${1}" "${2}"; }
 
 # pyflame: 1 (time) 2 (interval)
 function oflame() {
-	PIDFile="/var/run/odoo-dev.pid"
+	PIDFile="/tmp/odoo-dev.pid"
 	PID=$(<"$PIDFile")
 	OUTPUT="/tmp/oflame.flame"
 	GRAPH="/tmp/oflame.svg"
