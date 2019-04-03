@@ -58,6 +58,11 @@ alias ubash="source ~/.bashrc"
 
 alias hackchromeheadless="google-chrome --headless --remote-debugging-port=8071"
 
+function gr()
+{
+	git rebase "odoo/${1}"
+}
+
 # fetch, create, and push a new branch
 function gnb()
 {
