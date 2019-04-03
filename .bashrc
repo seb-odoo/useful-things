@@ -48,6 +48,7 @@ alias gca='git commit --amend'
 alias gcad='git commit --amend --date="$(date -R)"'
 alias gcadne='git commit --amend --date="$(date -R)" --no-edit'
 alias grs='git reset --soft HEAD~1'
+alias gwhere='git branch -r --contains'
 
 alias tog="terminator -l 'odoo gits' </dev/null &>/dev/null &"
 alias tos="terminator -l 'odoo shell' </dev/null &>/dev/null &"
