@@ -199,3 +199,12 @@ function ocoverage() {
 		webbrowser "${htmldir}/index.html"
 	fi
 }
+
+function otunnel() {
+	ssh odoo-dev@stheys.com -f -N -T -R 18069:localhost:8069
+}
+
+function killotunnel() {
+	ps aux | grep 'ssh odoo-dev@stheys.com' | grep -v grep | awk '{print $2}' | xargs -r kill;
+}
+
