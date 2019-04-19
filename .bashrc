@@ -137,21 +137,24 @@ function odoo-bin-params() {
 	edition=${1}
 	shift 1
 	rest=$*
-
+	shell=""
 	addons_path="~/repo/odoo/odoo/addons,~/repo/odoo/addons"
-	if [[ ${edition} == *"e"* ]]; then
+	if [[ "${edition}" == *"s"* ]]; then
+		shell='shell'
+	fi
+	if [[ "${edition}" == *"e"* ]]; then
 		addons_path="${addons_path},~/repo/enterprise/"
 		d="${d}-e"
 	fi
-	if [[ ${edition} == *"t"* ]]; then
+	if [[ "${edition}" == *"t"* ]]; then
 		addons_path="${addons_path},~/repo/design-themes/"
 		d="${d}-t"
 	fi
-	if [[ ${edition} == *"d"* ]]; then
+	if [[ "${edition}" == *"d"* ]]; then
 		addons_path="${addons_path},~/repo/big-data/"
 		d="${d}-d"
 	fi
-	echo "-d ${d} --addons-path ${addons_path} ${rest}"
+	echo "${shell} -d ${d} --addons-path ${addons_path} ${rest}"
 }
 
 function clearsqllog() {
