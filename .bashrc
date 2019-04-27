@@ -246,3 +246,19 @@ GIT_PROMPT_SYMBOLS_AHEAD="${BoldGreen}↑ "
 GIT_PROMPT_SYMBOLS_BEHIND="${BoldRed}↓ "
 
 source ~/.bash-git-prompt/gitprompt.sh
+
+
+function usbkeyopen() {
+	sudo cryptsetup luksOpen /dev/sdb USBDrive
+	sudo mount /dev/mapper/USBDrive /mnt/USBDrive
+}
+
+function usbkeyclose() {
+	sudo umount /mnt/USBDrive
+	sudo cryptsetup luksClose USBDrive
+}
+
+function usbkeysave() {
+	rsync -aAXvi --progress --delete ~/.config/ /mnt/USBDrive/.config/
+	rsync -aAXvi --progress --delete ~/.ssh/ /mnt/USBDrive/.ssh/
+}
