@@ -175,11 +175,21 @@ function curltime() {
 
 function manycurltime() {
 	max=${1}
+	allTimes=()
 	shift 1
-	for((i=0; i<= ${max}; i++))
+	for((i=0; i < ${max}; i++))
 	do
-		curltime $*
+		cur=$(curltime $*)
+		echo $cur
+		allTimes[i]=$cur
 	done
+	tot=0
+	for i in ${allTimes[@]}
+	do
+		cmd="$tot+$i"
+		tot=$(echo $cmd | sed -u 's/,/./g' | bc -l)
+	done
+	echo "$tot $max" | awk '{printf "%0.4f\n", $1 / $2}'
 }
 
 function gogogo() {
