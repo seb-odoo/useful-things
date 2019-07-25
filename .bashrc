@@ -159,6 +159,8 @@ function odoo-bin-params() {
 	echo "${shell}-d ${d} --addons-path ${addons_path} ${rest}"
 }
 
+alias obet="odoo-bin et"
+
 function clearsqllog() {
 	sudo rm /var/log/postgresql/postgresql-9.5-main.log*
 	sudo service postgresql restart
