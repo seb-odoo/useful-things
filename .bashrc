@@ -142,7 +142,7 @@ function odoo-bin-params() {
 	shell=""
 	addons_path="~/repo/odoo/odoo/addons,~/repo/odoo/addons"
 	if [[ "${edition}" == *"s"* ]]; then
-		shell='shell'
+		shell='shell '
 	fi
 	if [[ "${edition}" == *"e"* ]]; then
 		addons_path="${addons_path},~/repo/enterprise/"
@@ -156,7 +156,7 @@ function odoo-bin-params() {
 		addons_path="${addons_path},~/repo/big-data/"
 		d="${d}-d"
 	fi
-	echo "${shell} -d ${d} --addons-path ${addons_path} ${rest}"
+	echo "${shell}-d ${d} --addons-path ${addons_path} ${rest}"
 }
 
 function clearsqllog() {
