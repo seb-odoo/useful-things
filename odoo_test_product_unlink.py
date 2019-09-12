@@ -46,9 +46,6 @@ def execute(self):
         'value_ids': [(6, 0, random.sample(pa.value_ids.ids, 10))],
     } for pa in product_attributes)
 
-    _logger.info('Create variants')
-
-    product_template.with_context(tracking_disable=True).create_variant_ids()
     variants = product_template.product_variant_ids
 
     # Create a dummy SO to prevent the variant from being deleted by
