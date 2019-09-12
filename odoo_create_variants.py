@@ -48,6 +48,8 @@ def execute(self, template_nb=10000):
 
         product_attributes += product_attribute
 
+    product_attributes.flush()
+
     # ---------- create new ------------------------------------------------
 
     _logger.info('Done with attributes in %.3fs, now starting to create %s products' % (time.time() - start, template_nb))
@@ -62,6 +64,8 @@ def execute(self, template_nb=10000):
             'website_published': True,
         })
     product_templates = self.env['product.template'].with_context(create_product_product=True, tracking_disable=True).create(products)
+
+    product_templates.flush()
 
     # ---------- adding ptal -----------------------------------------------
 
@@ -94,17 +98,11 @@ def execute(self, template_nb=10000):
             }]
             max_attribute_nb = max_attribute_nb // value_nb
 
-    self.env['product.template.attribute.line'].create(lines)
+    lines = self.env['product.template.attribute.line'].create(lines)
 
-    # ---------- create variants -------------------------------------------
+    lines.flush()
 
-    _logger.info('Done creating %d ptal in %.3fs, now creating the variants' % (len(lines), time.time() - start))
-
-    start = time.time()
-
-    product_templates.with_context(tracking_disable=True).create_variant_ids()
-
-    _logger.info('Done creating variants in %.3fs' % (time.time() - start))
+    _logger.info('Done creating %d ptal in %.3fs' % (len(lines), time.time() - start))
 
     self.env.cr.commit()
 
