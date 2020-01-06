@@ -82,6 +82,28 @@ function gnb()
 	fi
 }
 
+# new local branch based on remote branch
+function gnbr() {
+	BRANCH=${1/odoo-dev:}
+	git fetch odoo-dev $BRANCH
+	git checkout -b $BRANCH "odoo-dev/${BRANCH}"
+}
+
+# hard reset to remote branch
+function grhr() {
+	branch=`git branch | grep \*`
+	branch=${branch/\* }
+	git fetch odoo-dev $BRANCH
+
+	read -p "About to reset --hard $branch, type y to confirm: "  yes
+
+	if [ "$yes" == "y" ]; then
+	    git reset --hard "odoo-dev/$branch"
+	else
+	    echo "not reseting"
+	fi
+}
+
 # checkout an existing branch
 function gcb() { git checkout "${1}-${2}-seb"; }
 
