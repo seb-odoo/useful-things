@@ -1,7 +1,7 @@
 {
     "env": {
         "commonjs": true,
-        "es6": true
+        "es2017": true
     },
     "extends": "eslint:recommended",
     "parserOptions": {
@@ -10,7 +10,7 @@
     "rules": {
         "array-bracket-spacing": ["warn", "never"],
         "brace-style": "warn",
-        "camelcase": ["warn", {"properties": "never"}],
+        "camelcase": ["off", {"properties": "never"}],
         "comma-dangle": ["off"],
         "comma-spacing": ["warn", {"before": false, "after": true}],
         "curly": ["warn"],
@@ -26,7 +26,7 @@
         "no-redeclare": ["warn"],
         "no-unused-vars": ["warn", {"args": "none"}],
         "no-use-before-define": ["warn", "nofunc"],
-        "object-curly-spacing": ["warn", "never"],
+        "object-curly-spacing": ["warn", "always"],
         "quotes": ["off", "double"],
         "semi": ["error", "always"],
         "semi-spacing": ["warn", {"before": false, "after": true}],
@@ -36,7 +36,7 @@
         "space-in-parens": ["warn", "never"]
     },
     "globals": {
-        "openerp": true, "odoo": true, "CKEDITOR": true,
+        "openerp": true, "odoo": true, "CKEDITOR": true, "owl": true,
 
         "$": false, "jQuery": false, "_": false, "google": false, "window": false,
         "setTimeout": false, "clearTimeout": false, "document": false, "console": false,
@@ -45,6 +45,6 @@
         "setInterval": false, "clearInterval": false, "Image": false, "jstz": false,
         "ZeroClipboard": false, "sessionStorage": false, "Node": false, "history": false,
         "gapi": false, "Event": false, "Gravitec": false, "navigator": false,
-        "OneSignal": false, "PDFJS": false, "ClipboardJS": false
+        "OneSignal": false, "PDFJS": false, "ClipboardJS": false, "fuzzy": true
     }
 }
