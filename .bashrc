@@ -195,6 +195,10 @@ function odoo-bin-params() {
 
 alias obet="odoo-bin et"
 
+function otf() {
+	odoo-bin et --stop-after-init --test-file $*
+}
+
 function clearsqllog() {
 	sudo rm /var/log/postgresql/postgresql-9.5-main.log*
 	sudo service postgresql restart
