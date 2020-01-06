@@ -1,4 +1,3 @@
-
 import logging
 import math
 import random
@@ -57,7 +56,6 @@ def execute(self, template_nb=10000):
     start = time.time()
 
     products = []
-    # TODO SEB handle sequence
     for i in range(template_nb):
         products.append({
             'name': "p %s" % rw.random_word(),
