@@ -16,6 +16,8 @@
 				"odoo/doc/_build",
 				"odoodays-2018",
 				"technical-training",
+				"node_modules",
+				"owl/tools/benchmarks"
 			],
 			"path": "."
 		}
