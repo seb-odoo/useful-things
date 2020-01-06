@@ -61,6 +61,8 @@ alias ubash="source ~/.bashrc"
 
 alias hackchromeheadless="google-chrome --headless --remote-debugging-port=8071"
 
+alias odoo-venv="source ~/virtualenvs/odoo/bin/activate"
+
 function gr()
 {
 	git rebase "odoo/${1}"
@@ -82,6 +84,7 @@ function gnb()
 
 # checkout an existing branch
 function gcb() { git checkout "${1}-${2}-seb"; }
+
 
 # kill stuck odoo process, by rde-odoo
 function killodoo() { ps aux | grep 'odoo-bin' | grep -v grep | awk '{print $2}' | xargs -r kill; }
