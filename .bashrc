@@ -137,6 +137,12 @@ function oobl() { open_github "odoo" "odoo" "blame" "${1}" "${2}"; }
 function oebl() { open_github "odoo" "enterprise" "blame" "${1}" "${2}"; }
 function otbl() { open_github "odoo" "design-themes" "blame" "${1}" "${2}"; }
 
+function otrace() {
+	PIDFile="/tmp/odoo-dev.pid"
+	PID=$(<"$PIDFile")
+	kill -3 ${PID}
+}
+
 # pyflame: 1 (time) 2 (interval)
 function oflame() {
 	PIDFile="/tmp/odoo-dev.pid"
