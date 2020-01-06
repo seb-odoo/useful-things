@@ -23,7 +23,7 @@ def execute(self, partner_nb=1000):
 
     time.sleep(3)
 
-    _logger.info('Starting to create partners')
+    _logger.info('Starting to create %d partners' % len(vals_list))
 
     start = time.time()
 
