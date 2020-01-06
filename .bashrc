@@ -165,6 +165,7 @@ function odoo-bin-params() {
 	branch=${branch/\(HEAD detached at odoo-dev\/}
 	branch=${branch/\(HEAD detached at }
 	branch=${branch/\(HEAD detached from odoo-dev\/}
+	branch=${branch/\(HEAD detached from }
 	branch=${branch/\(no branch, rebasing }
 	branch=${branch/\(no branch, bisect started on }
 	branch=${branch/\)}
