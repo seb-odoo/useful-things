@@ -91,14 +91,14 @@ function gnbr() {
 
 # hard reset to remote branch
 function grhr() {
-	branch=`git branch | grep \*`
-	branch=${branch/\* }
+	BRANCH=`git branch | grep \*`
+	BRANCH=${branch/\* }
 	git fetch odoo-dev $BRANCH
 
-	read -p "About to reset --hard $branch, type y to confirm: "  yes
+	read -p "About to reset --hard $BRANCH, type y to confirm: "  yes
 
 	if [ "$yes" == "y" ]; then
-	    git reset --hard "odoo-dev/$branch"
+	    git reset --hard "odoo-dev/$BRANCH"
 	else
 	    echo "not reseting"
 	fi
