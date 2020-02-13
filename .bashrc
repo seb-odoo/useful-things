@@ -69,6 +69,7 @@ function odoo-venv() {
 	source ~/virtualenvs/odoo/bin/activate
 }
 
+alias list-swap="smem -s swap"
 
 function gr()
 {
