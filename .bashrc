@@ -52,8 +52,12 @@ alias gcadne='git commit --amend --date="$(date -R)" --no-edit'
 alias grs='git reset --soft HEAD~1'
 alias gwhere='git branch -r --contains'
 
-alias tog="terminator -l 'odoo gits' </dev/null &>/dev/null &"
-alias tos="terminator -l 'odoo shell' </dev/null &>/dev/null &"
+function tog() {
+	terminator -l 'odoo gits' </dev/null &>/dev/null &
+}
+function tos() {
+	terminator -l 'odoo shell' </dev/null &>/dev/null &
+}
 
 alias tig="tig --max-count=100"
 
@@ -234,10 +238,12 @@ function manycurltime() {
 }
 
 function gogogo() {
-	tog
-	tos
-	subl
+	tog &
+	tos &
+	subl &
 	firefox &
+	git-cola -r ~/repo/odoo &
+	echo "All set, have a wonderful day!"
 }
 
 function logmodules () {
