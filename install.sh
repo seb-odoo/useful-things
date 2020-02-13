@@ -25,6 +25,7 @@ ln -s "${DIR}/.eslintrc" ~/.eslintrc
 ln -s "${DIR}/.odoorc-dev" "${REPO}/.odoorc"
 ln -s "${DIR}/.flake8" "${REPO}/.flake8"
 ln -s "${DIR}/odoo.sublime-project" "${REPO}/odoo.sublime-project"
+ln -s "${DIR}/.terminator-config" ~/.config/terminator/config
 
 OC_REPO="${REPO}/odoo"
 git clone git@github.com:odoo/odoo.git -v -o odoo "${OC_REPO}"

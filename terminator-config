@@ -1,0 +1,105 @@
+[global_config]
+  dbus = False
+  enabled_plugins = APTURLHandler, LaunchpadCodeURLHandler, LaunchpadBugURLHandler
+  inactive_color_offset = 1.0
+  suppress_multiple_term_dialog = True
+[keybindings]
+[layouts]
+  [[default]]
+    [[[child1]]]
+      parent = window0
+      profile = default
+      type = Terminal
+    [[[window0]]]
+      parent = ""
+      type = Window
+  [[odoo gits]]
+    [[[child0]]]
+      fullscreen = False
+      last_active_term = 023c356c-138f-4b2e-8cbe-54f215a6e98c
+      last_active_window = True
+      maximised = True
+      order = 0
+      parent = ""
+      position = 1920:0
+      size = 1920, 1030
+      title = Odoo Git Triple
+      type = Window
+    [[[child1]]]
+      order = 0
+      parent = child0
+      position = 957
+      ratio = 0.5
+      type = HPaned
+    [[[child3]]]
+      order = 1
+      parent = child1
+      position = 512
+      ratio = 0.5
+      type = VPaned
+    [[[terminal2]]]
+      command = bash --init-file <(echo ". $HOME/.bashrc && odoo-venv")
+      directory = /home/seb/repo/odoo
+      order = 0
+      parent = child1
+      profile = default
+      type = Terminal
+      uuid = 023c356c-138f-4b2e-8cbe-54f215a6e98c
+    [[[terminal4]]]
+      command = bash --init-file <(echo ". $HOME/.bashrc && odoo-venv")
+      directory = /home/seb/repo/enterprise
+      order = 0
+      parent = child3
+      profile = default
+      type = Terminal
+      uuid = f68e3f29-271e-41f7-9b3d-4a4a9310459a
+    [[[terminal5]]]
+      command = bash --init-file <(echo ". $HOME/.bashrc && odoo-venv")
+      directory = /home/seb/repo/design-themes
+      order = 1
+      parent = child3
+      profile = default
+      type = Terminal
+      uuid = 9077456c-83b2-4924-8830-04dcd73d8c40
+  [[odoo shell]]
+    [[[child0]]]
+      fullscreen = False
+      last_active_term = b497d877-0356-474e-8745-20f47d9a63be
+      last_active_window = True
+      maximised = True
+      order = 0
+      parent = ""
+      position = 0:0
+      size = 1920, 1025
+      title = Odoo Shell + htop
+      type = Window
+    [[[child1]]]
+      order = 0
+      parent = child0
+      ratio = 0.278431372549
+      type = VPaned
+    [[[terminal2]]]
+      command = bash --init-file <(echo ". $HOME/.bashrc && htop")
+      order = 0
+      group = htop
+      parent = child1
+      profile = default
+      type = Terminal
+      uuid = b497d877-0356-474e-8745-20f47d9a63be
+    [[[terminal3]]]
+      command = bash --init-file <(echo ". $HOME/.bashrc && odoo-venv")
+      directory = /home/seb/repo/odoo
+      group = odoo shell
+      order = 1
+      parent = child1
+      profile = default
+      type = Terminal
+      uuid = 58969cfa-f6ff-441c-88e3-0ecf2704a14d
+[plugins]
+[profiles]
+  [[default]]
+    background_color = "#424242"
+    cursor_color = "#ffffff"
+    font = Monospace 11
+    foreground_color = "#ffffff"
+    scrollback_infinite = True
