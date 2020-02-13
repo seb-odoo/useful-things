@@ -65,7 +65,10 @@ alias ubash="source ~/.bashrc"
 
 alias hackchromeheadless="google-chrome --headless --remote-debugging-port=8071"
 
-alias odoo-venv="source ~/virtualenvs/odoo/bin/activate"
+function odoo-venv() {
+	source ~/virtualenvs/odoo/bin/activate
+}
+
 
 function gr()
 {
