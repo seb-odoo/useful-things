@@ -1,3 +1,5 @@
+export PATH=$PATH:/home/seb/repo/odoo-ops-tools
+
 export VISUAL="subl -w"
 export EDITOR="$VISUAL"
 
