@@ -1,18 +1,34 @@
-0_package_control_loader
-Advanced CSV
-All Autocomplete
-Git blame
-GitGutter
-Highlight Trailing Whitespace
-Package Control
-PackageResourceViewer
-requirementstxt
-Sass
-SideBarEnhancements
-SublimeLinter
-SublimeLinter-contrib-bashate
-SublimeLinter-eslint
-SublimeLinter-flake8
-SublimeLinter-javac
-SublimeLinter-json
-SublimeLinter-xmllint
+{
+	"bootstrapped": true,
+	"in_process_packages":
+	[
+	],
+	"installed_packages":
+	[
+		"A File Icon",
+		"Advanced CSV",
+		"All Autocomplete",
+		"AutoBackups",
+		"ayu",
+		"Git blame",
+		"GitGutter",
+		"Highlight Trailing Whitespace",
+		"Materialize",
+		"Open Search in a New Tab",
+		"Package Control",
+		"PackageResourceViewer",
+		"requirementstxt",
+		"Sass",
+		"SideBarEnhancements",
+		"SublimeLinter",
+		"SublimeLinter-contrib-bashate",
+		"SublimeLinter-eslint",
+		"SublimeLinter-flake8",
+		"SublimeLinter-javac",
+		"SublimeLinter-json",
+		"SublimeLinter-xmllint",
+		"Tab Filter",
+		"Theme - Dark Material",
+		"TypeScript Syntax"
+	]
+}
