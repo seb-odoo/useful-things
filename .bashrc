@@ -92,6 +92,20 @@ function gnb()
 	fi
 }
 
+# fetch, create, and push a new branch based on master mail owl
+function gnbmmo()
+{
+    BASE='master-mail-owl'
+    BRANCH=$1
+    FULL_NAME="${BASE}-${BRANCH}-seb"
+    git fetch odoo-dev $BASE
+    git checkout -b $FULL_NAME "odoo-dev/${BASE}" --no-track
+    if [ ! -z "$FULL_NAME" ]; then
+        # we need to push because the upstream branch doesn't exist yet
+        git push -u odoo-dev $FULL_NAME
+    fi
+}
+
 # new local branch based on remote branch
 function gnbr() {
 	BRANCH=${1/odoo-dev:}
