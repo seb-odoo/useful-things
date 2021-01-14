@@ -36,7 +36,7 @@
         "space-in-parens": ["warn", "never"]
     },
     "globals": {
-        "openerp": true, "odoo": true, "CKEDITOR": true, "owl": true,
+        "openerp": true, "odoo": true, "CKEDITOR": true, "owl": true, "DOMParser": false,
 
         "$": false, "jQuery": false, "_": false, "google": false, "window": false,
         "setTimeout": false, "clearTimeout": false, "document": false, "console": false,
