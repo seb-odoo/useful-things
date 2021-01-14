@@ -1,15 +1,23 @@
 #!/bin/bash
 
-ssh-keygen
+# into .bashrc: source ~/repo/useful-things/.bashrc
+# ssh-keygen
+sudo apt-get update
 sudo apt install git
+# sudo add-apt-repository ppa:gnome-terminator
+
+sudo apt install libxml2-dev libpq-dev libldap2-dev libsasl2-dev libxslt1-dev python3-setuptools python3-wheel htop postgresql
+
+sudo -u postgres createuser -s $USER
 
 wget -qO - https://download.sublimetext.com/sublimehq-pub.gpg | sudo apt-key add -
 echo "deb https://download.sublimetext.com/ apt/stable/" | sudo tee /etc/apt/sources.list.d/sublime-text.list
-sudo apt-get update
 
 sudo apt-get install sublime-text git-cola vim
+sudo apt-get install terminator
 
 git clone https://github.com/magicmonty/bash-git-prompt.git ~/.bash-git-prompt --depth=1
+
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
