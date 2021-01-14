@@ -6,7 +6,7 @@ sudo apt-get update
 sudo apt install git
 # sudo add-apt-repository ppa:gnome-terminator
 
-sudo apt install libxml2-dev libpq-dev libldap2-dev libsasl2-dev libxslt1-dev python3-setuptools python3-wheel htop postgresql
+sudo apt install libxml2-dev libpq-dev libldap2-dev libsasl2-dev libxslt1-dev python3-setuptools python3-wheel htop postgresql flake8
 
 sudo -u postgres createuser -s $USER
 
