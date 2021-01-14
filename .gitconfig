@@ -16,6 +16,7 @@
 [cola]
 	tabwidth = 4
 	spellcheck = false
+	expandtab = true
 [gui]
 	editor = subl
 	diffcontext = 5
