@@ -5,6 +5,5 @@ limit_memory_soft = 4294967296
 limit_time_real = 0
 pidfile = /tmp/odoo-dev.pid
 proxy_mode = 1
-geoip_database=/var/lib/GeoIP/GeoLite2-City.mmdb
 smtp = 127.0.0.1
 smtp_port = 1025
