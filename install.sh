@@ -7,6 +7,7 @@ sudo apt install git
 # sudo add-apt-repository ppa:gnome-terminator
 
 sudo apt install libxml2-dev libpq-dev libldap2-dev libsasl2-dev libxslt1-dev python3-setuptools python3-wheel htop postgresql flake8
+sudo apt install zlib1g-dev libxml2-utils inotify-tools
 
 sudo -u postgres createuser -s $USER
 
@@ -46,3 +47,16 @@ git clone git@github.com:odoo/enterprise.git -v -o odoo "${OE_REPO}"
 OT="${REPO}/design-themes"
 git clone git@github.com:odoo/design-themes.git -v -o odoo "${OT}"
 (cd "${OT}" && git remote add odoo-dev git@github.com:odoo-dev/design-themes.git)
+
+# pyflame
+sudo apt-get install autoconf automake autotools-dev g++ pkg-config python-dev python3-dev libtool make
+cd ~/repo
+git clone git@github.com:uber-archive/pyflame.git
+cd pyflame
+./autogen.sh
+./configure
+make
+sudo cp src/pyflame /usr/bin/
+
+cd ~/repo
+git clone git@github.com:brendangregg/FlameGraph.git
