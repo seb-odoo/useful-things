@@ -204,37 +204,52 @@ function odoo-bin() {
 	eval $RES
 }
 
+function branchdb() {
+    edition=${1}
+    branch=`git branch | grep \*`
+    branch=${branch/\(HEAD detached at odoo-dev\/}
+    branch=${branch/\(HEAD detached at }
+    branch=${branch/\(HEAD detached from odoo-dev\/}
+    branch=${branch/\(HEAD detached from }
+    branch=${branch/\(no branch, rebasing }
+    branch=${branch/\(no branch, bisect started on }
+    branch=${branch/\)}
+    d=${branch/\* }
+    if [[ "${edition}" == *"e"* ]]; then
+        d="${d}-e"
+    fi
+    if [[ "${edition}" == *"t"* ]]; then
+        d="${d}-t"
+    fi
+    if [[ "${edition}" == *"d"* ]]; then
+        d="${d}-d"
+    fi
+    echo "${d}"
+}
+
 function odoo-bin-params() {
-	branch=`git branch | grep \*`
-	branch=${branch/\(HEAD detached at odoo-dev\/}
-	branch=${branch/\(HEAD detached at }
-	branch=${branch/\(HEAD detached from odoo-dev\/}
-	branch=${branch/\(HEAD detached from }
-	branch=${branch/\(no branch, rebasing }
-	branch=${branch/\(no branch, bisect started on }
-	branch=${branch/\)}
-	d=${branch/\* }
-	edition=${1}
-	shift 1
-	rest=$*
-	shell=""
+    edition=${1}
+    shift 1
+    rest=$*
+    d="$(branchdb ${edition})"
+	cli=""
 	addons_path="~/repo/odoo/odoo/addons,~/repo/odoo/addons"
 	if [[ "${edition}" == *"s"* ]]; then
-		shell='shell '
+		cli='shell '
 	fi
+    if [[ "${edition}" == *"p"* ]]; then
+        cli='populate '
+    fi
 	if [[ "${edition}" == *"e"* ]]; then
 		addons_path="${addons_path},~/repo/enterprise/"
-		d="${d}-e"
 	fi
 	if [[ "${edition}" == *"t"* ]]; then
 		addons_path="${addons_path},~/repo/design-themes/"
-		d="${d}-t"
 	fi
 	if [[ "${edition}" == *"d"* ]]; then
 		addons_path="${addons_path},~/repo/big-data/"
-		d="${d}-d"
 	fi
-	echo "${shell}-d ${d} --addons-path ${addons_path} ${rest}"
+	echo "${cli}-d ${d} --addons-path ${addons_path} ${rest}"
 }
 
 alias obet="odoo-bin et"
@@ -412,6 +427,7 @@ function grebaseprog() {
     rm $TMPFILE
 }
 
+
 # ./../upgrade/test-upgrade.py -c saas-13.3 master-clean-notification-seb --auto-drop -i snailmail
 
 # Reminder of what to type to get the JS env from the browser console
@@ -420,3 +436,24 @@ function getjsenv() {
     odoo.define(function (require) { window.env = require('web.env'); window.tour = require('web_tour.tour'); } );"
 }
 
+# Get and install an Odoo db from a dump zip
+function odooget() {
+    zipurl=$2
+    dbname=$(branchdb $1)
+    zipname=$(basename "$zipurl")
+    echo "about to restore zip '$zipname' into db '$dbname'"
+    mkdir /tmp/restore-$dbname
+    echo "### downloading"
+    wget $zipurl -P /tmp/restore-$dbname -q
+    unzip -q /tmp/restore-$dbname/$zipname -d /tmp/restore-$dbname
+    echo "### restoring filestore"
+    rm -r ~/.local/share/Odoo/filestore/$dbname
+    mkdir ~/.local/share/Odoo/filestore/$dbname
+    mv /tmp/restore-$dbname/filestore/* ~/.local/share/Odoo/filestore/$dbname
+    echo "### restoring db"
+    dropdb $dbname
+    createdb $dbname
+    psql -q $dbname < /tmp/restore-$dbname/dump.sql
+    echo "### cleaning"
+    rm -r /tmp/restore-$dbname
+}
