@@ -368,6 +368,33 @@ function owl-update() {
 	npm run build
 	cp dist/owl.js ~/repo/odoo/addons/web/static/lib/owl/owl.js
 }
+
+function fixwindow() {
+    marco --no-composite --replace &
+}
+
+function fixusb() {
+    if [[ $EUID != 0 ]] ; then
+      echo This must be run as root!
+      exit 1
+    fi
+
+    for xhci in /sys/bus/pci/drivers/?hci_hcd ; do
+
+      if ! cd $xhci ; then
+        echo Weird error. Failed to change directory to $xhci
+        exit 1
+      fi
+
+      echo Resetting devices from $xhci...
+
+      for i in ????:??:??.? ; do
+        echo -n "$i" > unbind
+        echo -n "$i" > bind
+      done
+    done
+}
+
 # Rebase progressive, the goal is to rebase commit by commit of the target
 # branch to be able to resolve conflicts as soon as they happen instead of
 # having a big batch of conflicts at the end.
