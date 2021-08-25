@@ -412,3 +412,9 @@ function grebaseprog() {
     rm $TMPFILE
 }
 
+# Reminder of what to type to get the JS env from the browser console
+function getjsenv() {
+    echo "
+    odoo.define(function (require) { window.env = require('web.env'); window.tour = require('web_tour.tour'); } );"
+}
+
