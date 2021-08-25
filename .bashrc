@@ -368,3 +368,20 @@ function owl-update() {
 	npm run build
 	cp dist/owl.js ~/repo/odoo/addons/web/static/lib/owl/owl.js
 }
+# Rebase progressive, the goal is to rebase commit by commit of the target
+# branch to be able to resolve conflicts as soon as they happen instead of
+# having a big batch of conflicts at the end.
+# This is much slower but much easier to handle.
+# When a conflict arise, after it is resolved, the same command can be called
+# again.
+# Typically example: grebaseprog HEAD~1 odoo/master (1 should be the number of commits to be rebased on the current branch)
+function grebaseprog() {
+    START=$1
+    END=$2
+    TMPFILE="/tmp/rebase.sh"
+    git log --pretty=format:"echo \"rebasing onto %h\" && git rebase %h && \\" --reverse "${START}..${END}" > $TMPFILE
+    chmod +x $TMPFILE
+    . $TMPFILE
+    rm $TMPFILE
+}
+
