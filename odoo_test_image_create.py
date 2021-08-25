@@ -15,7 +15,7 @@ def execute(self, partner_nb=1):
 
     odoo.cli.server.setup_pid_file()
 
-    with open('/home/odoo/repo/useful-things/oscar-sutton-yihlaRCCvd4-unsplash.jpg', 'rb') as f:
+    with open('/home/seb/repo/useful-things/oscar-sutton-yihlaRCCvd4-unsplash.jpg', 'rb') as f:
         big_image = base64.b64encode(f.read())
 
     _logger.info('PID set, 3 sec given to start pyflame')
