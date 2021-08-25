@@ -14,8 +14,13 @@ sudo -u postgres createuser -s $USER
 wget -qO - https://download.sublimetext.com/sublimehq-pub.gpg | sudo apt-key add -
 echo "deb https://download.sublimetext.com/ apt/stable/" | sudo tee /etc/apt/sources.list.d/sublime-text.list
 
-sudo apt-get install sublime-text git-cola vim
-sudo apt-get install terminator
+sudo apt-get install sublime-text git-cola vim terminator htop python3-pip \
+postgresql python3-dev libxml2-dev libxslt1-dev libldap2-dev libsasl2-dev \
+build-essential libsasl2-dev python-dev libldap2-dev libssl-dev python3-pypdf2 \
+python3-venv npm python3-flake8 meld gimp flake8
+
+sudo -u postgres createuser -s $USER
+createdb $USER
 
 git clone https://github.com/magicmonty/bash-git-prompt.git ~/.bash-git-prompt --depth=1
 
@@ -34,7 +39,7 @@ ln -s "${DIR}/.eslintrc" ~/.eslintrc
 ln -s "${DIR}/.odoorc-dev" "${REPO}/.odoorc"
 ln -s "${DIR}/.flake8" "${REPO}/.flake8"
 ln -s "${DIR}/odoo.sublime-project" "${REPO}/odoo.sublime-project"
-ln -s "${DIR}/.terminator-config" ~/.config/terminator/config
+ln -s "${DIR}/../.terminator-config" ~/.config/terminator/config
 
 OC_REPO="${REPO}/odoo"
 git clone git@github.com:odoo/odoo.git -v -o odoo "${OC_REPO}"
@@ -60,3 +65,32 @@ sudo cp src/pyflame /usr/bin/
 
 cd ~/repo
 git clone git@github.com:brendangregg/FlameGraph.git
+
+# install discord from deb
+
+# in repo, with venv on:
+
+(
+    cd "${OC_REPO}" && \
+    pip install setuptools wheel && \
+    pip install -r requirements.txt && \
+    pip install psycopg2-binary pudb websocket-client phonenumbers pre-commit markdown
+)
+
+# wkhtmltopdf manually https://github.com/odoo/odoo/wiki/Wkhtmltopdf v 0.12.5
+
+
+sudo npm install -g eslint
+sudo npm install -g rtlcss
+
+(
+    cd /tmp && \
+    curl -O https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && \
+    sudo dpkg -i google-chrome-stable_current_amd64.deb
+)
+
+# for cola get the non bugged version (3.6)
+# https://packages.ubuntu.com/focal/all/git-cola/download
+
+
+# https://www.lullabot.com/articles/installing-mailhog-for-ubuntu-1604
