@@ -412,6 +412,8 @@ function grebaseprog() {
     rm $TMPFILE
 }
 
+# ./../upgrade/test-upgrade.py -c saas-13.3 master-clean-notification-seb --auto-drop -i snailmail
+
 # Reminder of what to type to get the JS env from the browser console
 function getjsenv() {
     echo "
