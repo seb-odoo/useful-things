@@ -4,10 +4,10 @@
 	signingkey = 3342C21C3A5A1C9B
 [push]
 	default = simple
-
 [diff]
-	external = git-meld
-	tool = xxdiff
+	tool = meld
+[difftool]
+	prompt = false
 [filter "lfs"]
 	smudge = git-lfs smudge -- %f
 	process = git-lfs filter-process
