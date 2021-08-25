@@ -9,11 +9,16 @@
 				"*/static/lib/*.js",
 				"*/static/lib/*.js.map",
 				"*/static/lib/*.css",
-				"bootstrap.css.map"
+				"bootstrap.css.map",
+                "documentation/content/developer/howtos/profile/flamegraph.svg",
+                "enterprise/documents_spreadsheet_account/data/files/*.json",
+                "enterprise/documents_spreadsheet_crm/data/files/*.json"
 			],
 			"folder_exclude_patterns":
 			[
 				"odoo/doc/_build",
+                "documentation/_build",
+                "documentation/odoo",
 				"odoodays-2018",
 				"technical-training",
 				"node_modules",
