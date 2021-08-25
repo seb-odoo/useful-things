@@ -1,7 +1,7 @@
 {
     "env": {
         "commonjs": true,
-        "es2017": true
+        "es2020": true
     },
     "extends": "eslint:recommended",
     "parserOptions": {
@@ -36,8 +36,8 @@
         "space-in-parens": ["warn", "never"]
     },
     "globals": {
-        "openerp": true, "odoo": true, "CKEDITOR": true, "owl": true, "DOMParser": false,
-
+        "openerp": true, "odoo": true, "CKEDITOR": true, "owl": true, "DOMParser": false, "self": true,
+        "DataTransfer": false,
         "$": false, "jQuery": false, "_": false, "google": false, "window": false,
         "setTimeout": false, "clearTimeout": false, "document": false, "console": false,
         "QUnit": false, "moment": false, "FileReader": false, "nv": false, "d3": false,
