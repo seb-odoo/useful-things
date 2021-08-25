@@ -122,6 +122,15 @@ function gnbr() {
 	BRANCH=${1/odoo-dev:}
 	git fetch odoo-dev $BRANCH
 	git checkout -b $BRANCH "odoo-dev/${BRANCH}"
+    git checkout $BRANCH
+
+    read -p "About to reset --hard $BRANCH, type y to confirm: "  yes
+
+    if [ "$yes" == "y" ]; then
+        git reset --hard "odoo-dev/$BRANCH"
+    else
+        echo "not reseting"
+    fi
 }
 
 # hard reset to remote branch
