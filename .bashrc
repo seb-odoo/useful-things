@@ -93,6 +93,11 @@ function gnb()
 	fi
 }
 
+function gnb14()
+{
+    gnb "14.0" $*
+}
+
 # fetch, create, and push a new branch based on master mail owl
 function gnbmmo()
 {
