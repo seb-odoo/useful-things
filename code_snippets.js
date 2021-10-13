@@ -24,3 +24,22 @@ odoo.define(async function (require) {
         ],
     });
 });
+
+// Copying this code in the browser console will add `amount` messages on the (first) chatter.
+odoo.define(async function (require) {
+    const chatter = odoo.__DEBUG__.messaging.models['mail.chatter'].all()[0];
+    const amount = 100;
+    const promises = [];
+    for (let i = 0; i < amount; i++) {
+        const params = {
+            'post_data': {
+                'body': `test ${i}`,
+            },
+            'thread_id': chatter.thread.id,
+            'thread_model': chatter.thread.model,
+        };
+        promises.push(chatter.messaging.env.services.rpc({ route: `/mail/message/post`, params }));
+    }
+    await Promise.all(promises);
+    chatter.refresh();
+});
