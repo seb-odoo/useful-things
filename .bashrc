@@ -46,6 +46,7 @@ alias gr12='git rebase odoo/12.0'
 alias gr123='git rebase odoo/saas-12.3'
 alias gr13='git rebase odoo/13.0'
 alias gr14='git rebase odoo/14.0'
+alias gr15='git rebase odoo/15.0'
 alias grc='git rebase --continue'
 alias gcrm='git commit --reuse-message=HEAD@{1}'
 alias gca='git commit --amend'
@@ -96,6 +97,11 @@ function gnb()
 function gnb14()
 {
     gnb "14.0" $*
+}
+
+function gnb15()
+{
+    gnb "15.0" $*
 }
 
 function gnbm()
