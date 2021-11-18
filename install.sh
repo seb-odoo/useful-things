@@ -6,7 +6,7 @@ sudo apt-get update
 sudo apt install git
 # sudo add-apt-repository ppa:gnome-terminator
 
-sudo apt install libxml2-dev libpq-dev libldap2-dev libsasl2-dev libxslt1-dev python3-setuptools python3-wheel htop postgresql flake8
+sudo apt install libxml2-dev libpq-dev libldap2-dev libsasl2-dev libxslt1-dev python3-setuptools python3-wheel htop postgresql flake8 postgresql-server-dev-all
 sudo apt install zlib1g-dev libxml2-utils inotify-tools
 
 sudo -u postgres createuser -s $USER
@@ -72,9 +72,10 @@ git clone git@github.com:brendangregg/FlameGraph.git
 
 (
     cd "${OC_REPO}" && \
-    pip install setuptools wheel && \
+    pip install --upgrade pip
+    pip install setuptools wheel setuptools_rust && \
     pip install -r requirements.txt && \
-    pip install psycopg2-binary pudb websocket-client phonenumbers pre-commit markdown
+    pip install psycopg2-binary pudb websocket-client phonenumbers pre-commit markdown geoip2
 )
 
 # wkhtmltopdf manually https://github.com/odoo/odoo/wiki/Wkhtmltopdf v 0.12.5
