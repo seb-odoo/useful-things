@@ -53,7 +53,9 @@
       type = Terminal
       parent = og-horizontal
       order = 0
+      group = g
       profile = default
+      title = og-odoo
       uuid = 023c356c-138f-4b2e-8cbe-54f215a6e98c
     [[[og-enterprise]]]
       command = bash --init-file <(echo ". $HOME/.bashrc && odoo-venv")
@@ -61,7 +63,9 @@
       type = Terminal
       parent = og-right-vertical
       order = 0
+      group = g
       profile = default
+      title = og-enterprise
       uuid = f68e3f29-271e-41f7-9b3d-4a4a9310459a
     [[[og-right-bottom-vertical]]]
       type = VPaned
@@ -76,6 +80,7 @@
       parent = og-right-bottom-vertical
       order = 0
       profile = default
+      title = og-design-themes
       uuid = 9077456c-83b2-4924-8830-04dcd73d8c40
     [[[og-upgrade]]]
       command = bash --init-file <(echo ". $HOME/.bashrc && odoo-venv")
@@ -84,6 +89,7 @@
       parent = og-right-bottom-vertical
       order = 1
       profile = default
+      title = og-upgrade
       uuid = 2d2d31b5-34ab-426d-bb6a-ccc7eaeae049
   [[odoo shell]]
     [[[child0]]]
