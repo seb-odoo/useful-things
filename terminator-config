@@ -1,9 +1,19 @@
 [global_config]
   dbus = False
-  enabled_plugins = APTURLHandler, LaunchpadCodeURLHandler, LaunchpadBugURLHandler
   inactive_color_offset = 1.0
+  enabled_plugins = APTURLHandler, LaunchpadCodeURLHandler, LaunchpadBugURLHandler
   suppress_multiple_term_dialog = True
 [keybindings]
+  broadcast_off = <Alt>o
+  broadcast_group = <Alt>g
+  broadcast_all = <Alt>a
+[profiles]
+  [[default]]
+    background_color = "#424242"
+    cursor_color = "#ffffff"
+    font = Monospace 11
+    foreground_color = "#ffffff"
+    scrollback_infinite = True
 [layouts]
   [[default]]
     [[[child1]]]
@@ -15,65 +25,65 @@
       type = Window
   [[odoo gits]]
     [[[og-root]]]
+      type = Window
+      parent = ""
+      order = 0
+      position = 0:0
+      maximised = True
       fullscreen = False
+      size = 1920, 1022
+      title = Odoo Git ^4
       last_active_term = 023c356c-138f-4b2e-8cbe-54f215a6e98c
       last_active_window = True
-      maximised = True
-      order = 0
-      parent = ""
-      position = 1920:0
-      size = 1920, 1030
-      title = Odoo Git ^4
-      type = Window
     [[[og-horizontal]]]
-      order = 0
-      parent = og-root
-      position = 957
-      ratio = 0.5
       type = HPaned
+      parent = og-root
+      order = 0
+      position = 959
+      ratio = 0.5007832898172324
     [[[og-right-vertical]]]
-      order = 1
-      parent = og-horizontal
-      position = 0
-      ratio = 0.5
       type = VPaned
+      parent = og-horizontal
+      order = 1
+      position = 511
+      ratio = 0.5024582104228122
     [[[og-odoo]]]
       command = bash --init-file <(echo ". $HOME/.bashrc && odoo-venv")
       directory = /home/seb/repo/odoo
-      order = 0
-      parent = og-horizontal
-      profile = default
       type = Terminal
+      parent = og-horizontal
+      order = 0
+      profile = default
       uuid = 023c356c-138f-4b2e-8cbe-54f215a6e98c
     [[[og-enterprise]]]
       command = bash --init-file <(echo ". $HOME/.bashrc && odoo-venv")
       directory = /home/seb/repo/enterprise
-      order = 0
-      parent = og-right-vertical
-      profile = default
       type = Terminal
+      parent = og-right-vertical
+      order = 0
+      profile = default
       uuid = f68e3f29-271e-41f7-9b3d-4a4a9310459a
     [[[og-right-bottom-vertical]]]
-      order = 1
-      parent = og-right-vertical
-      position = 512
-      ratio = 0.5
       type = VPaned
+      parent = og-right-vertical
+      order = 1
+      position = 251
+      ratio = 0.500998003992016
     [[[og-design-themes]]]
       command = bash --init-file <(echo ". $HOME/.bashrc && odoo-venv")
       directory = /home/seb/repo/design-themes
-      order = 0
-      parent = og-right-bottom-vertical
-      profile = default
       type = Terminal
+      parent = og-right-bottom-vertical
+      order = 0
+      profile = default
       uuid = 9077456c-83b2-4924-8830-04dcd73d8c40
     [[[og-upgrade]]]
       command = bash --init-file <(echo ". $HOME/.bashrc && odoo-venv")
       directory = /home/seb/repo/upgrade
-      order = 1
-      parent = og-right-bottom-vertical
-      profile = default
       type = Terminal
+      parent = og-right-bottom-vertical
+      order = 1
+      profile = default
       uuid = 2d2d31b5-34ab-426d-bb6a-ccc7eaeae049
   [[odoo shell]]
     [[[child0]]]
@@ -110,10 +120,3 @@
       type = Terminal
       uuid = 58969cfa-f6ff-441c-88e3-0ecf2704a14d
 [plugins]
-[profiles]
-  [[default]]
-    background_color = "#424242"
-    cursor_color = "#ffffff"
-    font = Monospace 11
-    foreground_color = "#ffffff"
-    scrollback_infinite = True
