@@ -1,7 +1,7 @@
 [user]
 	name = Sébastien Theys
 	email = seb@odoo.com
-	signingkey = 3342C21C3A5A1C9B
+	signingKey = /home/seb/.ssh/id_rsa.pub
 [push]
 	default = simple
 [diff]
@@ -17,8 +17,9 @@
 	tabwidth = 4
 	spellcheck = false
 	expandtab = true
+	statusshowtotals = true
 [gui]
-	editor = subl
+	editor = code
 	diffcontext = 5
 [merge]
 	verbosity = 5
@@ -26,3 +27,25 @@
 	checkoutr = checkout
 [gpg]
 	program = gpg
+	format = ssh
+[core]
+	editor = code --wait
+	untrackedCache = true
+	fsmonitor = true
+[pull]
+	ff = only
+[rerere]
+	enabled = true
+[branch]
+	sort = -committerdate
+[commit]
+	gpgsign = true
+[maintenance]
+	repo = /home/seb/repo/upgrade
+	repo = /home/seb/repo/design-themes
+	repo = /home/seb/repo/odoo
+	repo = /home/seb/repo/enterprise
+[fetch]
+	writeCommitGraph = true
+[rebase]
+	updaterefs = true
