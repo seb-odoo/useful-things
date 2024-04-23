@@ -2,28 +2,27 @@
 
 # into .bashrc: source ~/repo/useful-things/.bashrc
 # ssh-keygen
+sudo add-apt-repository ppa:git-core/ppa
 sudo apt-get update
 sudo apt install git
 # sudo add-apt-repository ppa:gnome-terminator
 
 sudo apt install libxml2-dev libpq-dev libldap2-dev libsasl2-dev libxslt1-dev python3-setuptools python3-wheel htop postgresql flake8 postgresql-server-dev-all
-sudo apt install zlib1g-dev libxml2-utils inotify-tools
+sudo apt install zlib1g-dev libxml2-utils inotify-tools fonts-noto
 
 sudo -u postgres createuser -s $USER
 
-wget -qO - https://download.sublimetext.com/sublimehq-pub.gpg | sudo apt-key add -
-echo "deb https://download.sublimetext.com/ apt/stable/" | sudo tee /etc/apt/sources.list.d/sublime-text.list
+# wget -qO - https://download.sublimetext.com/sublimehq-pub.gpg | sudo apt-key add -
+# echo "deb https://download.sublimetext.com/ apt/stable/" | sudo tee /etc/apt/sources.list.d/sublime-text.list
 
-sudo apt-get install sublime-text git-cola vim terminator htop python3-pip \
+# sudo apt-get install sublime-text
+
+sudo apt-get install git-cola vim terminator htop python3-pip \
 postgresql python3-dev libxml2-dev libxslt1-dev libldap2-dev libsasl2-dev \
-build-essential libsasl2-dev python-dev libldap2-dev libssl-dev python3-pypdf2 \
-python3-venv npm python3-flake8 meld gimp flake8
-
-sudo -u postgres createuser -s $USER
-createdb $USER
+build-essential libsasl2-dev libldap2-dev libssl-dev python3-pypdf2 \
+python3-venv python3-flake8 meld gimp flake8
 
 git clone https://github.com/magicmonty/bash-git-prompt.git ~/.bash-git-prompt --depth=1
-
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
@@ -38,6 +37,7 @@ ln -s "${DIR}/.gitconfig" ~/.gitconfig
 ln -s "${DIR}/.eslintrc" ~/.eslintrc
 ln -s "${DIR}/.odoorc-dev" "${REPO}/.odoorc"
 ln -s "${DIR}/.flake8" "${REPO}/.flake8"
+ln -s "${DIR}/.sass-lint.yml" "${REPO}/.sass-lint.yml"
 ln -s "${DIR}/odoo.sublime-project" "${REPO}/odoo.sublime-project"
 ln -s "${DIR}/../.terminator-config" ~/.config/terminator/config
 
@@ -54,7 +54,7 @@ git clone git@github.com:odoo/design-themes.git -v -o odoo "${OT}"
 (cd "${OT}" && git remote add odoo-dev git@github.com:odoo-dev/design-themes.git)
 
 # pyflame
-sudo apt-get install autoconf automake autotools-dev g++ pkg-config python-dev python3-dev libtool make
+sudo apt-get install autoconf automake autotools-dev g++ pkg-config python3-dev libtool make
 cd ~/repo
 git clone git@github.com:uber-archive/pyflame.git
 cd pyflame
@@ -75,11 +75,16 @@ git clone git@github.com:brendangregg/FlameGraph.git
     pip install --upgrade pip
     pip install setuptools wheel setuptools_rust && \
     pip install -r requirements.txt && \
-    pip install psycopg2-binary pudb websocket-client phonenumbers pre-commit markdown geoip2
+    pip install psycopg2-binary pudb websocket-client phonenumbers pre-commit markdown geoip2 pdfminer.six && \
+    pip install -U pyopenssl cryptography
+    pip install dbfread pylint astroid
 )
 
 # wkhtmltopdf manually https://github.com/odoo/odoo/wiki/Wkhtmltopdf v 0.12.5
 
+
+curl -fsSL https://deb.nodesource.com/setup_21.x | sudo -E bash - &&\
+sudo apt-get install -y nodejs
 
 sudo npm install -g eslint
 sudo npm install -g rtlcss
@@ -95,3 +100,12 @@ sudo npm install -g rtlcss
 
 
 # https://www.lullabot.com/articles/installing-mailhog-for-ubuntu-1604
+
+
+sudo npm install postcss stylelint stylelint-config-standard-scss es-check -g
+
+# install cinnamon desktop
+
+# vscode: eslint, prettier, gitlens
+
+# rsync -avzP --exclude "*[Cc]ache/" --exclude ".[cC]ache/" --exclude '[Tt]mp/' --exclude '[tT]emp/' --exclude '[tT]rash/' --exclude '[cC]rash [Rr]eports/' /home/seb/ seb@10.30.71.138:/home/seb/
