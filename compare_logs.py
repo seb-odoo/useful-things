@@ -64,22 +64,30 @@ def clean_log(content, ids_map):
     content = re.sub(r".*odoo\.service\.server.*", "", content)
     # remove odoo.tests.stats
     content = re.sub(r".*odoo\.tests\.stats.*", "", content)
+    # remove odoo.tests.result
+    content = re.sub(r".*odoo\.tests\.result:.*", "", content)
     # remove "odoo: " lines
     content = re.sub(r"^odoo: .*", "", content)
-    # remove "INSERT INTO "bus_bus"" lines (can be commented if necessary)
-    content = re.sub(r'.*INSERT INTO "bus_bus".*', "", content)
-    # remove "INSERT INTO" lines (can be commented if necessary)
-    content = re.sub(r".*INSERT INTO.*", "", content)
+    # remove test line with "======================================================================"
+    content = re.sub(r".*={70}.*", "", content)
     # kill new lines and extra spaces (in queries)
     content = re.sub(r"\s+", " ", content)
     # remake new lines at the proper places
     content = re.sub(r" (odoo(\.\w+)*:)", r"\n\1", content)
+    # remove Query count less than expected
+    content = re.sub(r".*Query count less than expected.*", "", content)
+    # remove Query count more than expected
+    content = re.sub(r".*Query count more than expected.*", "", content)
     # remove unlink ids
     content = re.sub(
         r"User #\d+ deleted ([\w\.]+) records with IDs: \[\d+\]",
         r"User #x deleted \1 records with IDs: [x]",
         content,
     )
+    # remove "INSERT INTO "bus_bus"" lines (should be improved to remove dynamic parts instead, can be commented if necessary)
+    content = re.sub(r'.*INSERT INTO "bus_bus".*', "", content)
+    # remove "INSERT INTO" lines (should be improved to remove dynamic parts instead, can be commented if necessary)
+    content = re.sub(r".*INSERT INTO.*", "", content)
     # discard irrelevant ids in "IN" queries
     content = re.sub(r"(\"\w+\".\"\w+\") IN \((\d+(, \d+)*)\)", replace_in_ids, content)
     # discard irrelevant ids in "IN" queries with dynamic field name
