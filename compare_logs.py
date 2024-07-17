@@ -82,8 +82,16 @@ def clean_log(content, ids_map):
     )
     # discard irrelevant ids in "IN" queries
     content = re.sub(r"(\"\w+\".\"\w+\") IN \((\d+(, \d+)*)\)", replace_in_ids, content)
+    # discard irrelevant ids in "IN" queries with dynamic field name
+    content = re.sub(r"(\w+.\w+) IN \((\d+(, \d+)*)\)", replace_in_ids, content)
     # discard irrelevant ids in "=" queries
     content = re.sub(r"(\"\w+\".\"\w+\") = (\d+)", replace_equal_ids, content)
+    # kill what looks like a datetime in format 2024-07-17 13:32:46.462594
+    content = re.sub(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{6})?", "fake_date", content)
+    # kill what looks like email stuff <351129566921887.1721223167.391957044601440-openerp-message-notify@seb-laptop>
+    content = re.sub(r"<\d+\.\d+.\d+-openerp-message-notify@.+>", "fake@email", content)
+    # kill id following fake email: 'fake@email', 42,
+    content = re.sub(r"'fake@email', \d+,", "fake_id", content)
     # sort field names in SELECT
     content = re.sub(
         r"SELECT (\"\w+\"\.\"\w+\"(, \"\w+\"\.\"\w+\")*) FROM", replace_select, content
