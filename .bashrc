@@ -37,8 +37,9 @@ _git_checkout ()
 alias gis="git status"
 alias gil="git log"
 alias gfo='git fetch odoo -p'
-alias gfa='git fetch --all -p'
+alias gfa='git fetch -j2 --multiple odoo odoo-dev -p'
 alias gfod='git fetch odoo-dev -p'
+alias gpf='git push --force-with-lease'
 alias grm='git rebase odoo/master'
 alias gr10='git rebase odoo/10.0'
 alias gr11='git rebase odoo/11.0'
@@ -47,6 +48,14 @@ alias gr123='git rebase odoo/saas-12.3'
 alias gr13='git rebase odoo/13.0'
 alias gr14='git rebase odoo/14.0'
 alias gr15='git rebase odoo/15.0'
+alias gr153='git rebase odoo/saas-15.3'
+alias gr16='git rebase odoo/16.0'
+alias gr163='git rebase odoo/saas-16.3'
+alias gr164='git rebase odoo/saas-16.4'
+alias gr17='git rebase odoo/17.0'
+alias gr171='git rebase odoo/saas-17.1'
+alias gr172='git rebase odoo/saas-17.2'
+alias grdr='git rebase odoo-dev/master-discuss-refactoring'
 alias grc='git rebase --continue'
 alias gcrm='git commit --reuse-message=HEAD@{1}'
 alias gca='git commit --amend'
@@ -55,6 +64,10 @@ alias gcad='git commit --amend --date="$(date -R)"'
 alias gcadne='git commit --amend --date="$(date -R)" --no-edit'
 alias grs='git reset --soft HEAD~1'
 alias gwhere='git branch -r --contains'
+alias gpfl="git push --force-with-lease --force-if-includes"
+alias ducks='while read -r line;do du -sh "$line";done < <(ls -1A) | sort -rh | head -n11'
+alias qunit_fail="python qunit_until_fail.py -m mail -m mail_enterprise -m test_mail -m im_livechat -m whatsapp -m voip -m hr_expense -m account_accountant -m hr_holidays -m calendar -m documents -m test_mail_full --no-fail-fast -n 100"
+alias pfb="python ~/repo/useful-things/fetch_bundle.py"
 
 function tog() {
 	terminator -l 'odoo gits' </dev/null &>/dev/null &
@@ -70,7 +83,7 @@ alias ubash="source ~/.bashrc"
 alias hackchromeheadless="google-chrome --headless --remote-debugging-port=8071"
 
 function odoo-venv() {
-	source ~/virtualenvs/odoo/bin/activate
+	source ~/virtualenvs/odoo17/bin/activate
 }
 
 alias list-swap="smem -s swap"
@@ -85,7 +98,7 @@ function gnb()
 {
 	BASE=$1
 	BRANCH=$2
-	FULL_NAME="${BASE}-${BRANCH}-seb"
+	FULL_NAME="${BASE}-${BRANCH}--seb"
 	git fetch odoo $BASE
 	git checkout -b $FULL_NAME "odoo/${BASE}" --no-track
 	if [ ! -z "$FULL_NAME" ]; then
@@ -109,24 +122,10 @@ function gnbm()
     gnb "master" $*
 }
 
-# fetch, create, and push a new branch based on master mail owl
-function gnbmmo()
-{
-    BASE='master-mail-owl'
-    BRANCH=$1
-    FULL_NAME="${BASE}-${BRANCH}-seb"
-    git fetch odoo-dev $BASE
-    git checkout -b $FULL_NAME "odoo-dev/${BASE}" --no-track
-    if [ ! -z "$FULL_NAME" ]; then
-        # we need to push because the upstream branch doesn't exist yet
-        git push -u odoo-dev $FULL_NAME
-    fi
-}
-
 # new local branch based on remote branch
 function gnbr() {
 	BRANCH=${1/odoo-dev:}
-	git fetch odoo-dev $BRANCH
+	git fetch odoo-dev +refs/heads/$BRANCH:refs/remotes/odoo-dev/$BRANCH
 	git checkout -b $BRANCH "odoo-dev/${BRANCH}"
     git checkout $BRANCH
 
@@ -137,13 +136,14 @@ function gnbr() {
     else
         echo "not reseting"
     fi
+	git push --set-upstream odoo-dev $BRANCH
 }
 
 # hard reset to remote branch
 function grhr() {
 	BRANCH=`git branch | grep \*`
 	BRANCH=${BRANCH/\* }
-	git fetch odoo-dev $BRANCH
+	git fetch odoo-dev +refs/heads/$BRANCH:refs/remotes/odoo-dev/$BRANCH
 
 	read -p "About to reset --hard $BRANCH, type y to confirm: "  yes
 
@@ -155,8 +155,16 @@ function grhr() {
 }
 
 # checkout an existing branch
-function gcb() { git checkout "${1}-${2}-seb"; }
+function gcb() { git checkout "${1}-${2}--seb"; }
 
+
+# opens the PR creation page on odoo-dev for master-discuss-refactoring depending on the current branch
+function prdr() {
+    BRANCH=`git branch | grep \*`
+    BRANCH=${BRANCH/\* }
+    REMOTE=${PWD##*/}
+    webbrowser "https://github.com/odoo-dev/${REMOTE}/compare/master-discuss-refactoring...odoo-dev:${BRANCH}?expand=1";
+}
 
 # kill stuck odoo process, by rde-odoo
 function killodoo() { ps aux | grep 'odoo-bin' | grep -v grep | awk '{print $2}' | xargs -r kill; }
@@ -166,6 +174,7 @@ function killodoo9() { ps aux | grep 'odoo-bin' | grep -v grep | awk '{print $2}
 function webbrowser() { python3 -m webbrowser $1; }
 
 function task() { webbrowser "https://www.odoo.com/web#id=${1}&action=333&active_id=587&model=project.task&view_type=form&menu_id=4720"; }
+function runbot() { webbrowser "https://runbot.odoo.com/web/#id=${1}&view_type=form&model=runbot.build.error&menu_id=405"; }
 
 function open_github() { webbrowser "https://github.com/${1}/${2}/${3}/${4}/${5}"; }
 
@@ -301,9 +310,10 @@ function manycurltime() {
 function gogogo() {
 	tog &
 	tos &
-	subl &
+	code &
 	firefox &
 	git-cola -r ~/repo/odoo &
+	git-cola -r ~/repo/enterprise &
 	echo "All set, have a wonderful day!"
 }
 
@@ -443,6 +453,7 @@ function getjsenv() {
 }
 
 # Get and install an Odoo db from a dump zip
+# Example: odooget et https://runbot136.odoo.com/runbot/static/build/44255209-saas-16-3/logs/44255209-saas-16-3-all.zip
 function odooget() {
     zipurl=$2
     dbname=$(branchdb $1)
@@ -463,3 +474,18 @@ function odooget() {
     echo "### cleaning"
     rm -r /tmp/restore-$dbname
 }
+
+# sql log: --test-tags /test_discuss_full --stop-after-init --log-handler :WARNING --logfile ~/log1.log
+# + in sql_db execute -> change debug to warning
+
+function clean-remote-branches() {
+	git branch -r |
+	grep odoo-dev/ |
+	grep -v '>' |
+	grep -v 'seb' |
+	xargs -L1 |
+	awk '{sub(/origin\//,"");print}' |
+	xargs git branch -dr
+}
+
+# with self.env.cr._enable_logging():
