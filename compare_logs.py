@@ -37,16 +37,9 @@ def clean_log(content, ids_map):
         for found_id in found_ids:
             if found_id not in ids:
                 ids[found_id] = max(ids.values()) + 1 if ids else 1
-        return f"{field_name} IN ({', '.join('fake_' + str(ids[found_id]) for found_id in found_ids)})"
-
-    def replace_id_eq_any(match):
-        field_name = f"{match.group(1)}.{match.group(2)}".replace('"', "")
-        ids = ids_map[field_name]
-        found_ids = sorted([int(i) for i in match.group(3).split(", ")])
-        for found_id in found_ids:
-            if found_id not in ids:
-                ids[found_id] = max(ids.values()) + 1 if ids else 1
-        return f"{field_name} IN ({', '.join('fake_' + str(ids[found_id]) for found_id in found_ids)})"
+        return (
+            f"{field_name} IN ({', '.join('fake_' + str(ids[found_id]) for found_id in found_ids)})"
+        )
 
     def replace_equal_ids(match):
         field_name = match.group(1).replace('"', "")
@@ -119,8 +112,24 @@ def clean_log(content, ids_map):
     content = re.sub(r"(\"?\w+\"?.\"?\w+\"?) IN \((\d+(, \d+)*)\)", replace_in_ids, content)
     # discard irrelevant ids in "=" queries
     content = re.sub(r"(\"?\w+\"?.\"?\w+\"?) ?= ?(\d+)", replace_equal_ids, content)
+
+    def replace_id_eq_any(match):
+        field_name = f"{match.group(3)}".replace('"', "")
+        if "." not in field_name:
+            field_name = f"{match.group(2)}.{field_name}".replace('"', "")
+        ids = ids_map[field_name]
+        found_ids = sorted([int(i) for i in match.group(5).split(", ")])
+        for found_id in found_ids:
+            if found_id not in ids:
+                ids[found_id] = max(ids.values()) + 1 if ids else 1
+        return f"{match.group(1)}{', '.join('fake_' + str(ids[found_id]) for found_id in found_ids)}{match.group(7)}"
+
     # discard irrelevant ids in "FROM ... WHERE ... = ANY (ARRAY[...])" queries
-    content = re.sub(r"FROM (\"?\w+\"?) WHERE (\"?\w+\"?) = ANY \(ARRAY\[(\d+(, \d+)*)\]\)", replace_id_eq_any, content)
+    content = re.sub(
+        r"(FROM (\"?\w+\"?) WHERE (\"?\w+\"?(\.\"?\w+\"?)?) = ANY ?\(ARRAY\[)(\d+(, \d+)*)(\]\))",
+        replace_id_eq_any,
+        content,
+    )
     # kill what looks like a datetime in format 2024-07-17 13:32:46.462594
     content = re.sub(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{6})?", "fake_date", content)
     # kill what looks like a datetime in format 2024-08-16T16:54:12
