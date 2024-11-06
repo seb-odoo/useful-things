@@ -55,6 +55,7 @@ alias gr164='git rebase odoo/saas-16.4'
 alias gr17='git rebase odoo/17.0'
 alias gr171='git rebase odoo/saas-17.1'
 alias gr172='git rebase odoo/saas-17.2'
+alias gr18='git rebase odoo/18.0'
 alias grdr='git rebase odoo-dev/master-discuss-refactoring'
 alias grc='git rebase --continue'
 alias gcrm='git commit --reuse-message=HEAD@{1}'
@@ -273,6 +274,20 @@ function otf() {
 	odoo-bin et --stop-after-init --test-file $*
 }
 
+function ott() {
+	odoo-bin et --stop-after-init --test-tags $*
+}
+
+function ottb() {
+	rm ~/before.log
+	odoo-bin et --stop-after-init --logfile ~/before.log --test-tags $*
+}
+
+function otta() {
+	rm ~/after.log
+	odoo-bin et --stop-after-init --logfile ~/after.log --test-tags $*
+}
+
 function clearsqllog() {
 	sudo rm /var/log/postgresql/postgresql-9.5-main.log*
 	sudo service postgresql restart
@@ -475,9 +490,6 @@ function odooget() {
     rm -r /tmp/restore-$dbname
 }
 
-# sql log: --test-tags /test_discuss_full --stop-after-init --log-handler :WARNING --logfile ~/log1.log
-# + in sql_db execute -> change debug to warning
-
 function clean-remote-branches() {
 	git branch -r |
 	grep odoo-dev/ |
@@ -487,5 +499,3 @@ function clean-remote-branches() {
 	awk '{sub(/origin\//,"");print}' |
 	xargs git branch -dr
 }
-
-# with self.env.cr._enable_logging():
