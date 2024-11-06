@@ -130,6 +130,21 @@ def clean_log(content, ids_map):
         replace_id_eq_any,
         content,
     )
+    def replace_id_eq_any_2(match):
+        field_name = f"{match.group(2)}".replace('"', "")
+        ids = ids_map[field_name]
+        found_ids = sorted([int(i) for i in match.group(3).split(", ")])
+        for found_id in found_ids:
+            if found_id not in ids:
+                ids[found_id] = max(ids.values()) + 1 if ids else 1
+        return f"{match.group(1)}{', '.join('fake_' + str(ids[found_id]) for found_id in found_ids)}{match.group(4)}"
+
+    # discard irrelevant ids in "model.field = ANY (ARRAY[...])" queries
+    content = re.sub(
+        r"((\"?\w+\"?\.\"?\w+\"?) = ANY ?\(ARRAY\[)(\d+(, \d+)*)(\]\))",
+        replace_id_eq_any_2,
+        content,
+    )
     # kill what looks like a datetime in format 2024-07-17 13:32:46.462594
     content = re.sub(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{6})?", "fake_date", content)
     # kill what looks like a datetime in format 2024-08-16T16:54:12
