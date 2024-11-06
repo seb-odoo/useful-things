@@ -5,7 +5,7 @@ import argparse
 import re
 
 # call the script like this:
-# python compare_logs.py ___AFTER___ ~/Desktop/before.log ~/Desktop/after.log
+# python compare_logs.py ___AFTER___ ~/before.log ~/after.log
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "after",
@@ -31,7 +31,7 @@ def clean_log(content, ids_map):
     content = "\n".join(final_lines)
 
     def replace_in_ids(match):
-        field_name = match.group(1)
+        field_name = match.group(1).replace('"', "")
         ids = ids_map[field_name]
         found_ids = sorted([int(i) for i in match.group(2).split(", ")])
         for found_id in found_ids:
@@ -39,8 +39,17 @@ def clean_log(content, ids_map):
                 ids[found_id] = max(ids.values()) + 1 if ids else 1
         return f"{field_name} IN ({', '.join('fake_' + str(ids[found_id]) for found_id in found_ids)})"
 
+    def replace_id_eq_any(match):
+        field_name = f"{match.group(1)}.{match.group(2)}".replace('"', "")
+        ids = ids_map[field_name]
+        found_ids = sorted([int(i) for i in match.group(3).split(", ")])
+        for found_id in found_ids:
+            if found_id not in ids:
+                ids[found_id] = max(ids.values()) + 1 if ids else 1
+        return f"{field_name} IN ({', '.join('fake_' + str(ids[found_id]) for found_id in found_ids)})"
+
     def replace_equal_ids(match):
-        field_name = match.group(1)
+        field_name = match.group(1).replace('"', "")
         ids = ids_map[field_name]
         found_id = int(match.group(2))
         if found_id not in ids:
@@ -53,7 +62,7 @@ def clean_log(content, ids_map):
         return f"SELECT {', '.join(parts)} FROM"
 
     # remove header "2024-07-03 13:59:22,488 1499449 INFO master-init-data-5--seb-e-t "
-    content = re.sub(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3} \d+ \w+ [\w?-]+ ", "", content)
+    content = re.sub(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3} \d+ \w+ [\w?.-]+ ", "", content)
     # remove query timing: "odoo.sql_db: [0.204 ms] query:"
     content = re.sub(r"odoo.sql_db: \[\d+\.\d+ ms\] query:", "odoo.sql_db: [x ms] query:", content)
     # remove modules loaded (timings)
@@ -62,6 +71,24 @@ def clean_log(content, ids_map):
     content = re.sub(r".*Registry loaded in.*", "", content)
     # remove odoo.service.server (timings, counter)
     content = re.sub(r".*odoo\.service\.server.*", "", content)
+    # remove odoo.addons.base.models.ir_actions_report
+    content = re.sub(r".*odoo\.addons\.base\.models\.ir_actions_report*", "", content)
+    # remove odoo.addons.base.models.ir_qweb
+    content = re.sub(r".*odoo\.addons\.base\.models\.ir_qweb.*", "", content)
+    # remove odoo.addons.base.models.res_device:
+    content = re.sub(r".*odoo\.addons\.base\.models\.res_device.*", "", content)
+    # remove odoo.models.unlink
+    content = re.sub(r".*odoo\.models\.unlink.*", "", content)
+    # remove Simulating signal changes during tests
+    content = re.sub(r".*Simulating signal changes during tests.*", "", content)
+    # remove Generating routing map
+    content = re.sub(r".*Generating routing map.*", "", content)
+    # remove Login successful for
+    content = re.sub(r".*Login successful for.*", "", content)
+    # remove Signup email sent for user
+    content = re.sub(r".*Signup email sent for user.*", "", content)
+    # remove werkzeug:
+    content = re.sub(r".*werkzeug: .*", "", content)
     # remove odoo.tests.stats
     content = re.sub(r".*odoo\.tests\.stats.*", "", content)
     # remove odoo.tests.result
@@ -89,13 +116,15 @@ def clean_log(content, ids_map):
     # remove "INSERT INTO" lines (should be improved to remove dynamic parts instead, can be commented if necessary)
     content = re.sub(r".*INSERT INTO.*", "", content)
     # discard irrelevant ids in "IN" queries
-    content = re.sub(r"(\"\w+\".\"\w+\") IN \((\d+(, \d+)*)\)", replace_in_ids, content)
-    # discard irrelevant ids in "IN" queries with dynamic field name
-    content = re.sub(r"(\w+.\w+) IN \((\d+(, \d+)*)\)", replace_in_ids, content)
+    content = re.sub(r"(\"?\w+\"?.\"?\w+\"?) IN \((\d+(, \d+)*)\)", replace_in_ids, content)
     # discard irrelevant ids in "=" queries
-    content = re.sub(r"(\"\w+\".\"\w+\") = (\d+)", replace_equal_ids, content)
+    content = re.sub(r"(\"?\w+\"?.\"?\w+\"?) ?= ?(\d+)", replace_equal_ids, content)
+    # discard irrelevant ids in "FROM ... WHERE ... = ANY (ARRAY[...])" queries
+    content = re.sub(r"FROM (\"?\w+\"?) WHERE (\"?\w+\"?) = ANY \(ARRAY\[(\d+(, \d+)*)\]\)", replace_id_eq_any, content)
     # kill what looks like a datetime in format 2024-07-17 13:32:46.462594
     content = re.sub(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{6})?", "fake_date", content)
+    # kill what looks like a datetime in format 2024-08-16T16:54:12
+    content = re.sub(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", "fake_date", content)
     # kill what looks like email stuff <351129566921887.1721223167.391957044601440-openerp-message-notify@seb-laptop>
     content = re.sub(r"<\d+\.\d+.\d+-openerp-message-notify@.+>", "fake@email", content)
     # kill id following fake email: 'fake@email', 42,
