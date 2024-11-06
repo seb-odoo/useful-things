@@ -78,7 +78,7 @@ git clone git@github.com:brendangregg/FlameGraph.git
     pip install psycopg2-binary pudb websocket-client phonenumbers pre-commit markdown geoip2 pdfminer.six && \
     pip install -U pyopenssl cryptography
     pip install dbfread pylint astroid
-    pip install phonenumbers
+    pip install phonenumbers flanker cbor2 asn1crypto
 )
 
 # wkhtmltopdf manually https://github.com/odoo/odoo/wiki/Wkhtmltopdf v 0.12.5
