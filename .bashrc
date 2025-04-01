@@ -34,6 +34,7 @@ _git_checkout ()
 	esac
 }
 
+alias gbd="git branch -D"
 alias gis="git status"
 alias gil="git log"
 alias gfo='git fetch odoo -p'
@@ -56,6 +57,8 @@ alias gr17='git rebase odoo/17.0'
 alias gr171='git rebase odoo/saas-17.1'
 alias gr172='git rebase odoo/saas-17.2'
 alias gr18='git rebase odoo/18.0'
+alias gr181='git rebase odoo/saas-18.1'
+alias gr182='git rebase odoo/saas-18.2'
 alias grdr='git rebase odoo-dev/master-discuss-refactoring'
 alias grc='git rebase --continue'
 alias gcrm='git commit --reuse-message=HEAD@{1}'
@@ -69,6 +72,8 @@ alias gpfl="git push --force-with-lease --force-if-includes"
 alias ducks='while read -r line;do du -sh "$line";done < <(ls -1A) | sort -rh | head -n11'
 alias qunit_fail="python qunit_until_fail.py -m mail -m mail_enterprise -m test_mail -m im_livechat -m whatsapp -m voip -m hr_expense -m account_accountant -m hr_holidays -m calendar -m documents -m test_mail_full --no-fail-fast -n 100"
 alias pfb="python ~/repo/useful-things/fetch_bundle.py"
+alias hoot='npm run start --'
+alias hoot_mail='npm run start -- -m "@mail"'
 
 function tog() {
 	terminator -l 'odoo gits' </dev/null &>/dev/null &
@@ -175,8 +180,7 @@ function killodoo9() { ps aux | grep 'odoo-bin' | grep -v grep | awk '{print $2}
 function webbrowser() { python3 -m webbrowser $1; }
 
 function task() { webbrowser "https://www.odoo.com/web#id=${1}&action=333&active_id=587&model=project.task&view_type=form&menu_id=4720"; }
-function runbot() { webbrowser "https://runbot.odoo.com/web/#id=${1}&view_type=form&model=runbot.build.error&menu_id=405"; }
-
+function runbot() { webbrowser "https://runbot.odoo.com/odoo/action-573/${1}"; }
 function open_github() { webbrowser "https://github.com/${1}/${2}/${3}/${4}/${5}"; }
 
 # PR
@@ -323,13 +327,17 @@ function manycurltime() {
 }
 
 function gogogo() {
-	tog &
-	tos &
-	code &
 	firefox &
+	tog &
+	code &
 	git-cola -r ~/repo/odoo &
 	git-cola -r ~/repo/enterprise &
-	echo "All set, have a wonderful day!"
+	git-cola -r ~/repo/upgrade &
+	tos &
+	nohup google-chrome-stable > /dev/null 2>&1 &
+	nohup flatpak run com.discordapp.Discord > /dev/null 2>&1 &
+	echo "All set, have a wonderful day!" &
+	date
 }
 
 function logmodules () {
@@ -459,7 +467,7 @@ function grebaseprog() {
 }
 
 
-# ./../upgrade/test-upgrade.py -c saas-13.3 master-clean-notification-seb --auto-drop -i snailmail
+# ./../upgrade/tools/test-upgrade.py -c saas-13.3 master-clean-notification-seb --auto-drop -i snailmail
 
 # Reminder of what to type to get the JS env from the browser console
 function getjsenv() {
@@ -498,4 +506,10 @@ function clean-remote-branches() {
 	xargs -L1 |
 	awk '{sub(/origin\//,"");print}' |
 	xargs git branch -dr
+}
+
+function start_sfu() {
+	PUBLIC_IP="127.0.0.1"
+	echo "PUBLIC_IP: $PUBLIC_IP"
+	AUTH_KEY=abc123 DEBUG=mediasoup* LOG_COLOR=1 LOG_LEVEL=debug LOG_TIMESTAMP=1 PUBLIC_IP="$PUBLIC_IP" WORKER_LOG_LEVEL=debug npm run start
 }
