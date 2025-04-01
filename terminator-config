@@ -48,7 +48,7 @@
       position = 511
       ratio = 0.5024582104228122
     [[[og-odoo]]]
-      command = bash --init-file <(echo ". $HOME/.bashrc && odoo-venv")
+      command = bash --init-file <(echo ". $HOME/.bashrc; odoo-venv")
       directory = /home/seb/repo/odoo
       type = Terminal
       parent = og-horizontal
@@ -58,7 +58,7 @@
       title = og-odoo
       uuid = 023c356c-138f-4b2e-8cbe-54f215a6e98c
     [[[og-enterprise]]]
-      command = bash --init-file <(echo ". $HOME/.bashrc && odoo-venv")
+      command = bash --init-file <(echo ". $HOME/.bashrc; odoo-venv")
       directory = /home/seb/repo/enterprise
       type = Terminal
       parent = og-right-vertical
@@ -74,7 +74,7 @@
       position = 251
       ratio = 0.500998003992016
     [[[og-design-themes]]]
-      command = bash --init-file <(echo ". $HOME/.bashrc && odoo-venv")
+      command = bash --init-file <(echo ". $HOME/.bashrc; odoo-venv")
       directory = /home/seb/repo/design-themes
       type = Terminal
       parent = og-right-bottom-vertical
@@ -83,7 +83,7 @@
       title = og-design-themes
       uuid = 9077456c-83b2-4924-8830-04dcd73d8c40
     [[[og-upgrade]]]
-      command = bash --init-file <(echo ". $HOME/.bashrc && odoo-venv")
+      command = bash --init-file <(echo ". $HOME/.bashrc; odoo-venv")
       directory = /home/seb/repo/upgrade
       type = Terminal
       parent = og-right-bottom-vertical
@@ -109,7 +109,7 @@
       ratio = 0.278431372549
       type = VPaned
     [[[terminal2]]]
-      command = bash --init-file <(echo ". $HOME/.bashrc && htop")
+      command = bash --init-file <(echo ". $HOME/.bashrc; htop")
       order = 0
       group = htop
       parent = child1
@@ -117,7 +117,7 @@
       type = Terminal
       uuid = b497d877-0356-474e-8745-20f47d9a63be
     [[[terminal3]]]
-      command = bash --init-file <(echo ". $HOME/.bashrc && odoo-venv")
+      command = bash --init-file <(echo ". $HOME/.bashrc; odoo-venv")
       directory = /home/seb/repo/odoo
       group = odoo shell
       order = 1
