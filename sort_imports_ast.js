@@ -2,22 +2,31 @@
 const fs = require("fs");
 const { glob } = require("glob");
 const recast = require("recast");
-const { namedTypes: n, builders: b } = require("ast-types");
+const { builders, namedTypes } = require("ast-types");
 
 const { visit } = recast.types;
 const babelParser = require("recast/parsers/babel");
 
 // Function to transform relative import paths to absolute import paths
-function transformImportPath(importPath, moduleName) {
+function transformImportPath(importPath, moduleName, filePath) {
     let transformedPath = importPath;
-    // Add '@' and module name at the start if the path starts with ./
-    if (importPath.startsWith("./")) {
-        transformedPath = '@' + moduleName + '/' + transformedPath;
+
+    // Resolve the directory of the current file
+    const fileDir = filePath.substring(0, filePath.lastIndexOf("/"));
+
+    // Replace './' and '../' with absolute paths
+    if (importPath.startsWith("./") || importPath.startsWith("../")) {
+        const absolutePath = require("path").resolve(fileDir, importPath);
+        transformedPath = "@" + moduleName + "/" + absolutePath.replace(/^.*addons\/[^/]+\//, "");
     }
+
     // Transform 'static/tests/' into '../'
-    transformedPath = transformedPath.replace(/^static\/tests\//, '../');
+    transformedPath = transformedPath.replace(/static\/tests\//, "../");
+    // Remove 'static/src/' prefix
+    transformedPath = transformedPath.replace(/static\/src\//, "");
     // Remove the final '.js'
-    transformedPath = transformedPath.replace(/\.js$/, '');
+    transformedPath = transformedPath.replace(/\.js$/, "");
+
     return transformedPath;
 }
 
@@ -29,37 +38,17 @@ async function processFile(filePath) {
 
     // Find the module name (the directory just after 'addons/')
     const moduleNameMatch = filePath.match(/addons\/([^/]+)\//);
-    const moduleName = moduleNameMatch ? moduleNameMatch[1] : '';
-    console.log(`Module name: ${moduleName}`);
-
-    // Remove empty statements between two import statements
-    visit(ast, {
-        visitProgram(path) {
-            const body = path.get("body");
-            let lastWasImport = false;
-            for (let i = body.value.length - 1; i >= 0; i--) {
-                const node = body.get(i);
-                if (n.ImportDeclaration.check(node.value)) {
-                    lastWasImport = true;
-                } else if (lastWasImport && node.value.type === "EmptyStatement") {
-                    path.get("body", i).prune();
-                } else {
-                    lastWasImport = false;
-                }
-            }
-            this.traverse(path);
-        }
-    });
+    const moduleName = moduleNameMatch ? moduleNameMatch[1] : "";
 
     // Transform relative import paths to absolute import paths
     visit(ast, {
         visitImportDeclaration(path) {
             const source = path.node.source.value;
-            if (source.startsWith(".")) {
-                path.node.source.value = transformImportPath(source, moduleName);
+            if (source.startsWith(".") || source.startsWith("../")) {
+                path.node.source.value = transformImportPath(source, moduleName, filePath);
             }
             this.traverse(path);
-        }
+        },
     });
 
     const body = ast.program.body;
@@ -67,15 +56,13 @@ async function processFile(filePath) {
     // Separate import statements from other statements
     const importStatements = [];
     const otherStatements = [];
-    body.forEach(node => {
-        if (n.ImportDeclaration.check(node)) {
+    body.forEach((node) => {
+        if (namedTypes.ImportDeclaration.check(node)) {
             importStatements.push(node);
         } else {
             otherStatements.push(node);
         }
     });
-
-    console.log(`Found ${importStatements.length} import statements.`);
 
     // Sort import statements by source value
     importStatements.sort((a, b) => {
@@ -87,34 +74,48 @@ async function processFile(filePath) {
     // Group imports by prefix '@word/'
     const groupedImports = [];
     let previousPrefix = null;
-    importStatements.forEach(statement => {
+    importStatements.forEach((statement) => {
         const source = statement.source.value;
         const prefixMatch = source.match(/^@([^/]+)\//);
         const currentPrefix = prefixMatch ? prefixMatch[0] : null;
-
         if (previousPrefix && previousPrefix !== currentPrefix) {
-            groupedImports.push(b.emptyStatement());
+            groupedImports.push(
+                builders.expressionStatement(builders.identifier("/*__EMPTY_LINE__*/"))
+            );
         }
         groupedImports.push(statement);
         previousPrefix = currentPrefix;
     });
+    if (importStatements.length > 0) {
+        groupedImports.push(
+            builders.expressionStatement(builders.identifier("/*__EMPTY_LINE__*/"))
+        );
+    }
 
     // Combine sorted imports and other statements
-    ast.program.body = [...groupedImports, ...otherStatements];
-
-    const newContent = recast.print(ast).code;
+    ast.program.body = otherStatements;
+    const otherStatementsContent = recast.print(ast).code;
+    ast.program.body = groupedImports;
+    const newImportContent = recast.print(ast, { reuseWhitespace: false }).code;
+    const newContent = (newImportContent + otherStatementsContent).replace(
+        /\n\s*\/\*__EMPTY_LINE__\*\/;\n\n?/g,
+        "\n\n"
+    );
     if (newContent !== content) {
         fs.writeFileSync(filePath, newContent, "utf-8");
         console.log(`File ${filePath} has been updated.`);
-    } else {
-        console.log(`No changes made to ${filePath}.`);
     }
 }
 
 // Process all .js files in the ../odoo/addons/mail directory
 async function processAllFiles() {
     try {
-        const jsFiles = await glob("../odoo/addons/mail/**/*.js", { ignore: "node_modules/**" });
+        const jsFiles = await glob("../odoo/addons/mail/**/*.js", {
+            ignore: [
+                "../odoo/addons/mail/static/lib/**",
+                "../odoo/addons/mail/push-to-talk-extension/**",
+            ],
+        });
         console.log(`Found ${jsFiles.length} files.`);
         for (const filePath of jsFiles) {
             await processFile(filePath);
