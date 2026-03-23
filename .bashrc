@@ -102,15 +102,25 @@ function gr()
 # fetch, create, and push a new branch
 function gnb()
 {
+	REPO=$(basename "$PWD")
+	[[ "$REPO" =~ ^(odoo|enterprise)$ ]] || { echo "Invalid repo ${REPO}"; exit 1; }
 	BASE=$1
-	BRANCH=$2
-	FULL_NAME="${BASE}-${BRANCH}--seb"
+	NAME=$2
+	FULL_NAME="${BASE}-${NAME}--seb"
+	FOLDER=~/src/odoo/${FULL_NAME}/${REPO}
 	git fetch odoo $BASE
-	git checkout -b $FULL_NAME "odoo/${BASE}" --no-track
-	if [ ! -z "$FULL_NAME" ]; then
-		# we need to push because the upstream branch doesn't exist yet
-		git push -u odoo-dev $FULL_NAME
-	fi
+	git worktree add -b $FULL_NAME $FOLDER "odoo/${BASE}" --no-track
+	# we need to push because the upstream branch doesn't exist yet
+	git push -u odoo-dev $FULL_NAME
+}
+
+function goto()
+{
+	REPO=$(basename "$PWD")
+	[[ "$REPO" =~ ^(odoo|enterprise)$ ]] || { echo "Invalid repo ${REPO}"; exit 1; }
+	FULL_NAME=$1
+	FOLDER=~/src/odoo/${FULL_NAME}/${REPO}
+	cd $FOLDER
 }
 
 function gnb14()
@@ -253,7 +263,7 @@ function odoo-bin-params() {
     rest=$*
     d="$(branchdb ${edition})"
 	cli=""
-	addons_path="~/repo/odoo/odoo/addons,~/repo/odoo/addons"
+	addons_path="./../odoo/odoo/addons,./../odoo/addons"
 	if [[ "${edition}" == *"s"* ]]; then
 		cli='shell '
 	fi
@@ -261,10 +271,10 @@ function odoo-bin-params() {
         cli='populate '
     fi
 	if [[ "${edition}" == *"e"* ]]; then
-		addons_path="${addons_path},~/repo/enterprise/"
+		addons_path="${addons_path},./../enterprise/"
 	fi
 	if [[ "${edition}" == *"t"* ]]; then
-		addons_path="${addons_path},~/repo/design-themes/"
+		addons_path="${addons_path},./../design-themes/"
 	fi
 	if [[ "${edition}" == *"d"* ]]; then
 		addons_path="${addons_path},~/repo/big-data/"

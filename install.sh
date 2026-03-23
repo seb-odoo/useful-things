@@ -79,6 +79,7 @@ git clone git@github.com:brendangregg/FlameGraph.git
     pip install -U pyopenssl cryptography
     pip install dbfread pylint astroid
     pip install phonenumbers flanker cbor2 asn1crypto
+    pip install rich  # for pfb
 )
 
 # wkhtmltopdf manually https://github.com/odoo/odoo/wiki/Wkhtmltopdf v 0.12.5
