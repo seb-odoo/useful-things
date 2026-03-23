@@ -43,9 +43,11 @@ print(f"Fetching {url}")
 response = requests.request("GET", url, timeout=3).json()
 print(response)
 
-def run(cmd, folder):
+def run(cmd, folder=None):
     print("exec: " + " ".join(cmd))
     subprocess.run(cmd, cwd=folder, check=True, text=True, capture_output=True)
+
+run(["ln", "-sfn", "/home/seb/src/odoo/.vscode", f"{wt_root_folder}/.vscode"])
 
 for branch in response["branches"]:
     repo = branch["repo"]
@@ -93,4 +95,5 @@ for commit in response["commits"]:
             print(e.stderr)
             raise(e)
 
+run(["code", wt_root_folder])
 print("[green]Done[/green]")
