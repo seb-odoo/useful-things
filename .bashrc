@@ -71,6 +71,8 @@ alias qunit_fail="python qunit_until_fail.py -m mail -m mail_enterprise -m test_
 alias pfb="python ~/repo/useful-things/fetch_bundle.py"
 alias hoot='npm run start --'
 alias hoot_mail='npm run start -- -m "@mail"'
+alias model_parser="node dist/type-gen-idx.mjs --path ../odoo --enterprise"
+alias mailhog='~/gocode/bin/MailHog'
 
 function tog() {
 	terminator -l 'odoo gits' </dev/null &>/dev/null &
