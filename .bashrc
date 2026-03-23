@@ -280,7 +280,7 @@ function odoo-bin-params() {
 	if [[ "${edition}" == *"d"* ]]; then
 		addons_path="${addons_path},~/repo/big-data/"
 	fi
-	echo "${cli}-d ${d} --addons-path ${addons_path} ${rest}"
+	echo "${cli}-d ${d} --addons-path ${addons_path} --dev replica ${rest}"
 }
 
 alias obet="odoo-bin et"
@@ -312,7 +312,6 @@ function obadger() {
 	pgbadger /var/log/postgresql/postgresql-9.5-main.log -o /tmp/postgresql.html
 	webbrowser /tmp/postgresql.html
 }
-
 
 function curltime() {
 	curl -so /dev/null -w '%{time_total}\n' $*
