@@ -121,7 +121,7 @@ function goto()
 {
 	REPO=$(basename "$PWD")
 	[[ "$REPO" =~ ^(odoo|enterprise|design-themes|upgrade)$ ]] || { echo "Invalid repo ${REPO}"; return 1; }
-	FULL_NAME=$1
+	FULL_NAME=${1/odoo-dev:}
 	FOLDER=~/src/odoo/${FULL_NAME}/${REPO}
 	cd $FOLDER
 }
