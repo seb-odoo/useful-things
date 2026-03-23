@@ -1,0 +1,6 @@
+[[config]]
+name = "My Config"
+odoo_path = "${workspaceFolder}/odoo"
+addons_paths = ["${workspaceFolder}/enterprise", "${workspaceFolder}/design-themes", "$autoDetectAddons"]
+python_path = "/home/seb/virtualenvs/odoo20/bin/python"
+stdlib = "/home/seb/virtualenvs/odoo20/lib/python3.12/site-packages/mypy/typeshed/stdlib/"

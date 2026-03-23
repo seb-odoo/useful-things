@@ -47,6 +47,7 @@ def run(cmd, folder=None):
     print("exec: " + " ".join(cmd))
     subprocess.run(cmd, cwd=folder, check=True, text=True, capture_output=True)
 
+run(["ln", "-sfn", "/home/seb/repo/useful-things/odools.toml", f"{wt_root_folder}/odools.toml"])
 run(["ln", "-sfn", "/home/seb/src/odoo/.vscode", f"{wt_root_folder}/.vscode"])
 
 for branch in response["branches"]:
