@@ -524,3 +524,8 @@ function start_sfu() {
 	echo "PUBLIC_IP: $PUBLIC_IP"
 	AUTH_KEY=abc123 DEBUG=mediasoup* LOG_COLOR=1 LOG_LEVEL=debug LOG_TIMESTAMP=1 PUBLIC_IP="$PUBLIC_IP" WORKER_LOG_LEVEL=debug npm run start
 }
+
+function cherry_pick() {
+	git fetch odoo-dev $1
+	git cherry-pick $1
+}
