@@ -1,5 +1,6 @@
 """Fetch bundle info from runbot"""
 
+from collections import defaultdict
 from rich import print
 
 import argparse
@@ -50,6 +51,7 @@ def run(cmd, folder=None):
 run(["ln", "-sfn", "/home/seb/repo/useful-things/odools.toml", f"{wt_root_folder}/odools.toml"])
 run(["ln", "-sfn", "/home/seb/src/odoo/.vscode", f"{wt_root_folder}/.vscode"])
 
+make_branch_by_repo = defaultdict(lambda: False)
 for branch in response["branches"]:
     repo = branch["repo"]
     if branch["is_pr"]:
@@ -59,6 +61,7 @@ for branch in response["branches"]:
     print(f"Fetching [yellow]{repo}[/yellow]")
     try:
         run(["git", "fetch", remote_dev, branch["name"]], repo_folder)
+        make_branch_by_repo[repo] = True
     except subprocess.CalledProcessError as e:
         print(e.stderr)
         raise
@@ -72,29 +75,43 @@ for commit in response["commits"]:
     print("------------------------------------")
     print(f"Handling [yellow]{repo}[/yellow] ({repo_folder}) with {remote} at {commit_hash}")
     run(["git", "fetch", remote, commit_hash], repo_folder)
-    try:
-        run(["git", "worktree", "add", "-B", bundle_name, wt_repo_folder, commit_hash], repo_folder)
-    except subprocess.CalledProcessError as e:
-        if f"fatal: '{bundle_name}' is already used by worktree at '{wt_repo_folder}'" in e.stderr:
-            pass
-        elif f"fatal: '{wt_repo_folder}' already exists" in e.stderr:
-            run(["git", "switch", "-C", bundle_name, f"{remote_dev}/{bundle_name}"], wt_repo_folder)
-        else:
-            print(e.stderr)
-            raise
-    try:
-        run(["git", "branch", "-u", f"{remote_dev_by_repo[repo]}/{bundle_name}"], wt_repo_folder)
-    except subprocess.CalledProcessError as e:
-        if (
-            f"fatal: could not set upstream of HEAD to {remote_dev_by_repo[repo]}/{bundle_name} when it does not point to any branch"
-            in e.stderr
-            or f"fatal: the requested upstream branch '{remote_dev_by_repo[repo]}/{bundle_name}' does not exist"
-            in e.stderr
-        ):
-            pass
-        else:
-            print(e.stderr)
-            raise(e)
+    if make_branch_by_repo[repo]:
+        try:
+            run(["git", "worktree", "add", "-B", bundle_name, wt_repo_folder, commit_hash], repo_folder)
+        except subprocess.CalledProcessError as e:
+            if f"fatal: '{bundle_name}' is already used by worktree at '{wt_repo_folder}'" in e.stderr:
+                pass
+            elif f"fatal: '{wt_repo_folder}' already exists" in e.stderr:
+                run(["git", "switch", "-C", bundle_name, f"{remote_dev}/{bundle_name}"], wt_repo_folder)
+            else:
+                print(e.stderr)
+                raise
+        try:
+            run(["git", "branch", "-u", f"{remote_dev_by_repo[repo]}/{bundle_name}"], wt_repo_folder)
+        except subprocess.CalledProcessError as e:
+            if (
+                f"fatal: could not set upstream of HEAD to {remote_dev_by_repo[repo]}/{bundle_name} when it does not point to any branch"
+                in e.stderr
+                or f"fatal: the requested upstream branch '{remote_dev_by_repo[repo]}/{bundle_name}' does not exist"
+                in e.stderr
+            ):
+                pass
+            else:
+                print(e.stderr)
+                raise(e)
+    else:
+        try:
+            run(["git", "worktree", "add", wt_repo_folder, commit_hash], repo_folder)
+        except subprocess.CalledProcessError as e:
+            if f"fatal: '{wt_repo_folder}' already exists" in e.stderr:
+                try:
+                    run(["git", "checkout", commit_hash], wt_repo_folder)
+                except subprocess.CalledProcessError as e:
+                    print(e.stderr)
+                    raise
+            else:
+                print(e.stderr)
+                raise
 
-run(["code", wt_root_folder])
+run(["code", "."], wt_root_folder)
 print("[green]Done[/green]")
