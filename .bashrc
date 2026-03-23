@@ -85,8 +85,12 @@ alias ubash="source ~/.bashrc"
 
 alias hackchromeheadless="google-chrome --headless --remote-debugging-port=8071"
 
-function odoo-venv() {
+function odoo-venv-17() {
 	source ~/virtualenvs/odoo17/bin/activate
+}
+
+function odoo-venv() {
+	source ~/virtualenvs/odoo20/bin/activate
 }
 
 alias list-swap="smem -s swap"
