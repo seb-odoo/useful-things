@@ -106,7 +106,7 @@ function gr()
 function gnb()
 {
 	REPO=$(basename "$PWD")
-	[[ "$REPO" =~ ^(odoo|enterprise)$ ]] || { echo "Invalid repo ${REPO}"; exit 1; }
+	[[ "$REPO" =~ ^(odoo|enterprise|design-themes|upgrade)$ ]] || { echo "Invalid repo ${REPO}"; return 1; }
 	BASE=$1
 	NAME=$2
 	FULL_NAME="${BASE}-${NAME}--seb"
@@ -120,7 +120,7 @@ function gnb()
 function goto()
 {
 	REPO=$(basename "$PWD")
-	[[ "$REPO" =~ ^(odoo|enterprise)$ ]] || { echo "Invalid repo ${REPO}"; exit 1; }
+	[[ "$REPO" =~ ^(odoo|enterprise|design-themes|upgrade)$ ]] || { echo "Invalid repo ${REPO}"; return 1; }
 	FULL_NAME=$1
 	FOLDER=~/src/odoo/${FULL_NAME}/${REPO}
 	cd $FOLDER
