@@ -3,9 +3,13 @@
 from collections import defaultdict
 from rich import print
 
+# Record the starting time
 import argparse
 import requests
 import subprocess
+import time
+
+start_time = time.perf_counter()
 
 # change this config
 ROOT = "/home/seb/repo/"
@@ -31,25 +35,48 @@ remote_dev_by_repo = {
     "enterprise": "odoo-dev",
     "odoo": "odoo-dev",
     "upgrade-util": "origin",
-    "upgrade": "odoo-dev",
+    "upgrade": "odoo",
 }
 
 parser = argparse.ArgumentParser()
 parser.add_argument("name", help="Name of the bundle to fetch", type=str)
 args = parser.parse_args()
 bundle_name = args.name.replace("odoo-dev:", "")
-wt_root_folder = f"/home/seb/src/odoo/{bundle_name}"
+parts = bundle_name.split("-")
+base = f"{parts[0]}-{parts[1]}" if parts[0] == "saas" else parts[0]
+wt_root_folder = f"/home/seb/src/odoo"
+wt_base_folder = f"{wt_root_folder}/{base}"
+wt_bundle_folder = f"{wt_base_folder}/{bundle_name}"
 url = f"https://runbot.odoo.com/api/bundle?name={bundle_name}"
 print(f"Fetching {url}")
 response = requests.request("GET", url, timeout=3).json()
 print(response)
 
-def run(cmd, folder=None):
-    print("exec: " + " ".join(cmd))
-    subprocess.run(cmd, cwd=folder, check=True, text=True, capture_output=True)
+def run(cmd, *, cwd=None, handle_exceptions=None, **kwargs):
+    elapsed_time = time.perf_counter() - start_time
+    print(f"{elapsed_time:.2f} [yellow]From: " + (cwd or "current folder") + "[/yellow]")
+    state = "✅️"
+    error = None
+    try:
+        subprocess.run(cmd, cwd=cwd, check=True, text=True, capture_output=True, **kwargs)
+    except subprocess.CalledProcessError as e:
+        if handle_exceptions:
+            for msg, handler in handle_exceptions.items():
+                if msg in e.stderr:
+                    handler()
+                    state = "⚠️"
+                    return
+        state = "❌"
+        error = e.stderr
+        raise
+    finally:
+        print(state + " " + " ".join(cmd))
+        if error:
+            print(error)
 
-run(["ln", "-sfn", "/home/seb/repo/useful-things/odools.toml", f"{wt_root_folder}/odools.toml"])
-run(["ln", "-sfn", "/home/seb/src/odoo/.vscode", f"{wt_root_folder}/.vscode"])
+run(["mkdir", "-p", wt_bundle_folder])
+run(["ln", "-sfn", "/home/seb/repo/useful-things/odools.toml", f"{wt_bundle_folder}/odools.toml"])
+run(["ln", "-sfn", f"{wt_root_folder}/.vscode", f"{wt_bundle_folder}/.vscode"])
 
 make_branch_by_repo = defaultdict(lambda: False)
 for branch in response["branches"]:
@@ -59,59 +86,46 @@ for branch in response["branches"]:
     repo_folder = folder_by_repo[repo]
     remote_dev = remote_dev_by_repo[repo]
     print(f"Fetching [yellow]{repo}[/yellow]")
-    try:
-        run(["git", "fetch", remote_dev, branch["name"]], repo_folder)
-        make_branch_by_repo[repo] = True
-    except subprocess.CalledProcessError as e:
-        print(e.stderr)
-        raise
+    run(["git", "fetch", remote_dev, f"+refs/heads/{branch['name']}:refs/remotes/{remote_dev}/{branch['name']}"], cwd=repo_folder)
+    make_branch_by_repo[repo] = True
 for commit in response["commits"]:
     repo = commit["repo"]
     repo_folder = folder_by_repo[repo]
-    wt_repo_folder = f"{wt_root_folder}/{repo}"
+    wt_repo_folder = f"{wt_bundle_folder}/{repo}"
     remote = remote_by_repo[repo]
     remote_dev = remote_dev_by_repo[repo]
+    remote_dev_branch_name = f"{remote_dev}/{bundle_name}"
+    ref =  f"refs/heads/{bundle_name}"
     commit_hash = commit["name"]
     print("------------------------------------")
     print(f"Handling [yellow]{repo}[/yellow] ({repo_folder}) with {remote} at {commit_hash}")
-    run(["git", "fetch", remote, commit_hash], repo_folder)
+    run(["git", "fetch", remote, commit_hash], cwd=repo_folder)
     if make_branch_by_repo[repo]:
-        try:
-            run(["git", "worktree", "add", "-B", bundle_name, wt_repo_folder, commit_hash], repo_folder)
-        except subprocess.CalledProcessError as e:
-            if f"fatal: '{bundle_name}' is already used by worktree at '{wt_repo_folder}'" in e.stderr:
-                pass
-            elif f"fatal: '{wt_repo_folder}' already exists" in e.stderr:
-                run(["git", "switch", "-C", bundle_name, f"{remote_dev}/{bundle_name}"], wt_repo_folder)
-            else:
-                print(e.stderr)
-                raise
-        try:
-            run(["git", "branch", "-u", f"{remote_dev_by_repo[repo]}/{bundle_name}"], wt_repo_folder)
-        except subprocess.CalledProcessError as e:
-            if (
-                f"fatal: could not set upstream of HEAD to {remote_dev_by_repo[repo]}/{bundle_name} when it does not point to any branch"
-                in e.stderr
-                or f"fatal: the requested upstream branch '{remote_dev_by_repo[repo]}/{bundle_name}' does not exist"
-                in e.stderr
-            ):
-                pass
-            else:
-                print(e.stderr)
-                raise(e)
+        run(["git", "worktree", "add", "-B", bundle_name, wt_repo_folder, remote_dev_branch_name], cwd=repo_folder, handle_exceptions={
+            f"fatal: '{bundle_name}' is already used by worktree at '{wt_repo_folder}'": lambda: None,
+            f"fatal: '{wt_repo_folder}' already exists": lambda: run(["git", "switch", "-C", bundle_name, remote_dev_branch_name], cwd=wt_repo_folder),
+        })
+        run(["git", "branch", "-u", ref], cwd=wt_repo_folder, handle_exceptions={
+            f"fatal: could not set upstream of HEAD to {ref} when it does not point to any branch": lambda: None,
+            f"fatal: the requested upstream branch '{ref}' does not exist": lambda: None,
+        })
     else:
-        try:
-            run(["git", "worktree", "add", wt_repo_folder, commit_hash], repo_folder)
-        except subprocess.CalledProcessError as e:
-            if f"fatal: '{wt_repo_folder}' already exists" in e.stderr:
-                try:
-                    run(["git", "checkout", commit_hash], wt_repo_folder)
-                except subprocess.CalledProcessError as e:
-                    print(e.stderr)
-                    raise
-            else:
-                print(e.stderr)
-                raise
+        run(["git", "worktree", "add", wt_repo_folder, commit_hash], cwd=repo_folder, handle_exceptions={
+            f"fatal: '{wt_repo_folder}' already exists": lambda: run(["git", "checkout", commit_hash], cwd=wt_repo_folder),
+        })
 
-run(["code", "."], wt_root_folder)
+# files = [".eslintignore", ".eslintrc.json", "jsconfig.json", "package-lock.json", "package.json"]
+for repo in ("odoo", "enterprise"):
+    # for file in files:
+    #     file_path = f"{wt_base_folder}/{repo}/{file}"
+    #     run(["touch", file_path])
+    #     run(["ln", "-sfn", file_path, f"{wt_bundle_folder}/{repo}/{file}"])
+    node_folder = f"{wt_base_folder}/{repo}/node_modules"
+    run(["mkdir", "-p", node_folder], handle_exceptions={})
+    run(["ln", "-sfn", node_folder, f"{wt_bundle_folder}/{repo}/node_modules"])
+run(
+    ["bash", f"{wt_bundle_folder}/odoo/addons/web/tooling/enable.sh"],
+    input="y\n",
+)
+run(["code", "."], cwd=wt_bundle_folder)
 print("[green]Done[/green]")

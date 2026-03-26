@@ -69,6 +69,7 @@ alias gpfl="git push --force-with-lease --force-if-includes"
 alias ducks='while read -r line;do du -sh "$line";done < <(ls -1A) | sort -rh | head -n11'
 alias qunit_fail="python qunit_until_fail.py -m mail -m mail_enterprise -m test_mail -m im_livechat -m whatsapp -m voip -m hr_expense -m account_accountant -m hr_holidays -m calendar -m documents -m test_mail_full --no-fail-fast -n 100"
 alias pfb="python ~/repo/useful-things/fetch_bundle.py"
+alias delete_bundle="python ~/repo/useful-things/delete_bundle.py"
 alias hoot='npm run start --'
 alias hoot_mail='npm run start -- -m "@mail"'
 alias model_parser="node ~/repo/DiscussModelParser/dist/type-gen-idx.mjs --path ../odoo --enterprise"
@@ -110,7 +111,7 @@ function gnb()
 	BASE=$1
 	NAME=$2
 	FULL_NAME="${BASE}-${NAME}--seb"
-	FOLDER=~/src/odoo/${FULL_NAME}/${REPO}
+	FOLDER=~/src/odoo/$BASE/${FULL_NAME}/${REPO}
 	git fetch odoo $BASE
 	git worktree add -b $FULL_NAME $FOLDER "odoo/${BASE}" --no-track
 	# we need to push because the upstream branch doesn't exist yet
@@ -122,7 +123,8 @@ function goto()
 	REPO=$(basename "$PWD")
 	[[ "$REPO" =~ ^(odoo|enterprise|design-themes|upgrade)$ ]] || { echo "Invalid repo ${REPO}"; return 1; }
 	FULL_NAME=${1/odoo-dev:}
-	FOLDER=~/src/odoo/${FULL_NAME}/${REPO}
+	BASE=${FULL_NAME%%-*}
+	FOLDER=~/src/odoo/$BASE/${FULL_NAME}/${REPO}
 	cd $FOLDER
 }
 
@@ -248,6 +250,9 @@ function branchdb() {
     branch=${branch/\(no branch, bisect started on }
     branch=${branch/\)}
     d=${branch/\* }
+	if [ "$d" == "(no branch" ]; then
+    	d=$(basename "${PWD%/odoo}")
+	fi
     if [[ "${edition}" == *"e"* ]]; then
         d="${d}-e"
     fi
@@ -342,9 +347,9 @@ function gogogo() {
 	firefox &
 	tog &
 	code &
-	git-cola -r ~/repo/odoo &
-	git-cola -r ~/repo/enterprise &
-	git-cola -r ~/repo/upgrade &
+	# git-cola -r ~/repo/odoo &
+	# git-cola -r ~/repo/enterprise &
+	# git-cola -r ~/repo/upgrade &
 	tos &
 	nohup google-chrome-stable > /dev/null 2>&1 &
 	nohup flatpak run com.discordapp.Discord > /dev/null 2>&1 &

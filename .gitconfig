@@ -50,3 +50,5 @@
 	writeCommitGraph = true
 [rebase]
 	updaterefs = true
+[checkout]
+	workers = 0
