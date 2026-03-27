@@ -81,7 +81,7 @@ git clone git@github.com:brendangregg/FlameGraph.git
     pip install phonenumbers cbor2 asn1crypto
     pip install html2text  # for odoo 12.0
     pip install mypy  # for Odoo LS
-    pip install rich  # for pfb
+    pip install fire rich  # for pfb and utils
 )
 
 # wkhtmltopdf manually https://github.com/odoo/odoo/wiki/Wkhtmltopdf v 0.12.5
