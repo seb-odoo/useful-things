@@ -68,8 +68,8 @@ alias gwhere='git branch -r --contains'
 alias gpfl="git push --force-with-lease --force-if-includes"
 alias ducks='while read -r line;do du -sh "$line";done < <(ls -1A) | sort -rh | head -n11'
 alias qunit_fail="python qunit_until_fail.py -m mail -m mail_enterprise -m test_mail -m im_livechat -m whatsapp -m voip -m hr_expense -m account_accountant -m hr_holidays -m calendar -m documents -m test_mail_full --no-fail-fast -n 100"
-alias pfb="python ~/repo/useful-things/fetch_bundle.py"
-alias delete_bundle="python ~/repo/useful-things/delete_bundle.py"
+alias pfb="python ~/repo/useful-things/scripts/fetch_bundle.py"
+alias delete_bundle="python ~/repo/useful-things/scripts/delete_bundle.py"
 alias hoot='npm run start --'
 alias hoot_mail='npm run start -- -m "@mail"'
 alias model_parser="node ~/repo/DiscussModelParser/dist/type-gen-idx.mjs --path ../odoo --enterprise"
@@ -123,7 +123,7 @@ function goto()
 	REPO=$(basename "$PWD")
 	[[ "$REPO" =~ ^(odoo|enterprise|design-themes|upgrade)$ ]] || { echo "Invalid repo ${REPO}"; return 1; }
 	FULL_NAME=${1/odoo-dev:}
-	BASE=${FULL_NAME%%-*}
+	BASE=$(python ~/repo/useful-things/scripts/utils.py get_base_from_bundle_name ${FULL_NAME})
 	FOLDER=~/src/odoo/$BASE/${FULL_NAME}/${REPO}
 	cd $FOLDER
 }

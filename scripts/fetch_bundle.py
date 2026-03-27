@@ -10,6 +10,7 @@ import argparse
 import requests
 
 from command_runner import ignore_error, PrintParams, Runner
+from utils import get_base_from_bundle_name
 
 runner = Runner()
 
@@ -44,8 +45,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("name", help="Name of the bundle to fetch", type=str)
 args = parser.parse_args()
 bundle_name = args.name.replace("odoo-dev:", "")
-parts = bundle_name.split("-")
-base = f"{parts[0]}-{parts[1]}" if parts[0] == "saas" else parts[0]
+base = get_base_from_bundle_name(bundle_name)
 wt_root_folder = "/home/seb/src/odoo"
 wt_base_folder = f"{wt_root_folder}/{base}"
 wt_bundle_folder = f"{wt_base_folder}/{bundle_name}"
