@@ -1,15 +1,14 @@
 """Fetch bundle info from runbot"""
 
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from rich import print
-from rich.live import Live
 from rich.tree import Tree
 
 import argparse
 import requests
 
-from command_runner import ignore_error, PrintParams, Runner
+from command_runner import ignore_error, live_task_executor, PrintParams, Runner
 from utils import get_base_from_bundle_name
 
 runner = Runner()
@@ -73,12 +72,11 @@ def fetch_url(url):
         return f"{url}: Failed due to {e}"
 
 
-def handle_branch(branch, live, tree):
+def handle_branch(branch, print_params: PrintParams):
     repo = branch["repo"]
     if branch["is_pr"]:
         return
-    tree_repo = tree.add(repo)
-    live.refresh()
+    print_params = print_params.tree_add(repo)
     repo_folder = folder_by_repo[repo]
     remote_dev = remote_dev_by_repo[repo]
     runner.run(
@@ -88,27 +86,24 @@ def handle_branch(branch, live, tree):
             remote_dev,
             f"+refs/heads/{branch['name']}:refs/remotes/{remote_dev}/{branch['name']}",
         ],
-        print_params=PrintParams(live, tree_repo),
+        print_params=print_params,
         cwd=repo_folder,
     )
     make_branch_by_repo[repo] = True
 
 
-tree = Tree("Branches")
-with Live(tree, auto_refresh=False) as live:
-    futures = []
-    with ThreadPoolExecutor(max_workers=12) as executor:
-        for branch in response["branches"]:
-            futures.append(executor.submit(handle_branch, branch, live, tree))
-    for future in futures:
-        future.result()
-    live.refresh()
+with live_task_executor(Tree("Branches")) as submit_task:
+    for branch in response["branches"]:
+        submit_task(handle_branch, branch)
 
 
-def handle_commit(commit, live, tree):
+def switch_to_branch(*, cwd, branch, target, print_params: PrintParams):
+    runner.run(["git", "switch", "-C", branch, target], print_params=print_params, cwd=cwd)
+
+
+def handle_commit(commit, print_params: PrintParams):
     repo = commit["repo"]
-    tree_repo = tree.add(repo)
-    live.refresh()
+    print_params = print_params.tree_add(repo)
     repo_folder = folder_by_repo[repo]
     wt_repo_folder = f"{wt_bundle_folder}/{repo}"
     remote = remote_by_repo[repo]
@@ -116,28 +111,26 @@ def handle_commit(commit, live, tree):
     remote_dev_branch_name = f"{remote_dev}/{bundle_name}"
     ref = f"refs/heads/{bundle_name}"
     commit_hash = commit["name"]
-    runner.run(
-        ["git", "fetch", remote, commit_hash],
-        print_params=PrintParams(live, tree_repo),
-        cwd=repo_folder,
-    )
+    runner.run(["git", "fetch", remote, commit_hash], print_params=print_params, cwd=repo_folder)
     if make_branch_by_repo[repo]:
+        switch_branch_callback = partial(
+            switch_to_branch,
+            cwd=wt_repo_folder,
+            branch=bundle_name,
+            target=remote_dev_branch_name,
+        )
         runner.run(
             ["git", "worktree", "add", "-B", bundle_name, wt_repo_folder, remote_dev_branch_name],
-            print_params=PrintParams(live, tree_repo),
+            print_params=print_params,
             cwd=repo_folder,
             handle_exceptions={
-                f"fatal: '{bundle_name}' is already used by worktree at '{wt_repo_folder}'": ignore_error,
-                f"fatal: '{wt_repo_folder}' already exists": lambda live, tree: runner.run(
-                    ["git", "switch", "-C", bundle_name, remote_dev_branch_name],
-                    print_params=PrintParams(live, tree),
-                    cwd=wt_repo_folder,
-                ),
+                f"fatal: '{bundle_name}' is already used by worktree at '{wt_repo_folder}'": switch_branch_callback,
+                f"fatal: '{wt_repo_folder}' already exists": switch_branch_callback,
             },
         )
         runner.run(
             ["git", "branch", "-u", ref],
-            print_params=PrintParams(live, tree_repo),
+            print_params=print_params,
             cwd=wt_repo_folder,
             handle_exceptions={
                 f"fatal: could not set upstream of HEAD to {ref} when it does not point to any branch": ignore_error,
@@ -147,27 +140,22 @@ def handle_commit(commit, live, tree):
     else:
         runner.run(
             ["git", "worktree", "add", wt_repo_folder, commit_hash],
-            print_params=PrintParams(live, tree_repo),
+            print_params=print_params,
             cwd=repo_folder,
             handle_exceptions={
-                f"fatal: '{wt_repo_folder}' already exists": lambda live, tree: runner.run(
+                f"fatal: '{wt_repo_folder}' already exists": lambda print_params: runner.run(
                     ["git", "checkout", commit_hash],
-                    print_params=PrintParams(live, tree),
+                    print_params=print_params,
                     cwd=wt_repo_folder,
                 ),
             },
         )
 
 
-tree = Tree("Commits")
-with Live(tree, auto_refresh=False) as live:
-    futures = []
-    with ThreadPoolExecutor(max_workers=12) as executor:
-        for commit in response["commits"]:
-            futures.append(executor.submit(handle_commit, commit, live, tree))
-    for future in futures:
-        future.result()
-    live.refresh()
+with live_task_executor(Tree("Commits")) as submit_task:
+    for commit in response["commits"]:
+        submit_task(handle_commit, commit)
+
 
 # files = [".eslintignore", ".eslintrc.json", "jsconfig.json", "package-lock.json", "package.json"]
 for repo in ("odoo", "enterprise"):
@@ -182,7 +170,8 @@ for repo in ("odoo", "enterprise"):
         print_params=PrintParams(),
     )
 runner.run(
-    ["bash", f"{wt_bundle_folder}/odoo/addons/web/tooling/enable.sh"],
+    ["bash", "./odoo/addons/web/tooling/enable.sh"],
+    cwd=wt_bundle_folder,
     input="y\n",
     print_params=PrintParams(),
 )

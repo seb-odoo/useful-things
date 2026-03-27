@@ -3,18 +3,25 @@
 import subprocess
 import time
 
+from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 from rich.live import Live
 from rich.tree import Tree
-
-
-def ignore_error(live, tree):
-    pass
 
 
 class PrintParams:
     def __init__(self, live: Live = None, tree: Tree = None):
         self.live = live
         self.tree = tree
+
+    def tree_add(self, label):
+        res = PrintParams(self.live, self.tree.add(label))
+        res.live.refresh()
+        return res
+
+
+def ignore_error(print_params: PrintParams):
+    pass
 
 
 class Runner:
@@ -38,15 +45,15 @@ class Runner:
             local_live.start()
         try:
             run = Runner.Run(
-            runner=self,
-            cmd=cmd,
-            live=live or local_live,
-            tree=(print_params and print_params.tree),
-            capture_output=capture_output,
-            cwd=cwd,
-            handle_exceptions=handle_exceptions,
-            **kwargs,
-        )
+                runner=self,
+                cmd=cmd,
+                live=live or local_live,
+                tree=(print_params and print_params.tree),
+                capture_output=capture_output,
+                cwd=cwd,
+                handle_exceptions=handle_exceptions,
+                **kwargs,
+            )
             run.execute()
         finally:
             if local_live:
@@ -68,6 +75,7 @@ class Runner:
             )
             self.live = live
             self.tree = None
+            self.caught = None
             self.handle_exceptions = handle_exceptions
             if tree:
                 self.tree = tree.add("")
@@ -76,29 +84,51 @@ class Runner:
         def execute(self):
             error = None
             try:
-                self.state = "⏳️"
-                self._print_progress()
+                self._update_state("⏳️")
                 subprocess.run(self.cmd, check=True, text=True, **self.kwargs)
-                self.state = "✅️"
+                self._update_state("✅️")
             except subprocess.CalledProcessError as e:
                 if self.handle_exceptions:
                     for msg, handler in self.handle_exceptions.items():
                         if msg in e.stderr:
-                            handler(self.live, self.tree)
-                            self.state = "❎️"
+                            self.caught = msg
+                            self._update_state("❎️")
+                            handler(print_params=PrintParams(self.live, self.tree))
                             return
-                self.state = "❌"
+                self._update_state("❌")
                 error = e.stderr
                 raise
             finally:
-                self._print_progress()
                 if error:
-                    self.live.console.print(error)
+                    if self.tree:
+                        self.tree.add(error)
+                        self.live.refresh()
+                    else:
+                        self.live.console.print(error)
+                        self.live.refresh()
 
         def _print_progress(self):
             text = f"{self.starting_print}\n{self.runner.elapsed_time:.2f} {self.state} {' '.join(self.cmd)}"
+            if self.caught:
+                text += f"\n{self.caught}"
             if not self.tree:
                 self.live.update(text, refresh=True)
                 return
             self.tree.label = text
             self.live.refresh()
+
+        def _update_state(self, state):
+            self.state = state
+            self._print_progress()
+
+
+@contextmanager
+def live_task_executor(tree, max_workers=12):
+    with Live(tree, auto_refresh=False) as live:
+        print_params = PrintParams(live, tree)
+        futures = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            yield lambda func, item: futures.append(executor.submit(func, item, print_params))
+        for future in futures:
+            future.result()
+        live.refresh()
