@@ -15,7 +15,6 @@ from commands import (
     clean_bundle_name,
     get_base_from_bundle_name,
     get_remote_dev_branch_name,
-    get_worktree_base_folder,
     get_worktree_bundle_folder,
     get_worktree_bundle_repo_folder,
 )
@@ -87,10 +86,5 @@ def handle_commit(runner: UtilsRunner, commit):
 
 
 runner.parallel_run(Tree("Commits"), response["commits"], handle_commit, lambda c: c["repo"])
-for repo in ("odoo", "enterprise"):
-    node_folder = f"{get_worktree_base_folder(base)}/{repo}/node_modules"
-    runner.run(["mkdir", "-p", node_folder])
-    runner.run(["ln", "-sfn", node_folder, f"{wt_bundle_folder}/{repo}/node_modules"])
-runner.run(["bash", "./odoo/addons/web/tooling/enable.sh"], cwd=wt_bundle_folder, input="y\n")
-runner.run(["code", "."], cwd=wt_bundle_folder)
+runner.finish_worktree_bundle_folder(bundle_name=bundle_name)
 print("[green]Done[/green]")

@@ -109,7 +109,7 @@ alias gnb="python ~/repo/useful-things/scripts/create_bundle.py"
 function goto()
 {
 	REPO=$(basename "$PWD")
-	[[ "$REPO" =~ ^(odoo|enterprise|design-themes|upgrade)$ ]] || { echo "Invalid repo ${REPO}"; return 1; }
+	[[ "$REPO" =~ ^(odoo|enterprise|design-themes|upgrade|documentation|upgrade-util)$ ]] || { echo "Invalid repo ${REPO}"; return 1; }
 	FULL_NAME=${1/odoo-dev:}
 	BASE=$(python ~/repo/useful-things/scripts/commands.py get_base_from_bundle_name ${FULL_NAME})
 	FOLDER=~/src/odoo/$BASE/${FULL_NAME}/${REPO}
@@ -279,6 +279,9 @@ function odoo-bin-params() {
 	fi
 	if [[ "${edition}" == *"d"* ]]; then
 		addons_path="${addons_path},~/repo/big-data/"
+	fi
+	if [[ "${edition}" == *"a"* ]]; then
+		addons_path="${addons_path},~/repo/allbuilds.org/odoo-addons"
 	fi
 	echo "${cli}-d ${d} --addons-path ${addons_path} --dev replica ${rest}"
 }
