@@ -4,12 +4,14 @@ from collections.abc import Iterable
 
 from command_runner import Runner
 from commands import (
+    get_base_from_bundle_name,
     get_remote_dev_branch_name,
     get_remote_dev_repo,
     get_remote_dev_ref,
     get_remote_ref,
     get_remote_repo,
     get_repo_folder,
+    get_worktree_base_folder,
     get_worktree_bundle_folder,
     get_worktree_bundle_repo_folder,
     get_worktree_container_folder,
@@ -49,13 +51,30 @@ class UtilsRunner(Runner):
         self.run(["git", "update-ref", "-d", get_remote_ref(bundle_name, repo)])
         self.run(["git", "update-ref", "-d", get_remote_dev_ref(bundle_name, repo)])
 
+    def finish_worktree_bundle_folder(self, *, bundle_name):
+        runner = self.with_params(cwd=get_worktree_bundle_folder(bundle_name))
+        wt_base_folder = get_worktree_base_folder(get_base_from_bundle_name(bundle_name))
+        for repo in ("odoo", "enterprise"):
+            base_node_folder = f"{wt_base_folder}/{repo}/node_modules"
+            runner.run(["mkdir", "-p", base_node_folder])
+            runner.run(
+                [
+                    "ln",
+                    "-sfn",
+                    base_node_folder,
+                    f"{get_worktree_bundle_repo_folder(bundle_name, repo)}/node_modules",
+                ]
+            )
+        runner.run(["bash", "./odoo/addons/web/tooling/enable.sh"], input="y\n")
+        runner.run(["code", "."])
+
     def git_fetch(self, *, repo, dev, ref=None):
         if ref is not None and not ref:
             return
         if ref is None:
             ref = []
         remote = get_remote_dev_repo(repo) if dev else get_remote_repo(repo)
-        ref = ref if isinstance(ref, Iterable) else [ref]
+        ref = ref if isinstance(ref, Iterable) and not isinstance(ref, str) else [ref]
         self.run(["git", "fetch", remote, *ref, "-p"], cwd=get_repo_folder(repo))
 
     def prepare_worktree_bundle_folder(self, *, bundle_name):

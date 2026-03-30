@@ -64,4 +64,5 @@ def handle_repo(runner: UtilsRunner, repo):
 
 runner.prepare_worktree_bundle_folder(bundle_name=bundle_name)
 runner.parallel_run(Tree("Repositories"), get_repos(), handle_repo)
+runner.finish_worktree_bundle_folder(bundle_name=bundle_name)
 print("[green]Done[/green]")
