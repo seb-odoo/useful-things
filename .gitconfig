@@ -42,10 +42,12 @@
 [commit]
 	gpgsign = true
 [maintenance]
-	repo = /home/seb/repo/upgrade
 	repo = /home/seb/repo/design-themes
-	repo = /home/seb/repo/odoo
+	repo = /home/seb/repo/documentation
 	repo = /home/seb/repo/enterprise
+	repo = /home/seb/repo/odoo
+	repo = /home/seb/repo/upgrade
+	repo = /home/seb/repo/upgrade-utils
 [fetch]
 	writeCommitGraph = true
 [rebase]
