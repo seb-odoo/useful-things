@@ -112,7 +112,8 @@ class Runner:
                 + (self.kwargs.get("cwd") or "current folder")
                 + "[/yellow]"
             )
-            text = f"{starting_print} {self.state} {' '.join(self.cmd)}"
+            input = f"\n{self.kwargs['input']}" if self.kwargs.get("input") else ""
+            text = f"{starting_print} {self.state} {' '.join(self.cmd)}{input}"
             if self.caught:
                 text += f"\n{self.caught}"
             if not self.runner.tree:
@@ -134,7 +135,12 @@ class Runner:
     ):
         if not collection:
             return
-        runner = self.with_params(tree=tree)
+        runner = self
+        if runner.tree:
+            if tree != runner.tree:
+                runner = runner.tree_add(tree.label)
+        else:
+            runner = runner.with_params(tree=tree)
         local_live = False
         if not runner.live:
             local_live = True
@@ -142,7 +148,7 @@ class Runner:
             runner.live.start()
         try:
             futures = []
-            with ThreadPoolExecutor(max_workers=len(collection)) as executor:
+            with ThreadPoolExecutor(max_workers=max(16, len(collection))) as executor:
                 for item in collection:
                     futures.append(
                         executor.submit(

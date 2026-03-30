@@ -1,4 +1,5 @@
-"""Fetch all remote branches that are locally known.
+"""Fetch all remote branches that are locally checkouted, and also fetch all sticky branches.
+All other remote refs are removed.
 
 Examples:
  $ python ~/repo/useful-things/scripts/fetch_all.py
@@ -7,37 +8,55 @@ Examples:
 from rich import print
 from rich.tree import Tree
 
-from utils import UtilsRunner, get_remote_dev_repo, get_remote_repo
+from utils import UtilsRunner
 
-from commands import get_repo_folder, get_repos
+from commands import (
+    get_remote_dev_ref,
+    get_remote_dev_repo,
+    get_remote_ref,
+    get_remote_repo,
+    get_sticky_bundles,
+    get_repo_folder,
+    get_repos,
+)
 
 runner = UtilsRunner()
 
 
 def handle_repo_remote(runner: UtilsRunner, repo_remote):
-    repo, remote = repo_remote
-    runner = runner.with_params(cwd=get_repo_folder(repo))
-    # res = runner.run(["git", "branch", "-r"], capture_output=True)
-    # remote_branches = [
-    #     line.removeprefix(f"{remote}/")
-    #     for line in [line.strip() for line in res.stdout.splitlines()]
-    #     if line.startswith(f"{remote}/") and not line.startswith(f"{remote}/HEAD")
-    # ]
-    if dev := remote == get_remote_dev_repo(repo):
+    repo, remote, branch_r = repo_remote
+    sticky_bundles = get_sticky_bundles(repo)
+    remote_branches = [
+        line.removeprefix(f"{remote}/")
+        for line in branch_r
+        if line.startswith(f"{remote}/") and not line.startswith(f"{remote}/HEAD")
+    ]
+    dev = remote == get_remote_dev_repo(repo)
+    if dev:
         res = runner.run(["git", "branch", "--format=%(refname:short)"], capture_output=True)
-        local_branches = [line.strip() for line in res.stdout.splitlines() if "HEAD" not in line]
-        # for branch in (branch for branch in remote_branches if branch not in local_branches):
-        #     runner.delete_remote_ref(repo=repo, bundle_name=branch)
-        runner.git_fetch(repo=repo, dev=dev, ref=local_branches)
+        to_fetch = [line.strip() for line in res.stdout.splitlines() if "HEAD" not in line]
     else:
-        runner.git_fetch(repo=repo, dev=dev, ref=[])
-        pass
+        to_fetch = sticky_bundles
+    if refs_to_delete := [
+        get_ref(branch, repo)
+        for branch in remote_branches
+        if branch not in to_fetch
+        for get_ref in (get_remote_ref, get_remote_dev_ref)
+    ]:
+        runner.run(
+            ["git", "update-ref", "--stdin"],
+            input="".join([f"delete {ref}\n" for ref in refs_to_delete]),
+        )
+    runner.git_fetch(repo=repo, dev=dev, ref=to_fetch)
 
 
 def handle_repo(runner: UtilsRunner, repo):
+    runner = runner.with_params(cwd=get_repo_folder(repo))
+    res = runner.run(["git", "branch", "-r"], capture_output=True)
+    branch_r = [line.strip() for line in res.stdout.splitlines()]
     runner.parallel_run(
         runner.tree,
-        [(repo, remote) for remote in (get_remote_repo(repo), get_remote_dev_repo(repo))],
+        [(repo, remote, branch_r) for remote in (get_remote_repo(repo), get_remote_dev_repo(repo))],
         handle_repo_remote,
         lambda repo_remote: repo_remote[1],
     )
