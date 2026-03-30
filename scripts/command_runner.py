@@ -23,9 +23,9 @@ class Runner:
     def with_params(self, *, cwd=None, live: Live = None, tree: Tree = None):
         return self.__class__(
             start_time=self.start_time,
-            cwd=cwd or self.cwd,
-            live=live or self.live,
-            tree=tree or self.tree,
+            cwd=cwd if cwd is not None else self.cwd,
+            live=live if live is not None else self.live,
+            tree=tree if tree is not None else self.tree,
         )
 
     def tree_add(self, label):
@@ -59,7 +59,7 @@ class Runner:
                 handle_exceptions=handle_exceptions,
                 **kwargs,
             )
-            run.execute()
+            return run.execute()
         finally:
             if local_live:
                 runner.live.stop()
@@ -87,8 +87,9 @@ class Runner:
             error = None
             try:
                 self._update_state("⏳️")
-                subprocess.run(self.cmd, check=True, text=True, **self.kwargs)
+                res = subprocess.run(self.cmd, check=True, text=True, **self.kwargs)
                 self._update_state("✅️")
+                return res
             except subprocess.CalledProcessError as e:
                 if self.handle_exceptions:
                     for msg, handler in self.handle_exceptions.items():
@@ -125,26 +126,33 @@ class Runner:
 
     def parallel_run[T](
         self,
-        tree,
+        tree: Tree,
         collection: Collection[T],
         func: Callable[[Self, T], None],
         key: Callable[[T], str] = None,
     ):
         if not collection:
             return
-        tree_runner = self.with_params(tree=tree)
-        with Live(tree, auto_refresh=False) as live:
-            live_runner = tree_runner.with_params(live=live)
+        runner = self.with_params(tree=tree)
+        local_live = False
+        if not runner.live:
+            local_live = True
+            runner = runner.with_params(live=Live(runner.tree, auto_refresh=False))
+            runner.live.start()
+        try:
             futures = []
             with ThreadPoolExecutor(max_workers=len(collection)) as executor:
                 for item in collection:
                     futures.append(
                         executor.submit(
                             func,
-                            live_runner.tree_add(key(item) if key else item),
+                            runner.tree_add(key(item) if key else item),
                             item,
                         )
                     )
             for future in futures:
                 future.result()
-            live.refresh()
+        finally:
+            runner.live.refresh()
+            if local_live:
+                runner.live.stop()

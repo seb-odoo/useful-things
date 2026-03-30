@@ -14,7 +14,7 @@ remote_by_repo = {
     "documentation": "odoo",
     "enterprise": "odoo",
     "odoo": "odoo",
-    "upgrade-util": "origin",
+    "upgrade-util": "odoo",
     "upgrade": "odoo",
 }
 remote_dev_by_repo = {
@@ -22,7 +22,7 @@ remote_dev_by_repo = {
     "documentation": "odoo-dev",
     "enterprise": "odoo-dev",
     "odoo": "odoo-dev",
-    "upgrade-util": "origin",
-    "upgrade": "odoo",
+    "upgrade-util": "odoo-dev",
+    "upgrade": "odoo-dev",
 }
 WORKTREE_CONTAINER = "/home/seb/src/odoo"

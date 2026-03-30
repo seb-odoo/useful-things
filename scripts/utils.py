@@ -1,10 +1,13 @@
 """Various utility methods."""
 
+from collections.abc import Iterable
+
 from command_runner import Runner
 from commands import (
-    get_remote_branch_name,
     get_remote_dev_branch_name,
     get_remote_dev_repo,
+    get_remote_dev_ref,
+    get_remote_ref,
     get_remote_repo,
     get_repo_folder,
     get_worktree_bundle_folder,
@@ -42,9 +45,14 @@ class UtilsRunner(Runner):
             handle_exceptions=handle_exceptions,
         )
 
+    def delete_remote_ref(self, *, repo, bundle_name):
+        self.run(["git", "update-ref", "-d", get_remote_ref(bundle_name, repo)])
+        self.run(["git", "update-ref", "-d", get_remote_dev_ref(bundle_name, repo)])
+
     def git_fetch(self, *, repo, dev, ref):
         remote = get_remote_dev_repo(repo) if dev else get_remote_repo(repo)
-        self.run(["git", "fetch", remote, ref], cwd=get_repo_folder(repo))
+        ref = ref if isinstance(ref, Iterable) else [ref]
+        self.run(["git", "fetch", remote, *ref, "-p"], cwd=get_repo_folder(repo))
 
     def prepare_worktree_bundle_folder(self, *, bundle_name):
         worktree_bundle_folder = get_worktree_bundle_folder(bundle_name)

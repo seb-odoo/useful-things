@@ -15,7 +15,6 @@ from command_runner import ignore_error
 from commands import (
     clean_bundle_name,
     get_remote_dev_repo,
-    get_remote_ref,
     get_repo_folder,
     get_repos,
     get_worktree_bundle_folder,
@@ -44,7 +43,7 @@ def handle_repo(runner: UtilsRunner, repo: str):
             f"fatal: '{wt_bundle_repo_folder}' is not a working tree": ignore_error,
         },
     )
-    runner.run(["git", "update-ref", "-d", get_remote_ref(bundle_name, repo)])
+    runner.delete_remote_ref(repo=repo, bundle_name=bundle_name)
     runner.run(
         ["git", "branch", "-D", bundle_name],
         handle_exceptions={f"error: branch '{bundle_name}' not found": ignore_error},

@@ -39,6 +39,11 @@ def get_remote_dev_branch_name(bundle_name, repo):
 
 def get_remote_ref(bundle_name, repo):
     """Get the remote ref for a given bundle name and repo."""
+    return f"refs/remotes/{get_remote_branch_name(bundle_name, repo)}"
+
+
+def get_remote_dev_ref(bundle_name, repo):
+    """Get the remote ref for a given bundle name and repo."""
     return f"refs/remotes/{get_remote_dev_branch_name(bundle_name, repo)}"
 
 
