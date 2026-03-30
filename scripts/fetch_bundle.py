@@ -1,65 +1,41 @@
-"""Fetch bundle info from runbot"""
+"""Fetch bundle info from runbot and create/update corresponding worktrees locally.
+
+Example: python ~/repo/useful-things/scripts/fetch_bundle.py master-bundle-name-ngram.
+"""
 
 from collections import defaultdict
-from functools import partial
 from rich import print
 from rich.tree import Tree
 
 import argparse
 import requests
 
-from command_runner import ignore_error, live_task_executor, PrintParams, Runner
-from utils import get_base_from_bundle_name
+from command_runner import live_task_executor, PrintParams, Runner
+from commands import (
+    clean_bundle_name,
+    get_base_from_bundle_name,
+    get_remote_dev_branch_name,
+    get_worktree_base_folder,
+    get_worktree_bundle_folder,
+    get_worktree_bundle_repo_folder,
+)
+from utils import add_worktree, git_fetch, prepare_worktree_bundle_folder, switch_to_branch
 
 runner = Runner()
 
 # change this config
 ROOT = "/home/seb/repo/"
-folder_by_repo = {
-    "design-themes": f"{ROOT}design-themes",
-    "documentation": f"{ROOT}documentation",
-    "enterprise": f"{ROOT}enterprise",
-    "odoo": f"{ROOT}odoo",
-    "upgrade-util": f"{ROOT}upgrade-util",
-    "upgrade": f"{ROOT}upgrade",
-}
-remote_by_repo = {
-    "design-themes": "odoo",
-    "documentation": "odoo",
-    "enterprise": "odoo",
-    "odoo": "odoo",
-    "upgrade-util": "origin",
-    "upgrade": "odoo",
-}
-remote_dev_by_repo = {
-    "design-themes": "odoo-dev",
-    "documentation": "odoo-dev",
-    "enterprise": "odoo-dev",
-    "odoo": "odoo-dev",
-    "upgrade-util": "origin",
-    "upgrade": "odoo",
-}
 
 parser = argparse.ArgumentParser()
 parser.add_argument("name", help="Name of the bundle to fetch", type=str)
 args = parser.parse_args()
-bundle_name = args.name.replace("odoo-dev:", "")
+bundle_name = clean_bundle_name(args.name)
 base = get_base_from_bundle_name(bundle_name)
-wt_root_folder = "/home/seb/src/odoo"
-wt_base_folder = f"{wt_root_folder}/{base}"
-wt_bundle_folder = f"{wt_base_folder}/{bundle_name}"
+wt_bundle_folder = get_worktree_bundle_folder(bundle_name)
 url = f"https://runbot.odoo.com/api/bundle?name={bundle_name}"
 print(f"Fetching {url}")
 response = requests.request("GET", url, timeout=3).json()
 print(response)
-
-runner.run(["mkdir", "-p", wt_bundle_folder])
-runner.run(
-    ["ln", "-sfn", "/home/seb/repo/useful-things/odools.toml", f"{wt_bundle_folder}/odools.toml"],
-)
-runner.run(
-    ["ln", "-sfn", f"{wt_root_folder}/.vscode", f"{wt_bundle_folder}/.vscode"],
-)
 
 make_branch_by_repo = defaultdict(lambda: False)
 
@@ -72,83 +48,71 @@ def fetch_url(url):
         return f"{url}: Failed due to {e}"
 
 
-def handle_branch(branch, print_params: PrintParams):
-    repo = branch["repo"]
-    if branch["is_pr"]:
-        return
-    print_params = print_params.tree_add(repo)
-    repo_folder = folder_by_repo[repo]
-    remote_dev = remote_dev_by_repo[repo]
-    runner.run(
-        [
-            "git",
-            "fetch",
-            remote_dev,
-            f"+refs/heads/{branch['name']}:refs/remotes/{remote_dev}/{branch['name']}",
-        ],
-        print_params=print_params,
-        cwd=repo_folder,
-    )
-    make_branch_by_repo[repo] = True
-
-
-with live_task_executor(Tree("Branches")) as submit_task:
-    for branch in response["branches"]:
-        submit_task(handle_branch, branch)
-
-
-def switch_to_branch(*, cwd, branch, target, print_params: PrintParams):
-    runner.run(["git", "switch", "-C", branch, target], print_params=print_params, cwd=cwd)
+prepare_worktree_bundle_folder(runner=runner, bundle_name=bundle_name)
+for branch in response["branches"]:
+    if not branch["is_pr"]:
+        make_branch_by_repo[branch["repo"]] = True
 
 
 def handle_commit(commit, print_params: PrintParams):
     repo = commit["repo"]
     print_params = print_params.tree_add(repo)
-    repo_folder = folder_by_repo[repo]
-    wt_repo_folder = f"{wt_bundle_folder}/{repo}"
-    remote = remote_by_repo[repo]
-    remote_dev = remote_dev_by_repo[repo]
-    remote_dev_branch_name = f"{remote_dev}/{bundle_name}"
-    ref = f"refs/heads/{bundle_name}"
-    commit_hash = commit["name"]
-    runner.run(["git", "fetch", remote, commit_hash], print_params=print_params, cwd=repo_folder)
+    wt_repo_folder = get_worktree_bundle_repo_folder(bundle_name, repo)
     if make_branch_by_repo[repo]:
-        switch_branch_callback = partial(
-            switch_to_branch,
-            cwd=wt_repo_folder,
-            branch=bundle_name,
-            target=remote_dev_branch_name,
-        )
-        runner.run(
-            ["git", "worktree", "add", "-B", bundle_name, wt_repo_folder, remote_dev_branch_name],
+        remote_dev_branch_name = get_remote_dev_branch_name(bundle_name, repo)
+
+        def handle_existing_worktree(print_params):
+            switch_to_branch(
+                runner=runner,
+                cwd=wt_repo_folder,
+                branch=bundle_name,
+                target_ref=remote_dev_branch_name,
+                print_params=print_params,
+            )
+            runner.run(
+                ["git", "branch", "-u", remote_dev_branch_name],
+                print_params=print_params,
+                cwd=wt_repo_folder,
+            )
+
+        git_fetch(
+            runner=runner,
+            repo=repo,
+            dev=True,
+            ref=bundle_name,
             print_params=print_params,
-            cwd=repo_folder,
-            handle_exceptions={
-                f"fatal: '{bundle_name}' is already used by worktree at '{wt_repo_folder}'": switch_branch_callback,
-                f"fatal: '{wt_repo_folder}' already exists": switch_branch_callback,
-            },
         )
-        runner.run(
-            ["git", "branch", "-u", ref],
+        add_worktree(
+            runner=runner,
+            repo=repo,
+            bundle_name=bundle_name,
+            make_branch=True,
+            target_ref=remote_dev_branch_name,
+            track=True,
+            on_existing=handle_existing_worktree,
             print_params=print_params,
-            cwd=wt_repo_folder,
-            handle_exceptions={
-                f"fatal: could not set upstream of HEAD to {ref} when it does not point to any branch": ignore_error,
-                f"fatal: the requested upstream branch '{ref}' does not exist": ignore_error,
-            },
         )
     else:
-        runner.run(
-            ["git", "worktree", "add", wt_repo_folder, commit_hash],
+        commit_hash = commit["name"]
+        git_fetch(
+            runner=runner,
+            repo=repo,
+            dev=False,
+            ref=commit_hash,
             print_params=print_params,
-            cwd=repo_folder,
-            handle_exceptions={
-                f"fatal: '{wt_repo_folder}' already exists": lambda print_params: runner.run(
-                    ["git", "checkout", commit_hash],
-                    print_params=print_params,
-                    cwd=wt_repo_folder,
-                ),
-            },
+        )
+        add_worktree(
+            runner=runner,
+            repo=repo,
+            bundle_name=bundle_name,
+            make_branch=False,
+            target_ref=commit_hash,
+            on_existing=lambda print_params: runner.run(
+                ["git", "checkout", commit_hash],
+                print_params=print_params,
+                cwd=wt_repo_folder,
+            ),
+            print_params=print_params,
         )
 
 
@@ -157,13 +121,8 @@ with live_task_executor(Tree("Commits")) as submit_task:
         submit_task(handle_commit, commit)
 
 
-# files = [".eslintignore", ".eslintrc.json", "jsconfig.json", "package-lock.json", "package.json"]
 for repo in ("odoo", "enterprise"):
-    # for file in files:
-    #     file_path = f"{wt_base_folder}/{repo}/{file}"
-    #     run(["touch", file_path])
-    #     run(["ln", "-sfn", file_path, f"{wt_bundle_folder}/{repo}/{file}"])
-    node_folder = f"{wt_base_folder}/{repo}/node_modules"
+    node_folder = f"{get_worktree_base_folder(base)}/{repo}/node_modules"
     runner.run(["mkdir", "-p", node_folder])
     runner.run(
         ["ln", "-sfn", node_folder, f"{wt_bundle_folder}/{repo}/node_modules"],

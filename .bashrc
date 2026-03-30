@@ -104,28 +104,38 @@ function gr()
 }
 
 # fetch, create, and push a new branch
-function gnb()
-{
-	REPO=$(basename "$PWD")
-	[[ "$REPO" =~ ^(odoo|enterprise|design-themes|upgrade)$ ]] || { echo "Invalid repo ${REPO}"; return 1; }
-	BASE=$1
-	NAME=$2
-	FULL_NAME="${BASE}-${NAME}--seb"
-	FOLDER=~/src/odoo/$BASE/${FULL_NAME}/${REPO}
-	git fetch odoo $BASE
-	git worktree add -b $FULL_NAME $FOLDER "odoo/${BASE}" --no-track
-	# we need to push because the upstream branch doesn't exist yet
-	git push -u odoo-dev $FULL_NAME
-}
+alias gnb="python ~/repo/useful-things/scripts/create_bundle.py"
 
 function goto()
 {
 	REPO=$(basename "$PWD")
 	[[ "$REPO" =~ ^(odoo|enterprise|design-themes|upgrade)$ ]] || { echo "Invalid repo ${REPO}"; return 1; }
 	FULL_NAME=${1/odoo-dev:}
-	BASE=$(python ~/repo/useful-things/scripts/utils.py get_base_from_bundle_name ${FULL_NAME})
+	BASE=$(python ~/repo/useful-things/scripts/commands.py get_base_from_bundle_name ${FULL_NAME})
 	FOLDER=~/src/odoo/$BASE/${FULL_NAME}/${REPO}
 	cd $FOLDER
+}
+
+function opencode()
+{
+	BUNDLE_NAME=${1/odoo-dev:}
+	BASE=$(python ~/repo/useful-things/scripts/commands.py get_base_from_bundle_name ${BUNDLE_NAME})
+	ODOO_BASE=~/src/odoo/$BASE/${BUNDLE_NAME}
+	ODOO_BASE="$ODOO_BASE" bwrap-opencode.sh
+}
+
+function gotorepo()
+{
+	REPO=$(basename "$PWD")
+	[[ "$REPO" =~ ^(odoo|enterprise|design-themes|upgrade)$ ]] || { echo "Invalid repo ${REPO}"; return 1; }
+	FOLDER=~/repo/${REPO}
+	cd $FOLDER
+}
+
+function pfbgt()
+{
+	python ~/repo/useful-things/scripts/fetch_bundle.py $1
+	goto $1
 }
 
 function gnb14()
@@ -141,23 +151,6 @@ function gnb15()
 function gnbm()
 {
     gnb "master" $*
-}
-
-# new local branch based on remote branch
-function gnbr() {
-	BRANCH=${1/odoo-dev:}
-	git fetch odoo-dev +refs/heads/$BRANCH:refs/remotes/odoo-dev/$BRANCH
-	git checkout -b $BRANCH "odoo-dev/${BRANCH}"
-    git checkout $BRANCH
-
-    read -p "About to reset --hard $BRANCH, type y to confirm: "  yes
-
-    if [ "$yes" == "y" ]; then
-        git reset --hard "odoo-dev/$BRANCH"
-    else
-        echo "not reseting"
-    fi
-	git push --set-upstream odoo-dev $BRANCH
 }
 
 # hard reset to remote branch

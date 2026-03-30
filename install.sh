@@ -9,6 +9,11 @@ sudo apt install git
 
 sudo apt install libxml2-dev libpq-dev libldap2-dev libsasl2-dev libxslt1-dev python3-setuptools python3-wheel htop postgresql flake8 postgresql-server-dev-all
 sudo apt install zlib1g-dev libxml2-utils inotify-tools fonts-noto
+# sandboxing for ai
+sudo apt install bubblewrap
+sudo apt install apparmor-profiles
+sudo ln -s /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/
+sudo apparmor_parser /etc/apparmor.d/bwrap-userns-restrict
 
 sudo -u postgres createuser -s $USER
 

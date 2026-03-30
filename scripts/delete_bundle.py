@@ -7,43 +7,41 @@ import argparse
 import glob
 
 from command_runner import ignore_error, live_task_executor, PrintParams, Runner
-from utils import get_base_from_bundle_name
+from commands import (
+    clean_bundle_name,
+    get_remote_dev_repo,
+    get_remote_ref,
+    get_repos,
+    get_worktree_bundle_folder,
+    get_worktree_bundle_repo_folder,
+)
 
 runner = Runner()
 
 ROOT = "/home/seb/repo"
-repos = ["design-themes", "documentation", "enterprise", "odoo", "upgrade-util", "upgrade"]
-remote_dev_by_repo = {
-    "design-themes": "odoo-dev",
-    "documentation": "odoo-dev",
-    "enterprise": "odoo-dev",
-    "odoo": "odoo-dev",
-    "upgrade-util": "origin",
-    "upgrade": "odoo",
-}
 
 parser = argparse.ArgumentParser()
-parser.add_argument("name", help="Name of the branch to delete", type=str)
+parser.add_argument("name", help="Name of the bundle to delete", type=str)
+parser.add_argument("--also-remote", help="Whether to also delete the remote bundle", action="store_true")
 args = parser.parse_args()
-bundle_name = args.name.replace("odoo-dev:", "")
-base = get_base_from_bundle_name(bundle_name)
-wt_root_folder = f"/home/seb/src/odoo/{base}/{bundle_name}"
+bundle_name = clean_bundle_name(args.name)
+also_remote = args.also_remote
 
 
 def handle_repo(repo, print_params: PrintParams):
     repo_folder = f"{ROOT}/{repo}"
     print_params = print_params.tree_add(repo)
-    repo_wt_root_folder = f"{wt_root_folder}/{repo}"
+    wt_bundle_repo_folder = get_worktree_bundle_repo_folder(bundle_name, repo)
     runner.run(
-        ["git", "worktree", "remove", repo_wt_root_folder],
+        ["git", "worktree", "remove", wt_bundle_repo_folder],
         cwd=repo_folder,
         print_params=print_params,
         handle_exceptions={
-            f"fatal: '{repo_wt_root_folder}' is not a working tree": ignore_error,
+            f"fatal: '{wt_bundle_repo_folder}' is not a working tree": ignore_error,
         },
     )
     runner.run(
-        ["git", "update-ref", "-d", f"refs/remotes/{remote_dev_by_repo[repo]}/{bundle_name}"],
+        ["git", "update-ref", "-d", get_remote_ref(bundle_name, repo)],
         cwd=repo_folder,
         print_params=print_params,
     )
@@ -53,12 +51,21 @@ def handle_repo(repo, print_params: PrintParams):
         print_params=print_params,
         handle_exceptions={f"error: branch '{bundle_name}' not found": ignore_error},
     )
+    if also_remote:
+        runner.run(
+            ["git", "push", get_remote_dev_repo(repo), "--delete", bundle_name],
+            cwd=repo_folder,
+            handle_exceptions={
+                f"error: unable to delete '{bundle_name}': remote ref does not exist": ignore_error,
+            },
+            print_params=print_params,
+        )
 
 
 with live_task_executor(Tree("Repositories")) as submit_task:
-    for repo in repos:
+    for repo in get_repos():
         submit_task(handle_repo, repo)
-runner.run(["rm", "-rf", wt_root_folder])
+runner.run(["rm", "-rf", get_worktree_bundle_folder(bundle_name)])
 
 
 def handle_file(file, print_params: PrintParams):
