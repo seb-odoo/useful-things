@@ -73,11 +73,7 @@ class Runner:
             self.runner = runner
             self.cmd = cmd
             self.kwargs = kwargs
-            self.starting_print = (
-                f"{self.runner.elapsed_time:.2f} [yellow]From: "
-                + (kwargs.get("cwd") or "current folder")
-                + "[/yellow]"
-            )
+            self.starting_time = runner.elapsed_time
             self.caught = None
             self.handle_exceptions = handle_exceptions
             if self.runner.tree:
@@ -111,7 +107,12 @@ class Runner:
                         self.runner.live.refresh()
 
         def _print_progress(self):
-            text = f"{self.starting_print}\n{self.runner.elapsed_time:.2f} {self.state} {' '.join(self.cmd)}"
+            starting_print = (
+                f"[{self.starting_time:.2f}-{self.runner.elapsed_time:.2f}] [yellow]"
+                + (self.kwargs.get("cwd") or "current folder")
+                + "[/yellow]"
+            )
+            text = f"{starting_print} {self.state} {' '.join(self.cmd)}"
             if self.caught:
                 text += f"\n{self.caught}"
             if not self.runner.tree:
