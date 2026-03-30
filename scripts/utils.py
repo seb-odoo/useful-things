@@ -49,7 +49,11 @@ class UtilsRunner(Runner):
         self.run(["git", "update-ref", "-d", get_remote_ref(bundle_name, repo)])
         self.run(["git", "update-ref", "-d", get_remote_dev_ref(bundle_name, repo)])
 
-    def git_fetch(self, *, repo, dev, ref):
+    def git_fetch(self, *, repo, dev, ref=None):
+        if ref is not None and not ref:
+            return
+        if ref is None:
+            ref = []
         remote = get_remote_dev_repo(repo) if dev else get_remote_repo(repo)
         ref = ref if isinstance(ref, Iterable) else [ref]
         self.run(["git", "fetch", remote, *ref, "-p"], cwd=get_repo_folder(repo))

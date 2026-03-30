@@ -4,6 +4,7 @@ import fire
 
 from config import (
     BUNDLE_SUFFIX,
+    STICKY_BUNDLES,
     folder_by_repo,
     remote_by_repo,
     remote_dev_by_repo,
@@ -60,6 +61,13 @@ def get_repo_folder(repo):
 def get_repos():
     """Get the list of repos."""
     return folder_by_repo.keys()
+
+
+def get_sticky_bundles(repo):
+    """Get the list of sticky bundles."""
+    if repo in ("upgrade", "upgrade-util"):
+        return ["master"]
+    return STICKY_BUNDLES
 
 
 def get_worktree_base_folder(base):
