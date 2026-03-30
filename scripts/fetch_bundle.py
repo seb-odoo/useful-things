@@ -1,6 +1,7 @@
 """Fetch bundle info from runbot and create/update corresponding worktrees locally.
 
-Example: python ~/repo/useful-things/scripts/fetch_bundle.py master-bundle-name-ngram.
+Example:
+ $ python ~/repo/useful-things/scripts/fetch_bundle.py master-bundle-name-ngram
 """
 
 from collections import defaultdict
@@ -10,7 +11,6 @@ from rich.tree import Tree
 import argparse
 import requests
 
-from command_runner import live_task_executor, PrintParams, Runner
 from commands import (
     clean_bundle_name,
     get_base_from_bundle_name,
@@ -19,9 +19,9 @@ from commands import (
     get_worktree_bundle_folder,
     get_worktree_bundle_repo_folder,
 )
-from utils import add_worktree, git_fetch, prepare_worktree_bundle_folder, switch_to_branch
+from utils import UtilsRunner
 
-runner = Runner()
+runner = UtilsRunner()
 
 # change this config
 ROOT = "/home/seb/repo/"
@@ -48,91 +48,49 @@ def fetch_url(url):
         return f"{url}: Failed due to {e}"
 
 
-prepare_worktree_bundle_folder(runner=runner, bundle_name=bundle_name)
+runner.prepare_worktree_bundle_folder(bundle_name=bundle_name)
 for branch in response["branches"]:
     if not branch["is_pr"]:
         make_branch_by_repo[branch["repo"]] = True
 
 
-def handle_commit(commit, print_params: PrintParams):
+def handle_commit(runner: UtilsRunner, commit):
     repo = commit["repo"]
-    print_params = print_params.tree_add(repo)
     wt_repo_folder = get_worktree_bundle_repo_folder(bundle_name, repo)
     if make_branch_by_repo[repo]:
         remote_dev_branch_name = get_remote_dev_branch_name(bundle_name, repo)
-
-        def handle_existing_worktree(print_params):
-            switch_to_branch(
-                runner=runner,
-                cwd=wt_repo_folder,
-                branch=bundle_name,
-                target_ref=remote_dev_branch_name,
-                print_params=print_params,
-            )
-            runner.run(
-                ["git", "branch", "-u", remote_dev_branch_name],
-                print_params=print_params,
-                cwd=wt_repo_folder,
-            )
-
-        git_fetch(
-            runner=runner,
-            repo=repo,
-            dev=True,
-            ref=bundle_name,
-            print_params=print_params,
-        )
-        add_worktree(
-            runner=runner,
+        runner.git_fetch(repo=repo, dev=True, ref=bundle_name)
+        runner.add_worktree(
             repo=repo,
             bundle_name=bundle_name,
             make_branch=True,
             target_ref=remote_dev_branch_name,
             track=True,
-            on_existing=handle_existing_worktree,
-            print_params=print_params,
+            on_existing=lambda runner: (
+                runner.switch_to_branch(repo=repo, branch=bundle_name),
+                runner.run(["git", "branch", "-u", remote_dev_branch_name], cwd=wt_repo_folder),
+            ),
         )
     else:
         commit_hash = commit["name"]
-        git_fetch(
-            runner=runner,
-            repo=repo,
-            dev=False,
-            ref=commit_hash,
-            print_params=print_params,
-        )
-        add_worktree(
-            runner=runner,
+        runner.git_fetch(repo=repo, dev=False, ref=commit_hash)
+        runner.add_worktree(
             repo=repo,
             bundle_name=bundle_name,
             make_branch=False,
             target_ref=commit_hash,
-            on_existing=lambda print_params: runner.run(
+            on_existing=lambda runner: runner.run(
                 ["git", "checkout", commit_hash],
-                print_params=print_params,
                 cwd=wt_repo_folder,
             ),
-            print_params=print_params,
         )
 
 
-with live_task_executor(Tree("Commits")) as submit_task:
-    for commit in response["commits"]:
-        submit_task(handle_commit, commit)
-
-
+runner.parallel_run(Tree("Commits"), response["commits"], handle_commit, lambda c: c["repo"])
 for repo in ("odoo", "enterprise"):
     node_folder = f"{get_worktree_base_folder(base)}/{repo}/node_modules"
     runner.run(["mkdir", "-p", node_folder])
-    runner.run(
-        ["ln", "-sfn", node_folder, f"{wt_bundle_folder}/{repo}/node_modules"],
-        print_params=PrintParams(),
-    )
-runner.run(
-    ["bash", "./odoo/addons/web/tooling/enable.sh"],
-    cwd=wt_bundle_folder,
-    input="y\n",
-    print_params=PrintParams(),
-)
+    runner.run(["ln", "-sfn", node_folder, f"{wt_bundle_folder}/{repo}/node_modules"])
+runner.run(["bash", "./odoo/addons/web/tooling/enable.sh"], cwd=wt_bundle_folder, input="y\n")
 runner.run(["code", "."], cwd=wt_bundle_folder)
 print("[green]Done[/green]")

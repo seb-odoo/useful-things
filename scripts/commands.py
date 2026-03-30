@@ -24,12 +24,13 @@ def get_bundle_name_from_base_and_name(base, name):
 
 def get_remote_branch_name(bundle_name, repo):
     """Get the remote branch name for a given bundle name and repo."""
-    return f"{remote_by_repo[repo]}/{bundle_name}"
+    return f"{get_remote_repo(repo)}/{bundle_name}"
 
 
 def get_remote_dev_repo(repo):
     """Get the remote dev repo for a given repo."""
     return remote_dev_by_repo[repo]
+
 
 def get_remote_dev_branch_name(bundle_name, repo):
     """Get the remote dev branch name for a given bundle name and repo."""
@@ -39,6 +40,16 @@ def get_remote_dev_branch_name(bundle_name, repo):
 def get_remote_ref(bundle_name, repo):
     """Get the remote ref for a given bundle name and repo."""
     return f"refs/remotes/{get_remote_dev_branch_name(bundle_name, repo)}"
+
+
+def get_remote_repo(repo):
+    """Get the remote repo for a given repo."""
+    return remote_by_repo[repo]
+
+
+def get_repo_folder(repo):
+    """Get the repo folder for a given repo."""
+    return folder_by_repo[repo]
 
 
 def get_repos():
