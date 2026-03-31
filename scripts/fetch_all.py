@@ -23,8 +23,7 @@ from commands import (
 runner = UtilsRunner()
 
 
-def handle_repo_remote(runner: UtilsRunner, repo_remote):
-    repo, remote, branch_r = repo_remote
+def handle_repo_remote(runner: UtilsRunner, repo, remote, branch_r):
     sticky_bundles = get_sticky_bundles(repo)
     remote_branches = [
         line.removeprefix(f"{remote}/")
@@ -54,12 +53,8 @@ def handle_repo(runner: UtilsRunner, repo):
     runner = runner.with_params(cwd=get_repo_folder(repo))
     res = runner.run(["git", "branch", "-r"], capture_output=True)
     branch_r = [line.strip() for line in res.stdout.splitlines()]
-    runner.parallel_run(
-        runner.tree,
-        [(repo, remote, branch_r) for remote in (get_remote_repo(repo), get_remote_dev_repo(repo))],
-        handle_repo_remote,
-        lambda repo_remote: repo_remote[1],
-    )
+    for repo_remote in (get_remote_repo(repo), get_remote_dev_repo(repo)):
+        handle_repo_remote(runner, repo, repo_remote, branch_r)
 
 
 runner.parallel_run(Tree("Repositories"), get_repos(), handle_repo)
