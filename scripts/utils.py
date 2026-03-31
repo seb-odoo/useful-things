@@ -1,6 +1,8 @@
 """Various utility methods."""
 
 from collections.abc import Iterable
+from pydoc import text
+import re
 
 from command_runner import Runner
 from commands import (
@@ -75,7 +77,19 @@ class UtilsRunner(Runner):
             ref = []
         remote = get_remote_dev_repo(repo) if dev else get_remote_repo(repo)
         ref = ref if isinstance(ref, Iterable) and not isinstance(ref, str) else [ref]
-        self.run(["git", "fetch", remote, *ref, "-p"], cwd=get_repo_folder(repo))
+
+        def handle_fetch_exception(runner: Runner, e):
+            print(e.stderr)
+            match = re.search(r"(fatal: couldn't find remote ref\s+([^.\s]+))", e.stderr)
+            if match:
+                runner.git_fetch(repo=repo, dev=dev, ref=[r for r in ref if r != match.group(2)])
+                return match.group(1)
+
+        self.run(
+            ["git", "fetch", remote, *ref, "-p"],
+            cwd=get_repo_folder(repo),
+            handle_exceptions=handle_fetch_exception,
+        )
 
     def prepare_worktree_bundle_folder(self, *, bundle_name):
         worktree_bundle_folder = get_worktree_bundle_folder(bundle_name)

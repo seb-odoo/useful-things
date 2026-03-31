@@ -87,7 +87,12 @@ class Runner:
                 self._update_state("✅️")
                 return res
             except subprocess.CalledProcessError as e:
-                if self.handle_exceptions:
+                if callable(self.handle_exceptions):
+                    if res := self.handle_exceptions(self.runner, e):
+                        self.caught = res
+                        self._update_state("❎️")
+                        return
+                elif self.handle_exceptions:
                     for msg, handler in self.handle_exceptions.items():
                         if msg in e.stderr:
                             self.caught = msg
@@ -112,8 +117,15 @@ class Runner:
                 + (self.kwargs.get("cwd") or "current folder")
                 + "[/yellow]"
             )
+
+            def truncate_to_lines(text, max_lines=3):
+                lines = text.splitlines()
+                if len(lines) > max_lines:
+                    return "\n".join(lines[:max_lines]) + "\n..."
+                return text
+
             input = f"\n{self.kwargs['input']}" if self.kwargs.get("input") else ""
-            text = f"{starting_print} {self.state} {' '.join(self.cmd)}{input}"
+            text = f"{starting_print} {self.state} {' '.join(self.cmd)}{truncate_to_lines(input)}"
             if self.caught:
                 text += f"\n{self.caught}"
             if not self.runner.tree:
