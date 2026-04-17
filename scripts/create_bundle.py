@@ -30,8 +30,9 @@ bundle_name = get_bundle_name_from_base_and_name(args.base, args.name)
 
 
 def handle_repo(runner: UtilsRunner, repo):
-    runner.git_fetch(repo=repo, dev=False, ref=args.base)
-    target_ref = get_remote_branch_name(args.base, repo)
+    base = args.base if repo not in ["upgrade", "upgrade-util"] else "master"
+    runner.git_fetch(repo=repo, dev=False, ref=base)
+    target_ref = get_remote_branch_name(base, repo)
     worktree_bundle_repo_folder = get_worktree_bundle_repo_folder(bundle_name, repo)
     if os.environ.get("PWD").split("/")[-1] == repo:
         runner.add_worktree(
