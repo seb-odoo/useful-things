@@ -1,38 +1,5 @@
 export PATH=$PATH:/home/seb/repo/odoo-ops-tools
-
-export VISUAL="subl -w"
-export EDITOR="$VISUAL"
-
-# git checkout override to only look at local branches (not working anymore??)
-_git_checkout ()
-{
-	__git_has_doubledash && return
-
-	case "$cur" in
-	--conflict=*)
-		__gitcomp "diff3 merge" "" "${cur##--conflict=}"
-		;;
-	--*)
-		__gitcomp "
-			--quiet --ours --theirs --track --no-track --merge
-			--conflict= --orphan --patch
-			"
-		;;
-	*)
-		# check if --track, --no-track, or --no-guess was specified
-		# if so, disable DWIM mode
-		local flags="--track --no-track --no-guess" track=1
-		if [ -n "$(__git_find_on_cmdline "$flags")" ]; then
-			track=''
-		fi
-		if [ "$command" = "checkoutr" ]; then
-			__gitcomp_nl "$(__git_refs '' $track)"
-		else
-			__gitcomp_nl "$(__git_heads '' $track)"
-		fi
-		;;
-	esac
-}
+export GIT_PROMPT_FETCH_REMOTE_STATUS=0
 
 alias gbd="git branch -D"
 alias gis="git status"
@@ -119,8 +86,7 @@ function goto()
 function opencode()
 {
 	BUNDLE_NAME=${1/odoo-dev:}
-	BASE=$(python ~/repo/useful-things/scripts/commands.py get_base_from_bundle_name ${BUNDLE_NAME})
-	ODOO_BASE=~/src/odoo/$BASE/${BUNDLE_NAME}
+	ODOO_BASE=$(python ~/repo/useful-things/scripts/commands.py get_worktree_bundle_folder ${BUNDLE_NAME})
 	ODOO_BASE="$ODOO_BASE" bwrap-opencode.sh
 }
 
