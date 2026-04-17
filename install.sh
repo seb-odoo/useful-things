@@ -83,7 +83,7 @@ git clone git@github.com:brendangregg/FlameGraph.git
     pip install psycopg2-binary pudb websocket-client phonenumbers pre-commit markdown geoip2 pdfminer.six && \
     pip install -U pyopenssl cryptography
     pip install dbfread pylint astroid
-    pip install phonenumbers cbor2 asn1crypto
+    pip install phonenumbers cbor2 asn1crypto markdown2
     pip install html2text  # for odoo 12.0
     pip install mypy  # for Odoo LS
     pip install fire rich  # for pfb and utils
