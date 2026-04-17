@@ -1,7 +1,6 @@
 """Various utility methods."""
 
 from collections.abc import Iterable
-from pydoc import text
 import re
 
 from command_runner import Runner
@@ -13,7 +12,7 @@ from commands import (
     get_remote_ref,
     get_remote_repo,
     get_repo_folder,
-    get_worktree_base_folder,
+    get_worktree_base_repo,
     get_worktree_bundle_folder,
     get_worktree_bundle_repo_folder,
     get_worktree_container_folder,
@@ -55,9 +54,8 @@ class UtilsRunner(Runner):
 
     def finish_worktree_bundle_folder(self, *, bundle_name):
         runner = self.with_params(cwd=get_worktree_bundle_folder(bundle_name))
-        wt_base_folder = get_worktree_base_folder(get_base_from_bundle_name(bundle_name))
         for repo in ("odoo", "enterprise"):
-            base_node_folder = f"{wt_base_folder}/{repo}/node_modules"
+            base_node_folder = f"{get_worktree_base_repo(get_base_from_bundle_name(bundle_name), repo)}/node_modules"
             runner.run(["mkdir", "-p", base_node_folder])
             runner.run(
                 [
