@@ -78,9 +78,9 @@ class UtilsRunner(Runner):
 
         def handle_fetch_exception(runner: Runner, e):
             print(e.stderr)
-            match = re.search(r"(fatal: couldn't find remote ref\s+([^.\s]+))", e.stderr)
+            match = re.search(r"fatal: couldn't find remote ref\s+([^\s]+)", e.stderr)
             if match:
-                runner.git_fetch(repo=repo, dev=dev, ref=[r for r in ref if r != match.group(2)])
+                runner.git_fetch(repo=repo, dev=dev, ref=[r for r in ref if r != match.group(1)])
                 return match.group(1)
 
         self.run(
