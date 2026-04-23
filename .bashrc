@@ -119,10 +119,13 @@ function gnbm()
     gnb "master" $*
 }
 
+function rbundle() {
+	webbrowser "https://runbot.odoo.com/runbot/rd-1?search=$(git branch --show-current)"
+}
+
 # hard reset to remote branch
 function grhr() {
-	BRANCH=`git branch | grep \*`
-	BRANCH=${BRANCH/\* }
+	BRANCH=$(git branch --show-current)
 	git fetch odoo-dev +refs/heads/$BRANCH:refs/remotes/odoo-dev/$BRANCH
 
 	read -p "About to reset --hard $BRANCH, type y to confirm: "  yes
@@ -140,8 +143,7 @@ function gcb() { git checkout "${1}-${2}--seb"; }
 
 # opens the PR creation page on odoo-dev for master-discuss-refactoring depending on the current branch
 function prdr() {
-    BRANCH=`git branch | grep \*`
-    BRANCH=${BRANCH/\* }
+    BRANCH=$(git branch --show-current)
     REMOTE=${PWD##*/}
     webbrowser "https://github.com/odoo-dev/${REMOTE}/compare/master-discuss-refactoring...odoo-dev:${BRANCH}?expand=1";
 }
