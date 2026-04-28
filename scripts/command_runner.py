@@ -41,6 +41,7 @@ class Runner:
         capture_output=True,
         cwd=None,
         handle_exceptions=None,
+        on_success=None,
         **kwargs,
     ):
         runner = self
@@ -57,6 +58,7 @@ class Runner:
                 capture_output=capture_output,
                 cwd=cwd,
                 handle_exceptions=handle_exceptions,
+                on_success=on_success,
                 **kwargs,
             )
             return run.execute()
@@ -69,13 +71,14 @@ class Runner:
         return time.perf_counter() - self.start_time
 
     class Run:
-        def __init__(self, *, runner, cmd, handle_exceptions, **kwargs):
+        def __init__(self, *, runner, cmd, handle_exceptions, on_success, **kwargs):
             self.runner = runner
             self.cmd = cmd
             self.kwargs = kwargs
             self.starting_time = runner.elapsed_time
             self.caught = None
             self.handle_exceptions = handle_exceptions
+            self.on_success = on_success
             if self.runner.tree:
                 self.runner = self.runner.tree_add("")
 
@@ -85,6 +88,8 @@ class Runner:
                 self._update_state("⏳️")
                 res = subprocess.run(self.cmd, check=True, text=True, **self.kwargs)
                 self._update_state("✅️")
+                if self.on_success:
+                    self.on_success()
                 return res
             except subprocess.CalledProcessError as e:
                 if callable(self.handle_exceptions):
