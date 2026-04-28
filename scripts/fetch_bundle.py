@@ -36,6 +36,10 @@ print(f"Fetching {url}")
 response = requests.request("GET", url, timeout=3).json()
 print(response)
 
+if not response.get("id"):
+    print(f"Bundle [red]{bundle_name}[/red] not found on runbot or API failure")
+    exit(1)
+
 make_branch_by_repo = defaultdict(lambda: False)
 
 
