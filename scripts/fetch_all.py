@@ -8,7 +8,7 @@ Examples:
 from rich import print
 from rich.tree import Tree
 
-from utils import UtilsRunner
+from utils import RemoteRefManager, UtilsRunner
 
 from commands import (
     get_remote_dev_ref,
@@ -19,8 +19,11 @@ from commands import (
     get_repo_folder,
     get_repos,
 )
+from delete_bundle import delete_bundle
 
 runner = UtilsRunner()
+
+remote_ref_manager = RemoteRefManager()
 
 
 def handle_repo_remote(runner: UtilsRunner, repo, remote, branch_r):
@@ -46,7 +49,7 @@ def handle_repo_remote(runner: UtilsRunner, repo, remote, branch_r):
             ["git", "update-ref", "--stdin"],
             input="".join([f"delete {ref}\n" for ref in refs_to_delete]),
         )
-    runner.git_fetch(repo=repo, dev=dev, ref=to_fetch)
+    runner.git_fetch(repo=repo, dev=dev, ref=to_fetch, remote_ref_manager=remote_ref_manager)
 
 
 def handle_repo(runner: UtilsRunner, repo):
@@ -58,5 +61,11 @@ def handle_repo(runner: UtilsRunner, repo):
 
 
 runner.parallel_run(Tree("Repositories"), get_repos(), handle_repo)
-
 print("[green]Done[/green]")
+for ref in remote_ref_manager.safe_to_delete_refs:
+    delete_bundle(runner=runner, bundle_name=ref, force=True, also_remote=False)
+for repo, ref in remote_ref_manager.repo_ref_to_clean:
+    runner.delete_branch_and_remote_ref(repo=repo, bundle_name=ref)
+for ref in remote_ref_manager.refs_to_prompt_for_deletion:
+    if input(f"Gone ref: {ref}. Delete it? (Y/n)").lower() in ["", "y"]:
+        delete_bundle(runner=runner, bundle_name=ref, force=True, also_remote=False)
