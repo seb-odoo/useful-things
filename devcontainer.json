@@ -1,0 +1,44 @@
+{
+  "name": "Claude sandbox",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "remoteUser": "vscode",
+  // 1. Disable this to stop VS Code from corrupting Podman's keep-id user namespace mapping
+  "updateRemoteUserUID": true,
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,Z",
+  "workspaceFolder": "/workspace",
+  "mounts": [
+    "source=/home/seb/repo/odoo/.git,target=/home/seb/repo/odoo/.git,type=bind,Z",
+    "source=/home/seb/repo/enterprise/.git,target=/home/seb/repo/enterprise/.git,type=bind,Z",
+    "source=/home/seb/.claude,target=/home/vscode/.claude,type=bind,Z",
+    "source=/home/seb/.config/Code/User,target=/home/vscode/.config/Code/User,type=bind,Z",
+    "source=/home/seb/virtualenvs,target=/home/seb/virtualenvs,type=bind,Z"
+  ],
+  "features": {
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.10"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropic.claude-code",
+        "charliermarsh.ruff",
+        "dbaeumer.vscode-eslint",
+        "eamodio.gitlens",
+        "tyriar.sort-lines",
+        "odoo.odoo",
+        "odoo.owl-vision"
+      ]
+    }
+  },
+  "runArgs": [
+    "--net=bridge",
+    "--cap-drop=ALL",
+    "--security-opt=no-new-privileges",
+    "--userns=keep-id"
+  ],
+  "containerEnv": {
+    "HOME": "/home/vscode",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1"
+  }
+}
