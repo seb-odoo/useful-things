@@ -1,6 +1,8 @@
 {
   "name": "Claude sandbox",
-  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
   "remoteUser": "vscode",
   // 1. Disable this to stop VS Code from corrupting Podman's keep-id user namespace mapping
   "updateRemoteUserUID": true,
@@ -11,13 +13,11 @@
     "source=/home/seb/repo/enterprise/.git,target=/home/seb/repo/enterprise/.git,type=bind,Z",
     "source=/home/seb/.claude,target=/home/vscode/.claude,type=bind,Z",
     "source=/home/seb/.config/Code/User,target=/home/vscode/.config/Code/User,type=bind,Z",
-    "source=/home/seb/virtualenvs,target=/home/seb/virtualenvs,type=bind,Z"
+    "source=/home/seb/virtualenvs,target=/home/seb/virtualenvs,type=bind,Z",
+    "source=/home/seb/repo/useful-things/devcontainer.bashrc,target=/home/vscode/.bash_aliases,type=bind,readonly,Z",
+    "source=/var/run/postgresql,target=/var/run/postgresql,type=bind"
   ],
-  "features": {
-    "ghcr.io/devcontainers/features/python:1": {
-      "version": "3.10"
-    }
-  },
+  "postCreateCommand": "grep -q 'virtualenvs/odoo20/bin/activate' ~/.bashrc || echo 'source /home/seb/virtualenvs/odoo20/bin/activate' >> ~/.bashrc",
   "customizations": {
     "vscode": {
       "extensions": [
@@ -39,6 +39,8 @@
   ],
   "containerEnv": {
     "HOME": "/home/vscode",
-    "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1"
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
+    "PGHOST": "/var/run/postgresql",
+    "PGUSER": "seb"
   }
 }
