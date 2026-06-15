@@ -2,6 +2,8 @@
 
 from collections import defaultdict
 from collections.abc import Iterable
+import json
+import os
 import re
 
 from command_runner import Runner
@@ -19,6 +21,10 @@ from commands import (
     get_worktree_bundle_repo_folder,
     get_worktree_container_folder,
 )
+
+# Mirrors `workspaceFolder` in useful-things/devcontainer.json (kept in sync by hand: the JSONC file
+# isn't trivially parseable and the value is stable for this setup).
+WORKSPACE_FOLDER = "/workspace"
 
 
 class RemoteRefManager:
@@ -90,14 +96,37 @@ class UtilsRunner(Runner):
         runner.run(["git", "update-ref", "-d", get_remote_dev_ref(bundle_name, repo)])
         runner.run(["git", "branch", "-D", bundle_name], handle_exceptions=handle_exceptions)
 
+    def _devcontainer_folder_uri(self, bundle_folder):
+        """Build the VS Code folder-URI that opens `bundle_folder` attached to its dev container.
+
+        Reproduces the `dev-container+<hex>` authority VS Code writes itself, so opening it reuses a
+        running container (matched by the `devcontainer.local_folder` label) or builds+starts one.
+        """
+        config_file = f"{bundle_folder}/.devcontainer/devcontainer.json"
+        authority = {
+            "hostPath": bundle_folder,
+            "localDocker": False,
+            "settings": {"host": f"unix:///run/user/{os.getuid()}/podman/podman.sock"},
+            "configFile": {
+                "$mid": 1,
+                "fsPath": config_file,
+                "external": f"file://{config_file}",
+                "path": config_file,
+                "scheme": "file",
+            },
+        }
+        hex_authority = json.dumps(authority, separators=(",", ":")).encode().hex()
+        return f"vscode-remote://dev-container+{hex_authority}/{WORKSPACE_FOLDER}"
+
     def finish_worktree_bundle_folder(self, *, bundle_name):
-        runner = self.with_params(cwd=get_worktree_bundle_folder(bundle_name))
+        bundle_folder = get_worktree_bundle_folder(bundle_name)
+        runner = self.with_params(cwd=bundle_folder)
         runner.run(
             [
                 "ln",
                 "-sfn",
                 f"{get_worktree_container_folder()}/.devcontainer",
-                f"{get_worktree_bundle_folder(bundle_name)}/.devcontainer",
+                f"{bundle_folder}/.devcontainer",
             ]
         )
         for repo in ("odoo", "enterprise"):
@@ -112,7 +141,7 @@ class UtilsRunner(Runner):
                 ]
             )
         runner.run(["bash", "./odoo/addons/web/tooling/enable.sh"], input="y\n")
-        runner.run(["code", "."])
+        runner.run(["code", "--folder-uri", self._devcontainer_folder_uri(bundle_folder)])
 
     def git_fetch(self, *, repo, dev, ref=None, remote_ref_manager: RemoteRefManager = None):
         if ref is not None and not ref:
