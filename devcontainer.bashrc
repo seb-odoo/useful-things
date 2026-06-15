@@ -2,6 +2,10 @@
 # Sourced from the container's ~/.bashrc (see devcontainer.json postCreateCommand).
 # Only commands that work in the sandbox are kept; paths use /home/seb/... to match the mounts.
 
+# Make aliases expand in non-interactive shells too (e.g. the in-container Claude Code agent's
+# `bash -c` commands, which source this file via BASH_ENV). No-op/harmless in interactive shells.
+shopt -s expand_aliases
+
 # --- git workflow aliases ---
 alias gbd="git branch -D"
 alias gis="git status"
@@ -74,6 +78,11 @@ function branchdb() {
 function odoo-bin() {
 	RES="./odoo-bin $(odoo-bin-params $*)"
 	echo "Executing: ${RES}"
+	# Only when actually serving: ODOO_PROXY_HOST is set only inside the container, and skip
+	# shell/populate editions (s/p) and --stop-after-init runs.
+	if [[ -n "${ODOO_PROXY_HOST}" && "${1}" != *[sp]* && "${RES}" != *"--stop-after-init"* ]]; then
+		echo "URL: http://admin.${ODOO_PROXY_HOST}.localhost"
+	fi
 	eval $RES
 }
 
@@ -102,7 +111,14 @@ function odoo-bin-params() {
 	if [[ "${edition}" == *"a"* ]]; then
 		addons_path="${addons_path},~/repo/allbuilds.org/odoo-addons"
 	fi
-	echo "${cli}-d ${d} --addons-path ${addons_path} --dev replica ${rest}"
+	iface=""
+	if [[ -n "${ODOO_PROXY_HOST}" && "${edition}" != *[sp]* ]]; then
+		# In-container only: bind the bridge IP so the nginx proxy can reach Odoo (master's
+		# default is now 127.0.0.1), trust the proxy's forwarded headers, and load demo data in
+		# new DBs (Odoo 19+ defaults to none). Placed before ${rest} so an explicit flag can override.
+		iface="--http-interface=0.0.0.0 --proxy-mode --with-demo "
+	fi
+	echo "${cli}-d ${d} --addons-path ${addons_path} --dev replica ${iface}${rest}"
 }
 
 alias obet="odoo-bin et"
