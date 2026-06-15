@@ -1,5 +1,5 @@
 {
-  "name": "Claude sandbox",
+  "name": "${localWorkspaceFolderBasename} (Claude sandbox)",
   "build": {
     "dockerfile": "Dockerfile"
   },
@@ -14,10 +14,17 @@
     "source=/home/seb/.claude,target=/home/vscode/.claude,type=bind,Z",
     "source=/home/seb/.config/Code/User,target=/home/vscode/.config/Code/User,type=bind,Z",
     "source=/home/seb/virtualenvs,target=/home/seb/virtualenvs,type=bind,Z",
+    "source=/home/seb/.local/share/Odoo,target=/home/vscode/.local/share/Odoo,type=bind,z",
     "source=/home/seb/repo/useful-things/devcontainer.bashrc,target=/home/vscode/.bash_aliases,type=bind,readonly,Z",
     "source=/var/run/postgresql,target=/var/run/postgresql,type=bind"
   ],
   "postCreateCommand": "grep -q 'virtualenvs/odoo20/bin/activate' ~/.bashrc || echo 'source /home/seb/virtualenvs/odoo20/bin/activate' >> ~/.bashrc",
+  // Reached via the host nginx proxy (~/repo/useful-things/proxy) by bundle name, so don't let
+  // every window forward Odoo to the same host port and collide.
+  "portsAttributes": {
+    "8069": { "onAutoForward": "ignore" },
+    "8072": { "onAutoForward": "ignore" }
+  },
   "customizations": {
     "vscode": {
       "extensions": [
@@ -28,7 +35,11 @@
         "tyriar.sort-lines",
         "odoo.odoo",
         "odoo.owl-vision"
-      ]
+      ],
+      "settings": {
+        // Access is via the nginx proxy by name; don't forward Odoo ports to the host.
+        "remote.autoForwardPorts": false
+      }
     }
   },
   "runArgs": [
@@ -38,9 +49,19 @@
     "--userns=keep-id"
   ],
   "containerEnv": {
+    // Source the dev helpers (odoo-bin/ott/obet/…) in non-interactive shells (e.g. the agent's
+    // `bash -c`), which don't read ~/.bashrc. ~/.bash_aliases is the mounted devcontainer.bashrc.
+    "BASH_ENV": "/home/vscode/.bash_aliases",
     "HOME": "/home/vscode",
     "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
+    "ODOO_PROXY_HOST": "${localWorkspaceFolderBasename}",
+    // Make the reused 3.12 venv the default interpreter for every process (not just interactive
+    // shells), so odoo-bin (#!/usr/bin/env python3) doesn't fall back to the base image's 3.10.
+    // Hardcoded: ${containerEnv:PATH} is NOT resolved inside containerEnv (only in remoteEnv) and
+    // would clobber PATH literally. Trailing dirs mirror the base image PATH.
+    "PATH": "/home/seb/virtualenvs/odoo20/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     "PGHOST": "/var/run/postgresql",
-    "PGUSER": "seb"
+    "PGUSER": "seb",
+    "VIRTUAL_ENV": "/home/seb/virtualenvs/odoo20"
   }
 }

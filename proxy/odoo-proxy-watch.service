@@ -1,0 +1,16 @@
+# Regenerates the nginx proxy config whenever an Odoo dev container starts or stops.
+# Install as a systemd-user unit:
+#   ln -sfn ~/repo/useful-things/proxy/odoo-proxy-watch.service ~/.config/systemd/user/odoo-proxy-watch.service
+#   systemctl --user daemon-reload && systemctl --user enable --now odoo-proxy-watch.service
+
+[Unit]
+Description=Regenerate Odoo proxy config on podman container events
+After=odoo-proxy.service
+
+[Service]
+ExecStart=/usr/bin/python3 %h/repo/useful-things/scripts/proxy.py watch
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

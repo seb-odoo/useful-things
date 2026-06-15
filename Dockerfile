@@ -17,3 +17,12 @@ RUN apt-get update && \
         fonts-liberation \
         wkhtmltopdf && \
     rm -rf /var/lib/apt/lists/*
+
+# Chrome for HttpCase/tour (browser_js) + websocket tests. Odoo's ChromeBrowser runs it headless
+# with --no-sandbox --disable-dev-shm-usage, so it works under the dropped caps / small /dev/shm.
+RUN curl -fsSL https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+        -o /tmp/google-chrome.deb && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends /tmp/google-chrome.deb && \
+    rm -f /tmp/google-chrome.deb && \
+    rm -rf /var/lib/apt/lists/*
