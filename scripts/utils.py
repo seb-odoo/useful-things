@@ -92,6 +92,14 @@ class UtilsRunner(Runner):
 
     def finish_worktree_bundle_folder(self, *, bundle_name):
         runner = self.with_params(cwd=get_worktree_bundle_folder(bundle_name))
+        runner.run(
+            [
+                "ln",
+                "-sfn",
+                f"{get_worktree_container_folder()}/.devcontainer",
+                f"{get_worktree_bundle_folder(bundle_name)}/.devcontainer",
+            ]
+        )
         for repo in ("odoo", "enterprise"):
             base_node_folder = f"{get_worktree_base_repo(get_base_from_bundle_name(bundle_name), repo)}/node_modules"
             runner.run(["mkdir", "-p", base_node_folder])
