@@ -33,7 +33,7 @@ alias gnb="python ~/repo/useful-things/scripts/create_bundle.py"
 function goto()
 {
 	REPO=$(basename "$PWD")
-	[[ "$REPO" =~ ^(odoo|enterprise|design-themes|upgrade|documentation|upgrade-util)$ ]] || { echo "Invalid repo ${REPO}"; return 1; }
+	[[ "$REPO" =~ ^(odoo|enterprise|design-themes|upgrade|documentation|upgrade-util)$ ]] || REPO=odoo
 	FULL_NAME=${1/odoo-dev:}
 	BASE=$(python ~/repo/useful-things/scripts/commands.py get_base_from_bundle_name ${FULL_NAME})
 	FOLDER=~/src/odoo/$BASE/${FULL_NAME}/${REPO}
