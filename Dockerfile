@@ -26,3 +26,18 @@ RUN curl -fsSL https://dl.google.com/linux/direct/google-chrome-stable_current_a
     apt-get install -y --no-install-recommends /tmp/google-chrome.deb && \
     rm -f /tmp/google-chrome.deb && \
     rm -rf /var/lib/apt/lists/*
+
+# Node.js for Odoo's JS tooling (eslint/prettier/lint-staged; package.json engines >= 16.11).
+# Jammy's apt nodejs is v12 (too old) so install Node 22 LTS from NodeSource. Build-time only:
+# no-new-privileges + non-root vscode user means runtime apt/sudo can't escalate.
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+# Persist VS Code's extensions: devcontainer.json bind-mounts a host dir at
+# ~/.vscode-server/extensions. Pre-create the parent here owned by vscode so podman mounts the subdir
+# into an existing dir instead of auto-creating ~/.vscode-server as root — otherwise the server's
+# `mkdir ~/.vscode-server/bin` at attach fails with "Permission denied" (vscode can't write a
+# root-owned parent, and no-new-privileges/cap-drop ALL means no runtime sudo to fix it).
+RUN mkdir -p /home/vscode/.vscode-server/extensions && \
+    chown -R vscode:vscode /home/vscode/.vscode-server
