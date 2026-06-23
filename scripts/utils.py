@@ -80,6 +80,7 @@ class UtilsRunner(Runner):
             handle_exceptions = {
                 f"fatal: '{target_folder}' already exists": on_existing,
                 f"fatal: '{bundle_name}' is already used by worktree at '{target_folder}'": on_existing,
+                f"fatal: '{bundle_name}' is already checked out at '{target_folder}'": on_existing,
             }
         self.run(
             ["git", "worktree", "add"]
