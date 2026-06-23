@@ -16,7 +16,7 @@ from commands import (
     get_remote_ref,
     get_remote_repo,
     get_repo_folder,
-    get_worktree_base_repo,
+    get_worktree_base_folder,
     get_worktree_bundle_folder,
     get_worktree_bundle_repo_folder,
     get_worktree_container_folder,
@@ -119,8 +119,14 @@ class UtilsRunner(Runner):
         hex_authority = json.dumps(authority, separators=(",", ":")).encode().hex()
         return f"vscode-remote://dev-container+{hex_authority}/{WORKSPACE_FOLDER}"
 
+    @staticmethod
+    def _node_modules_ready(node_modules):
+        """A node_modules is usable once npm install has created its `.bin` directory."""
+        return os.path.isdir(os.path.join(node_modules, ".bin"))
+
     def finish_worktree_bundle_folder(self, *, bundle_name):
         bundle_folder = get_worktree_bundle_folder(bundle_name)
+        base_folder = get_worktree_base_folder(get_base_from_bundle_name(bundle_name))
         runner = self.with_params(cwd=bundle_folder)
         runner.run(
             [
@@ -130,18 +136,33 @@ class UtilsRunner(Runner):
                 f"{bundle_folder}/.devcontainer",
             ]
         )
-        for repo in ("odoo", "enterprise"):
-            base_node_folder = f"{get_worktree_base_repo(get_base_from_bundle_name(bundle_name), repo)}/node_modules"
-            runner.run(["mkdir", "-p", base_node_folder])
-            runner.run(
-                [
-                    "ln",
-                    "-sfn",
-                    base_node_folder,
-                    f"{get_worktree_bundle_repo_folder(bundle_name, repo)}/node_modules",
-                ]
-            )
+        # odoo and enterprise share one node_modules per base. We hard-link it into each worktree:
+        # the worktree gets a real directory (so `npm install` won't delete it the way it deletes a
+        # symlink), while the files share inodes so there is no extra disk cost. enable.sh then runs
+        # idempotently - `npm install` no-ops when the tree already matches, and its enterprise copy
+        # is guarded to skip when node_modules already exists.
+        base_node_modules = f"{base_folder}/node_modules"
+        base_lock = f"{base_folder}/package-lock.json"
+        odoo_wt = get_worktree_bundle_repo_folder(bundle_name, "odoo")
+        enterprise_wt = get_worktree_bundle_repo_folder(bundle_name, "enterprise")
+        base_ready = self._node_modules_ready(base_node_modules)
+        if base_ready:
+            # Reuse: hard-link the shared node_modules into both repos and seed odoo's lockfile so
+            # enable.sh's `npm install` recognises the tree as up to date instead of rebuilding it.
+            for repo_wt in (odoo_wt, enterprise_wt):
+                runner.run(["rm", "-rf", f"{repo_wt}/node_modules"])
+                runner.run(["cp", "-al", base_node_modules, f"{repo_wt}/node_modules"])
+            if os.path.exists(base_lock):
+                runner.run(["cp", base_lock, f"{odoo_wt}/package-lock.json"])
         runner.run(["bash", "./odoo/addons/web/tooling/enable.sh"], input="y\n")
+        if not base_ready:
+            # First worktree of this base: seed the shared base with hard links from the fresh
+            # build, then re-link enterprise so both repos point at the same inodes.
+            runner.run(["rm", "-rf", base_node_modules])
+            runner.run(["cp", "-al", f"{odoo_wt}/node_modules", base_node_modules])
+            runner.run(["cp", f"{odoo_wt}/package-lock.json", base_lock])
+            runner.run(["rm", "-rf", f"{enterprise_wt}/node_modules"])
+            runner.run(["cp", "-al", base_node_modules, f"{enterprise_wt}/node_modules"])
         runner.run(["code", "--folder-uri", self._devcontainer_folder_uri(bundle_folder)])
 
     def git_fetch(self, *, repo, dev, ref=None, remote_ref_manager: RemoteRefManager = None):

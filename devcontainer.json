@@ -11,14 +11,28 @@
   "mounts": [
     "source=/home/seb/repo/odoo/.git,target=/home/seb/repo/odoo/.git,type=bind,Z",
     "source=/home/seb/repo/enterprise/.git,target=/home/seb/repo/enterprise/.git,type=bind,Z",
+    "source=/home/seb/repo/design-themes/.git,target=/home/seb/repo/design-themes/.git,type=bind,Z",
+    "source=/home/seb/repo/documentation/.git,target=/home/seb/repo/documentation/.git,type=bind,Z",
+    "source=/home/seb/repo/upgrade/.git,target=/home/seb/repo/upgrade/.git,type=bind,Z",
+    "source=/home/seb/repo/upgrade-util/.git,target=/home/seb/repo/upgrade-util/.git,type=bind,Z",
     "source=/home/seb/.claude,target=/home/vscode/.claude,type=bind,Z",
     "source=/home/seb/.config/Code/User,target=/home/vscode/.config/Code/User,type=bind,Z",
     "source=/home/seb/virtualenvs,target=/home/seb/virtualenvs,type=bind,Z",
     "source=/home/seb/.local/share/Odoo,target=/home/vscode/.local/share/Odoo,type=bind,z",
+    // Persist VS Code's extensions across bundles/rebuilds so they install once, not per container.
+    // Bind (not a named volume) because no-new-privileges/cap-drop ALL means no runtime sudo to chown
+    // a root-owned volume; keep-id + updateRemoteUserUID maps vscode -> host seb (1001), so a
+    // seb-owned host dir is writable. Lowercase z: shared SELinux relabel for the parallel containers.
+    "source=/home/seb/.cache/devcontainer/vscode-server-extensions,target=/home/vscode/.vscode-server/extensions,type=bind,z",
     "source=/home/seb/repo/useful-things/devcontainer.bashrc,target=/home/vscode/.bash_aliases,type=bind,readonly,Z",
+    "source=/home/seb/repo/useful-things/claude-autoopen/claude-autoopen-0.0.1.vsix,target=/home/vscode/.claude-autoopen.vsix,type=bind,readonly,Z",
+    "source=/home/seb/repo/useful-things/install-claude-autoopen.sh,target=/home/vscode/.install-claude-autoopen.sh,type=bind,readonly,Z",
     "source=/var/run/postgresql,target=/var/run/postgresql,type=bind"
   ],
   "postCreateCommand": "grep -q 'virtualenvs/odoo20/bin/activate' ~/.bashrc || echo 'source /home/seb/virtualenvs/odoo20/bin/activate' >> ~/.bashrc",
+  // Install the in-house claude-autoopen extension (see useful-things/claude-autoopen), which opens a
+  // Claude Code tab on window open when none is present. Idempotent: skips if already installed.
+  "postAttachCommand": "bash /home/vscode/.install-claude-autoopen.sh",
   // Reached via the host nginx proxy (~/repo/useful-things/proxy) by bundle name, so don't let
   // every window forward Odoo to the same host port and collide.
   "portsAttributes": {
@@ -54,6 +68,14 @@
     "BASH_ENV": "/home/vscode/.bash_aliases",
     "HOME": "/home/vscode",
     "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
+    // Disable commit signing in the sandbox. The repo's bind-mounted .git/config (shared with the
+    // host) sets commit.gpgsign=true, and the SSH signingKey /home/seb/.ssh/id_rsa.pub isn't mounted
+    // here, so git aborts with "Couldn't load public key". A --global override loses to repo-local
+    // config and editing .git/config would change the host too; GIT_CONFIG_* env takes precedence
+    // over all config files and is container-only. Host commits stay signed.
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "commit.gpgsign",
+    "GIT_CONFIG_VALUE_0": "false",
     "ODOO_PROXY_HOST": "${localWorkspaceFolderBasename}",
     // Make the reused 3.12 venv the default interpreter for every process (not just interactive
     // shells), so odoo-bin (#!/usr/bin/env python3) doesn't fall back to the base image's 3.10.

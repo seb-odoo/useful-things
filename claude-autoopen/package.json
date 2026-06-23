@@ -1,0 +1,18 @@
+{
+  "name": "claude-autoopen",
+  "displayName": "Claude Auto-Open",
+  "description": "Opens a Claude Code tab and one terminal per repo on window open (dev container only).",
+  "version": "0.0.1",
+  "publisher": "local",
+  "private": true,
+  "engines": {
+    "vscode": "^1.67.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js"
+}
