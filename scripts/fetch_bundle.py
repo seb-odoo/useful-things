@@ -22,9 +22,6 @@ from utils import UtilsRunner
 
 runner = UtilsRunner()
 
-# change this config
-ROOT = "/home/seb/repo/"
-
 parser = argparse.ArgumentParser()
 parser.add_argument("name", help="Name of the bundle to fetch", type=str)
 args = parser.parse_args()
