@@ -34,6 +34,13 @@ def delete_bundle(
         runner = runner.with_params(cwd=get_repo_folder(repo))
         wt_bundle_repo_folder = get_worktree_bundle_repo_folder(bundle_name, repo)
         runner.run(
+            ["git", "worktree", "unlock", wt_bundle_repo_folder],
+            handle_exceptions={
+                f"'{wt_bundle_repo_folder}' is not locked": ignore_error,
+                f"'{wt_bundle_repo_folder}' is not a working tree": ignore_error,
+            },
+        )
+        runner.run(
             ["git", "worktree", "remove", wt_bundle_repo_folder, *(["--force"] if force else [])],
             handle_exceptions={
                 f"fatal: '{wt_bundle_repo_folder}' is not a working tree": ignore_error,
