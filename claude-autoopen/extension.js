@@ -23,7 +23,7 @@ function hasClaudeTab() {
   return false;
 }
 
-function openRepoTerminals() {
+async function openRepoTerminals() {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) {
     return;
@@ -32,8 +32,23 @@ function openRepoTerminals() {
   // Skip repos that already have a terminal (restored after a window reload) so we never
   // duplicate, mirroring hasClaudeTab()'s "open only if absent" guard.
   const open = new Set(vscode.window.terminals.map((terminal) => terminal.name));
-  // No per-repo existence check: every bundle has all 6 worktrees (config.py folder_by_repo), and a
-  // vscode.workspace.fs.stat() is a remote round-trip that, run per repo, staggered the terminals.
+  // The extensions cache is shared by every dev container, so this also activates in
+  // non-bundle workspaces (e.g. workflow-hub) where the repo cwds don't exist and each
+  // createTerminal would pop an error. One stat on the first repo decides: every bundle has
+  // all 6 worktrees (config.py folder_by_repo), so a single check suffices (per-repo stats
+  // are remote round-trips that staggered the terminals).
+  let isBundle = true;
+  try {
+    await vscode.workspace.fs.stat(vscode.Uri.joinPath(root, REPOS[0]));
+  } catch {
+    isBundle = false;
+  }
+  if (!isBundle) {
+    if (!open.has("workspace")) {
+      vscode.window.createTerminal({ name: "workspace", cwd: root }).show(true);
+    }
+    return;
+  }
   let first;
   for (const repo of REPOS) {
     if (open.has(repo)) {
@@ -58,7 +73,7 @@ async function activate() {
   // otherwise a restored tab might not be enumerated yet and we would open a duplicate. The same
   // wait also lets restored terminals enumerate before openRepoTerminals() decides which to open.
   await new Promise((resolve) => setTimeout(resolve, 2000));
-  openRepoTerminals();
+  await openRepoTerminals();
   if (hasClaudeTab()) {
     return;
   }

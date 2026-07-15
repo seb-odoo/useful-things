@@ -15,10 +15,23 @@
     "source=/home/seb/repo/documentation/.git,target=/home/seb/repo/documentation/.git,type=bind,Z",
     "source=/home/seb/repo/upgrade/.git,target=/home/seb/repo/upgrade/.git,type=bind,Z",
     "source=/home/seb/repo/upgrade-util/.git,target=/home/seb/repo/upgrade-util/.git,type=bind,Z",
+    // Workspace .vscode and odools.toml are symlinks in each bundle pointing at these absolute host
+    // paths; bind them at the same path (like the .git mounts above) so the symlinks resolve in the
+    // container. Without this the workspace settings.json never loads, so search.exclude (*.po/*.pot)
+    // is ignored and the Odoo extension can't read odools.toml.
+    "source=/home/seb/src/odoo/.vscode,target=/home/seb/src/odoo/.vscode,type=bind,Z",
+    "source=/home/seb/repo/useful-things/odools.toml,target=/home/seb/repo/useful-things/odools.toml,type=bind,readonly,Z",
     "source=/home/seb/.claude,target=/home/vscode/.claude,type=bind,Z",
     "source=/home/seb/.config/Code/User,target=/home/vscode/.config/Code/User,type=bind,Z",
     "source=/home/seb/virtualenvs,target=/home/seb/virtualenvs,type=bind,Z",
     "source=/home/seb/.local/share/Odoo,target=/home/vscode/.local/share/Odoo,type=bind,z",
+    // test-warden (parallel JS/Hoot test runner, ~/repo/TestWarden): reuse the host-built engine
+    // binary + bundled client at the same path (like the venv above); rw so the engine can write
+    // engine/.cache/. It launches chrome-headless-shell (auto-downloaded to $HOME/.cache/warden),
+    // not the image's Chrome (which would need a display), so share that cache to fetch it once.
+    // Lowercase z: shared relabel for the parallel containers, like the filestore/extensions mounts.
+    "source=/home/seb/repo/TestWarden,target=/home/seb/repo/TestWarden,type=bind,z",
+    "source=/home/seb/.cache/warden,target=/home/vscode/.cache/warden,type=bind,z",
     // Persist VS Code's extensions across bundles/rebuilds so they install once, not per container.
     // Bind (not a named volume) because no-new-privileges/cap-drop ALL means no runtime sudo to chown
     // a root-owned volume; keep-id + updateRemoteUserUID maps vscode -> host seb (1001), so a
