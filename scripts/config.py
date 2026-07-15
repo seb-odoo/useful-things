@@ -28,6 +28,8 @@ remote_dev_by_repo = {
 WORKTREE_CONTAINER = "/home/seb/src/odoo"
 STICKY_BUNDLES = [
     "master",
+    "saas-19.4",
+    "saas-19.3",
     "saas-19.2",
     "saas-19.1",
     "19.0",
