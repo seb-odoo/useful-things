@@ -141,6 +141,20 @@ function otta() {
 	odoo-bin et --stop-after-init --logfile ~/after.log --test-tags $*
 }
 
+# --- test-warden (parallel JS / Hoot tests) ---
+# Faster helper for Odoo's JS tests: runs them in parallel headless-Chrome tabs against the
+# in-container server on :8069. Start Odoo first (e.g. `obet`). First run downloads
+# chrome-headless-shell into the shared ~/.cache/warden mount.
+# Pass --once for a single run: the default re-runs until a failure, so don't use bare in scripts.
+#   twc --once                     # all Hoot tests
+#   twc --once -m '@mail'          # a whole module (Odoo roots every *.test.js at @<module>)
+#   twc --once -m '@web/core/utils/objects'  # narrower: one file's suite; add a describe to go deeper
+#   twc --once -t 'simple valid'   # a single test: unique substring of its full name, or 8-char id
+#   twc --flaky-check 50 -t '…'    # flaky-hunt one test  (legacy QUnit suites: --suite qunit)
+# -m matches a suite's EXACT fullName (@module/subdir/…/describe); a bare leaf name won't match.
+# See /home/seb/repo/TestWarden/README.md for the full flag list.
+function twc() { node /home/seb/repo/TestWarden/release/test-warden.cjs "$@"; }
+
 # kill stuck odoo process, by rde-odoo
 function killodoo() { ps aux | grep 'odoo-bin' | grep -v grep | awk '{print $2}' | xargs -r kill; }
 function killodoo9() { ps aux | grep 'odoo-bin' | grep -v grep | awk '{print $2}' | xargs -r kill -9; }

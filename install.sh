@@ -46,6 +46,10 @@ ln -s "${DIR}/.sass-lint.yml" "${REPO}/.sass-lint.yml"
 ln -s "${DIR}/odoo.sublime-project" "${REPO}/odoo.sublime-project"
 ln -s "${DIR}/../.terminator-config" ~/.config/terminator/config
 
+# Bind-mount source for the dev container's shared test-warden Chrome cache (must pre-exist).
+# TestWarden itself is cloned+built separately (git@github.com:tsm-odoo/TestWarden.git).
+mkdir -p ~/.cache/warden
+
 OC_REPO="${REPO}/odoo"
 git clone git@github.com:odoo/odoo.git -v -o odoo "${OC_REPO}"
 (cd "${OC_REPO}" && git remote add odoo-dev git@github.com:odoo-dev/odoo.git)
