@@ -6,7 +6,7 @@ import json
 import os
 import re
 
-from command_runner import Runner
+from command_runner import Runner, ignore_error
 from commands import (
     BUNDLE_SUFFIX,
     get_base_from_bundle_name,
@@ -25,6 +25,12 @@ from commands import (
 # Mirrors `workspaceFolder` in useful-things/devcontainer.json (kept in sync by hand: the JSONC file
 # isn't trivially parseable and the value is stable for this setup).
 WORKSPACE_FOLDER = "/workspace"
+
+# Worktrees are locked so `git worktree prune`/`git gc` can't delete them. Inside a dev
+# container the base repo's .git is mounted but the worktree paths (/home/seb/src/...) are not,
+# so an in-container prune/gc would otherwise see every worktree as missing and wipe the shared
+# admin data. delete_bundle unlocks before removing.
+WORKTREE_LOCK_REASON = "managed bundle: do not prune (paths are unmounted inside dev containers)"
 
 
 class RemoteRefManager:
@@ -90,11 +96,23 @@ class UtilsRunner(Runner):
             cwd=get_repo_folder(repo),
             handle_exceptions=handle_exceptions,
         )
+        self.run(
+            ["git", "worktree", "lock", "--reason", WORKTREE_LOCK_REASON, target_folder],
+            cwd=get_repo_folder(repo),
+            handle_exceptions={f"'{target_folder}' is already locked": ignore_error},
+        )
 
     def delete_branch_and_remote_ref(self, *, repo, bundle_name, handle_exceptions=None):
         runner = self.with_params(cwd=get_repo_folder(repo))
         runner.run(["git", "update-ref", "-d", get_remote_ref(bundle_name, repo)])
         runner.run(["git", "update-ref", "-d", get_remote_dev_ref(bundle_name, repo)])
+        # A bundle still active in another repo keeps this branch checked out in this repo's
+        # worktree, blocking deletion. Detach that worktree at the same commit so the branch can be
+        # deleted while the worktree (other repos build against it) keeps identical code.
+        # delete_bundle removes the worktree before calling this, so the detach is skipped there.
+        wt_folder = get_worktree_bundle_repo_folder(bundle_name, repo)
+        if os.path.isdir(wt_folder):
+            runner.run(["git", "-C", wt_folder, "switch", "--detach"])
         runner.run(["git", "branch", "-D", bundle_name], handle_exceptions=handle_exceptions)
 
     def _devcontainer_folder_uri(self, bundle_folder):
