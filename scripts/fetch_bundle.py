@@ -89,6 +89,15 @@ def handle_commit(runner: UtilsRunner, commit):
         )
 
 
-runner.parallel_run(Tree("Commits"), response["commits"], handle_commit, lambda c: c["repo"])
+# A batch still in preparation only lists the repos pushed so far, so a repo with a dev branch
+# can be missing from "commits". The dev branch path ignores the commit hash, so synthesize an
+# entry to get that repo's worktree anyway.
+commit_by_repo = {commit["repo"]: commit for commit in response["commits"]}
+for repo in make_branch_by_repo:
+    commit_by_repo.setdefault(repo, {"repo": repo})
+
+runner.parallel_run(
+    Tree("Commits"), list(commit_by_repo.values()), handle_commit, lambda c: c["repo"]
+)
 runner.finish_worktree_bundle_folder(bundle_name=bundle_name)
 print("[green]Done[/green]")

@@ -11,16 +11,16 @@ const OPEN_COMMAND = "claude-vscode.editor.open";
 // (useful-things/scripts/config.py folder_by_repo). One terminal each, cd'd into the worktree.
 const REPOS = ["odoo", "enterprise", "design-themes", "documentation", "upgrade", "upgrade-util"];
 
-function hasClaudeTab() {
+function getClaudeTab() {
   for (const group of vscode.window.tabGroups.all) {
     for (const tab of group.tabs) {
       const input = tab.input;
       if (input instanceof vscode.TabInputWebview && input.viewType.includes(CLAUDE_VIEWTYPE)) {
-        return true;
+        return tab;
       }
     }
   }
-  return false;
+  return undefined;
 }
 
 async function openRepoTerminals() {
@@ -74,17 +74,27 @@ async function activate() {
   // wait also lets restored terminals enumerate before openRepoTerminals() decides which to open.
   await new Promise((resolve) => setTimeout(resolve, 2000));
   await openRepoTerminals();
-  if (hasClaudeTab()) {
-    return;
+  if (!getClaudeTab()) {
+    const claude = vscode.extensions.getExtension(CLAUDE_EXTENSION_ID);
+    if (!claude) {
+      return;
+    }
+    if (!claude.isActive) {
+      await claude.activate();
+    }
+    await vscode.commands.executeCommand(OPEN_COMMAND);
+    // The freshly opened panel becomes the active editor, but the reveal is async: wait so it is
+    // enumerated as the active tab before we pin it.
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  const claude = vscode.extensions.getExtension(CLAUDE_EXTENSION_ID);
-  if (!claude) {
-    return;
+  // Pin the Claude tab so it stays at the front and isn't replaced by preview editors.
+  // workbench.action.pinEditor targets the ACTIVE editor (there is no API to pin an arbitrary tab),
+  // so guard on isActive to avoid pinning the wrong editor when a restored Claude tab isn't focused.
+  // VS Code persists pin state across reloads, so !isPinned keeps this idempotent.
+  const tab = getClaudeTab();
+  if (tab && tab.isActive && !tab.isPinned) {
+    await vscode.commands.executeCommand("workbench.action.pinEditor");
   }
-  if (!claude.isActive) {
-    await claude.activate();
-  }
-  await vscode.commands.executeCommand(OPEN_COMMAND);
 }
 
 function deactivate() {}
