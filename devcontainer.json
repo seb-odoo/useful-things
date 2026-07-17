@@ -15,10 +15,11 @@
     "source=/home/seb/repo/documentation/.git,target=/home/seb/repo/documentation/.git,type=bind,Z",
     "source=/home/seb/repo/upgrade/.git,target=/home/seb/repo/upgrade/.git,type=bind,Z",
     "source=/home/seb/repo/upgrade-util/.git,target=/home/seb/repo/upgrade-util/.git,type=bind,Z",
-    // Workspace .vscode and odools.toml are symlinks in each bundle pointing at these absolute host
-    // paths; bind them at the same path (like the .git mounts above) so the symlinks resolve in the
-    // container. Without this the workspace settings.json never loads, so search.exclude (*.po/*.pot)
-    // is ignored and the Odoo extension can't read odools.toml.
+    // Workspace .claude, .vscode and odools.toml are symlinks in each bundle pointing at these
+    // absolute host paths; bind them at the same path (like the .git mounts above) so the symlinks
+    // resolve in the container. Without this the workspace settings.json never loads, so
+    // search.exclude (*.po/*.pot) is ignored and the Odoo extension can't read odools.toml.
+    "source=/home/seb/src/odoo/.claude,target=/home/seb/src/odoo/.claude,type=bind,Z",
     "source=/home/seb/src/odoo/.vscode,target=/home/seb/src/odoo/.vscode,type=bind,Z",
     "source=/home/seb/repo/useful-things/odools.toml,target=/home/seb/repo/useful-things/odools.toml,type=bind,readonly,Z",
     "source=/home/seb/.claude,target=/home/vscode/.claude,type=bind,Z",
