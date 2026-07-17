@@ -239,6 +239,14 @@ class UtilsRunner(Runner):
                 f"{worktree_bundle_folder}/.vscode",
             ],
         )
+        self.run(
+            [
+                "ln",
+                "-sfn",
+                f"{get_worktree_container_folder()}/.claude",
+                f"{worktree_bundle_folder}/.claude",
+            ],
+        )
 
     def switch_to_branch(self, *, repo, branch, target_ref: str = None):
         cwd = get_worktree_bundle_repo_folder(branch, repo)
