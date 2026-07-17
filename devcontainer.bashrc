@@ -81,7 +81,7 @@ function odoo-bin() {
 	# Only when actually serving: ODOO_PROXY_HOST is set only inside the container, and skip
 	# shell/populate editions (s/p) and --stop-after-init runs.
 	if [[ -n "${ODOO_PROXY_HOST}" && "${1}" != *[sp]* && "${RES}" != *"--stop-after-init"* ]]; then
-		echo "URL: http://admin.${ODOO_PROXY_HOST}.localhost"
+		echo "URL: http://admin.${ODOO_PROXY_HOST}.localhost/?debug=assets"
 	fi
 	eval $RES
 }
