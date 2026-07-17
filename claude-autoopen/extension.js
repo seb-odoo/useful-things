@@ -92,8 +92,16 @@ async function activate() {
   // so guard on isActive to avoid pinning the wrong editor when a restored Claude tab isn't focused.
   // VS Code persists pin state across reloads, so !isPinned keeps this idempotent.
   const tab = getClaudeTab();
-  if (tab && tab.isActive && !tab.isPinned) {
-    await vscode.commands.executeCommand("workbench.action.pinEditor");
+  if (tab && tab.isActive) {
+    if (!tab.isPinned) {
+      await vscode.commands.executeCommand("workbench.action.pinEditor");
+    }
+    // The claude-code extension locks the editor group when it opens the panel into a new column
+    // (workbench.action.lockEditorGroup). A locked group refuses other editors, so files open in a
+    // separate column. We pin the tab to keep it in place, so undo the lock and let files open
+    // normally here. unlockEditorGroup targets the ACTIVE group; the isActive guard keeps it on the
+    // Claude group, and it is a no-op when the group is already unlocked, so this stays idempotent.
+    await vscode.commands.executeCommand("workbench.action.unlockEditorGroup");
   }
 }
 
