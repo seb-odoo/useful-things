@@ -23,6 +23,26 @@
     "source=/home/seb/src/odoo/.vscode,target=/home/seb/src/odoo/.vscode,type=bind,Z",
     "source=/home/seb/repo/useful-things/odools.toml,target=/home/seb/repo/useful-things/odools.toml,type=bind,readonly,Z",
     "source=/home/seb/.claude,target=/home/vscode/.claude,type=bind,Z",
+    // Kilo Code global config (kilo.jsonc with skills.paths -> ~/.claude/skills and instructions ->
+    // Claude memory). Mounted at the same path so the in-container Kilo shares skills/memory with
+    // Claude. ~/.claude (above) already brings the skills + global CLAUDE.md it points at.
+    "source=/home/seb/.config/kilo,target=/home/vscode/.config/kilo,type=bind,Z",
+    // Kilo session/state/cache, shared across ALL containers + the host (lowercase z: shared
+    // relabel for the parallel containers, like the extensions cache below). kilo.db holds the
+    // sessions/messages; a session's project is keyed by worktree path and every container uses
+    // /workspace, so a session started in one container is resumable from any other and persists
+    // across restarts (the data lives on the host). auth.json shares the login. storage/ holds
+    // session_diff; state/ holds locks + background-process; cache/ holds models.json. All are
+    // seb-owned (uid 1001) and keep-id maps vscode -> seb, so writes work. kilo.db is on local
+    // ext4, so SQLite WAL is safe to share via bind mount.
+    "source=/home/seb/.local/share/kilo,target=/home/vscode/.local/share/kilo,type=bind,z",
+    "source=/home/seb/.local/state/kilo,target=/home/vscode/.local/state/kilo,type=bind,z",
+    // Kilo also writes a SIBLING state dir kilo-sandbox-policy (sandbox network/fs policy
+    // snapshots), not under kilo/. It must be mounted too: the container's /home/vscode/.local/state
+    // parent is root-owned (podman auto-creates mount-point parents as root), so without this mount
+    // the vscode user cannot mkdir kilo-sandbox-policy and Kilo crashes with EACCES on prompt.
+    "source=/home/seb/.local/state/kilo-sandbox-policy,target=/home/vscode/.local/state/kilo-sandbox-policy,type=bind,z",
+    "source=/home/seb/.cache/kilo,target=/home/vscode/.cache/kilo,type=bind,z",
     "source=/home/seb/.config/Code/User,target=/home/vscode/.config/Code/User,type=bind,Z",
     "source=/home/seb/virtualenvs,target=/home/seb/virtualenvs,type=bind,Z",
     "source=/home/seb/.local/share/Odoo,target=/home/vscode/.local/share/Odoo,type=bind,z",
@@ -57,6 +77,7 @@
     "vscode": {
       "extensions": [
         "anthropic.claude-code",
+        "kilocode.kilo-code",
         "charliermarsh.ruff",
         "dbaeumer.vscode-eslint",
         "eamodio.gitlens",
@@ -91,6 +112,17 @@
     "GIT_CONFIG_KEY_0": "commit.gpgsign",
     "GIT_CONFIG_VALUE_0": "false",
     "ODOO_PROXY_HOST": "${localWorkspaceFolderBasename}",
+    // Auto-allow every Kilo tool inside the container (no permission prompts), like Claude's
+    // dontAsk + allow-all hook here. KILO_CONFIG_CONTENT is inline JSON with high precedence that
+    // deep-merges over the mounted ~/.config/kilo/kilo.jsonc. Container-only (set here, not on the
+    // host), so the host Kilo keeps its normal "ask" policy.
+    // IMPORTANT: the allow is scoped to agent.code, NOT a top-level "*" wildcard. Kilo evaluates
+    // permission last-match-wins and the plan agent builds its stack as: base "*":deny, then
+    // read-only bash allows, then "edit":deny (with plan-file exceptions). A global allow would
+    // land AFTER those denies and silently disable plan mode's read-only guarantee. Scoping to
+    // agent["code"] makes the default code agent prompt-free while leaving the plan agent's own
+    // deny rules intact (verified: plan still denies edit on normal files, allows .kilo/plans/*.md).
+    "KILO_CONFIG_CONTENT": "{\"agent\":{\"code\":{\"permission\":{\"*\":\"allow\",\"read\":\"allow\",\"edit\":\"allow\",\"write\":\"allow\",\"bash\":\"allow\",\"glob\":\"allow\",\"grep\":\"allow\",\"list\":\"allow\",\"task\":\"allow\",\"webfetch\":\"allow\",\"websearch\":\"allow\",\"external_directory\":\"allow\",\"question\":\"allow\",\"doom_loop\":\"allow\",\"todowrite\":\"allow\",\"todoread\":\"allow\",\"skill\":\"allow\",\"lsp\":\"allow\",\"semantic_search\":\"allow\",\"codesearch\":\"allow\",\"kilo_memory_save\":\"allow\",\"kilo_memory_recall\":\"allow\"}}}}",
     // Make the reused 3.12 venv the default interpreter for every process (not just interactive
     // shells), so odoo-bin (#!/usr/bin/env python3) doesn't fall back to the base image's 3.10.
     // Hardcoded: ${containerEnv:PATH} is NOT resolved inside containerEnv (only in remoteEnv) and
