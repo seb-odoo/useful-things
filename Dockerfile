@@ -41,3 +41,15 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
 # root-owned parent, and no-new-privileges/cap-drop ALL means no runtime sudo to fix it).
 RUN mkdir -p /home/vscode/.vscode-server/extensions && \
     chown -R vscode:vscode /home/vscode/.vscode-server
+
+# Same root-owned-parent problem for Kilo's XDG dirs: devcontainer.json bind-mounts
+# ~/.local/share/kilo, ~/.local/state/kilo, ~/.local/state/kilo-sandbox-policy and ~/.cache/kilo.
+# Pre-create the parents (and the mount points) owned by vscode so podman mounts into existing
+# vscode-owned dirs instead of auto-creating root-owned parents — otherwise Kilo crashes with
+# EACCES when it tries to mkdir a sibling (e.g. kilo-sandbox-policy) under a root-owned
+# ~/.local/state, and no-new-privileges/cap-drop ALL means no runtime sudo to fix it.
+RUN mkdir -p /home/vscode/.local/share/kilo \
+             /home/vscode/.local/state/kilo \
+             /home/vscode/.local/state/kilo-sandbox-policy \
+             /home/vscode/.cache/kilo && \
+    chown -R vscode:vscode /home/vscode/.local /home/vscode/.cache
