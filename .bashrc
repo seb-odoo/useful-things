@@ -14,7 +14,6 @@ alias orepo="code ~/repo/repo.code-workspace"
 alias delete_bundle="python ~/repo/useful-things/scripts/delete_bundle.py"
 alias hoot='npm run start --'
 alias hoot_mail='npm run start -- -m "@mail"'
-alias model_parser="node ~/repo/DiscussModelParser/dist/type-gen-idx.mjs --path ../odoo --enterprise"
 alias mailhog='~/gocode/bin/MailHog'
 
 function tog() {
