@@ -155,6 +155,17 @@ function otta() {
 # See /home/seb/repo/TestWarden/README.md for the full flag list.
 function twc() { node /home/seb/repo/TestWarden/release/test-warden.cjs "$@"; }
 
+# --- model types (DiscussModelParser) ---
+# Regenerates the @types/models.d.ts files from the JS model definitions (community +
+# enterprise). Run it after adding/changing a model, field or store patch; it rewrites
+# tracked files, so check `git status` after. Works from the bundle root or from a repo dir
+# ("odoo" and "enterprise" must be siblings, and enterprise is resolved as <path>/../enterprise).
+function model_parser() {
+	local community="../odoo"
+	[[ -d "${community}/addons/mail" ]] || community="./odoo"
+	node /home/seb/repo/DiscussModelParser/dist/type-gen-idx.mjs --path "${community}" --enterprise "$@"
+}
+
 # kill stuck odoo process, by rde-odoo
 function killodoo() { ps aux | grep 'odoo-bin' | grep -v grep | awk '{print $2}' | xargs -r kill; }
 function killodoo9() { ps aux | grep 'odoo-bin' | grep -v grep | awk '{print $2}' | xargs -r kill -9; }

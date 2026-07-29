@@ -53,6 +53,13 @@
     // Lowercase z: shared relabel for the parallel containers, like the filestore/extensions mounts.
     "source=/home/seb/repo/TestWarden,target=/home/seb/repo/TestWarden,type=bind,z",
     "source=/home/seb/.cache/warden,target=/home/vscode/.cache/warden,type=bind,z",
+    // DiscussModelParser (~/repo/DiscussModelParser): generates the @types/models.d.ts files
+    // for the discuss/mail JS models. Same path as the host so the wrapper in
+    // devcontainer.bashrc works on both sides; dist/type-gen-idx.mjs is a self-contained
+    // rollup bundle (Node built-ins only), so the image's Node 22 is enough, no install.
+    // rw so `git pull` + `npm run build` work in here (config.json's whitelist is inlined
+    // into dist/ at build time). Lowercase z: shared relabel, like TestWarden above.
+    "source=/home/seb/repo/DiscussModelParser,target=/home/seb/repo/DiscussModelParser,type=bind,z",
     // Persist VS Code's extensions across bundles/rebuilds so they install once, not per container.
     // Bind (not a named volume) because no-new-privileges/cap-drop ALL means no runtime sudo to chown
     // a root-owned volume; keep-id + updateRemoteUserUID maps vscode -> host seb (1001), so a
