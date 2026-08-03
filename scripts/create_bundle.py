@@ -5,19 +5,19 @@ Example:
 Note: -ngram is automatically suffixed depending on config value.
 """
 
-from rich import print
-from rich.tree import Tree
-
 import argparse
 import os
 
 from commands import (
+    get_base_for_repo,
     get_bundle_name_from_base_and_name,
     get_remote_branch_name,
     get_remote_dev_repo,
     get_repos,
     get_worktree_bundle_repo_folder,
 )
+from rich import print
+from rich.tree import Tree
 from utils import UtilsRunner
 
 runner = UtilsRunner()
@@ -30,7 +30,7 @@ bundle_name = get_bundle_name_from_base_and_name(args.base, args.name)
 
 
 def handle_repo(runner: UtilsRunner, repo):
-    base = args.base if repo not in ["upgrade", "upgrade-util"] else "master"
+    base = get_base_for_repo(args.base, repo)
     runner.git_fetch(repo=repo, dev=False, ref=base)
     target_ref = get_remote_branch_name(base, repo)
     worktree_bundle_repo_folder = get_worktree_bundle_repo_folder(bundle_name, repo)
