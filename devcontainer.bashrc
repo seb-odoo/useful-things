@@ -115,8 +115,15 @@ function odoo-bin-params() {
 	if [[ -n "${ODOO_PROXY_HOST}" && "${edition}" != *[sp]* ]]; then
 		# In-container only: bind the bridge IP so the nginx proxy can reach Odoo (master's
 		# default is now 127.0.0.1), trust the proxy's forwarded headers, and load demo data in
-		# new DBs (Odoo 19+ defaults to none). Placed before ${rest} so an explicit flag can override.
-		iface="--http-interface=0.0.0.0 --proxy-mode --with-demo "
+		# new DBs. Placed before ${rest} so an explicit flag can override.
+		demo=""
+		if grep -q '"--with-demo"' ./odoo/tools/config.py 2>/dev/null; then
+			# The demo default flipped to none in saas-18.3, which added --with-demo;
+			# saas-18.2 and before load demo data by default and reject the option
+			# (optparse errors out before ${rest} could override it).
+			demo="--with-demo "
+		fi
+		iface="--http-interface=0.0.0.0 --proxy-mode ${demo}"
 	fi
 	echo "${cli}-d ${d} --addons-path ${addons_path} --dev replica ${iface}${rest}"
 }
@@ -150,8 +157,8 @@ function otta() {
 #   twc --once -m '@mail'          # a whole module (Odoo roots every *.test.js at @<module>)
 #   twc --once -m '@web/core/utils/objects'  # narrower: one file's suite; add a describe to go deeper
 #   twc --once -t 'simple valid'   # a single test: unique substring of its full name, or 8-char id
-#   twc --flaky-check 50 -t '…'    # flaky-hunt one test  (legacy QUnit suites: --suite qunit)
-# -m matches a suite's EXACT fullName (@module/subdir/…/describe); a bare leaf name won't match.
+#   twc --flaky-check 50 -t '...'  # flaky-hunt one test  (legacy QUnit suites: --suite qunit)
+# -m matches a suite's EXACT fullName (@module/subdir/.../describe); a bare leaf name won't match.
 # See /home/seb/repo/TestWarden/README.md for the full flag list.
 function twc() { node /home/seb/repo/TestWarden/release/test-warden.cjs "$@"; }
 
