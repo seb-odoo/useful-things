@@ -4,20 +4,22 @@ Example:
  $ python ~/repo/useful-things/scripts/fetch_bundle.py master-bundle-name-ngram
 """
 
-from collections import defaultdict
-from rich import print
-from rich.tree import Tree
-
 import argparse
-import requests
+from collections import defaultdict
 
+import requests
 from commands import (
     clean_bundle_name,
+    get_base_for_repo,
     get_base_from_bundle_name,
+    get_remote_branch_name,
     get_remote_dev_branch_name,
+    get_repos,
     get_worktree_bundle_folder,
     get_worktree_bundle_repo_folder,
 )
+from rich import print
+from rich.tree import Tree
 from utils import UtilsRunner
 
 runner = UtilsRunner()
@@ -72,25 +74,30 @@ def handle_commit(runner: UtilsRunner, commit):
             ),
         )
     else:
-        commit_hash = commit["name"]
-        runner.git_fetch(repo=repo, dev=False, ref=commit_hash)
+        if commit_hash := commit.get("name"):
+            fetch_ref = target_ref = commit_hash
+        else:
+            base = get_base_for_repo(get_base_from_bundle_name(bundle_name), repo)
+            fetch_ref = base
+            target_ref = get_remote_branch_name(base, repo)
+        runner.git_fetch(repo=repo, dev=False, ref=fetch_ref)
         runner.add_worktree(
             repo=repo,
             bundle_name=bundle_name,
             make_branch=False,
-            target_ref=commit_hash,
+            target_ref=target_ref,
             on_existing=lambda runner: runner.run(
-                ["git", "checkout", commit_hash],
+                ["git", "checkout", target_ref],
                 cwd=wt_repo_folder,
             ),
         )
 
 
-# A batch still in preparation only lists the repos pushed so far, so a repo with a dev branch
-# can be missing from "commits". The dev branch path ignores the commit hash, so synthesize an
-# entry to get that repo's worktree anyway.
+# A batch still in preparation only lists the repos pushed so far, so a repo can be missing from
+# "commits". Synthesize an entry for every repo, so the bundle gets all of its worktrees: a repo
+# with a dev branch ignores the commit hash anyway, the others fall back to their base branch.
 commit_by_repo = {commit["repo"]: commit for commit in response["commits"]}
-for repo in make_branch_by_repo:
+for repo in get_repos():
     commit_by_repo.setdefault(repo, {"repo": repo})
 
 runner.parallel_run(

@@ -12,6 +12,11 @@ from config import (
 )
 
 
+def get_base_for_repo(base, repo):
+    """Get the base a given repo builds against: upgrade repos only live on master."""
+    return "master" if repo in ("upgrade", "upgrade-util") else base
+
+
 def get_base_from_bundle_name(bundle_name):
     """Get the base name from a bundle name."""
     parts = bundle_name.split("-")
