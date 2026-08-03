@@ -65,7 +65,12 @@
     // a root-owned volume; keep-id + updateRemoteUserUID maps vscode -> host seb (1001), so a
     // seb-owned host dir is writable. Lowercase z: shared SELinux relabel for the parallel containers.
     "source=/home/seb/.cache/devcontainer/vscode-server-extensions,target=/home/vscode/.vscode-server/extensions,type=bind,z",
-    "source=/home/seb/repo/useful-things/devcontainer.bashrc,target=/home/vscode/.bash_aliases,type=bind,readonly,Z",
+    // The container's ~/.bash_aliases, and BASH_ENV (see below), so every non-interactive shell
+    // sources it too. rw so it can be patched from inside the container; the host shell sources
+    // useful-things/.bashrc instead and never this file, so an in-container edit cannot land in a
+    // host shell. A syntax error here breaks every container shell including the agent's, so
+    // `bash -n` it after editing. Lowercase z: shared relabel, like the caches above.
+    "source=/home/seb/repo/useful-things/devcontainer.bashrc,target=/home/vscode/.bash_aliases,type=bind,z",
     "source=/home/seb/repo/useful-things/claude-autoopen/claude-autoopen-0.0.1.vsix,target=/home/vscode/.claude-autoopen.vsix,type=bind,readonly,Z",
     "source=/home/seb/repo/useful-things/install-claude-autoopen.sh,target=/home/vscode/.install-claude-autoopen.sh,type=bind,readonly,Z",
     "source=/var/run/postgresql,target=/var/run/postgresql,type=bind"
@@ -105,7 +110,7 @@
     "--userns=keep-id"
   ],
   "containerEnv": {
-    // Source the dev helpers (odoo-bin/ott/obet/…) in non-interactive shells (e.g. the agent's
+    // Source the dev helpers (odoo-bin/ott/obet/...) in non-interactive shells (e.g. the agent's
     // `bash -c`), which don't read ~/.bashrc. ~/.bash_aliases is the mounted devcontainer.bashrc.
     "BASH_ENV": "/home/vscode/.bash_aliases",
     "HOME": "/home/vscode",
