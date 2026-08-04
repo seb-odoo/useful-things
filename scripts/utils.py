@@ -106,14 +106,31 @@ class UtilsRunner(Runner):
         runner = self.with_params(cwd=get_repo_folder(repo))
         runner.run(["git", "update-ref", "-d", get_remote_ref(bundle_name, repo)])
         runner.run(["git", "update-ref", "-d", get_remote_dev_ref(bundle_name, repo)])
-        # A bundle still active in another repo keeps this branch checked out in this repo's
-        # worktree, blocking deletion. Detach that worktree at the same commit so the branch can be
-        # deleted while the worktree (other repos build against it) keeps identical code.
-        # delete_bundle removes the worktree before calling this, so the detach is skipped there.
-        wt_folder = get_worktree_bundle_repo_folder(bundle_name, repo)
-        if os.path.isdir(wt_folder):
-            runner.run(["git", "-C", wt_folder, "switch", "--detach"])
+        self._release_branch_from_worktrees(runner, bundle_name)
         runner.run(["git", "branch", "-D", bundle_name], handle_exceptions=handle_exceptions)
+
+    def _release_branch_from_worktrees(self, runner, branch):
+        """Take `branch` out of the worktrees holding it, which otherwise block `git branch -D`.
+
+        A bundle still active in another repo keeps a worktree on the branch, and a Claude worktree
+        created inside a dev container leaves a registration under /tmp behind once the container is
+        gone.
+        """
+        res = runner.run(["git", "worktree", "list", "--porcelain"])
+        for block in res.stdout.strip().split("\n\n"):
+            fields = {}
+            for line in block.splitlines():
+                key, _, value = line.partition(" ")
+                fields[key] = value
+            if fields.get("branch") != f"refs/heads/{branch}":
+                continue
+            if "prunable" in fields:
+                # Only this branch's registrations go: `git worktree prune` would also drop those of
+                # dev container worktrees still in use, whose /tmp path never exists on the host.
+                runner.run(["git", "worktree", "remove", "--force", fields["worktree"]])
+            else:
+                # Detached at the same commit, so the repos building against it see the same code.
+                runner.run(["git", "-C", fields["worktree"], "switch", "--detach"])
 
     def _devcontainer_folder_uri(self, bundle_folder):
         """Build the VS Code folder-URI that opens `bundle_folder` attached to its dev container.
