@@ -4,18 +4,17 @@ Examples:
  $ python ~/repo/useful-things/scripts/delete_bundle.py master-bundle-name-ngram
  $ python ~/repo/useful-things/scripts/delete_bundle.py master-bundle-name-ngram --also-remote
  $ python ~/repo/useful-things/scripts/delete_bundle.py master-first-ngram master-second-ngram
+ $ python ~/repo/useful-things/scripts/delete_bundle.py 'saas-19.*'
 """
 
-from rich import print
-from rich.tree import Tree
-
-from contextlib import nullcontext
 import argparse
-import argcomplete
+import fnmatch
 import glob
 import os
 import threading
+from contextlib import nullcontext
 
+import argcomplete
 from command_runner import ignore_error
 from commands import (
     clean_bundle_name,
@@ -26,6 +25,8 @@ from commands import (
     get_worktree_bundle_repo_folder,
 )
 from config import WORKTREE_CONTAINER
+from rich import print
+from rich.tree import Tree
 from utils import UtilsRunner
 
 
@@ -42,6 +43,21 @@ def _existing_bundles():
 def _bundle_name_completer(prefix, parsed_args, **kwargs):
     already_given = set(getattr(parsed_args, "name", None) or [])
     return [bundle for bundle in _existing_bundles() if bundle not in already_given]
+
+
+def expand_bundle_names(names: list[str]):
+    """Expand the `fnmatch` patterns (e.g. `saas-19.*`) against the existing bundles.
+
+    Names without any wildcard are kept as is, so that a bundle can still be cleaned up
+    when its worktree folder is already gone.
+    """
+    expanded = []
+    for name in names:
+        if not any(char in name for char in "*?["):
+            expanded.append(name)
+            continue
+        expanded.extend(fnmatch.filter(_existing_bundles(), name))
+    return list(dict.fromkeys(expanded))
 
 
 def delete_bundle(
@@ -145,7 +161,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "name",
-        help="Name of the bundle(s) to delete",
+        help="Name or pattern of the bundle(s) to delete",
         type=str,
         nargs="+",
     ).completer = _bundle_name_completer
@@ -161,9 +177,14 @@ if __name__ == "__main__":
     )
     argcomplete.autocomplete(parser)
     args = parser.parse_args()
+    bundle_names = expand_bundle_names(
+        [clean_bundle_name(name) for name in args.name]
+    )
+    if not bundle_names:
+        parser.error("no bundle to delete")
     delete_bundles(
         UtilsRunner(),
-        bundle_names=[clean_bundle_name(name) for name in args.name],
+        bundle_names=bundle_names,
         force=args.force,
         also_remote=args.also_remote,
     )
