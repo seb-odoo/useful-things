@@ -106,6 +106,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "name", help="Name of the bundle to delete", type=str
     ).completer = _bundle_name_completer
+    parser.add_argument("--force", help="Whether to force remove", action="store_true")
     parser.add_argument(
         "--also-remote", help="Whether to also delete the remote bundle", action="store_true"
     )
@@ -117,6 +118,7 @@ if __name__ == "__main__":
     delete_bundle(
         runner=UtilsRunner(),
         bundle_name=clean_bundle_name(args.name),
+        force=args.force,
         also_remote=args.also_remote,
         force=args.force,
     )
