@@ -148,7 +148,7 @@ class Runner:
         tree: Tree,
         collection: Collection[T],
         func: Callable[[Self, T], None],
-        key: Callable[[T], str] = None,
+        key: Callable[[T], str] | None = None,
     ):
         if not collection:
             return
