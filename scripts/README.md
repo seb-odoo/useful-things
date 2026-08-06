@@ -127,6 +127,7 @@ Removes a bundle from the local system (worktrees, branches, filestore, database
 - Removes filestore entries under `~/.local/share/Odoo/filestore/`
 - Completes the bundle names having a worktree folder (needs `argcomplete`'s global completion,
   see `activate-global-python-argcomplete`)
+- `--force`: remove the worktrees even when they are dirty
 - `--also-remote`: also deletes the remote dev branch. ⚠️ Do not use on branches of others!
 
 ```bash
