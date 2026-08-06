@@ -5,6 +5,12 @@ All scripts are re-entrant.
 
 Not fully re-usable yet, as the config has to be changed in-place, and not everything is configurable.
 
+## Shell completion
+
+`autocomplete/enable.sh`/`disable.sh` let you quickly turn tab completion on or off: they add or
+remove a marked block in `~/.bashrc` that sets up `create_bundle`, `delete_bundle` and
+`fetch_bundle` as aliases and wires up completion for `create_bundle`/`delete_bundle`.
+
 ## Bundle management
 
 Bundles are named `<base>-<name><suffix>` where suffix is set in `config.py` (`BUNDLE_SUFFIX`, e.g. `--seb`).
