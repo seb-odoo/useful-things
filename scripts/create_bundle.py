@@ -16,6 +16,7 @@ from commands import (
     get_repos,
     get_worktree_bundle_repo_folder,
 )
+from config import STICKY_BUNDLES
 from rich import print
 from rich.tree import Tree
 from utils import UtilsRunner
@@ -23,7 +24,9 @@ from utils import UtilsRunner
 runner = UtilsRunner()
 
 parser = argparse.ArgumentParser()
-parser.add_argument("base", help="Name of the base to create the bundle for. Eg. master", type=str)
+parser.add_argument(
+    "base", help="Name of the base to create the bundle for. Eg. master", type=str
+).completer = lambda *args, **kwargs: STICKY_BUNDLES
 parser.add_argument("name", help="Name of the bundle to create", type=str)
 args = parser.parse_args()
 bundle_name = get_bundle_name_from_base_and_name(args.base, args.name)
