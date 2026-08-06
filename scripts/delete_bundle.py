@@ -8,8 +8,10 @@ Examples:
 from rich import print
 from rich.tree import Tree
 
+import argcomplete
 import argparse
 import glob
+import os
 
 from command_runner import ignore_error
 from commands import (
@@ -20,7 +22,22 @@ from commands import (
     get_worktree_bundle_folder,
     get_worktree_bundle_repo_folder,
 )
+from config import WORKTREE_CONTAINER
 from utils import UtilsRunner
+
+
+def _existing_bundles():
+    """List the names of the bundles having a worktree folder."""
+    repos = list(get_repos())
+    bundles = []
+    for path in glob.glob(f"{WORKTREE_CONTAINER}/*/*"):
+        if any(os.path.isdir(os.path.join(path, repo)) for repo in repos):
+            bundles.append(os.path.basename(path))
+    return sorted(bundles)
+
+
+def _bundle_name_completer(prefix, **kwargs):
+    return _existing_bundles()
 
 
 def delete_bundle(
@@ -86,13 +103,16 @@ def delete_bundle(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("name", help="Name of the bundle to delete", type=str)
+    parser.add_argument(
+        "name", help="Name of the bundle to delete", type=str
+    ).completer = _bundle_name_completer
     parser.add_argument(
         "--also-remote", help="Whether to also delete the remote bundle", action="store_true"
     )
     parser.add_argument(
         "--force", help="Whether to force delete the bundle", action="store_true"
     )
+    argcomplete.autocomplete(parser)
     args = parser.parse_args()
     delete_bundle(
         runner=UtilsRunner(),
