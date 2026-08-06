@@ -3,15 +3,18 @@
 Examples:
  $ python ~/repo/useful-things/scripts/delete_bundle.py master-bundle-name-ngram
  $ python ~/repo/useful-things/scripts/delete_bundle.py master-bundle-name-ngram --also-remote
+ $ python ~/repo/useful-things/scripts/delete_bundle.py master-first-ngram master-second-ngram
 """
 
 from rich import print
 from rich.tree import Tree
 
-import argcomplete
+from contextlib import nullcontext
 import argparse
+import argcomplete
 import glob
 import os
+import threading
 
 from command_runner import ignore_error
 from commands import (
@@ -36,8 +39,9 @@ def _existing_bundles():
     return sorted(bundles)
 
 
-def _bundle_name_completer(prefix, **kwargs):
-    return _existing_bundles()
+def _bundle_name_completer(prefix, parsed_args, **kwargs):
+    already_given = set(getattr(parsed_args, "name", None) or [])
+    return [bundle for bundle in _existing_bundles() if bundle not in already_given]
 
 
 def delete_bundle(
@@ -46,35 +50,49 @@ def delete_bundle(
     bundle_name: str,
     force: bool = False,
     also_remote: bool = False,
+    repo_locks: dict[str, threading.Lock] | None = None,
 ):
     def handle_repo(runner: UtilsRunner, repo: str):
-        runner = runner.with_params(cwd=get_repo_folder(repo))
-        wt_bundle_repo_folder = get_worktree_bundle_repo_folder(bundle_name, repo)
-        runner.run(
-            ["git", "worktree", "unlock", wt_bundle_repo_folder],
-            handle_exceptions={
-                f"'{wt_bundle_repo_folder}' is not locked": ignore_error,
-                f"'{wt_bundle_repo_folder}' is not a working tree": ignore_error,
-            },
-        )
-        runner.run(
-            ["git", "worktree", "remove", wt_bundle_repo_folder, *(["--force"] if force else [])],
-            handle_exceptions={
-                f"fatal: '{wt_bundle_repo_folder}' is not a working tree": ignore_error,
-            },
-        )
-        runner.delete_branch_and_remote_ref(
-            repo=repo,
-            bundle_name=bundle_name,
-            handle_exceptions={f"error: branch '{bundle_name}' not found": ignore_error},
-        )
-        if also_remote:
+        # Every step below writes into the shared repository (worktree metadata, refs):
+        # when several bundles are deleted at once, they must not touch the same one
+        # concurrently, git would fail to lock `packed-refs`. Repositories are still
+        # handled in parallel.
+        with repo_locks[repo] if repo_locks else nullcontext():
+            runner = runner.with_params(cwd=get_repo_folder(repo))
+            wt_bundle_repo_folder = get_worktree_bundle_repo_folder(bundle_name, repo)
             runner.run(
-                ["git", "push", get_remote_dev_repo(repo), "--delete", bundle_name],
+                ["git", "worktree", "unlock", wt_bundle_repo_folder],
                 handle_exceptions={
-                    f"error: unable to delete '{bundle_name}': remote ref does not exist": ignore_error,
+                    f"'{wt_bundle_repo_folder}' is not locked": ignore_error,
+                    f"'{wt_bundle_repo_folder}' is not a working tree": ignore_error,
                 },
             )
+            runner.run(
+                [
+                    "git",
+                    "worktree",
+                    "remove",
+                    wt_bundle_repo_folder,
+                    *(["--force"] if force else []),
+                ],
+                handle_exceptions={
+                    f"fatal: '{wt_bundle_repo_folder}' is not a working tree": ignore_error,
+                },
+            )
+            runner.delete_branch_and_remote_ref(
+                repo=repo,
+                bundle_name=bundle_name,
+                handle_exceptions={
+                    f"error: branch '{bundle_name}' not found": ignore_error,
+                },
+            )
+            if also_remote:
+                runner.run(
+                    ["git", "push", get_remote_dev_repo(repo), "--delete", bundle_name],
+                    handle_exceptions={
+                        f"error: unable to delete '{bundle_name}': remote ref does not exist": ignore_error,
+                    },
+                )
 
     runner.parallel_run(Tree("Repositories"), get_repos(), handle_repo)
     runner.run(["rm", "-rf", get_worktree_bundle_folder(bundle_name)])
@@ -101,24 +119,51 @@ def delete_bundle(
     print("[green]Done[/green]")
 
 
+def delete_bundles(
+    runner: UtilsRunner,
+    *,
+    bundle_names: list[str],
+    force: bool = False,
+    also_remote: bool = False,
+):
+    """Delete several bundles at once, one thread per bundle."""
+    repo_locks = {repo: threading.Lock() for repo in get_repos()}
+
+    def handle_bundle(runner: UtilsRunner, bundle_name: str):
+        delete_bundle(
+            runner,
+            bundle_name=bundle_name,
+            force=force,
+            also_remote=also_remote,
+            repo_locks=repo_locks,
+        )
+
+    runner.parallel_run(Tree("Bundles"), bundle_names, handle_bundle)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "name", help="Name of the bundle to delete", type=str
+        "name",
+        help="Name of the bundle(s) to delete",
+        type=str,
+        nargs="+",
     ).completer = _bundle_name_completer
-    parser.add_argument("--force", help="Whether to force remove", action="store_true")
     parser.add_argument(
-        "--also-remote", help="Whether to also delete the remote bundle", action="store_true"
+        "--force",
+        help="Whether to force remove",
+        action="store_true",
     )
     parser.add_argument(
-        "--force", help="Whether to force delete the bundle", action="store_true"
+        "--also-remote",
+        help="Whether to also delete the remote bundle",
+        action="store_true",
     )
     argcomplete.autocomplete(parser)
     args = parser.parse_args()
-    delete_bundle(
-        runner=UtilsRunner(),
-        bundle_name=clean_bundle_name(args.name),
+    delete_bundles(
+        UtilsRunner(),
+        bundle_names=[clean_bundle_name(name) for name in args.name],
         force=args.force,
         also_remote=args.also_remote,
-        force=args.force,
     )
