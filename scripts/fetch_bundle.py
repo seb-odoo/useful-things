@@ -58,6 +58,9 @@ for branch in response["branches"]:
 
 def handle_commit(runner: UtilsRunner, commit):
     repo = commit["repo"]
+    if repo not in get_repos():
+        # runbot knows about all the repositories, `config.py` only about the cloned ones
+        return
     wt_repo_folder = get_worktree_bundle_repo_folder(bundle_name, repo)
     if make_branch_by_repo[repo]:
         remote_dev_branch_name = get_remote_dev_branch_name(bundle_name, repo)
