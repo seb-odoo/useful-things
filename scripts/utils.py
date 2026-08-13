@@ -81,26 +81,65 @@ class UtilsRunner(Runner):
         on_existing=None,
     ):
         target_folder = get_worktree_bundle_repo_folder(bundle_name, repo)
-        handle_exceptions = None
-        if on_existing:
-            handle_exceptions = {
-                f"fatal: '{target_folder}' already exists": on_existing,
-                f"fatal: '{bundle_name}' is already used by worktree at '{target_folder}'": on_existing,
-                f"fatal: '{bundle_name}' is already checked out at '{target_folder}'": on_existing,
-            }
-        self.run(
+        repo_folder = get_repo_folder(repo)
+        cmd = (
             ["git", "worktree", "add"]
             + (["-B", bundle_name] if make_branch else [])
             + [target_folder, target_ref]
-            + (["--track"] if track else []),
-            cwd=get_repo_folder(repo),
-            handle_exceptions=handle_exceptions,
+            + (["--track"] if track else [])
+        )
+        self.run(
+            cmd,
+            cwd=repo_folder,
+            handle_exceptions=self._handle_branch_holder(
+                branch=bundle_name,
+                cwd=repo_folder,
+                retry=cmd,
+                target_folder=target_folder,
+                on_existing=on_existing,
+            ),
         )
         self.run(
             ["git", "worktree", "lock", "--reason", WORKTREE_LOCK_REASON, target_folder],
-            cwd=get_repo_folder(repo),
+            cwd=repo_folder,
             handle_exceptions={f"'{target_folder}' is already locked": ignore_error},
         )
+
+    def _handle_branch_holder(self, *, branch, cwd, retry, target_folder=None, on_existing=None):
+        """Build a `handle_exceptions` handler for a command another worktree on `branch` blocks.
+
+        The holder is either the bundle's own folder, which the caller knows how to reuse through
+        `on_existing`, or a worktree created inside a dev container and never removed: its path only
+        exists in the container, so on the host the registration reads `prunable` while it still
+        keeps the branch checked out. Such an entry goes and the command runs again.
+        """
+        reuse_messages = (
+            [
+                f"fatal: '{target_folder}' already exists",
+                f"fatal: '{branch}' is already used by worktree at '{target_folder}'",
+                f"fatal: '{branch}' is already checked out at '{target_folder}'",
+            ]
+            if target_folder and on_existing
+            else []
+        )
+
+        def handle(runner, e):
+            for message in reuse_messages:
+                if message in e.stderr:
+                    on_existing(runner)
+                    return message
+            match = re.search(r"is already (?:checked out|used by worktree) at '([^']+)'", e.stderr)
+            if not match or not self._release_branch_from_worktrees(
+                runner.with_params(cwd=cwd), branch, prunable_only=True
+            ):
+                # A live worktree holds the branch: git's own error names it, so let it through.
+                return None
+            # Same handler on the retry: the branch was the first thing git looked at, the bundle
+            # folder it finds next is the caller's to reuse.
+            runner.run(retry, cwd=cwd, handle_exceptions=handle)
+            return match.group(0)
+
+        return handle
 
     def delete_branch_and_remote_ref(self, *, repo, bundle_name, handle_exceptions=None):
         runner = self.with_params(cwd=get_repo_folder(repo))
@@ -109,13 +148,17 @@ class UtilsRunner(Runner):
         self._release_branch_from_worktrees(runner, bundle_name)
         runner.run(["git", "branch", "-D", bundle_name], handle_exceptions=handle_exceptions)
 
-    def _release_branch_from_worktrees(self, runner, branch):
+    def _release_branch_from_worktrees(self, runner, branch, prunable_only=False):
         """Take `branch` out of the worktrees holding it, which otherwise block `git branch -D`.
 
-        A bundle still active in another repo keeps a worktree on the branch, and a Claude worktree
-        created inside a dev container leaves a registration under /tmp behind once the container is
-        gone.
+        A bundle still active in another repo keeps a worktree on the branch, and a worktree created
+        inside a dev container leaves a registration behind once the container is gone, under /tmp
+        for a Claude worktree and under /workspace for a test-warden server one. `prunable_only`
+        keeps the live worktrees on their branch, for a caller that only needs the leftovers gone.
+
+        Returns the paths released, so a caller can tell "nothing to release" from "recovered".
         """
+        released = []
         res = runner.run(["git", "worktree", "list", "--porcelain"])
         for block in res.stdout.strip().split("\n\n"):
             fields = {}
@@ -126,11 +169,15 @@ class UtilsRunner(Runner):
                 continue
             if "prunable" in fields:
                 # Only this branch's registrations go: `git worktree prune` would also drop those of
-                # dev container worktrees still in use, whose /tmp path never exists on the host.
+                # dev container worktrees still in use, whose path never exists on the host.
                 runner.run(["git", "worktree", "remove", "--force", fields["worktree"]])
+            elif prunable_only:
+                continue
             else:
                 # Detached at the same commit, so the repos building against it see the same code.
                 runner.run(["git", "-C", fields["worktree"], "switch", "--detach"])
+            released.append(fields["worktree"])
+        return released
 
     def _devcontainer_folder_uri(self, bundle_folder):
         """Build the VS Code folder-URI that opens `bundle_folder` attached to its dev container.
