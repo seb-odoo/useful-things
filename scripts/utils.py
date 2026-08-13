@@ -230,6 +230,8 @@ class UtilsRunner(Runner):
             match = re.search(r"fatal: couldn't find remote ref\s+([^\s]+)", e.stderr)
             if match:
                 gone_ref = match.group(1)
+                if gone_ref not in ref:
+                    return
                 if remote_ref_manager:
                     remote_ref_manager.add_gone(repo, gone_ref)
                 runner.git_fetch(

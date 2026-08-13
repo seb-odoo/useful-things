@@ -35,8 +35,11 @@ def handle_repo_remote(runner: UtilsRunner, repo, remote, branch_r):
     ]
     dev = remote == get_remote_dev_repo(repo)
     if dev:
-        res = runner.run(["git", "branch", "--format=%(refname:short)"], capture_output=True)
-        to_fetch = [line.strip() for line in res.stdout.splitlines() if "HEAD" not in line]
+        res = runner.run(
+            ["git", "for-each-ref", "--format=%(refname:short)", "refs/heads/"],
+            capture_output=True,
+        )
+        to_fetch = [line.strip() for line in res.stdout.splitlines()]
     else:
         to_fetch = sticky_bundles
     if refs_to_delete := [
