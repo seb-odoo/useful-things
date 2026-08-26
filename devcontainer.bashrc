@@ -185,3 +185,9 @@ function odoo-venv-17() {
 function odoo-venv() {
 	source /home/seb/virtualenvs/odoo20/bin/activate
 }
+
+# Add the claude wrapper to PATH once, as BASH_ENV re-runs this file in every nested shell.
+case ":$PATH:" in
+	*":$HOME/.claude/bin:"*) ;;
+	*) export PATH="$HOME/.claude/bin:$PATH" ;;
+esac
