@@ -119,6 +119,6 @@ sudo npm install postcss stylelint stylelint-config-standard-scss es-check -g
 
 # install cinnamon desktop
 
-# vscode: eslint, prettier, gitlens
+# vscode: eslint, prettier
 
 # rsync -avzP --exclude "*[Cc]ache/" --exclude ".[cC]ache/" --exclude '[Tt]mp/' --exclude '[tT]emp/' --exclude '[tT]rash/' --exclude '[cC]rash [Rr]eports/' /home/seb/ seb@10.30.71.138:/home/seb/
