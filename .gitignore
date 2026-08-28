@@ -3,3 +3,5 @@
 __pycache__/
 # js tooling
 node_modules
+# ruff
+.ruff_cache/
