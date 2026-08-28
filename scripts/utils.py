@@ -300,8 +300,11 @@ class UtilsRunner(Runner):
 
     def open_devcontainer(self, *, bundle_name):
         """Open VS Code attached to an existing bundle's dev container (no worktree/npm setup)."""
-        bundle_folder = get_worktree_bundle_folder(bundle_name)
-        self.run(["code", "--folder-uri", self._devcontainer_folder_uri(bundle_folder)])
+        self.open_devcontainer_folder(folder=get_worktree_bundle_folder(bundle_name))
+
+    def open_devcontainer_folder(self, *, folder):
+        """Same, for any folder holding a .devcontainer, bundle or not."""
+        self.run(["code", "--folder-uri", self._devcontainer_folder_uri(folder)])
 
     def prepare_worktree_bundle_folder(self, *, bundle_name):
         worktree_bundle_folder = get_worktree_bundle_folder(bundle_name)
