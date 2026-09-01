@@ -1,3 +1,5 @@
+# the real per-machine config: never committed, see devcontainer/config.env.example
+config.env
 # compiled python files
 *.py[co]
 __pycache__/

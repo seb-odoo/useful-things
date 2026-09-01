@@ -1,0 +1,155 @@
+// The dev container every bundle opens, minus whatever is optional: those come back as
+// devcontainer.fragment.json files, merged in by build.py, so a machine that has none of them
+// still gets a container that builds and runs.
+//
+// @KEY@ placeholders are expanded from config.env (see config.env.example beside this file,
+// read by config.py). Edit this file, never the generated one.
+{
+  "name": "${localWorkspaceFolderBasename} (Claude sandbox)",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "remoteUser": "vscode",
+  // 1. Disable this to stop VS Code from corrupting Podman's keep-id user namespace mapping
+  "updateRemoteUserUID": true,
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,Z",
+  "workspaceFolder": "/workspace",
+  "mounts": [
+    "source=@REPO_ROOT@/odoo/.git,target=@REPO_ROOT@/odoo/.git,type=bind,Z",
+    "source=@REPO_ROOT@/enterprise/.git,target=@REPO_ROOT@/enterprise/.git,type=bind,Z",
+    "source=@REPO_ROOT@/design-themes/.git,target=@REPO_ROOT@/design-themes/.git,type=bind,Z",
+    "source=@REPO_ROOT@/documentation/.git,target=@REPO_ROOT@/documentation/.git,type=bind,Z",
+    "source=@REPO_ROOT@/upgrade/.git,target=@REPO_ROOT@/upgrade/.git,type=bind,Z",
+    "source=@REPO_ROOT@/upgrade-util/.git,target=@REPO_ROOT@/upgrade-util/.git,type=bind,Z",
+    // Workspace .claude, .vscode and odools.toml are symlinks in each bundle pointing at these
+    // absolute host paths; bind them at the same path (like the .git mounts above) so the symlinks
+    // resolve in the container. Without this the workspace settings.json never loads, so
+    // search.exclude (*.po/*.pot) is ignored and the Odoo extension can't read odools.toml.
+    // The shared .claude is versioned in the claude-config repo, so the host path is itself a
+    // symlink into it: mount the real directory, not the link.
+    "source=@HOME@/.claude/external/src-odoo-claude,target=@WORKTREE_ROOT@/.claude,type=bind,Z",
+    "source=@WORKTREE_ROOT@/.vscode,target=@WORKTREE_ROOT@/.vscode,type=bind,Z",
+    "source=@USEFUL_THINGS@/odools.toml,target=@USEFUL_THINGS@/odools.toml,type=bind,readonly,Z",
+    "source=@HOME@/.claude,target=/home/vscode/.claude,type=bind,Z",
+    // Kilo Code global config (kilo.jsonc with skills.paths -> ~/.claude/skills and instructions ->
+    // Claude memory). Mounted at the same path so the in-container Kilo shares skills/memory with
+    // Claude. ~/.claude (above) already brings the skills + global CLAUDE.md it points at.
+    "source=@CONFIG_ROOT@/kilo,target=/home/vscode/.config/kilo,type=bind,Z",
+    // Kilo session/state/cache, shared across ALL containers + the host (lowercase z: shared
+    // relabel for the parallel containers, like the extensions cache below). kilo.db holds the
+    // sessions/messages; a session's project is keyed by worktree path and every container uses
+    // /workspace, so a session started in one container is resumable from any other and persists
+    // across restarts (the data lives on the host). auth.json shares the login. storage/ holds
+    // session_diff; state/ holds locks + background-process; cache/ holds models.json. All are
+    // seb-owned (uid 1001) and keep-id maps vscode -> seb, so writes work. kilo.db is on local
+    // ext4, so SQLite WAL is safe to share via bind mount.
+    "source=@SHARE_ROOT@/kilo,target=/home/vscode/.local/share/kilo,type=bind,z",
+    "source=@STATE_ROOT@/kilo,target=/home/vscode/.local/state/kilo,type=bind,z",
+    // Kilo also writes a SIBLING state dir kilo-sandbox-policy (sandbox network/fs policy
+    // snapshots), not under kilo/. It must be mounted too: the container's /home/vscode/.local/state
+    // parent is root-owned (podman auto-creates mount-point parents as root), so without this mount
+    // the vscode user cannot mkdir kilo-sandbox-policy and Kilo crashes with EACCES on prompt.
+    "source=@STATE_ROOT@/kilo-sandbox-policy,target=/home/vscode/.local/state/kilo-sandbox-policy,type=bind,z",
+    "source=@CACHE_ROOT@/kilo,target=/home/vscode/.cache/kilo,type=bind,z",
+    "source=@CONFIG_ROOT@/Code/User,target=/home/vscode/.config/Code/User,type=bind,Z",
+    "source=@VENV_ROOT@,target=@VENV_ROOT@,type=bind,Z",
+    "source=@SHARE_ROOT@/Odoo,target=/home/vscode/.local/share/Odoo,type=bind,z",
+    // test-warden (parallel JS/Hoot test runner, ~/repo/TestWarden): reuse the host-built engine
+    // binary + bundled client at the same path (like the venv above); rw so the engine can write
+    // engine/.cache/. It launches chrome-headless-shell (auto-downloaded to $HOME/.cache/warden),
+    // not the image's Chrome (which would need a display), so share that cache to fetch it once.
+    // Lowercase z: shared relabel for the parallel containers, like the filestore/extensions mounts.
+    "source=@REPO_ROOT@/TestWarden,target=@REPO_ROOT@/TestWarden,type=bind,z",
+    "source=@CACHE_ROOT@/warden,target=/home/vscode/.cache/warden,type=bind,z",
+    // DiscussModelParser (~/repo/DiscussModelParser): generates the @types/models.d.ts files
+    // for the discuss/mail JS models. Same path as the host so the wrapper in
+    // devcontainer.bashrc works on both sides; dist/type-gen-idx.mjs is a self-contained
+    // rollup bundle (Node built-ins only), so the image's Node 22 is enough, no install.
+    // rw so `git pull` + `npm run build` work in here (config.json's whitelist is inlined
+    // into dist/ at build time). Lowercase z: shared relabel, like TestWarden above.
+    "source=@REPO_ROOT@/DiscussModelParser,target=@REPO_ROOT@/DiscussModelParser,type=bind,z",
+    "source=@HOME@/.local/bin/gh,target=/usr/local/bin/gh,type=bind,readonly,z",
+    // Persist VS Code's extensions across bundles/rebuilds so they install once, not per container.
+    // Bind (not a named volume) because no-new-privileges/cap-drop ALL means no runtime sudo to chown
+    // a root-owned volume; keep-id + updateRemoteUserUID maps vscode -> host seb (1001), so a
+    // seb-owned host dir is writable. Lowercase z: shared SELinux relabel for the parallel containers.
+    "source=@CACHE_ROOT@/devcontainer/vscode-server-extensions,target=/home/vscode/.vscode-server/extensions,type=bind,z",
+    // The container's ~/.bash_aliases, and BASH_ENV (see below), so every non-interactive shell
+    // sources it too. rw so it can be patched from inside the container; the host shell sources
+    // useful-things/.bashrc instead and never this file, so an in-container edit cannot land in a
+    // host shell. A syntax error here breaks every container shell including the agent's, so
+    // `bash -n` it after editing. Lowercase z: shared relabel, like the caches above.
+    "source=@USEFUL_THINGS@/devcontainer.bashrc,target=/home/vscode/.bash_aliases,type=bind,z",
+    "source=@USEFUL_THINGS@/claude-autoopen/claude-autoopen-0.0.1.vsix,target=/home/vscode/.claude-autoopen.vsix,type=bind,readonly,Z",
+    "source=@USEFUL_THINGS@/install-claude-autoopen.sh,target=/home/vscode/.install-claude-autoopen.sh,type=bind,readonly,Z",
+    "source=/var/run/postgresql,target=/var/run/postgresql,type=bind"
+  ],
+  "postCreateCommand": "grep -q '@VENV@/bin/activate' ~/.bashrc || echo 'source @VENV@/bin/activate' >> ~/.bashrc",
+  // Install the in-house claude-autoopen extension (see useful-things/claude-autoopen), which opens a
+  // Claude Code tab on window open when none is present. Idempotent: skips if already installed.
+  "postAttachCommand": "bash /home/vscode/.install-claude-autoopen.sh",
+  // Reached via the host nginx proxy (~/repo/useful-things/proxy) by bundle name, so don't let
+  // every window forward Odoo to the same host port and collide.
+  "portsAttributes": {
+    "8069": { "onAutoForward": "ignore" },
+    "8072": { "onAutoForward": "ignore" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropic.claude-code",
+        "kilocode.kilo-code",
+        "charliermarsh.ruff",
+        "dbaeumer.vscode-eslint",
+        "tyriar.sort-lines",
+        "odoo.odoo",
+        "odoo.owl-vision"
+      ],
+      "settings": {
+        // Access is via the nginx proxy by name; don't forward Odoo ports to the host.
+        "remote.autoForwardPorts": false
+      }
+    }
+  },
+  "runArgs": [
+    "--net=bridge",
+    "--cap-drop=ALL",
+    "--security-opt=no-new-privileges",
+    "--userns=keep-id",
+  ],
+  "containerEnv": {
+    // Source the dev helpers (odoo-bin/ott/obet/...) in non-interactive shells (e.g. the agent's
+    // `bash -c`), which don't read ~/.bashrc. ~/.bash_aliases is the mounted devcontainer.bashrc.
+    "BASH_ENV": "/home/vscode/.bash_aliases",
+    "HOME": "/home/vscode",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
+    // Disable commit signing in the sandbox. The repo's bind-mounted .git/config (shared with the
+    // host) sets commit.gpgsign=true, and the SSH signingKey @HOME@/.ssh/id_rsa.pub isn't mounted
+    // here, so git aborts with "Couldn't load public key". A --global override loses to repo-local
+    // config and editing .git/config would change the host too; GIT_CONFIG_* env takes precedence
+    // over all config files and is container-only. Host commits stay signed.
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "commit.gpgsign",
+    "GIT_CONFIG_VALUE_0": "false",
+    "ODOO_PROXY_HOST": "${localWorkspaceFolderBasename}",
+    // Auto-allow every Kilo tool inside the container (no permission prompts), like Claude's
+    // dontAsk + allow-all hook here. KILO_CONFIG_CONTENT is inline JSON with high precedence that
+    // deep-merges over the mounted ~/.config/kilo/kilo.jsonc. Container-only (set here, not on the
+    // host), so the host Kilo keeps its normal "ask" policy.
+    // IMPORTANT: the allow is scoped to agent.code, NOT a top-level "*" wildcard. Kilo evaluates
+    // permission last-match-wins and the plan agent builds its stack as: base "*":deny, then
+    // read-only bash allows, then "edit":deny (with plan-file exceptions). A global allow would
+    // land AFTER those denies and silently disable plan mode's read-only guarantee. Scoping to
+    // agent["code"] makes the default code agent prompt-free while leaving the plan agent's own
+    // deny rules intact (verified: plan still denies edit on normal files, allows .kilo/plans/*.md).
+    "KILO_CONFIG_CONTENT": "{\"agent\":{\"code\":{\"permission\":{\"*\":\"allow\",\"read\":\"allow\",\"edit\":\"allow\",\"write\":\"allow\",\"bash\":\"allow\",\"glob\":\"allow\",\"grep\":\"allow\",\"list\":\"allow\",\"task\":\"allow\",\"webfetch\":\"allow\",\"websearch\":\"allow\",\"external_directory\":\"allow\",\"question\":\"allow\",\"doom_loop\":\"allow\",\"todowrite\":\"allow\",\"todoread\":\"allow\",\"skill\":\"allow\",\"lsp\":\"allow\",\"semantic_search\":\"allow\",\"codesearch\":\"allow\",\"kilo_memory_save\":\"allow\",\"kilo_memory_recall\":\"allow\"}}}}",
+    // Make the reused 3.12 venv the default interpreter for every process (not just interactive
+    // shells), so odoo-bin (#!/usr/bin/env python3) doesn't fall back to the base image's 3.10.
+    // Hardcoded: ${containerEnv:PATH} is NOT resolved inside containerEnv (only in remoteEnv) and
+    // would clobber PATH literally. Trailing dirs mirror the base image PATH.
+    "PATH": "@VENV@/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "PGHOST": "@PG_HOST@",
+    "PGUSER": "@PG_USER@",
+    "VIRTUAL_ENV": "@VENV@"
+  }
+}
