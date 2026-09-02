@@ -44,6 +44,14 @@ class Runner:
         on_success=None,
         **kwargs,
     ):
+        """Run `cmd` and return its `CompletedProcess`, or `None` on a tolerated failure.
+
+        `handle_exceptions` says which failures are tolerated, either as a
+        `{message in stderr: handler}` mapping, `ignore_error` being the handler that only
+        marks the command, or as a `handler(runner, error)` deciding on the spot, tolerating
+        the failure when it returns something truthy. A caller reading the result of a command
+        it lets fail has to handle that `None`.
+        """
         runner = self
         cwd = cwd or self.cwd
         local_live = False
