@@ -25,6 +25,7 @@ remote_dev_by_repo = {
     "upgrade-util": "odoo-dev",
     "upgrade": "odoo-dev",
 }
+FILESTORE_CONTAINER = "/home/seb/.local/share/Odoo/filestore"
 WORKTREE_CONTAINER = "/home/seb/src/odoo"
 STICKY_BUNDLES = [
     "master",

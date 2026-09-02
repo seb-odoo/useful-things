@@ -4,6 +4,7 @@ import fire
 
 from config import (
     BUNDLE_SUFFIX,
+    FILESTORE_CONTAINER,
     STICKY_BUNDLES,
     folder_by_repo,
     remote_by_repo,
@@ -26,6 +27,11 @@ def get_base_from_bundle_name(bundle_name):
 def get_bundle_name_from_base_and_name(base, name):
     """Get the bundle name from the base and the name."""
     return f"{base}-{name}{BUNDLE_SUFFIX}"
+
+
+def get_filestore_bundle_prefix(bundle_name):
+    """Get the path the filestores of a bundle start with, one per database."""
+    return f"{FILESTORE_CONTAINER}/{bundle_name}"
 
 
 def get_remote_branch_name(bundle_name, repo):

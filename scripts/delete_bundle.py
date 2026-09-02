@@ -19,6 +19,7 @@ import argcomplete
 from command_runner import ignore_error
 from commands import (
     clean_bundle_name,
+    get_filestore_bundle_prefix,
     get_remote_dev_repo,
     get_repo_folder,
     get_repos,
@@ -161,7 +162,7 @@ def delete_bundle(
     runner.run(["rm", "-rf", get_worktree_bundle_folder(bundle_name)])
 
     def handle_file(runner: UtilsRunner, file: str):
-        if not file.startswith(f"/home/seb/.local/share/Odoo/filestore/{bundle_name}"):
+        if not file.startswith(get_filestore_bundle_prefix(bundle_name)):
             print(f"[red]Skipping {file} as it doesn't match the expected pattern[/red]")
             return
         runner.run(["rm", "-rf", file])
@@ -176,7 +177,7 @@ def delete_bundle(
 
     runner.parallel_run(
         Tree("Files"),
-        glob.glob(f"/home/seb/.local/share/Odoo/filestore/{bundle_name}*"),
+        glob.glob(f"{get_filestore_bundle_prefix(bundle_name)}*"),
         handle_file,
     )
     print("[green]Done[/green]")

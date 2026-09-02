@@ -26,6 +26,8 @@ from commands import (
 # isn't trivially parseable and the value is stable for this setup).
 WORKSPACE_FOLDER = "/workspace"
 
+_USEFUL_THINGS_FOLDER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # Worktrees are locked so `git worktree prune`/`git gc` can't delete them. Inside a dev
 # container the base repo's .git is mounted but the worktree paths (/home/seb/src/...) are not,
 # so an in-container prune/gc would otherwise see every worktree as missing and wipe the shared
@@ -315,7 +317,7 @@ class UtilsRunner(Runner):
             [
                 "ln",
                 "-sfn",
-                "/home/seb/repo/useful-things/odools.toml",
+                f"{_USEFUL_THINGS_FOLDER}/odools.toml",
                 f"{worktree_bundle_folder}/odools.toml",
             ],
         )
