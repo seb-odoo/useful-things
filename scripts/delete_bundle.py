@@ -235,9 +235,7 @@ if __name__ == "__main__":
     )
     argcomplete.autocomplete(parser)
     args = parser.parse_args()
-    bundle_names = expand_bundle_names(
-        [clean_bundle_name(name) for name in args.name]
-    )
+    bundle_names = expand_bundle_names([clean_bundle_name(name) for name in args.name])
     if not bundle_names:
         parser.error("no bundle to delete")
     try:

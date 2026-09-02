@@ -130,7 +130,9 @@ class UtilsRunner(Runner):
                     return message
             match = re.search(r"is already (?:checked out|used by worktree) at '([^']+)'", e.stderr)
             if not match or not self._release_branch_from_worktrees(
-                runner.with_params(cwd=cwd), branch, prunable_only=True
+                runner.with_params(cwd=cwd),
+                branch,
+                prunable_only=True,
             ):
                 # A live worktree holds the branch: git's own error names it, so let it through.
                 return None
@@ -259,7 +261,7 @@ class UtilsRunner(Runner):
                 "-sfn",
                 f"{get_worktree_container_folder()}/.devcontainer",
                 f"{bundle_folder}/.devcontainer",
-            ]
+            ],
         )
         self._install_js_tooling(runner, bundle_name=bundle_name, base_folder=base_folder)
         runner.run(["code", "--folder-uri", self._devcontainer_folder_uri(bundle_folder)])

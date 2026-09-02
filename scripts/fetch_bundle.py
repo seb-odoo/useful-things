@@ -104,7 +104,10 @@ for repo in get_repos():
     commit_by_repo.setdefault(repo, {"repo": repo})
 
 runner.parallel_run(
-    Tree("Commits"), list(commit_by_repo.values()), handle_commit, lambda c: c["repo"]
+    Tree("Commits"),
+    list(commit_by_repo.values()),
+    handle_commit,
+    lambda c: c["repo"],
 )
 runner.finish_worktree_bundle_folder(bundle_name=bundle_name)
 print("[green]Done[/green]")

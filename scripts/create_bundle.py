@@ -25,7 +25,9 @@ runner = UtilsRunner()
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
-    "base", help="Name of the base to create the bundle for. Eg. master", type=str
+    "base",
+    help="Name of the base to create the bundle for. Eg. master",
+    type=str,
 ).completer = lambda *args, **kwargs: STICKY_BUNDLES
 parser.add_argument("name", help="Name of the bundle to create", type=str)
 args = parser.parse_args()

@@ -172,7 +172,7 @@ class Runner:
                             func,
                             runner.tree_add(key(item) if key else item),
                             item,
-                        )
+                        ),
                     )
             for future in futures:
                 future.result()

@@ -79,6 +79,7 @@ def get_worktree_base_folder(base):
     """Get the worktree base folder name from the base."""
     return f"{WORKTREE_CONTAINER}/{base}"
 
+
 def get_worktree_base_repo(base, repo):
     """Get the worktree base folder name from the base for a given repo."""
     return f"{WORKTREE_CONTAINER}/{base}/{repo}"

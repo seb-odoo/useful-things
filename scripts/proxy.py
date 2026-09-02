@@ -37,7 +37,7 @@ def _running_dev_containers():
             capture_output=True,
             text=True,
             check=True,
-        ).stdout
+        ).stdout,
     )
     for container in info:
         labels = container.get("Config", {}).get("Labels") or {}
@@ -46,7 +46,8 @@ def _running_dev_containers():
             continue
         networks = container.get("NetworkSettings", {}).get("Networks") or {}
         ip = (networks.get("podman") or {}).get("IPAddress") or container.get(
-            "NetworkSettings", {}
+            "NetworkSettings",
+            {},
         ).get("IPAddress")
         if not ip:
             continue
