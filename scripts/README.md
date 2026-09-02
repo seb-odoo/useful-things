@@ -135,9 +135,10 @@ Removes a bundle from the local system (worktrees, branches, filestore, database
   see `activate-global-python-argcomplete`)
 - Accepts several bundles at once, deleted in parallel (one thread per bundle)
 - Accepts `fnmatch` patterns, expanded against the existing worktree folders: `'saas-19.*'`
-- Leaves a bundle untouched, and exits 1, when one of its worktrees holds uncommitted files: they
-  are listed, and the other bundles of the run are still deleted
-- `--force`: delete such a bundle anyway, uncommitted files included
+- Leaves a bundle untouched, and exits 1, when one of its worktrees holds uncommitted files or its
+  branch holds commits no remote has: they are listed, and the other bundles of the run are still
+  deleted
+- `--force`: delete such a bundle anyway, unsaved work included
 - `--also-remote`: also deletes the remote dev branch. ⚠️ Do not use on branches of others!
 
 ```bash

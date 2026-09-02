@@ -46,31 +46,42 @@ def _bundle_name_completer(prefix, parsed_args, **kwargs):
     return [bundle for bundle in _existing_bundles() if bundle not in already_given]
 
 
-def _dirty_worktrees(runner: UtilsRunner, bundle_name: str):
-    """Map the bundle worktrees holding uncommitted files to their `git status` lines.
+def _unsaved_work(runner: UtilsRunner, bundle_name: str):
+    """Map the repos of a bundle to the work its deletion would lose, by kind.
 
-    Only the worktrees still on disk are looked at, and `git status --porcelain` sees a worktree
-    the way `git worktree remove` does: the tooling files and the node_modules of a bundle are
-    ignored, so they don't count as uncommitted.
+    A worktree is read the way `git worktree remove` reads it, so the tooling files and the
+    node_modules of a bundle don't count as uncommitted. A commit counts as saved as soon as a
+    remote ref holds it, the dev remote included.
     """
-    dirty = {}
+    unsaved = {}
     lock = threading.Lock()
 
     def handle_repo(runner: UtilsRunner, repo: str):
+        found = {}
         folder = get_worktree_bundle_repo_folder(bundle_name, repo)
-        if not os.path.isdir(folder):
-            return
+        if os.path.isdir(folder):
+            res = runner.run(
+                ["git", "status", "--porcelain"],
+                cwd=folder,
+                handle_exceptions={"fatal: not a git repository": ignore_error},
+            )
+            if res and res.stdout.strip():
+                found["uncommitted files"] = res.stdout.strip().splitlines()
         res = runner.run(
-            ["git", "status", "--porcelain"],
-            cwd=folder,
-            handle_exceptions={"fatal: not a git repository": ignore_error},
+            ["git", "log", "--format=%h %s", f"refs/heads/{bundle_name}", "--not", "--remotes"],
+            cwd=get_repo_folder(repo),
+            handle_exceptions={
+                f"fatal: ambiguous argument 'refs/heads/{bundle_name}'": ignore_error,
+            },
         )
         if res and res.stdout.strip():
+            found["unpushed commits"] = res.stdout.strip().splitlines()
+        if found:
             with lock:
-                dirty[repo] = res.stdout.strip().splitlines()
+                unsaved[repo] = found
 
-    runner.parallel_run(Tree("Worktree status"), get_repos(), handle_repo)
-    return dirty
+    runner.parallel_run(Tree("Unsaved work"), get_repos(), handle_repo)
+    return unsaved
 
 
 def expand_bundle_names(names: list[str]):
@@ -96,13 +107,13 @@ def delete_bundle(
     also_remote: bool = False,
     repo_locks: dict[str, threading.Lock] | None = None,
 ):
-    """Delete a bundle, unless one of its worktrees holds uncommitted files.
+    """Delete a bundle, unless one of its repos holds work the deletion would lose.
 
-    Returns those files by repo, empty once the bundle is deleted. Nothing is touched when they
-    are there: the bundle folder goes as a whole below, so they would be lost with it.
+    Returns that work by repo and by kind, empty once the bundle is deleted. Nothing is touched
+    when there is some: the bundle folder goes as a whole below, and the branch with it.
     """
-    if not force and (dirty := _dirty_worktrees(runner, bundle_name)):
-        return dirty
+    if not force and (unsaved := _unsaved_work(runner, bundle_name)):
+        return unsaved
 
     def handle_repo(runner: UtilsRunner, repo: str):
         # Every step below writes into the shared repository (worktree metadata, refs):
@@ -181,24 +192,24 @@ def delete_bundles(
 ):
     """Delete several bundles at once, one thread per bundle.
 
-    Returns the uncommitted files by repo of the bundles left alone, by bundle name. They are
-    reported by the caller: a `parallel_run` holds the live display until it is over.
+    Returns the unsaved work of the bundles left alone, by bundle name. It is reported by the
+    caller: a `parallel_run` holds the live display until it is over.
     """
     repo_locks = {repo: threading.Lock() for repo in get_repos()}
     skipped = {}
     lock = threading.Lock()
 
     def handle_bundle(runner: UtilsRunner, bundle_name: str):
-        dirty = delete_bundle(
+        unsaved = delete_bundle(
             runner,
             bundle_name=bundle_name,
             force=force,
             also_remote=also_remote,
             repo_locks=repo_locks,
         )
-        if dirty:
+        if unsaved:
             with lock:
-                skipped[bundle_name] = dirty
+                skipped[bundle_name] = unsaved
 
     runner.parallel_run(Tree("Bundles"), bundle_names, handle_bundle)
     return skipped
@@ -240,13 +251,15 @@ if __name__ == "__main__":
         # The tree above already shows the failing command with its stderr.
         print(f"[red]{' '.join(e.cmd)} failed[/red]")
         raise SystemExit(1) from None
-    for bundle_name, dirty in skipped.items():
-        print(f"[red]{bundle_name}: not deleted, uncommitted files (use --force):[/red]")
-        for repo, lines in dirty.items():
+    for bundle_name, unsaved in skipped.items():
+        print(f"[red]{bundle_name}: not deleted, the work below would be lost (use --force):[/red]")
+        for repo, found in unsaved.items():
             print(f"  [yellow]{repo}[/yellow]")
-            for line in lines[:10]:
-                print(f"    {line}")
-            if len(lines) > 10:
-                print(f"    ... and {len(lines) - 10} more")
+            for kind, lines in found.items():
+                print(f"    {kind}")
+                for line in lines[:10]:
+                    print(f"      {line}")
+                if len(lines) > 10:
+                    print(f"      ... and {len(lines) - 10} more")
     if skipped:
         raise SystemExit(1)
