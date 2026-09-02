@@ -226,7 +226,7 @@ if __name__ == "__main__":
     ).completer = _bundle_name_completer
     parser.add_argument(
         "--force",
-        help="Whether to force remove",
+        help="Whether to delete a bundle holding unsaved work",
         action="store_true",
     )
     parser.add_argument(
