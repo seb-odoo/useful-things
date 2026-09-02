@@ -11,6 +11,7 @@ import argparse
 import fnmatch
 import glob
 import os
+import subprocess
 import threading
 from contextlib import nullcontext
 
@@ -45,6 +46,33 @@ def _bundle_name_completer(prefix, parsed_args, **kwargs):
     return [bundle for bundle in _existing_bundles() if bundle not in already_given]
 
 
+def _dirty_worktrees(runner: UtilsRunner, bundle_name: str):
+    """Map the bundle worktrees holding uncommitted files to their `git status` lines.
+
+    Only the worktrees still on disk are looked at, and `git status --porcelain` sees a worktree
+    the way `git worktree remove` does: the tooling files and the node_modules of a bundle are
+    ignored, so they don't count as uncommitted.
+    """
+    dirty = {}
+    lock = threading.Lock()
+
+    def handle_repo(runner: UtilsRunner, repo: str):
+        folder = get_worktree_bundle_repo_folder(bundle_name, repo)
+        if not os.path.isdir(folder):
+            return
+        res = runner.run(
+            ["git", "status", "--porcelain"],
+            cwd=folder,
+            handle_exceptions={"fatal: not a git repository": ignore_error},
+        )
+        if res and res.stdout.strip():
+            with lock:
+                dirty[repo] = res.stdout.strip().splitlines()
+
+    runner.parallel_run(Tree("Worktree status"), get_repos(), handle_repo)
+    return dirty
+
+
 def expand_bundle_names(names: list[str]):
     """Expand the `fnmatch` patterns (e.g. `saas-19.*`) against the existing bundles.
 
@@ -68,6 +96,14 @@ def delete_bundle(
     also_remote: bool = False,
     repo_locks: dict[str, threading.Lock] | None = None,
 ):
+    """Delete a bundle, unless one of its worktrees holds uncommitted files.
+
+    Returns those files by repo, empty once the bundle is deleted. Nothing is touched when they
+    are there: the bundle folder goes as a whole below, so they would be lost with it.
+    """
+    if not force and (dirty := _dirty_worktrees(runner, bundle_name)):
+        return dirty
+
     def handle_repo(runner: UtilsRunner, repo: str):
         # Every step below writes into the shared repository (worktree metadata, refs):
         # when several bundles are deleted at once, they must not touch the same one
@@ -133,6 +169,7 @@ def delete_bundle(
         handle_file,
     )
     print("[green]Done[/green]")
+    return {}
 
 
 def delete_bundles(
@@ -142,19 +179,29 @@ def delete_bundles(
     force: bool = False,
     also_remote: bool = False,
 ):
-    """Delete several bundles at once, one thread per bundle."""
+    """Delete several bundles at once, one thread per bundle.
+
+    Returns the uncommitted files by repo of the bundles left alone, by bundle name. They are
+    reported by the caller: a `parallel_run` holds the live display until it is over.
+    """
     repo_locks = {repo: threading.Lock() for repo in get_repos()}
+    skipped = {}
+    lock = threading.Lock()
 
     def handle_bundle(runner: UtilsRunner, bundle_name: str):
-        delete_bundle(
+        dirty = delete_bundle(
             runner,
             bundle_name=bundle_name,
             force=force,
             also_remote=also_remote,
             repo_locks=repo_locks,
         )
+        if dirty:
+            with lock:
+                skipped[bundle_name] = dirty
 
     runner.parallel_run(Tree("Bundles"), bundle_names, handle_bundle)
+    return skipped
 
 
 if __name__ == "__main__":
@@ -182,9 +229,24 @@ if __name__ == "__main__":
     )
     if not bundle_names:
         parser.error("no bundle to delete")
-    delete_bundles(
-        UtilsRunner(),
-        bundle_names=bundle_names,
-        force=args.force,
-        also_remote=args.also_remote,
-    )
+    try:
+        skipped = delete_bundles(
+            UtilsRunner(),
+            bundle_names=bundle_names,
+            force=args.force,
+            also_remote=args.also_remote,
+        )
+    except subprocess.CalledProcessError as e:
+        # The tree above already shows the failing command with its stderr.
+        print(f"[red]{' '.join(e.cmd)} failed[/red]")
+        raise SystemExit(1) from None
+    for bundle_name, dirty in skipped.items():
+        print(f"[red]{bundle_name}: not deleted, uncommitted files (use --force):[/red]")
+        for repo, lines in dirty.items():
+            print(f"  [yellow]{repo}[/yellow]")
+            for line in lines[:10]:
+                print(f"    {line}")
+            if len(lines) > 10:
+                print(f"    ... and {len(lines) - 10} more")
+    if skipped:
+        raise SystemExit(1)
