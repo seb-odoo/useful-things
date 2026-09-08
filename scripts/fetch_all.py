@@ -42,11 +42,10 @@ def handle_repo_remote(runner: UtilsRunner, repo, remote, branch_r):
         to_fetch = [line.strip() for line in res.stdout.splitlines()]
     else:
         to_fetch = sticky_bundles
+    # Prune this remote's namespace only: seb-odoo also has a `master`, origin/master must survive.
+    get_ref = get_remote_dev_ref if dev else get_remote_ref
     if refs_to_delete := [
-        get_ref(branch, repo)
-        for branch in remote_branches
-        if branch not in to_fetch
-        for get_ref in (get_remote_ref, get_remote_dev_ref)
+        get_ref(branch, repo) for branch in remote_branches if branch not in to_fetch
     ]:
         runner.run(
             ["git", "update-ref", "--stdin"],

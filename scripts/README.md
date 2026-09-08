@@ -193,7 +193,7 @@ Syncs git remotes: fetches locally checked-out branches + sticky bundles; prunes
 
 - Dev remote: fetches all locally checked-out branches
 - Standard remote: fetches only sticky bundles (master, saas-*, 18.0, 17.0, 16.0)
-- Deletes remote refs outside those two sets
+- Deletes the handled remote's own refs outside those two sets
 
 ```bash
 $ python scripts/fetch_all.py
