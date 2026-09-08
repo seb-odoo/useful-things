@@ -5,6 +5,7 @@ import fire
 from config import (
     BUNDLE_SUFFIX,
     FILESTORE_CONTAINER,
+    MASTER_ONLY_REPOS,
     STICKY_BUNDLES,
     folder_by_repo,
     remote_by_repo,
@@ -14,8 +15,8 @@ from config import (
 
 
 def get_base_for_repo(base, repo):
-    """Get the base a given repo builds against: upgrade repos only live on master."""
-    return "master" if repo in ("upgrade", "upgrade-util") else base
+    """Get the base a given repo builds against: repos without version branches live on master."""
+    return "master" if repo in MASTER_ONLY_REPOS else base
 
 
 def get_base_from_bundle_name(bundle_name):
@@ -76,7 +77,7 @@ def get_repos():
 
 def get_sticky_bundles(repo):
     """Get the list of sticky bundles."""
-    if repo in ("upgrade", "upgrade-util"):
+    if repo in MASTER_ONLY_REPOS:
         return ["master"]
     return STICKY_BUNDLES
 

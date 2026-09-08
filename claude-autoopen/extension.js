@@ -7,9 +7,17 @@ const CLAUDE_VIEWTYPE = "claudeVSCodePanel";
 const CLAUDE_EXTENSION_ID = "anthropic.claude-code";
 const OPEN_COMMAND = "claude-vscode.editor.open";
 
-// Every /workspace bundle is created with exactly these 6 repo worktrees
-// (useful-things/scripts/config.py folder_by_repo). One terminal each, cd'd into the worktree.
-const REPOS = ["odoo", "enterprise", "design-themes", "documentation", "upgrade", "upgrade-util"];
+// Every /workspace bundle is created with these repo worktrees (useful-things/scripts/config.py
+// folder_by_repo). One terminal each, cd'd into the worktree.
+const REPOS = [
+  "odoo",
+  "enterprise",
+  "owl",
+  "design-themes",
+  "documentation",
+  "upgrade",
+  "upgrade-util",
+];
 
 function getClaudeTab() {
   for (const group of vscode.window.tabGroups.all) {
@@ -32,25 +40,24 @@ async function openRepoTerminals() {
   // Skip repos that already have a terminal (restored after a window reload) so we never
   // duplicate, mirroring hasClaudeTab()'s "open only if absent" guard.
   const open = new Set(vscode.window.terminals.map((terminal) => terminal.name));
-  // The extensions cache is shared by every dev container, so this also activates in
-  // non-bundle workspaces (e.g. workflow-hub) where the repo cwds don't exist and each
-  // createTerminal would pop an error. One stat on the first repo decides: every bundle has
-  // all 6 worktrees (config.py folder_by_repo), so a single check suffices (per-repo stats
-  // are remote round-trips that staggered the terminals).
-  let isBundle = true;
+  // createTerminal on a missing cwd pops an error, and a workspace can lack any of these repos:
+  // workflow-hub has none, a bundle older than a repo's folder_by_repo entry has all but that one.
+  let entries;
   try {
-    await vscode.workspace.fs.stat(vscode.Uri.joinPath(root, REPOS[0]));
+    entries = await vscode.workspace.fs.readDirectory(root);
   } catch {
-    isBundle = false;
+    entries = [];
   }
-  if (!isBundle) {
+  const present = new Set(entries.map(([name]) => name));
+  const repos = REPOS.filter((repo) => present.has(repo));
+  if (!repos.length) {
     if (!open.has("workspace")) {
       vscode.window.createTerminal({ name: "workspace", cwd: root }).show(true);
     }
     return;
   }
   let first;
-  for (const repo of REPOS) {
+  for (const repo of repos) {
     if (open.has(repo)) {
       continue;
     }

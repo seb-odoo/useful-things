@@ -6,6 +6,7 @@ folder_by_repo = {
     "documentation": f"{_ROOT}/documentation",
     "enterprise": f"{_ROOT}/enterprise",
     "odoo": f"{_ROOT}/odoo",
+    "owl": f"{_ROOT}/owl",
     "upgrade-util": f"{_ROOT}/upgrade-util",
     "upgrade": f"{_ROOT}/upgrade",
 }
@@ -14,6 +15,7 @@ remote_by_repo = {
     "documentation": "odoo",
     "enterprise": "odoo",
     "odoo": "odoo",
+    "owl": "origin",
     "upgrade-util": "odoo",
     "upgrade": "odoo",
 }
@@ -22,10 +24,12 @@ remote_dev_by_repo = {
     "documentation": "odoo-dev",
     "enterprise": "odoo-dev",
     "odoo": "odoo-dev",
+    "owl": "seb-odoo",
     "upgrade-util": "odoo-dev",
     "upgrade": "odoo-dev",
 }
 FILESTORE_CONTAINER = "/home/seb/.local/share/Odoo/filestore"
+MASTER_ONLY_REPOS = ("owl", "upgrade", "upgrade-util")
 WORKTREE_CONTAINER = "/home/seb/src/odoo"
 STICKY_BUNDLES = [
     "master",

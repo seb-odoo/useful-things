@@ -46,6 +46,7 @@
 	repo = /home/seb/repo/documentation
 	repo = /home/seb/repo/enterprise
 	repo = /home/seb/repo/odoo
+	repo = /home/seb/repo/owl
 	repo = /home/seb/repo/upgrade
 	repo = /home/seb/repo/upgrade-util
 [fetch]
