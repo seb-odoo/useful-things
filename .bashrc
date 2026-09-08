@@ -269,14 +269,6 @@ function usbkeysave() {
 	rsync -aAXvi --progress --delete ~/.ssh/ /mnt/USBDrive/.ssh/
 }
 
-function owl-update() {
-	cd ~/repo/owl
-	git checkout master
-	git rebase origin/master
-	npm run build
-	cp dist/owl.js ~/repo/odoo/addons/web/static/lib/owl/owl.js
-}
-
 function fixwindow() {
     marco --no-composite --replace &
 }
