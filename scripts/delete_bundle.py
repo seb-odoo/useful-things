@@ -26,7 +26,7 @@ from commands import (
     get_worktree_bundle_folder,
     get_worktree_bundle_repo_folder,
 )
-from config import WORKTREE_CONTAINER
+from config import FILESTORE_CONTAINER, WORKTREE_CONTAINER
 from rich import print
 from rich.tree import Tree
 from utils import UtilsRunner
@@ -83,6 +83,39 @@ def _unsaved_work(runner: UtilsRunner, bundle_name: str):
 
     runner.parallel_run(Tree("Unsaved work"), get_repos(), handle_repo)
     return unsaved
+
+
+def _bundle_databases(runner: UtilsRunner, bundle_name: str):
+    """The names a bundle leaves in postgres and in the filestore, as one list.
+
+    Both are asked because neither holds all of them: a run that died before writing an attachment
+    leaves a database with no filestore, and a filestore whose database was dropped by hand stays
+    on disk. The names are the bundle's own, minus the suffix a database name never carries.
+    """
+    prefix = os.path.basename(get_filestore_bundle_prefix(bundle_name))
+    found = {
+        os.path.basename(path)
+        for path in glob.glob(f"{get_filestore_bundle_prefix(bundle_name)}*")
+    }
+    res = runner.run(
+        ["psql", "-d", "postgres", "-tAc", "select datname from pg_database"],
+        handle_exceptions={"could not connect to server": ignore_error},
+    )
+    found |= {line.strip() for line in (res.stdout if res else "").splitlines() if line.strip()}
+    return sorted(one for one in found if one == prefix or one.startswith(f"{prefix}-"))
+
+
+def _server_still_on_it(name: str):
+    """Say a database outlived its bundle because something is connected to it.
+
+    An odoo-bin left running on one of the bundle's databases is that session's to stop: the
+    bundle is deleted either way, and killing it here would take down whatever it is doing.
+    """
+
+    def handler(runner: UtilsRunner):
+        print(f"[yellow]{name}: kept, a server is still connected to it[/yellow]")
+
+    return handler
 
 
 def expand_bundle_names(names: list[str]):
@@ -161,24 +194,21 @@ def delete_bundle(
     runner.parallel_run(Tree("Repositories"), get_repos(), handle_repo)
     runner.run(["rm", "-rf", get_worktree_bundle_folder(bundle_name)])
 
-    def handle_file(runner: UtilsRunner, file: str):
-        if not file.startswith(get_filestore_bundle_prefix(bundle_name)):
-            print(f"[red]Skipping {file} as it doesn't match the expected pattern[/red]")
+    def handle_database(runner: UtilsRunner, name: str):
+        folder = f"{FILESTORE_CONTAINER}/{name}"
+        if not folder.startswith(get_filestore_bundle_prefix(bundle_name)):
+            print(f"[red]Skipping {name} as it doesn't match the expected pattern[/red]")
             return
-        runner.run(["rm", "-rf", file])
-        last_part = file.split("/")[-1]
+        runner.run(["rm", "-rf", folder])
         runner.run(
-            ["dropdb", last_part],
-            handle_exceptions={
-                f'ERROR:  database "{last_part}" does not exist': ignore_error,
-                f'dropdb: error: database removal failed: ERROR:  database "{last_part}" does not exist': ignore_error,
-            },
+            ["dropdb", "--if-exists", name],
+            handle_exceptions={"is being accessed by other users": _server_still_on_it(name)},
         )
 
     runner.parallel_run(
-        Tree("Files"),
-        glob.glob(f"{get_filestore_bundle_prefix(bundle_name)}*"),
-        handle_file,
+        Tree("Databases"),
+        _bundle_databases(runner, bundle_name),
+        handle_database,
     )
     print("[green]Done[/green]")
     return {}
