@@ -74,6 +74,12 @@ function branchdb() {
     echo "${d}"
 }
 
+# The database a test run uses, named after the bundle so `delete_bundle` finds it again: a name
+# invented per run outlives its bundle and nothing ever cleans it up.
+#   testdb       -> <branch>-claude       (python runs)
+#   testdb hoot  -> <branch>-claude-hoot  (JS/Hoot runs)
+function testdb() { echo "$(branchdb)-claude${1:+-${1}}"; }
+
 # --- odoo-bin helpers ---
 function odoo-bin() {
 	RES="./odoo-bin $(odoo-bin-params $*)"
