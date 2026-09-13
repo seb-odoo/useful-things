@@ -1,5 +1,5 @@
 # Curated Odoo-dev subset of useful-things/.bashrc, adapted for the Claude sandbox dev container.
-# Sourced from the container's ~/.bashrc (see devcontainer.json postCreateCommand).
+# Reached as BASH_ENV and as ~/.bash_aliases in the container; the host sources it from .bashrc.
 # Only commands that work in the sandbox are kept; paths use /home/seb/... to match the mounts.
 
 # Make aliases expand in non-interactive shells too (e.g. the in-container Claude Code agent's

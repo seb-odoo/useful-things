@@ -138,6 +138,27 @@ def expand(node, values):
     return node
 
 
+def missing_sources(result):
+    """The mount sources that are not on disk, which is what a stale config looks like.
+
+    Said and never fatal: the base mounts the `.git` of repos that are simply not cloned on a given
+    machine, and nothing cloned is meant to still build and run. What it does catch is a path that
+    moved without this being run again, where the next container is the one that finds out.
+    """
+    gone = []
+    for mount in result.get("mounts", []):
+        if not isinstance(mount, str):
+            continue
+        for piece in mount.split(","):
+            key, _, value = piece.partition("=")
+            # A "${localWorkspaceFolder}" is resolved by the devcontainer CLI, long after this runs.
+            if key != "source" or not value or "${" in value:
+                continue
+            if not pathlib.Path(value).exists():
+                gone.append(value)
+    return gone
+
+
 def main():
     values = config.load()
     parser = argparse.ArgumentParser()
@@ -165,6 +186,9 @@ def main():
         base=base_path,
         fragments=", ".join(used) or "none cloned",
     ) + json.dumps(result, indent=2) + "\n"
+
+    for source in missing_sources(result):
+        print(f"warning: mount source missing: {source}")
 
     if args.check:
         current = out_path.read_text() if out_path.exists() else ""

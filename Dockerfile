@@ -53,3 +53,15 @@ RUN mkdir -p /home/vscode/.local/share/kilo \
              /home/vscode/.local/state/kilo-sandbox-policy \
              /home/vscode/.cache/kilo && \
     chown -R vscode:vscode /home/vscode/.local /home/vscode/.cache
+
+# ~/.bash_aliases, so the container's ~/.bashrc, install-claude-path.sh and the Bash( ... )
+# permission rules keep reaching the shell helpers by that name while the mount itself is the
+# directory holding them. Built here rather than in postCreateCommand so it exists before the
+# first shell, and because a fragment can overwrite that scalar but not an image layer. The link
+# dangles until the mount arrives, which is safe: the -uid image runs `chown -R` over this and
+# -R implies no-dereference, so a broken link is skipped rather than fatal. Last in the file so
+# changing the arg cannot invalidate the layers above.
+ARG CONTAINER_BASHRC
+RUN test -n "$CONTAINER_BASHRC" && \
+    ln -sfn "$CONTAINER_BASHRC" /home/vscode/.bash_aliases && \
+    chown -h vscode:vscode /home/vscode/.bash_aliases

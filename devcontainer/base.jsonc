@@ -7,7 +7,10 @@
 {
   "name": "${localWorkspaceFolderBasename} (Claude sandbox)",
   "build": {
-    "dockerfile": "Dockerfile"
+    "dockerfile": "Dockerfile",
+    // Where the image symlinks ~/.bash_aliases. Passed as an arg so the path lives here with the
+    // other @KEY@ ones and the Dockerfile stays free of any absolute path of its own.
+    "args": { "CONTAINER_BASHRC": "@USEFUL_THINGS@/container-rw/devcontainer.bashrc" }
   },
   "remoteUser": "vscode",
   // 1. Disable this to stop VS Code from corrupting Podman's keep-id user namespace mapping
@@ -64,7 +67,7 @@
     "source=@CACHE_ROOT@/warden,target=/home/vscode/.cache/warden,type=bind,z",
     // DiscussModelParser (~/repo/DiscussModelParser): generates the @types/models.d.ts files
     // for the discuss/mail JS models. Same path as the host so the wrapper in
-    // devcontainer.bashrc works on both sides; dist/type-gen-idx.mjs is a self-contained
+    // container-rw/devcontainer.bashrc works on both sides; dist/type-gen-idx.mjs is self-contained
     // rollup bundle (Node built-ins only), so the image's Node 22 is enough, no install.
     // rw so `git pull` + `npm run build` work in here (config.json's whitelist is inlined
     // into dist/ at build time). Lowercase z: shared relabel, like TestWarden above.
@@ -75,12 +78,17 @@
     // a root-owned volume; keep-id + updateRemoteUserUID maps vscode -> host seb (1001), so a
     // seb-owned host dir is writable. Lowercase z: shared SELinux relabel for the parallel containers.
     "source=@CACHE_ROOT@/devcontainer/vscode-server-extensions,target=/home/vscode/.vscode-server/extensions,type=bind,z",
-    // The container's ~/.bash_aliases, and BASH_ENV (see below), so every non-interactive shell
-    // sources it too. rw so it can be patched from inside the container; the host shell sources
-    // useful-things/.bashrc instead and never this file, so an in-container edit cannot land in a
-    // host shell. A syntax error here breaks every container shell including the agent's, so
-    // `bash -n` it after editing. Lowercase z: shared relabel, like the caches above.
-    "source=@USEFUL_THINGS@/devcontainer.bashrc,target=/home/vscode/.bash_aliases,type=bind,z",
+    // The shell helpers, reached as BASH_ENV and through the ~/.bash_aliases symlink the image
+    // makes. The directory and not the file: a bind of a file pins its inode, and an editor that
+    // writes by renaming over it leaves every running container on the dead copy, silently. rw so
+    // it can be patched from inside the container, in place now that the mount point is the
+    // directory; the host shell sources useful-things/.bashrc instead, which stays out of here, so
+    // an in-container edit still cannot land in a host shell. Keep this directory to the one file:
+    // whatever is added becomes writable host surface for every container, and a lowercase z would
+    // relabel all of it were SELinux ever turned on (it is off here, so the z is documentation).
+    // A syntax error now reaches every running container's next shell rather than waiting for a
+    // rebuild, so `bash -n` it after editing.
+    "source=@USEFUL_THINGS@/container-rw,target=@USEFUL_THINGS@/container-rw,type=bind,z",
     "source=@USEFUL_THINGS@/claude-autoopen/claude-autoopen-0.0.1.vsix,target=/home/vscode/.claude-autoopen.vsix,type=bind,readonly,Z",
     "source=@USEFUL_THINGS@/install-claude-autoopen.sh,target=/home/vscode/.install-claude-autoopen.sh,type=bind,readonly,Z",
     "source=/var/run/postgresql,target=/var/run/postgresql,type=bind"
@@ -120,8 +128,10 @@
   ],
   "containerEnv": {
     // Source the dev helpers (odoo-bin/ott/obet/...) in non-interactive shells (e.g. the agent's
-    // `bash -c`), which don't read ~/.bashrc. ~/.bash_aliases is the mounted devcontainer.bashrc.
-    "BASH_ENV": "/home/vscode/.bash_aliases",
+    // `bash -c`), which don't read ~/.bashrc. The mounted file itself, so this holds whether or not
+    // the ~/.bash_aliases symlink is there; that symlink is what ~/.bashrc, install-claude-path.sh
+    // and the Bash( ... ) permission rules still reach it by.
+    "BASH_ENV": "@USEFUL_THINGS@/container-rw/devcontainer.bashrc",
     "HOME": "/home/vscode",
     "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
     // Disable commit signing in the sandbox. The repo's bind-mounted .git/config (shared with the
