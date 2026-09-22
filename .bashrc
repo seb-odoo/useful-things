@@ -66,21 +66,6 @@ function pfbgt()
 	goto $1
 }
 
-function gnb14()
-{
-    gnb "14.0" $*
-}
-
-function gnb15()
-{
-    gnb "15.0" $*
-}
-
-function gnbm()
-{
-    gnb "master" $*
-}
-
 function rbundle() {
 	webbrowser "https://runbot.odoo.com/runbot/rd-1?search=$(git branch --show-current)"
 }
