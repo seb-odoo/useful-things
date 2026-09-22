@@ -56,3 +56,5 @@
 	updaterefs = true
 [checkout]
 	workers = 0
+[maintenance "prefetch"]
+	enabled = false
