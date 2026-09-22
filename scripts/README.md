@@ -192,7 +192,7 @@ Done
 Syncs git remotes: fetches locally checked-out branches + sticky bundles; prunes everything else.
 
 - Dev remote: fetches all locally checked-out branches
-- Standard remote: fetches only sticky bundles (master, saas-*, 18.0, 17.0, 16.0)
+- Standard remote: fetches only sticky bundles (`STICKY_BUNDLES` in `config.py`)
 - Deletes the handled remote's own refs outside those two sets
 
 ```bash
@@ -200,44 +200,68 @@ $ python scripts/fetch_all.py
 Repositories
 ├── design-themes
 │   ├── [0.00-0.01] /home/seb/repo/design-themes ✅️ git branch -r
-│   ├── odoo
-│   │   └── [0.02-1.46] /home/seb/repo/design-themes ✅️ git fetch odoo master saas-19.2 saas-19.1 19.0 saas-18.4 saas-18.3 saas-18.2 18.0 17.0 16.0 -p
-│   └── odoo-dev
-│       └── [0.03-0.06] /home/seb/repo/design-themes ✅️ git branch --format=%(refname:short)
+│   ├── [0.01-1.55] /home/seb/repo/design-themes ✅️ git fetch odoo master 20.0
+│   │   saas-19.4 saas-19.3 saas-19.2 saas-19.1 19.0 saas-18.4 saas-18.3
+│   │   saas-18.2 18.0 17.0 16.0 -p
+│   └── [1.55-1.56] /home/seb/repo/design-themes ✅️ git for-each-ref
+│       --format=%(refname:short) refs/heads/
 ├── documentation
 │   ├── [0.00-0.01] /home/seb/repo/documentation ✅️ git branch -r
-│   ├── odoo
-│   │   └── [0.03-1.95] /home/seb/repo/documentation ✅️ git fetch odoo master saas-19.2 saas-19.1 19.0 saas-18.4 saas-18.3 saas-18.2 18.0 17.0 16.0 -p
-│   └── odoo-dev
-│       └── [0.04-0.09] /home/seb/repo/documentation ✅️ git branch --format=%(refname:short)
+│   ├── [0.01-2.13] /home/seb/repo/documentation ✅️ git fetch odoo master 20.0
+│   │   saas-19.4 saas-19.3 saas-19.2 saas-19.1 19.0 saas-18.4 saas-18.3
+│   │   saas-18.2 18.0 17.0 16.0 -p
+│   ├── [2.13-2.13] /home/seb/repo/documentation ✅️ git for-each-ref
+│   │   --format=%(refname:short) refs/heads/
+│   └── [2.13-3.79] /home/seb/repo/documentation ✅️ git fetch odoo-dev
+│       master-store-doc--seb -p
 ├── enterprise
-│   ├── [0.00-0.02] /home/seb/repo/enterprise ✅️ git branch -r
-│   ├── odoo
-│   │   └── [0.04-1.62] /home/seb/repo/enterprise ✅️ git fetch odoo master saas-19.2 saas-19.1 19.0 saas-18.4 saas-18.3 saas-18.2 18.0 17.0 16.0 -p
-│   └── odoo-dev
-│       ├── [0.06-0.10] /home/seb/repo/enterprise ✅️ git branch --format=%(refname:short)
-│       └── [0.11-1.55] /home/seb/repo/enterprise ✅️ git fetch odoo-dev master-add_members-user--seb master-setupclass--seb master-member-user--seb -p
+│   ├── [0.00-0.01] /home/seb/repo/enterprise ✅️ git branch -r
+│   ├── [0.01-1.64] /home/seb/repo/enterprise ✅️ git fetch odoo master 20.0
+│   │   saas-19.4 saas-19.3 saas-19.2 saas-19.1 19.0 saas-18.4 saas-18.3
+│   │   saas-18.2 18.0 17.0 16.0 -p
+│   ├── [1.64-1.64] /home/seb/repo/enterprise ✅️ git for-each-ref
+│   │   --format=%(refname:short) refs/heads/
+│   └── [1.64-3.13] /home/seb/repo/enterprise ✅️ git fetch odoo-dev
+│       master-onrelationchange--seb master-recipient-uids--seb
+│       master-record-signal--seb master-signal-props--seb
+│       master-split-channel-thread--seb -p
 ├── odoo
-│   ├── [0.01-0.16] /home/seb/repo/odoo ✅️ git branch -r
-│   ├── odoo
-│   │   └── [0.16-2.66] /home/seb/repo/odoo ✅️ git fetch odoo master saas-19.2 saas-19.1 19.0 saas-18.4 saas-18.3 saas-18.2 18.0 17.0 16.0 -p
-│   └── odoo-dev
-│       ├── [0.17-0.36] /home/seb/repo/odoo ✅️ git branch --format=%(refname:short)
-│       └── [0.37-2.26] /home/seb/repo/odoo ✅️ git fetch odoo-dev master-add_members-user--seb master-unique-chat--seb master-setupclass--seb master-member-user--seb master-livechat_to_store--seb master-split-channel-thread--seb 
-│           master-transient-real-id--seb -p
+│   ├── [0.00-0.02] /home/seb/repo/odoo ✅️ git branch -r
+│   ├── [0.02-1.65] /home/seb/repo/odoo ✅️ git fetch odoo master 20.0 saas-19.4
+│   │   saas-19.3 saas-19.2 saas-19.1 19.0 saas-18.4 saas-18.3 saas-18.2 18.0
+│   │   17.0 16.0 -p
+│   ├── [1.65-1.65] /home/seb/repo/odoo ✅️ git for-each-ref
+│   │   --format=%(refname:short) refs/heads/
+│   └── [1.65-3.15] /home/seb/repo/odoo ✅️ git fetch odoo-dev
+│       19.0-convert-inline-946970--seb
+│       20.0-light-user-notification-preferences-disabled-aku
+│       master-lazy-field-map--seb master-record-signal--seb
+│       master-split-channel-thread--seb -p
+├── owl
+│   ├── [0.00-0.01] /home/seb/repo/owl ✅️ git branch -r
+│   ├── [0.01-0.62] /home/seb/repo/owl ✅️ git fetch origin master -p
+│   ├── [0.62-0.62] /home/seb/repo/owl ✅️ git for-each-ref
+│   │   --format=%(refname:short) refs/heads/
+│   └── [0.62-2.02] /home/seb/repo/owl ✅️ git fetch seb-odoo
+│       master-signal-props--seb master-string-types--seb -p
+├── sfu
+│   ├── [0.00-0.01] /home/seb/repo/sfu ✅️ git branch -r
+│   ├── [0.01-0.01] /home/seb/repo/sfu ✅️ git for-each-ref
+│   │   --format=%(refname:short) refs/heads/
+│   └── [0.01-1.50] /home/seb/repo/sfu ✅️ git fetch origin master
+│       master-recording2-tso -p
 ├── upgrade-util
-│   ├── [0.01-0.02] /home/seb/repo/upgrade-util ✅️ git branch -r
-│   ├── odoo
-│   │   └── [0.05-1.40] /home/seb/repo/upgrade-util ✅️ git fetch odoo master -p
-│   └── odoo-dev
-│       └── [0.08-0.09] /home/seb/repo/upgrade-util ✅️ git branch --format=%(refname:short)
+│   ├── [0.00-0.01] /home/seb/repo/upgrade-util ✅️ git branch -r
+│   ├── [0.01-1.58] /home/seb/repo/upgrade-util ✅️ git fetch odoo master -p
+│   └── [1.58-1.58] /home/seb/repo/upgrade-util ✅️ git for-each-ref
+│       --format=%(refname:short) refs/heads/
 └── upgrade
-    ├── [0.02-0.12] /home/seb/repo/upgrade ✅️ git branch -r
-    ├── odoo
-    │   └── [0.12-2.21] /home/seb/repo/upgrade ✅️ git fetch odoo master -p
-    └── odoo-dev
-        ├── [0.13-0.25] /home/seb/repo/upgrade ✅️ git branch --format=%(refname:short)
-        └── [0.26-1.87] /home/seb/repo/upgrade ✅️ git fetch odoo-dev master-unique-chat--seb -p
+    ├── [0.00-0.01] /home/seb/repo/upgrade ✅️ git branch -r
+    ├── [0.01-2.11] /home/seb/repo/upgrade ✅️ git fetch odoo master -p
+    ├── [2.11-2.11] /home/seb/repo/upgrade ✅️ git for-each-ref
+    │   --format=%(refname:short) refs/heads/
+    └── [2.11-3.54] /home/seb/repo/upgrade ✅️ git fetch odoo-dev
+        master-split-channel-thread--seb -p
 Done
 ```
 

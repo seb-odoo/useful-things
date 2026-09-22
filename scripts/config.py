@@ -36,6 +36,7 @@ MASTER_ONLY_REPOS = ("owl", "sfu", "upgrade", "upgrade-util")
 WORKTREE_CONTAINER = "/home/seb/src/odoo"
 STICKY_BUNDLES = [
     "master",
+    "20.0",
     "saas-19.4",
     "saas-19.3",
     "saas-19.2",
