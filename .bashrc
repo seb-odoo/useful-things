@@ -39,7 +39,7 @@ function goto()
 {
 	REPO=$(basename "$PWD")
 	[[ "$REPO" =~ ^(odoo|enterprise|owl|sfu|design-themes|upgrade|documentation|upgrade-util)$ ]] || REPO=odoo
-	FULL_NAME=${1/odoo-dev:}
+	FULL_NAME=${1#*:}
 	BASE=$(python ~/repo/useful-things/scripts/commands.py get_base_from_bundle_name ${FULL_NAME})
 	FOLDER=~/src/odoo/$BASE/${FULL_NAME}/${REPO}
 	cd $FOLDER
@@ -47,7 +47,7 @@ function goto()
 
 function opencode()
 {
-	BUNDLE_NAME=${1/odoo-dev:}
+	BUNDLE_NAME=${1#*:}
 	ODOO_BASE=$(python ~/repo/useful-things/scripts/commands.py get_worktree_bundle_folder ${BUNDLE_NAME})
 	ODOO_BASE="$ODOO_BASE" bwrap-opencode.sh
 }

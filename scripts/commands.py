@@ -112,8 +112,12 @@ def get_worktree_container_folder():
 
 
 def clean_bundle_name(bundle_name):
-    """Get the cleaned bundle name."""
-    return bundle_name.replace("odoo-dev:", "")
+    """Get the cleaned bundle name, taking the dev remote prefix runbot displays.
+
+    A git ref name cannot hold a `:`, so whatever comes before it is that prefix, `odoo-dev:` for
+    most repos but `seb-odoo:` for owl.
+    """
+    return bundle_name.split(":")[-1]
 
 
 if __name__ == "__main__":
