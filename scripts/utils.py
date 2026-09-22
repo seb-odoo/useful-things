@@ -338,6 +338,14 @@ class UtilsRunner(Runner):
             ],
         )
 
+    def remote_has_branch(self, *, repo, branch):
+        """Say whether the dev remote of `repo` carries `branch`."""
+        res = self.run(
+            ["git", "ls-remote", "--heads", get_remote_dev_repo(repo), f"refs/heads/{branch}"],
+            cwd=get_repo_folder(repo),
+        )
+        return bool(res.stdout.strip())
+
     def switch_to_branch(self, *, repo, branch, target_ref: str = None):
         cwd = get_worktree_bundle_repo_folder(branch, repo)
         if not target_ref:
