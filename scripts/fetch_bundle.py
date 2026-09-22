@@ -46,16 +46,6 @@ if not runbot_bundle:
     response = {"branches": [], "commits": []}
 
 make_branch_by_repo = defaultdict(lambda: False)
-
-
-def fetch_url(url):
-    try:
-        response = requests.get(url, timeout=5)
-        return f"{url}: {response.status_code}"
-    except Exception as e:
-        return f"{url}: Failed due to {e}"
-
-
 for branch in response["branches"]:
     if not branch["is_pr"]:
         make_branch_by_repo[branch["repo"]] = True
