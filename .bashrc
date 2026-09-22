@@ -55,7 +55,7 @@ function opencode()
 function gotorepo()
 {
 	REPO=$(basename "$PWD")
-	[[ "$REPO" =~ ^(odoo|enterprise|owl|sfu|design-themes|upgrade)$ ]] || { echo "Invalid repo ${REPO}"; return 1; }
+	[[ "$REPO" =~ ^(odoo|enterprise|owl|sfu|design-themes|upgrade|documentation|upgrade-util)$ ]] || { echo "Invalid repo ${REPO}"; return 1; }
 	FOLDER=~/repo/${REPO}
 	cd $FOLDER
 }
