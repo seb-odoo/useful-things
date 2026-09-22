@@ -17,6 +17,7 @@ const REPOS = [
   "documentation",
   "upgrade",
   "upgrade-util",
+  "sfu",
 ];
 
 function getClaudeTab() {

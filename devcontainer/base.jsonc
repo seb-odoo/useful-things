@@ -25,6 +25,7 @@
     "source=@REPO_ROOT@/upgrade/.git,target=@REPO_ROOT@/upgrade/.git,type=bind,Z",
     "source=@REPO_ROOT@/upgrade-util/.git,target=@REPO_ROOT@/upgrade-util/.git,type=bind,Z",
     "source=@REPO_ROOT@/owl/.git,target=@REPO_ROOT@/owl/.git,type=bind,Z",
+    "source=@REPO_ROOT@/sfu/.git,target=@REPO_ROOT@/sfu/.git,type=bind,Z",
     // Workspace .claude, .vscode and odools.toml are symlinks in each bundle pointing at these
     // absolute host paths; bind them at the same path (like the .git mounts above) so the symlinks
     // resolve in the container. Without this the workspace settings.json never loads, so
