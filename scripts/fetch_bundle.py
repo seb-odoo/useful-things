@@ -33,12 +33,17 @@ base = get_base_from_bundle_name(bundle_name)
 wt_bundle_folder = get_worktree_bundle_folder(bundle_name)
 url = f"https://runbot.odoo.com/api/bundle?name={bundle_name}"
 print(f"Fetching {url}")
-response = requests.request("GET", url, timeout=3).json()
+try:
+    response = requests.request("GET", url, timeout=3).json()
+except requests.RequestException as e:
+    print(f"[red]No answer from runbot[/red] about {bundle_name}: {e}")
+    raise SystemExit(1) from None
 print(response)
 
-if not response.get("id"):
-    print(f"Bundle [red]{bundle_name}[/red] not found on runbot or API failure")
-    exit(1)
+runbot_bundle = bool(response.get("id"))
+if not runbot_bundle:
+    # runbot watches neither owl nor sfu: a branch pushed only there shows on the dev remotes alone.
+    response = {"branches": [], "commits": []}
 
 make_branch_by_repo = defaultdict(lambda: False)
 
@@ -51,7 +56,6 @@ def fetch_url(url):
         return f"{url}: Failed due to {e}"
 
 
-runner.prepare_worktree_bundle_folder(bundle_name=bundle_name)
 for branch in response["branches"]:
     if not branch["is_pr"]:
         make_branch_by_repo[branch["repo"]] = True
@@ -60,19 +64,30 @@ runbot_repos = {commit["repo"] for commit in response["commits"]} | {
 }
 
 
+def handle_remote_branch(runner: UtilsRunner, repo):
+    if (
+        not make_branch_by_repo[repo]
+        and repo not in runbot_repos
+        and bundle_name not in get_sticky_bundles(repo)
+    ):
+        make_branch_by_repo[repo] = runner.remote_has_branch(repo=repo, branch=bundle_name)
+
+
+runner.parallel_run(Tree("Branches"), get_repos(), handle_remote_branch)
+
+if not runbot_bundle and not any(make_branch_by_repo.values()):
+    print(f"Bundle [red]{bundle_name}[/red] found on neither runbot nor the dev remotes")
+    raise SystemExit(1)
+
+runner.prepare_worktree_bundle_folder(bundle_name=bundle_name)
+
+
 def handle_commit(runner: UtilsRunner, commit):
     repo = commit["repo"]
     if repo not in get_repos():
         # runbot knows about all the repositories, `config.py` only about the cloned ones
         return
     wt_repo_folder = get_worktree_bundle_repo_folder(bundle_name, repo)
-    if (
-        not make_branch_by_repo[repo]
-        and repo not in runbot_repos
-        and bundle_name not in get_sticky_bundles(repo)
-    ):
-        # runbot watches neither owl nor sfu, so their feature branch only shows on the remote.
-        make_branch_by_repo[repo] = runner.remote_has_branch(repo=repo, branch=bundle_name)
     if make_branch_by_repo[repo]:
         remote_dev_branch_name = get_remote_dev_branch_name(bundle_name, repo)
         runner.git_fetch(repo=repo, dev=True, ref=bundle_name)
