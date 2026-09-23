@@ -129,7 +129,7 @@ def get_prs(pairs):
         if (nodes := data[f"p{i}"]["pullRequests"]["nodes"])
     }
     for pr in prs.values():
-        pr["asked"] = get_last_ask(pr, data["viewer"]["login"])
+        pr["asked"], pr["auto_asked"] = get_asks(pr, data["viewer"]["login"])
         pr["pushed"] = get_last_push(pr)
     errors = set()
     with ThreadPoolExecutor(max_workers=max(len(prs), 1)) as executor:
@@ -140,13 +140,23 @@ def get_prs(pairs):
     return prs, sorted(errors)
 
 
-def get_last_ask(pr, login):
-    dates = [
-        node["createdAt"]
-        for node in pr["comments"]["nodes"] + pr["timelineItems"]["nodes"]
-        if (node.get("author") or node.get("actor") or {}).get("login") == login
+def get_asks(pr, login):
+    mine, automated = [], [pr["createdAt"]]
+    for node in pr["comments"]["nodes"] + pr["timelineItems"]["nodes"]:
+        by_me = (node.get("author") or node.get("actor") or {}).get("login") == login
+        (mine if by_me else automated).append(node["createdAt"])
+    return [
+        datetime.fromisoformat(max(dates)).timestamp() if dates else None
+        for dates in (mine, automated)
     ]
-    return datetime.fromisoformat(max(dates, default=pr["createdAt"])).timestamp()
+
+
+def get_ask_level(pr):
+    if pr["asked"] is None:
+        return 1, pr["auto_asked"]
+    if pr["pushed"] > pr["asked"]:
+        return 0, pr["pushed"]
+    return 2, pr["asked"]
 
 
 def get_last_push(pr):
@@ -271,11 +281,14 @@ def format_pr(pr, facts):
 
 
 def format_ask(pr, now):
-    if pr["pushed"] > pr["asked"]:
-        return f"[yellow]not asked since push {format_age(now - pr['pushed'], plain=True)}[/yellow]"
-    waited = now - pr["asked"]
-    style = next(style for limit, style in ASKED_STYLES if waited >= limit)
-    return f"[{style}]asked {format_age(waited, plain=True)}[/{style}]"
+    level, date = get_ask_level(pr)
+    age = format_age(now - date, plain=True)
+    if level == 0:
+        return f"[yellow]not asked since push {age}[/yellow]"
+    if level == 1:
+        return f"[yellow]auto-requested {age}[/yellow]"
+    style = next(style for limit, style in ASKED_STYLES if now - date >= limit)
+    return f"[{style}]asked {age}[/{style}]"
 
 
 def get_group(pr, facts, status, unpushed):
@@ -368,10 +381,10 @@ def main():
             for i, ask_tag in ask_tags.items():
                 rows[i] = (*rows[i][:-1], f"{rows[i][-1]} {ask_tag}")
             waiting = [prs[repo, branch] for repo in dates if (repo, branch) in prs]
-            if stale := [pr["pushed"] for pr in waiting if pr["pushed"] > pr["asked"]]:
-                urgency, date = -1, min(stale)
-            else:
-                date = max(pr["asked"] for pr in waiting)
+            levels = [get_ask_level(pr) for pr in waiting]
+            urgency = min(level for level, _date in levels)
+            dates = [date for level, date in levels if level == urgency]
+            date = max(dates) if urgency == 2 else min(dates)
         else:
             date = max(dates.values())
         groups[group].append((not delegated, urgency, date, rows))
