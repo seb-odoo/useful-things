@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import time
+import urllib.error
 import urllib.request
 
 from rich.console import Console
@@ -37,6 +38,7 @@ MERGEBOT_TAGS = {
     "ready": "[green]r+ ready[/green]",
     "staged": "[green]staged[/green]",
 }
+MERGEBOT_TIMEOUT = 3
 PR_STYLES = {"closed": "red", "draft": "dim", "merged": "magenta"}
 REVIEW_TAGS = {"APPROVED": "approved", "CHANGES_REQUESTED": "[red]changes[/red]"}
 
@@ -94,26 +96,31 @@ def get_prs(pairs):
         text=True,
     )
     if res.returncode:
-        return {}
+        return {}, [f"GitHub: {res.stderr.strip() or 'gh failed'}"]
     data = json.loads(res.stdout)["data"]
     prs = {
         pair: nodes[0]
         for i, pair in enumerate(pairs)
         if (nodes := data[f"p{i}"]["pullRequests"]["nodes"])
     }
-    with ThreadPoolExecutor() as executor:
-        for pr, state in zip(prs.values(), executor.map(get_mergebot_state, prs.values())):
+    errors = set()
+    with ThreadPoolExecutor(max_workers=max(len(prs), 1)) as executor:
+        for pr, (state, error) in zip(prs.values(), executor.map(get_mergebot_state, prs.values())):
             pr["mergebot"] = state
-    return prs
+            if error:
+                errors.add(f"mergebot: {error}")
+    return prs, sorted(errors)
 
 
 def get_mergebot_state(pr):
     url = pr["url"].replace("https://github.com", "https://mergebot.odoo.com") + ".json"
     try:
-        with urllib.request.urlopen(url, timeout=10) as res:
-            return json.load(res)["state"]
-    except OSError:
-        return None
+        with urllib.request.urlopen(url, timeout=MERGEBOT_TIMEOUT) as res:
+            return json.load(res)["state"], None
+    except urllib.error.HTTPError as error:
+        return None, None if error.code == 404 else str(error)
+    except OSError as error:
+        return None, str(getattr(error, "reason", error))
 
 
 def get_push(repo, branch):
@@ -210,7 +217,7 @@ def main():
             zip(pairs, executor.map(lambda pair: get_status(*pair, write_tree), pairs)),
         )
         pushes = dict(zip(pairs, executor.map(lambda pair: get_push(*pair), pairs)))
-        prs = prs_future.result()
+        prs, errors = prs_future.result()
 
     rows = []
     now = time.time()
@@ -243,6 +250,8 @@ def main():
     for row in rows:
         table.add_row(*row)
     console.print(table)
+    for error in errors:
+        console.print(f"[yellow]PR state incomplete[/yellow], {error}")
 
 
 if __name__ == "__main__":
