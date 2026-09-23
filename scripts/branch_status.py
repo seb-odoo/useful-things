@@ -37,6 +37,7 @@ from commands import (
 AGE_UNITS = (("d", 86400), ("h", 3600), ("m", 60))
 ASKED_STYLES = ((7 * 86400, "red"), (2 * 86400, "yellow"), (0, "dim"))
 BEHIND_STYLES = ((501, "red"), (50, "yellow"), (0, "default"))
+CI_RUNNING = "[dim]ci running[/dim]"
 DELEGATE = re.compile(r"@robodoo\b.*\bdelegate[+=]")
 GROUPS = {
     "me": "Waits on me",
@@ -46,8 +47,9 @@ GROUPS = {
     "mergebot": "Waits on mergebot",
     "others": "Not mine",
 }
+ISSUE_RANKS = {"review": 0, "wip": 2, "red": 1}
 MERGEBOT_TAGS = {
-    "approved": "r+",
+    "approved": "[green]r+[/green]",
     "error": "[red]staging error[/red]",
     "ready": "[green]r+ ready[/green]",
     "staged": "[green]staged[/green]",
@@ -55,6 +57,7 @@ MERGEBOT_TAGS = {
 MERGEBOT_TIMEOUT = 3
 MINOR_CHECKS = {"ci/security": "dim", "ci/style": "yellow"}
 PR_STYLES = {"closed": "red", "draft": "dim", "merged": "magenta"}
+R_PLUS_STATES = ("approved", "merged", "ready", "staged")
 REVIEW_TAGS = {"APPROVED": "approved", "CHANGES_REQUESTED": "[red]changes[/red]"}
 
 
@@ -106,7 +109,9 @@ def get_prs(pairs):
             "timelineItems(last: 20, itemTypes: [REVIEW_REQUESTED_EVENT]) { nodes { "
             "... on ReviewRequestedEvent { actor { login } createdAt } } } "
             "reviewThreads(first: 100) { nodes { isResolved } } "
-            "commits(last: 1) { nodes { commit { status { contexts { "
+            "forcePushes: timelineItems(last: 1, itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT]) { "
+            "nodes { ... on HeadRefForcePushedEvent { createdAt } } } "
+            "commits(last: 1) { nodes { commit { committedDate status { contexts { "
             "context state targetUrl } } } } } } } }",
         )
     res = subprocess.run(
@@ -125,6 +130,7 @@ def get_prs(pairs):
     }
     for pr in prs.values():
         pr["asked"] = get_last_ask(pr, data["viewer"]["login"])
+        pr["pushed"] = get_last_push(pr)
     errors = set()
     with ThreadPoolExecutor(max_workers=max(len(prs), 1)) as executor:
         for pr, (state, error) in zip(prs.values(), executor.map(get_mergebot_state, prs.values())):
@@ -141,6 +147,12 @@ def get_last_ask(pr, login):
         if (node.get("author") or node.get("actor") or {}).get("login") == login
     ]
     return datetime.fromisoformat(max(dates, default=pr["createdAt"])).timestamp()
+
+
+def get_last_push(pr):
+    dates = [node["createdAt"] for node in pr["forcePushes"]["nodes"]]
+    dates += [node["commit"]["committedDate"] for node in pr["commits"]["nodes"]]
+    return max(datetime.fromisoformat(date).timestamp() for date in dates)
 
 
 def get_mergebot_state(pr):
@@ -253,35 +265,43 @@ def format_pr(pr, facts):
             for c in facts["failing"]
         ]
         if facts["pending"]:
-            tags.append("[dim]ci running[/dim]")
+            tags.append(CI_RUNNING)
     number = f"[link={pr['url']}]{pr['number']}[/link]"
     return f"[{style}]{number}[/{style}]" if style else number, " ".join(tags)
 
 
+def format_ask(pr, now):
+    if pr["pushed"] > pr["asked"]:
+        return f"[yellow]not asked since push {format_age(now - pr['pushed'], plain=True)}[/yellow]"
+    waited = now - pr["asked"]
+    style = next(style for limit, style in ASKED_STYLES if waited >= limit)
+    return f"[{style}]asked {format_age(waited, plain=True)}[/{style}]"
+
+
 def get_group(pr, facts, status, unpushed):
     if not pr:
-        return "me", 1
+        return "me", "wip"
     if facts["state"] in ("closed", "merged") or pr["mergebot"] in ("ready", "staged"):
-        return "mergebot", 2
+        return "mergebot", None
     if (
         (status and status["conflict"])
         or any(c["context"] not in MINOR_CHECKS for c in facts["failing"])
-        or pr["reviewDecision"] == "CHANGES_REQUESTED"
         or pr["mergebot"] == "error"
     ):
-        return "me", 0
+        return "me", "red"
+    if unpushed or any(c["context"] == "ci/style" for c in facts["failing"]):
+        return "me", "wip"
     if (
-        unpushed
-        or facts["threads"]
-        or (facts["delegated"] and pr["mergebot"] != "approved")
-        or any(c["context"] == "ci/style" for c in facts["failing"])
+        facts["threads"]
+        or pr["reviewDecision"] == "CHANGES_REQUESTED"
+        or (facts["delegated"] and pr["mergebot"] not in R_PLUS_STATES)
     ):
-        return "me", 1
+        return "me", "review"
     if facts["pending"] or pr["mergebot"] == "approved":
-        return "ci", 2
+        return "ci", None
     if facts["state"] == "draft":
-        return "drafts", 2
-    return "reviewer", 2
+        return "drafts", None
+    return "reviewer", None
 
 
 def main():
@@ -314,6 +334,8 @@ def main():
         opener = f"[link=odoo-bundle://{branch}]{icon}[/link]"
         rows = []
         bundle_groups = []
+        ask_tags = {}
+        delegated = False
         for repo in sorted(dates, key=lambda repo: repo != "odoo"):
             status = statuses[repo, branch]
             if status is None:
@@ -325,28 +347,38 @@ def main():
             pr = prs.get((repo, branch))
             facts = get_pr_facts(pr) if pr else {}
             number, tags = format_pr(pr, facts)
+            delegated |= bool(facts) and facts["delegated"] and pr["mergebot"] not in R_PLUS_STATES
             push, unpushed = pushes[repo, branch]
             if BUNDLE_SUFFIX in branch:
                 bundle_groups.append(get_group(pr, facts, status, unpushed))
                 if bundle_groups[-1][0] == "reviewer":
-                    waited = now - pr["asked"]
-                    style = next(style for limit, style in ASKED_STYLES if waited >= limit)
-                    tags = f"{tags} [{style}]asked {format_age(waited, plain=True)}[/{style}]"
+                    ask_tags[len(rows)] = format_ask(pr, now)
             else:
-                bundle_groups.append(("others", 2))
+                bundle_groups.append(("others", None))
                 tags = dim_markup(tags)
             rows.append((age, opener, label, repo, push, behind, conflict, number, tags))
             age = opener = label = ""
-        group, urgency = min(bundle_groups, key=lambda item: (list(GROUPS).index(item[0]), item[1]))
+        group = min((group for group, _kind in bundle_groups), key=list(GROUPS).index)
+        kinds = {kind for row_group, kind in bundle_groups if row_group == group and kind}
+        worst = max(kinds, key=list(ISSUE_RANKS).index, default=None)
+        urgency = ISSUE_RANKS.get(worst, 0)
+        if group == "ci":
+            rows = [(*row[:-1], row[-1].removesuffix(CI_RUNNING).rstrip()) for row in rows]
         if group == "reviewer":
-            date = max(prs[repo, branch]["asked"] for repo in dates if (repo, branch) in prs)
+            for i, ask_tag in ask_tags.items():
+                rows[i] = (*rows[i][:-1], f"{rows[i][-1]} {ask_tag}")
+            waiting = [prs[repo, branch] for repo in dates if (repo, branch) in prs]
+            if stale := [pr["pushed"] for pr in waiting if pr["pushed"] > pr["asked"]]:
+                urgency, date = -1, min(stale)
+            else:
+                date = max(pr["asked"] for pr in waiting)
         else:
             date = max(dates.values())
-        groups[group].append((urgency, date, rows))
+        groups[group].append((not delegated, urgency, date, rows))
 
     for group, bundles_of_group in groups.items():
-        bundles_of_group.sort(key=lambda bundle: bundle[:2])
-        groups[group] = [row for bundle in bundles_of_group for row in bundle[2]]
+        bundles_of_group.sort(key=lambda bundle: bundle[:3])
+        groups[group] = [row for bundle in bundles_of_group for row in bundle[3]]
     rows = [row for group_rows in groups.values() for row in group_rows]
     table = Table(box=None, header_style="bold")
     for i, column in enumerate(("age", "", "branch", "repo", "push", "behind", "conflict", "PR")):
