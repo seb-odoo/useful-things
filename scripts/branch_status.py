@@ -36,6 +36,7 @@ from commands import (
 )
 
 AGE_UNITS = (("d", 86400), ("h", 3600), ("m", 60))
+ASK_SEVERITIES = {"dim": 2, "red": 0, "yellow": 1}
 ASKED_STYLES = ((7 * 86400, "red"), (2 * 86400, "yellow"), (0, "dim"))
 AUTO_ASKED_STYLES = ((7 * 86400, "red"), (86400, "yellow"), (0, "dim"))
 BEHIND_STYLES = ((501, "red"), (50, "yellow"), (0, "default"))
@@ -50,6 +51,7 @@ GROUPS = {
     "mergebot": "Waits on mergebot",
     "others": "Not mine",
 }
+GROUP_PRECEDENCE = ("me", "ci", "drafts", "reviewer", "mergebot", "others")
 ISSUE_RANKS = {"review": 0, "wip": 2, "red": 1}
 MAIN_CHECK_BY_REPO = {
     "design-themes": "ci/design-theme",
@@ -186,12 +188,14 @@ def get_asks(pr, login):
     ]
 
 
-def get_ask_level(pr):
+def get_ask(pr, now):
+    if pr["asked"] is not None and pr["pushed"] > pr["asked"]:
+        return "yellow", "not asked since push", pr["pushed"]
     if pr["asked"] is None:
-        return 1, pr["auto_asked"]
-    if pr["pushed"] > pr["asked"]:
-        return 0, pr["pushed"]
-    return 2, pr["asked"]
+        styles, label, date = AUTO_ASKED_STYLES, "auto-requested", pr["auto_asked"]
+    else:
+        styles, label, date = ASKED_STYLES, "asked", pr["asked"]
+    return next(style for limit, style in styles if now - date >= limit), label, date
 
 
 def get_last_push(pr):
@@ -341,13 +345,8 @@ def format_pr(pr, facts):
 
 
 def format_ask(pr, now):
-    level, date = get_ask_level(pr)
-    age = format_age(now - date, plain=True)
-    if level == 0:
-        return f"[yellow]not asked since push {age}[/yellow]"
-    styles, label = (AUTO_ASKED_STYLES, "auto-requested") if level == 1 else (ASKED_STYLES, "asked")
-    style = next(style for limit, style in styles if now - date >= limit)
-    return f"[{style}]{label} {age}[/{style}]"
+    style, label, date = get_ask(pr, now)
+    return f"[{style}]{label} {format_age(now - date, plain=True)}[/{style}]"
 
 
 def get_group(pr, facts, status, unpushed):
@@ -432,7 +431,7 @@ def main():
                 tags = dim_markup(tags)
             rows.append((age, opener, label, repo, push, behind, conflict, number, tags))
             age = opener = label = ""
-        group = min((group for group, _kind in bundle_groups), key=list(GROUPS).index)
+        group = min((group for group, _kind in bundle_groups), key=GROUP_PRECEDENCE.index)
         if get_worktree_bundle_folder(branch) in open_folders:
             group = "open"
         kinds = {kind for row_group, kind in bundle_groups if row_group == group and kind}
@@ -444,10 +443,9 @@ def main():
             for i, ask_tag in ask_tags.items():
                 rows[i] = (*rows[i][:-1], f"{ask_tag} {rows[i][-1]}".rstrip())
             waiting = [prs[repo, branch] for repo in dates if (repo, branch) in prs]
-            levels = [get_ask_level(pr) for pr in waiting]
-            urgency = min(level for level, _date in levels)
-            dates = [date for level, date in levels if level == urgency]
-            date = max(dates) if urgency == 2 else min(dates)
+            asks = [get_ask(pr, now) for pr in waiting]
+            urgency = min(ASK_SEVERITIES[style] for style, _label, _date in asks)
+            date = min(date for style, _label, date in asks if ASK_SEVERITIES[style] == urgency)
         else:
             date = max(dates.values())
         groups[group].append((not delegated, urgency, date, rows))
