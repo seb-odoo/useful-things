@@ -37,10 +37,10 @@ BEHIND_STYLES = ((501, "red"), (50, "yellow"), (0, "default"))
 DELEGATE = re.compile(r"@robodoo\b.*\bdelegate[+=]")
 GROUPS = {
     "me": "Waits on me",
-    "ci": "Waits on CI",
-    "reviewer": "Waits on a reviewer",
-    "mergebot": "Waits on mergebot",
     "drafts": "Drafts",
+    "reviewer": "Waits on a reviewer",
+    "ci": "Waits on CI",
+    "mergebot": "Waits on mergebot",
     "others": "Not mine",
 }
 MERGEBOT_TAGS = {
