@@ -116,6 +116,9 @@
         "odoo.owl-vision"
       ],
       "settings": {
+        // Upgrade folders like saas~19.5 match Claude's Windows short-name check (~<digit>), which
+        // only bypass mode skips: the allow-all hook and dontAsk still prompt on every write.
+        "claudeCode.allowDangerouslySkipPermissions": true,
         // Access is via the nginx proxy by name; don't forward Odoo ports to the host.
         "remote.autoForwardPorts": false
       }
