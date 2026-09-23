@@ -216,7 +216,7 @@ def format_pr(pr, facts):
         return "", ""
     state = facts["state"]
     style = PR_STYLES.get(state)
-    tags = [f"[{style}]{state}[/{style}]"] if style else []
+    tags = [f"[{style}]{state}[/{style}]"] if style and state != "draft" else []
     if pr["state"] == "OPEN":
         if mergebot := MERGEBOT_TAGS.get(pr["mergebot"]):
             tags.append(mergebot)
@@ -253,10 +253,10 @@ def get_group(pr, facts, status, unpushed):
         or (facts["delegated"] and pr["mergebot"] != "approved")
     ):
         return "me"
-    if facts["state"] == "draft":
-        return "drafts"
     if facts["pending"] or pr["mergebot"] == "approved":
         return "ci"
+    if facts["state"] == "draft":
+        return "drafts"
     return "reviewer"
 
 
