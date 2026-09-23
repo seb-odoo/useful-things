@@ -50,6 +50,7 @@ MERGEBOT_TAGS = {
     "staged": "[green]staged[/green]",
 }
 MERGEBOT_TIMEOUT = 3
+MINOR_CHECKS = {"ci/security": "dim", "ci/style": "yellow"}
 PR_STYLES = {"closed": "red", "draft": "dim", "merged": "magenta"}
 REVIEW_TAGS = {"APPROVED": "approved", "CHANGES_REQUESTED": "[red]changes[/red]"}
 
@@ -227,7 +228,7 @@ def format_pr(pr, facts):
         if threads := facts["threads"]:
             tags.append(f"[yellow]{threads} thread{'s' * (threads > 1)}[/yellow]")
         tags += [
-            f"[{'dim' if c['context'] == 'ci/security' else 'red'}]"
+            f"[{MINOR_CHECKS.get(c['context'], 'red')}]"
             f"[link={c['targetUrl']}]{c['context'].removeprefix('ci/')}[/link][/]"
             for c in facts["failing"]
         ]
@@ -239,25 +240,28 @@ def format_pr(pr, facts):
 
 def get_group(pr, facts, status, unpushed):
     if not pr:
-        return "me"
+        return "me", 1
     if facts["state"] in ("closed", "merged") or pr["mergebot"] in ("ready", "staged"):
-        return "mergebot"
-    blocking = [c for c in facts["failing"] if c["context"] != "ci/security"]
+        return "mergebot", 2
     if (
-        unpushed
-        or (status and status["conflict"])
-        or blocking
-        or facts["threads"]
+        (status and status["conflict"])
+        or any(c["context"] not in MINOR_CHECKS for c in facts["failing"])
         or pr["reviewDecision"] == "CHANGES_REQUESTED"
         or pr["mergebot"] == "error"
-        or (facts["delegated"] and pr["mergebot"] != "approved")
     ):
-        return "me"
+        return "me", 0
+    if (
+        unpushed
+        or facts["threads"]
+        or (facts["delegated"] and pr["mergebot"] != "approved")
+        or any(c["context"] == "ci/style" for c in facts["failing"])
+    ):
+        return "me", 1
     if facts["pending"] or pr["mergebot"] == "approved":
-        return "ci"
+        return "ci", 2
     if facts["state"] == "draft":
-        return "drafts"
-    return "reviewer"
+        return "drafts", 2
+    return "reviewer", 2
 
 
 def main():
@@ -289,7 +293,7 @@ def main():
         icon = "\N{OPEN FILE FOLDER}" if branch in worktree_branches else "\N{INBOX TRAY}"
         opener = f"[link=odoo-bundle://{branch}]{icon}[/link]"
         rows = []
-        bundle_groups = set()
+        bundle_groups = []
         for repo in sorted(dates, key=lambda repo: repo != "odoo"):
             status = statuses[repo, branch]
             if status is None:
@@ -303,14 +307,18 @@ def main():
             number, tags = format_pr(pr, facts)
             push, unpushed = pushes[repo, branch]
             if BUNDLE_SUFFIX in branch:
-                bundle_groups.add(get_group(pr, facts, status, unpushed))
+                bundle_groups.append(get_group(pr, facts, status, unpushed))
             else:
-                bundle_groups.add("others")
+                bundle_groups.append(("others", 2))
                 tags = dim_markup(tags)
             rows.append((age, opener, label, repo, push, behind, conflict, number, tags))
             age = opener = label = ""
-        groups[min(bundle_groups, key=list(GROUPS).index)] += rows
+        group, urgency = min(bundle_groups, key=lambda item: (list(GROUPS).index(item[0]), item[1]))
+        groups[group].append((urgency, max(dates.values()), rows))
 
+    for group, bundles_of_group in groups.items():
+        bundles_of_group.sort(key=lambda bundle: bundle[:2])
+        groups[group] = [row for bundle in bundles_of_group for row in bundle[2]]
     rows = [row for group_rows in groups.values() for row in group_rows]
     table = Table(box=None, header_style="bold")
     for i, column in enumerate(("age", "", "branch", "repo", "push", "behind", "conflict", "PR")):
