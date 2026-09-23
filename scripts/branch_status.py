@@ -450,6 +450,7 @@ def main():
             date = max(dates.values())
         groups[group].append((not delegated, urgency, date, rows))
 
+    counts = {group: len(bundles_of_group) for group, bundles_of_group in groups.items()}
     for group, bundles_of_group in groups.items():
         bundles_of_group.sort(key=lambda bundle: bundle[:3])
         groups[group] = [row for bundle in bundles_of_group for row in bundle[3]]
@@ -469,7 +470,7 @@ def main():
         if group_rows:
             if table.row_count:
                 table.add_row()
-            table.add_row("", "", f"[bold]{GROUPS[group]}[/bold]")
+            table.add_row("", "", f"[bold]{GROUPS[group]}[/bold] [dim]{counts[group]}[/dim]")
             for row in group_rows:
                 table.add_row(*row)
     console.print(table)
