@@ -50,6 +50,15 @@ GROUPS = {
     "others": "Not mine",
 }
 ISSUE_RANKS = {"review": 0, "wip": 2, "red": 1}
+MAIN_CHECK_BY_REPO = {
+    "design-themes": "ci/design-theme",
+    "documentation": "ci/documentation",
+    "enterprise": "ci/runbot",
+    "odoo": "ci/runbot",
+    "sfu": "ci/sfu",
+    "upgrade": "ci/runbot",
+    "upgrade-util": "ci/runbot",
+}
 MERGEBOT_TAGS = {
     "approved": "[green]r+[/green]",
     "error": "[red]staging error[/red]",
@@ -130,7 +139,8 @@ def get_prs(pairs):
             "reviews(last: 30) { nodes { body } } "
             "timelineItems(last: 20, itemTypes: [REVIEW_REQUESTED_EVENT]) { nodes { "
             "... on ReviewRequestedEvent { actor { login } createdAt } } } "
-            "reviewThreads(first: 100) { nodes { isResolved } } "
+            "reviewThreads(first: 100) { nodes { isResolved "
+            "comments(last: 1) { nodes { author { login } createdAt } } } } "
             "forcePushes: timelineItems(last: 1, itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT]) { "
             "nodes { ... on HeadRefForcePushedEvent { createdAt } } } "
             "commits(last: 1) { nodes { commit { committedDate status { contexts { "
@@ -152,6 +162,7 @@ def get_prs(pairs):
     }
     for pr in prs.values():
         pr["asked"], pr["auto_asked"] = get_asks(pr, data["viewer"]["login"])
+        pr["viewer"] = data["viewer"]["login"]
         pr["pushed"] = get_last_push(pr)
     errors = set()
     with ThreadPoolExecutor(max_workers=max(len(prs), 1)) as executor:
@@ -164,7 +175,8 @@ def get_prs(pairs):
 
 def get_asks(pr, login):
     mine, automated = [], [pr["createdAt"]]
-    for node in pr["comments"]["nodes"] + pr["timelineItems"]["nodes"]:
+    thread_comments = [t["comments"]["nodes"][0] for t in pr["reviewThreads"]["nodes"]]
+    for node in pr["comments"]["nodes"] + pr["timelineItems"]["nodes"] + thread_comments:
         by_me = (node.get("author") or node.get("actor") or {}).get("login") == login
         (mine if by_me else automated).append(node["createdAt"])
     return [
@@ -257,12 +269,20 @@ def dim_markup(markup):
     return dimmed
 
 
-def get_pr_facts(pr):
+def get_pr_facts(pr, repo):
     state = "draft" if pr["isDraft"] and pr["state"] == "OPEN" else pr["state"].lower()
     if pr["mergebot"] == "merged":
         state = "merged"
     bodies = [node["body"] for key in ("comments", "reviews") for node in pr[key]["nodes"]]
     contexts = (pr["commits"]["nodes"][0]["commit"]["status"] or {}).get("contexts", [])
+    main_check = MAIN_CHECK_BY_REPO.get(repo)
+    ci_not_started = main_check and main_check not in {c["context"] for c in contexts}
+    open_threads = [t for t in pr["reviewThreads"]["nodes"] if not t["isResolved"]]
+    to_answer = [
+        t
+        for t in open_threads
+        if (t["comments"]["nodes"][0]["author"] or {}).get("login") != pr["viewer"]
+    ]
     return {
         "delegated": any(DELEGATE.search(body) for body in bodies),
         "failing": [
@@ -270,9 +290,10 @@ def get_pr_facts(pr):
             for c in contexts
             if c["state"] in ("ERROR", "FAILURE") and c["context"] != "ci/codeowner"
         ],
-        "pending": any(c["state"] == "PENDING" for c in contexts),
+        "pending": ci_not_started or any(c["state"] == "PENDING" for c in contexts),
         "state": state,
-        "threads": sum(not t["isResolved"] for t in pr["reviewThreads"]["nodes"]),
+        "replied": len(open_threads) - len(to_answer),
+        "threads": len(to_answer),
     }
 
 
@@ -291,6 +312,8 @@ def format_pr(pr, facts):
             tags.append(review)
         if threads := facts["threads"]:
             tags.append(f"[yellow]{threads} thread{'s' * (threads > 1)}[/yellow]")
+        if replied := facts["replied"]:
+            tags.append(f"[dim]{replied} replied[/dim]")
         tags += [
             f"[{MINOR_CHECKS.get(c['context'], 'red')}]"
             f"[link={c['targetUrl']}]{c['context'].removeprefix('ci/')}[/link][/]"
@@ -382,7 +405,7 @@ def main():
                 behind = f"[{style}]{status['behind']}[/{style}]"
                 conflict = "[red]yes[/red]" if status["conflict"] else ""
             pr = prs.get((repo, branch))
-            facts = get_pr_facts(pr) if pr else {}
+            facts = get_pr_facts(pr, repo) if pr else {}
             number, tags = format_pr(pr, facts)
             delegated |= bool(facts) and facts["delegated"] and pr["mergebot"] not in R_PLUS_STATES
             push, unpushed = pushes[repo, branch]
