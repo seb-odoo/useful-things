@@ -32,6 +32,7 @@ from commands import (
     get_repo_folder,
     get_repos,
     get_sticky_bundles,
+    get_worktree_bundle_folder,
 )
 
 AGE_UNITS = (("d", 86400), ("h", 3600), ("m", 60))
@@ -40,6 +41,7 @@ BEHIND_STYLES = ((501, "red"), (50, "yellow"), (0, "default"))
 CI_RUNNING = "[dim]ci running[/dim]"
 DELEGATE = re.compile(r"@robodoo\b.*\bdelegate[+=]")
 GROUPS = {
+    "open": "Open in VS Code",
     "me": "Waits on me",
     "drafts": "Drafts",
     "reviewer": "Waits on a reviewer",
@@ -70,6 +72,26 @@ def git(repo, *args):
         text=True,
     )
     return res.stdout.strip() if res.returncode == 0 else None
+
+
+def get_open_bundle_folders():
+    try:
+        out = subprocess.run(
+            [
+                "podman",
+                "ps",
+                "--filter",
+                "label=devcontainer.local_folder",
+                "--format",
+                '{{index .Labels "devcontainer.local_folder"}}',
+            ],
+            capture_output=True,
+            check=False,
+            text=True,
+        ).stdout
+    except OSError:
+        return set()
+    return set(out.split())
 
 
 def has_write_tree():
@@ -332,11 +354,13 @@ def main():
                         worktree_branches.add(branch)
         pairs = [(repo, branch) for branch, dates in bundles.items() for repo in dates]
         prs_future = executor.submit(get_prs, pairs)
+        open_future = executor.submit(get_open_bundle_folders)
         statuses = dict(
             zip(pairs, executor.map(lambda pair: get_status(*pair, write_tree), pairs)),
         )
         pushes = dict(zip(pairs, executor.map(lambda pair: get_push(*pair), pairs)))
         prs, errors = prs_future.result()
+        open_folders = open_future.result()
 
     groups = {group: [] for group in GROUPS}
     now = time.time()
@@ -372,6 +396,8 @@ def main():
             rows.append((age, opener, label, repo, push, behind, conflict, number, tags))
             age = opener = label = ""
         group = min((group for group, _kind in bundle_groups), key=list(GROUPS).index)
+        if get_worktree_bundle_folder(branch) in open_folders:
+            group = "open"
         kinds = {kind for row_group, kind in bundle_groups if row_group == group and kind}
         worst = max(kinds, key=list(ISSUE_RANKS).index, default=None)
         urgency = ISSUE_RANKS.get(worst, 0)
