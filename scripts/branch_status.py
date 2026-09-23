@@ -223,9 +223,9 @@ def main():
     now = time.time()
     for branch, dates in sorted(bundles.items(), key=lambda item: -max(item[1].values())):
         age = format_age(now - max(dates.values()))
-        label = f"[link=odoo-bundle://{branch}]{branch}[/link]"
-        if branch in worktree_branches:
-            label = f"[cyan]{label}[/cyan]"
+        label = f"[cyan]{branch}[/cyan]" if branch in worktree_branches else branch
+        icon = "\N{OPEN FILE FOLDER}" if branch in worktree_branches else "\N{INBOX TRAY}"
+        opener = f"[link=odoo-bundle://{branch}]{icon}[/link]"
         for repo in sorted(dates, key=lambda repo: repo != "odoo"):
             status = statuses[repo, branch]
             if status is None:
@@ -235,11 +235,13 @@ def main():
                 behind = f"[{style}]{status['behind']}[/{style}]"
                 conflict = "[red]yes[/red]" if status["conflict"] else ""
             number, tags = format_pr(prs.get((repo, branch)))
-            rows.append((age, label, repo, pushes[repo, branch], behind, conflict, number, tags))
-            age = label = ""
+            rows.append(
+                (age, opener, label, repo, pushes[repo, branch], behind, conflict, number, tags),
+            )
+            age = opener = label = ""
 
     table = Table(box=None, header_style="bold")
-    for i, column in enumerate(("age", "branch", "repo", "push", "behind", "conflict", "PR")):
+    for i, column in enumerate(("age", "", "branch", "repo", "push", "behind", "conflict", "PR")):
         table.add_column(
             column,
             justify="right" if column in ("age", "behind", "PR") else "left",
