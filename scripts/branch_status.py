@@ -17,10 +17,12 @@ import urllib.error
 import urllib.request
 
 from rich.console import Console
+from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 
 from commands import (
+    BUNDLE_SUFFIX,
     get_base_for_repo,
     get_base_from_bundle_name,
     get_remote_dev_ref,
@@ -32,6 +34,7 @@ from commands import (
 )
 
 BEHIND_STYLES = ((501, "red"), (50, "yellow"), (0, "default"))
+DELEGATE = re.compile(r"@robodoo\b.*\bdelegate[+=]")
 MERGEBOT_TAGS = {
     "approved": "r+",
     "error": "[red]staging error[/red]",
@@ -86,6 +89,8 @@ def get_prs(pairs):
             f"headRefName: {json.dumps(branch)}, first: 1, "
             "orderBy: {field: CREATED_AT, direction: DESC}) "
             "{ nodes { isDraft number reviewDecision state url "
+            "comments(last: 30) { nodes { body } } reviews(last: 30) { nodes { body } } "
+            "reviewThreads(first: 100) { nodes { isResolved } } "
             "commits(last: 1) { nodes { commit { status { contexts { "
             "context state targetUrl } } } } } } } }",
         )
@@ -168,6 +173,16 @@ def format_age(seconds):
     return f"[{style}]now[/{style}]"
 
 
+def dim_markup(markup):
+    text = Text.from_markup(markup)
+    dimmed = Text(text.plain, style="dim")
+    for span in text.spans:
+        style = span.style if isinstance(span.style, Style) else Style.parse(span.style)
+        if style.link:
+            dimmed.stylize(Style(link=style.link), span.start, span.end)
+    return dimmed
+
+
 def format_pr(pr):
     if not pr:
         return "", ""
@@ -177,10 +192,15 @@ def format_pr(pr):
     style = PR_STYLES.get(state)
     tags = [f"[{style}]{state}[/{style}]"] if style else []
     if pr["state"] == "OPEN":
+        bodies = [node["body"] for key in ("comments", "reviews") for node in pr[key]["nodes"]]
         if mergebot := MERGEBOT_TAGS.get(pr["mergebot"]):
             tags.append(mergebot)
+        elif any(DELEGATE.search(body) for body in bodies):
+            tags.append("[green]delegated[/green]")
         elif review := REVIEW_TAGS.get(pr["reviewDecision"]):
             tags.append(review)
+        if threads := sum(not t["isResolved"] for t in pr["reviewThreads"]["nodes"]):
+            tags.append(f"[yellow]{threads} thread{'s' * (threads > 1)}[/yellow]")
         contexts = (pr["commits"]["nodes"][0]["commit"]["status"] or {}).get("contexts", [])
         failing = [
             c
@@ -235,6 +255,8 @@ def main():
                 behind = f"[{style}]{status['behind']}[/{style}]"
                 conflict = "[red]yes[/red]" if status["conflict"] else ""
             number, tags = format_pr(prs.get((repo, branch)))
+            if BUNDLE_SUFFIX not in branch:
+                tags = dim_markup(tags)
             rows.append(
                 (age, opener, label, repo, pushes[repo, branch], behind, conflict, number, tags),
             )
