@@ -67,8 +67,8 @@ def get_local_branches(repo):
         "refs/heads/",
     )
     return [
-        (name, int(date), bool(path))
-        for name, date, path in (line.split(" ", 2) for line in out.splitlines())
+        (name, int(date), any(path))
+        for name, date, *path in (line.split(" ", 2) for line in out.splitlines())
     ]
 
 
