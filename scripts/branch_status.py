@@ -8,6 +8,7 @@ Examples:
 """
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 import json
 import os
 import re
@@ -33,6 +34,8 @@ from commands import (
     get_sticky_bundles,
 )
 
+AGE_UNITS = (("d", 86400), ("h", 3600), ("m", 60))
+ASKED_STYLES = ((7 * 86400, "red"), (2 * 86400, "yellow"), (0, "dim"))
 BEHIND_STYLES = ((501, "red"), (50, "yellow"), (0, "default"))
 DELEGATE = re.compile(r"@robodoo\b.*\bdelegate[+=]")
 GROUPS = {
@@ -97,14 +100,17 @@ def get_prs(pairs):
             f'p{i}: repository(owner: "{owner}", name: "{name}") {{ pullRequests('
             f"headRefName: {json.dumps(branch)}, first: 1, "
             "orderBy: {field: CREATED_AT, direction: DESC}) "
-            "{ nodes { isDraft number reviewDecision state url "
-            "comments(last: 30) { nodes { body } } reviews(last: 30) { nodes { body } } "
+            "{ nodes { createdAt isDraft number reviewDecision state url "
+            "comments(last: 30) { nodes { author { login } body createdAt } } "
+            "reviews(last: 30) { nodes { body } } "
+            "timelineItems(last: 20, itemTypes: [REVIEW_REQUESTED_EVENT]) { nodes { "
+            "... on ReviewRequestedEvent { actor { login } createdAt } } } "
             "reviewThreads(first: 100) { nodes { isResolved } } "
             "commits(last: 1) { nodes { commit { status { contexts { "
             "context state targetUrl } } } } } } } }",
         )
     res = subprocess.run(
-        ["gh", "api", "graphql", "-f", f"query={{ {' '.join(queries)} }}"],
+        ["gh", "api", "graphql", "-f", f"query={{ viewer {{ login }} {' '.join(queries)} }}"],
         capture_output=True,
         check=False,
         text=True,
@@ -117,6 +123,8 @@ def get_prs(pairs):
         for i, pair in enumerate(pairs)
         if (nodes := data[f"p{i}"]["pullRequests"]["nodes"])
     }
+    for pr in prs.values():
+        pr["asked"] = get_last_ask(pr, data["viewer"]["login"])
     errors = set()
     with ThreadPoolExecutor(max_workers=max(len(prs), 1)) as executor:
         for pr, (state, error) in zip(prs.values(), executor.map(get_mergebot_state, prs.values())):
@@ -124,6 +132,15 @@ def get_prs(pairs):
             if error:
                 errors.add(f"mergebot: {error}")
     return prs, sorted(errors)
+
+
+def get_last_ask(pr, login):
+    dates = [
+        node["createdAt"]
+        for node in pr["comments"]["nodes"] + pr["timelineItems"]["nodes"]
+        if (node.get("author") or node.get("actor") or {}).get("login") == login
+    ]
+    return datetime.fromisoformat(max(dates, default=pr["createdAt"])).timestamp()
 
 
 def get_mergebot_state(pr):
@@ -175,12 +192,15 @@ def get_status(repo, branch, write_tree):
     }
 
 
-def format_age(seconds):
+def format_age(seconds, plain=False):
+    age = next(
+        (f"{int(seconds // size)}{unit}" for unit, size in AGE_UNITS if seconds >= size),
+        "now",
+    )
+    if plain:
+        return age
     style = "default" if seconds < 7 * 86400 else "dim"
-    for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
-        if seconds >= size:
-            return f"[{style}]{int(seconds // size)}{unit}[/{style}]"
-    return f"[{style}]now[/{style}]"
+    return f"[{style}]{age}[/{style}]"
 
 
 def dim_markup(markup):
@@ -308,13 +328,21 @@ def main():
             push, unpushed = pushes[repo, branch]
             if BUNDLE_SUFFIX in branch:
                 bundle_groups.append(get_group(pr, facts, status, unpushed))
+                if bundle_groups[-1][0] == "reviewer":
+                    waited = now - pr["asked"]
+                    style = next(style for limit, style in ASKED_STYLES if waited >= limit)
+                    tags = f"{tags} [{style}]asked {format_age(waited, plain=True)}[/{style}]"
             else:
                 bundle_groups.append(("others", 2))
                 tags = dim_markup(tags)
             rows.append((age, opener, label, repo, push, behind, conflict, number, tags))
             age = opener = label = ""
         group, urgency = min(bundle_groups, key=lambda item: (list(GROUPS).index(item[0]), item[1]))
-        groups[group].append((urgency, max(dates.values()), rows))
+        if group == "reviewer":
+            date = max(prs[repo, branch]["asked"] for repo in dates if (repo, branch) in prs)
+        else:
+            date = max(dates.values())
+        groups[group].append((urgency, date, rows))
 
     for group, bundles_of_group in groups.items():
         bundles_of_group.sort(key=lambda bundle: bundle[:2])
