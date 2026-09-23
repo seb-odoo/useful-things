@@ -37,6 +37,7 @@ from commands import (
 
 AGE_UNITS = (("d", 86400), ("h", 3600), ("m", 60))
 ASKED_STYLES = ((7 * 86400, "red"), (2 * 86400, "yellow"), (0, "dim"))
+AUTO_ASKED_STYLES = ((7 * 86400, "red"), (86400, "yellow"), (0, "dim"))
 BEHIND_STYLES = ((501, "red"), (50, "yellow"), (0, "default"))
 CI_RUNNING = "[dim]ci running[/dim]"
 DELEGATE = re.compile(r"@robodoo\b.*\bdelegate[+=]")
@@ -269,12 +270,24 @@ def dim_markup(markup):
     return dimmed
 
 
+def get_batch(context):
+    match = re.search(r"/batch/(\d+)/", context["targetUrl"] or "")
+    return int(match[1]) if match else None
+
+
 def get_pr_facts(pr, repo):
     state = "draft" if pr["isDraft"] and pr["state"] == "OPEN" else pr["state"].lower()
     if pr["mergebot"] == "merged":
         state = "merged"
     bodies = [node["body"] for key in ("comments", "reviews") for node in pr[key]["nodes"]]
     contexts = (pr["commits"]["nodes"][0]["commit"]["status"] or {}).get("contexts", [])
+    batches = {c["context"]: get_batch(c) for c in contexts}
+    latest = max(filter(None, batches.values()), default=None)
+    stale = {
+        c["context"]
+        for c in contexts
+        if c["state"] in ("ERROR", "FAILURE") and batches[c["context"]] not in (None, latest)
+    }
     main_check = MAIN_CHECK_BY_REPO.get(repo)
     ci_not_started = main_check and main_check not in {c["context"] for c in contexts}
     open_threads = [t for t in pr["reviewThreads"]["nodes"] if not t["isResolved"]]
@@ -288,9 +301,11 @@ def get_pr_facts(pr, repo):
         "failing": [
             c
             for c in contexts
-            if c["state"] in ("ERROR", "FAILURE") and c["context"] != "ci/codeowner"
+            if c["state"] in ("ERROR", "FAILURE")
+            and c["context"] != "ci/codeowner"
+            and c["context"] not in stale
         ],
-        "pending": ci_not_started or any(c["state"] == "PENDING" for c in contexts),
+        "pending": ci_not_started or bool(stale) or any(c["state"] == "PENDING" for c in contexts),
         "state": state,
         "replied": len(open_threads) - len(to_answer),
         "threads": len(to_answer),
@@ -330,10 +345,9 @@ def format_ask(pr, now):
     age = format_age(now - date, plain=True)
     if level == 0:
         return f"[yellow]not asked since push {age}[/yellow]"
-    if level == 1:
-        return f"[yellow]auto-requested {age}[/yellow]"
-    style = next(style for limit, style in ASKED_STYLES if now - date >= limit)
-    return f"[{style}]asked {age}[/{style}]"
+    styles, label = (AUTO_ASKED_STYLES, "auto-requested") if level == 1 else (ASKED_STYLES, "asked")
+    style = next(style for limit, style in styles if now - date >= limit)
+    return f"[{style}]{label} {age}[/{style}]"
 
 
 def get_group(pr, facts, status, unpushed):
@@ -428,7 +442,7 @@ def main():
             rows = [(*row[:-1], row[-1].removesuffix(CI_RUNNING).rstrip()) for row in rows]
         if group == "reviewer":
             for i, ask_tag in ask_tags.items():
-                rows[i] = (*rows[i][:-1], f"{rows[i][-1]} {ask_tag}")
+                rows[i] = (*rows[i][:-1], f"{ask_tag} {rows[i][-1]}".rstrip())
             waiting = [prs[repo, branch] for repo in dates if (repo, branch) in prs]
             levels = [get_ask_level(pr) for pr in waiting]
             urgency = min(level for level, _date in levels)
