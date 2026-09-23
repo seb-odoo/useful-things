@@ -265,6 +265,29 @@ Repositories
 Done
 ```
 
+### branch_status.py (`gbs`)
+
+Lists the local branches of every repo like `git branch`, newest first: what is not pushed, how far
+behind their base they are, whether a rebase conflicts, and their PR with its mergebot, review and
+CI state. Reads local refs only, so run `gfa` first for fresh numbers.
+
+Each branch name is an `odoo-bundle://` link, see `bundle_open.py`.
+
+### bundle_open.py
+
+Opens an `odoo-bundle://<bundle>` link: in its dev container when the worktree exists, like
+`ocode`, otherwise through `pfb` in a terminal, which opens the dev container at the end.
+
+One-time setup, so that a click on a `gbs` branch name reaches it:
+
+```bash
+$ ln -s ~/repo/useful-things/scripts/odoo-bundle.desktop ~/.local/share/applications/
+$ xdg-mime default odoo-bundle.desktop x-scheme-handler/odoo-bundle
+```
+
+and add `odoo-bundle` to `terminal.integrated.allowedLinkSchemes` in the VS Code settings, next to
+its default values.
+
 ## Support modules
 
 - **config.py** — central configuration (repo paths, remotes, bundle suffix, sticky bundles); **edit this file to match your own setup**

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Odoo bundle opener
+Comment=Open odoo-bundle:// links from gbs
+Exec=/home/seb/virtualenvs/odoo20/bin/python /home/seb/repo/useful-things/scripts/bundle_open.py %u
+Type=Application
+NoDisplay=true
+MimeType=x-scheme-handler/odoo-bundle;

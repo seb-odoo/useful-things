@@ -223,7 +223,9 @@ def main():
     now = time.time()
     for branch, dates in sorted(bundles.items(), key=lambda item: -max(item[1].values())):
         age = format_age(now - max(dates.values()))
-        label = f"[cyan]{branch}[/cyan]" if branch in worktree_branches else branch
+        label = f"[link=odoo-bundle://{branch}]{branch}[/link]"
+        if branch in worktree_branches:
+            label = f"[cyan]{label}[/cyan]"
         for repo in sorted(dates, key=lambda repo: repo != "odoo"):
             status = statuses[repo, branch]
             if status is None:
