@@ -192,6 +192,25 @@ def delete_bundle(
                 )
 
     runner.parallel_run(Tree("Repositories"), get_repos(), handle_repo)
+    containers = runner.run(
+        [
+            "podman",
+            "ps",
+            "--all",
+            "--format",
+            "{{.ID}} {{.State}}",
+            "--filter",
+            f"label=devcontainer.local_folder={get_worktree_bundle_folder(bundle_name)}",
+        ],
+    ).stdout.split("\n")
+    states = dict(line.split() for line in containers if line.strip())
+    if stopped := [container for container, state in states.items() if state != "running"]:
+        runner.run(["podman", "rm", *stopped])
+    if any(state == "running" for state in states.values()):
+        print(
+            f"[yellow]{bundle_name}: its dev container still runs, close its VS Code window and "
+            "delete the bundle again to remove it[/yellow]",
+        )
     runner.run(["rm", "-rf", get_worktree_bundle_folder(bundle_name)])
 
     def handle_database(runner: UtilsRunner, name: str):
