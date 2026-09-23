@@ -35,6 +35,14 @@ from commands import (
 
 BEHIND_STYLES = ((501, "red"), (50, "yellow"), (0, "default"))
 DELEGATE = re.compile(r"@robodoo\b.*\bdelegate[+=]")
+GROUPS = {
+    "me": "Waits on me",
+    "ci": "Waits on CI",
+    "reviewer": "Waits on a reviewer",
+    "mergebot": "Waits on mergebot",
+    "drafts": "Drafts",
+    "others": "Not mine",
+}
 MERGEBOT_TAGS = {
     "approved": "r+",
     "error": "[red]staging error[/red]",
@@ -131,13 +139,14 @@ def get_mergebot_state(pr):
 def get_push(repo, branch):
     remote_ref = get_remote_dev_ref(branch, repo)
     if git(repo, "rev-parse", "--verify", "--quiet", remote_ref) is None:
-        return "[dim]no remote[/dim]"
+        return "[dim]no remote[/dim]", True
     counts = git(repo, "rev-list", "--left-right", "--count", f"{branch}...{remote_ref}")
     ahead, behind = counts.split()
-    return " ".join(
+    markup = " ".join(
         [f"[yellow]+{ahead}[/yellow]"] * (ahead != "0")
         + [f"[yellow]-{behind}[/yellow]"] * (behind != "0"),
     )
+    return markup, bool(markup)
 
 
 def has_conflict(repo, branch, base_ref, write_tree):
@@ -183,39 +192,72 @@ def dim_markup(markup):
     return dimmed
 
 
-def format_pr(pr):
-    if not pr:
-        return "", ""
+def get_pr_facts(pr):
     state = "draft" if pr["isDraft"] and pr["state"] == "OPEN" else pr["state"].lower()
     if pr["mergebot"] == "merged":
         state = "merged"
-    style = PR_STYLES.get(state)
-    tags = [f"[{style}]{state}[/{style}]"] if style else []
-    if pr["state"] == "OPEN":
-        bodies = [node["body"] for key in ("comments", "reviews") for node in pr[key]["nodes"]]
-        if mergebot := MERGEBOT_TAGS.get(pr["mergebot"]):
-            tags.append(mergebot)
-        elif any(DELEGATE.search(body) for body in bodies):
-            tags.append("[green]delegated[/green]")
-        elif review := REVIEW_TAGS.get(pr["reviewDecision"]):
-            tags.append(review)
-        if threads := sum(not t["isResolved"] for t in pr["reviewThreads"]["nodes"]):
-            tags.append(f"[yellow]{threads} thread{'s' * (threads > 1)}[/yellow]")
-        contexts = (pr["commits"]["nodes"][0]["commit"]["status"] or {}).get("contexts", [])
-        failing = [
+    bodies = [node["body"] for key in ("comments", "reviews") for node in pr[key]["nodes"]]
+    contexts = (pr["commits"]["nodes"][0]["commit"]["status"] or {}).get("contexts", [])
+    return {
+        "delegated": any(DELEGATE.search(body) for body in bodies),
+        "failing": [
             c
             for c in contexts
             if c["state"] in ("ERROR", "FAILURE") and c["context"] != "ci/codeowner"
-        ]
+        ],
+        "pending": any(c["state"] == "PENDING" for c in contexts),
+        "state": state,
+        "threads": sum(not t["isResolved"] for t in pr["reviewThreads"]["nodes"]),
+    }
+
+
+def format_pr(pr, facts):
+    if not pr:
+        return "", ""
+    state = facts["state"]
+    style = PR_STYLES.get(state)
+    tags = [f"[{style}]{state}[/{style}]"] if style else []
+    if pr["state"] == "OPEN":
+        if mergebot := MERGEBOT_TAGS.get(pr["mergebot"]):
+            tags.append(mergebot)
+        elif facts["delegated"]:
+            tags.append("[green]delegated[/green]")
+        elif review := REVIEW_TAGS.get(pr["reviewDecision"]):
+            tags.append(review)
+        if threads := facts["threads"]:
+            tags.append(f"[yellow]{threads} thread{'s' * (threads > 1)}[/yellow]")
         tags += [
             f"[{'dim' if c['context'] == 'ci/security' else 'red'}]"
             f"[link={c['targetUrl']}]{c['context'].removeprefix('ci/')}[/link][/]"
-            for c in failing
+            for c in facts["failing"]
         ]
-        if any(c["state"] == "PENDING" for c in contexts):
+        if facts["pending"]:
             tags.append("[dim]ci running[/dim]")
     number = f"[link={pr['url']}]{pr['number']}[/link]"
     return f"[{style}]{number}[/{style}]" if style else number, " ".join(tags)
+
+
+def get_group(pr, facts, status, unpushed):
+    if not pr:
+        return "me"
+    if facts["state"] in ("closed", "merged") or pr["mergebot"] in ("ready", "staged"):
+        return "mergebot"
+    blocking = [c for c in facts["failing"] if c["context"] != "ci/security"]
+    if (
+        unpushed
+        or (status and status["conflict"])
+        or blocking
+        or facts["threads"]
+        or pr["reviewDecision"] == "CHANGES_REQUESTED"
+        or pr["mergebot"] == "error"
+        or (facts["delegated"] and pr["mergebot"] != "approved")
+    ):
+        return "me"
+    if facts["state"] == "draft":
+        return "drafts"
+    if facts["pending"] or pr["mergebot"] == "approved":
+        return "ci"
+    return "reviewer"
 
 
 def main():
@@ -239,13 +281,15 @@ def main():
         pushes = dict(zip(pairs, executor.map(lambda pair: get_push(*pair), pairs)))
         prs, errors = prs_future.result()
 
-    rows = []
+    groups = {group: [] for group in GROUPS}
     now = time.time()
     for branch, dates in sorted(bundles.items(), key=lambda item: -max(item[1].values())):
         age = format_age(now - max(dates.values()))
         label = f"[cyan]{branch}[/cyan]" if branch in worktree_branches else branch
         icon = "\N{OPEN FILE FOLDER}" if branch in worktree_branches else "\N{INBOX TRAY}"
         opener = f"[link=odoo-bundle://{branch}]{icon}[/link]"
+        rows = []
+        bundle_groups = set()
         for repo in sorted(dates, key=lambda repo: repo != "odoo"):
             status = statuses[repo, branch]
             if status is None:
@@ -254,14 +298,20 @@ def main():
                 style = next(style for limit, style in BEHIND_STYLES if status["behind"] >= limit)
                 behind = f"[{style}]{status['behind']}[/{style}]"
                 conflict = "[red]yes[/red]" if status["conflict"] else ""
-            number, tags = format_pr(prs.get((repo, branch)))
-            if BUNDLE_SUFFIX not in branch:
+            pr = prs.get((repo, branch))
+            facts = get_pr_facts(pr) if pr else {}
+            number, tags = format_pr(pr, facts)
+            push, unpushed = pushes[repo, branch]
+            if BUNDLE_SUFFIX in branch:
+                bundle_groups.add(get_group(pr, facts, status, unpushed))
+            else:
+                bundle_groups.add("others")
                 tags = dim_markup(tags)
-            rows.append(
-                (age, opener, label, repo, pushes[repo, branch], behind, conflict, number, tags),
-            )
+            rows.append((age, opener, label, repo, push, behind, conflict, number, tags))
             age = opener = label = ""
+        groups[min(bundle_groups, key=list(GROUPS).index)] += rows
 
+    rows = [row for group_rows in groups.values() for row in group_rows]
     table = Table(box=None, header_style="bold")
     for i, column in enumerate(("age", "", "branch", "repo", "push", "behind", "conflict", "PR")):
         table.add_column(
@@ -273,8 +323,13 @@ def main():
             no_wrap=True,
         )
     table.add_column("state", min_width=10)
-    for row in rows:
-        table.add_row(*row)
+    for group, group_rows in groups.items():
+        if group_rows:
+            if table.row_count:
+                table.add_row()
+            table.add_row("", "", f"[bold]{GROUPS[group]}[/bold]")
+            for row in group_rows:
+                table.add_row(*row)
     console.print(table)
     for error in errors:
         console.print(f"[yellow]PR state incomplete[/yellow], {error}")
