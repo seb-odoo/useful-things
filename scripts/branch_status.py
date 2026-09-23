@@ -30,6 +30,7 @@ from commands import (
     get_sticky_bundles,
 )
 
+BEHIND_STYLES = ((501, "red"), (50, "yellow"), (0, "default"))
 MERGEBOT_TAGS = {
     "approved": "r+",
     "error": "[red]staging error[/red]",
@@ -38,7 +39,6 @@ MERGEBOT_TAGS = {
 }
 PR_STYLES = {"closed": "red", "draft": "dim", "merged": "magenta"}
 REVIEW_TAGS = {"APPROVED": "approved", "CHANGES_REQUESTED": "[red]changes[/red]"}
-STALE_FORK_SECONDS = 24 * 3600
 
 
 def git(repo, *args):
@@ -84,7 +84,8 @@ def get_prs(pairs):
             f"headRefName: {json.dumps(branch)}, first: 1, "
             "orderBy: {field: CREATED_AT, direction: DESC}) "
             "{ nodes { isDraft number reviewDecision state url "
-            "commits(last: 1) { nodes { commit { status { contexts { context state } } } } } } } }",
+            "commits(last: 1) { nodes { commit { status { contexts { "
+            "context state targetUrl } } } } } } } }",
         )
     res = subprocess.run(
         ["gh", "api", "graphql", "-f", f"query={{ {' '.join(queries)} }}"],
@@ -146,25 +147,23 @@ def get_status(repo, branch, write_tree):
     if git(repo, "rev-parse", "--verify", "--quiet", base_ref) is None:
         return None
     behind = int(git(repo, "rev-list", "--count", f"{branch}..{base_ref}"))
-    merge_base = git(repo, "merge-base", base_ref, branch)
-    fork_date = int(git(repo, "log", "-1", "--format=%ct", merge_base))
     return {
         "behind": behind,
         "conflict": behind > 0 and has_conflict(repo, branch, base_ref, write_tree),
-        "stale": time.time() - fork_date > STALE_FORK_SECONDS,
     }
 
 
 def format_age(seconds):
+    style = "default" if seconds < 7 * 86400 else "dim"
     for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
         if seconds >= size:
-            return f"{int(seconds // size)}{unit}"
-    return "now"
+            return f"[{style}]{int(seconds // size)}{unit}[/{style}]"
+    return f"[{style}]now[/{style}]"
 
 
-def format_pr(repo, pr):
+def format_pr(pr):
     if not pr:
-        return repo, ""
+        return "", ""
     state = "draft" if pr["isDraft"] and pr["state"] == "OPEN" else pr["state"].lower()
     if pr["mergebot"] == "merged":
         state = "merged"
@@ -177,18 +176,19 @@ def format_pr(repo, pr):
             tags.append(review)
         contexts = (pr["commits"]["nodes"][0]["commit"]["status"] or {}).get("contexts", [])
         failing = [
-            c["context"]
+            c
             for c in contexts
             if c["state"] in ("ERROR", "FAILURE") and c["context"] != "ci/codeowner"
         ]
         tags += [
-            f"[{'dim' if check == 'ci/security' else 'red'}]{check.removeprefix('ci/')}[/]"
-            for check in failing
+            f"[{'dim' if c['context'] == 'ci/security' else 'red'}]"
+            f"[link={c['targetUrl']}]{c['context'].removeprefix('ci/')}[/link][/]"
+            for c in failing
         ]
         if any(c["state"] == "PENDING" for c in contexts):
             tags.append("[dim]ci running[/dim]")
     number = f"[link={pr['url']}]{pr['number']}[/link]"
-    return f"{repo}/[{style}]{number}[/{style}]" if style else f"{repo}/{number}", " ".join(tags)
+    return f"[{style}]{number}[/{style}]" if style else number, " ".join(tags)
 
 
 def main():
@@ -222,24 +222,24 @@ def main():
             if status is None:
                 behind = conflict = "-"
             else:
-                style = "yellow" if status["stale"] and status["behind"] else "default"
+                style = next(style for limit, style in BEHIND_STYLES if status["behind"] >= limit)
                 behind = f"[{style}]{status['behind']}[/{style}]"
                 conflict = "[red]yes[/red]" if status["conflict"] else ""
-            repo_cell, tags = format_pr(repo, prs.get((repo, branch)))
-            rows.append((age, label, repo_cell, pushes[repo, branch], behind, conflict, tags))
+            number, tags = format_pr(prs.get((repo, branch)))
+            rows.append((age, label, repo, pushes[repo, branch], behind, conflict, number, tags))
             age = label = ""
 
     table = Table(box=None, header_style="bold")
-    for i, column in enumerate(("age", "branch", "repo / PR", "push", "behind", "conflict")):
+    for i, column in enumerate(("age", "branch", "repo", "push", "behind", "conflict", "PR")):
         table.add_column(
             column,
-            justify="right" if column in ("age", "behind") else "left",
+            justify="right" if column in ("age", "behind", "PR") else "left",
             min_width=max(
                 Text.from_markup(cell).cell_len for cell in (column, *(row[i] for row in rows))
             ),
             no_wrap=True,
         )
-    table.add_column("PR state", min_width=10)
+    table.add_column("state", min_width=10)
     for row in rows:
         table.add_row(*row)
     console.print(table)
