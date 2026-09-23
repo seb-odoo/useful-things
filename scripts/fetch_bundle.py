@@ -14,6 +14,7 @@ from commands import (
     get_base_from_bundle_name,
     get_remote_branch_name,
     get_remote_dev_branch_name,
+    get_repo_folder,
     get_repos,
     get_sticky_bundles,
     get_worktree_bundle_folder,
@@ -45,6 +46,7 @@ if not runbot_bundle:
     # runbot watches neither owl nor sfu: a branch pushed only there shows on the dev remotes alone.
     response = {"branches": [], "commits": []}
 
+local_branch_by_repo = defaultdict(lambda: False)
 make_branch_by_repo = defaultdict(lambda: False)
 for branch in response["branches"]:
     if not branch["is_pr"]:
@@ -61,12 +63,18 @@ def handle_remote_branch(runner: UtilsRunner, repo):
         and bundle_name not in get_sticky_bundles(repo)
     ):
         make_branch_by_repo[repo] = runner.remote_has_branch(repo=repo, branch=bundle_name)
+    if not make_branch_by_repo[repo] and bundle_name not in get_sticky_bundles(repo):
+        res = runner.run(
+            ["git", "for-each-ref", "--format=%(refname)", f"refs/heads/{bundle_name}"],
+            cwd=get_repo_folder(repo),
+        )
+        local_branch_by_repo[repo] = bool(res.stdout.strip())
 
 
 runner.parallel_run(Tree("Branches"), get_repos(), handle_remote_branch)
 
-if not runbot_bundle and not any(make_branch_by_repo.values()):
-    print(f"Bundle [red]{bundle_name}[/red] found on neither runbot nor the dev remotes")
+if not runbot_bundle and not any([*make_branch_by_repo.values(), *local_branch_by_repo.values()]):
+    print(f"Bundle [red]{bundle_name}[/red] found on neither runbot, the dev remotes nor locally")
     raise SystemExit(1)
 
 runner.prepare_worktree_bundle_folder(bundle_name=bundle_name)
@@ -90,6 +98,17 @@ def handle_commit(runner: UtilsRunner, commit):
             on_existing=lambda runner: (
                 runner.switch_to_branch(repo=repo, branch=bundle_name),
                 runner.run(["git", "branch", "-u", remote_dev_branch_name], cwd=wt_repo_folder),
+            ),
+        )
+    elif local_branch_by_repo[repo]:
+        runner.add_worktree(
+            repo=repo,
+            bundle_name=bundle_name,
+            make_branch=False,
+            target_ref=bundle_name,
+            on_existing=lambda runner: runner.run(
+                ["git", "switch", bundle_name],
+                cwd=wt_repo_folder,
             ),
         )
     else:
