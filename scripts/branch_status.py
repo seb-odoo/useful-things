@@ -39,7 +39,7 @@ AGE_UNITS = (("d", 86400), ("h", 3600), ("m", 60))
 ASK_SEVERITIES = {"dim": 2, "red": 0, "yellow": 1}
 ASKED_STYLES = ((7 * 86400, "red"), (2 * 86400, "yellow"), (0, "dim"))
 AUTO_ASKED_STYLES = ((7 * 86400, "red"), (86400, "yellow"), (0, "dim"))
-BEHIND_STYLES = ((501, "red"), (50, "yellow"), (0, "default"))
+BEHIND_STYLES = ((501, "red"), (150, "yellow"), (0, "default"))
 CI_RUNNING = "[dim]ci running[/dim]"
 DELEGATE = re.compile(r"@robodoo\b.*\bdelegate[+=]")
 GROUPS = {
