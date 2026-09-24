@@ -284,16 +284,25 @@ def get_pr_facts(pr, repo):
     if pr["mergebot"] == "merged":
         state = "merged"
     bodies = [node["body"] for key in ("comments", "reviews") for node in pr[key]["nodes"]]
-    contexts = (pr["commits"]["nodes"][0]["commit"]["status"] or {}).get("contexts", [])
+    contexts = [
+        c
+        for c in (pr["commits"]["nodes"][0]["commit"]["status"] or {}).get("contexts", [])
+        if c["context"] != "ci/codeowner"
+    ]
     batches = {c["context"]: get_batch(c) for c in contexts}
     latest = max(filter(None, batches.values()), default=None)
+    running = any(c["state"] == "PENDING" for c in contexts)
     stale = {
         c["context"]
         for c in contexts
-        if c["state"] in ("ERROR", "FAILURE") and batches[c["context"]] not in (None, latest)
+        if running
+        and c["state"] in ("ERROR", "FAILURE")
+        and batches[c["context"]] not in (None, latest)
     }
     main_check = MAIN_CHECK_BY_REPO.get(repo)
-    ci_not_started = main_check and main_check not in {c["context"] for c in contexts}
+    ci_not_started = main_check and not any(
+        c["context"] in (main_check, f"{main_check} (light)") for c in contexts
+    )
     open_threads = [t for t in pr["reviewThreads"]["nodes"] if not t["isResolved"]]
     to_answer = [
         t
@@ -303,13 +312,9 @@ def get_pr_facts(pr, repo):
     return {
         "delegated": any(DELEGATE.search(body) for body in bodies),
         "failing": [
-            c
-            for c in contexts
-            if c["state"] in ("ERROR", "FAILURE")
-            and c["context"] != "ci/codeowner"
-            and c["context"] not in stale
+            c for c in contexts if c["state"] in ("ERROR", "FAILURE") and c["context"] not in stale
         ],
-        "pending": ci_not_started or bool(stale) or any(c["state"] == "PENDING" for c in contexts),
+        "pending": ci_not_started or running,
         "state": state,
         "replied": len(open_threads) - len(to_answer),
         "threads": len(to_answer),
