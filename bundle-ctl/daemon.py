@@ -185,6 +185,9 @@ def status(caller, query, body):
             zip(pairs, executor.map(lambda pair: get_status(*pair, write_tree), pairs)),
         )
         open_folders = open_future.result()
+    with state_lock:
+        state = read_state()
+    now = time.time()
     rows = []
     for bundle, names in sorted(repos_by_bundle.items()):
         folder = get_worktree_bundle_folder(bundle)
@@ -195,11 +198,10 @@ def status(caller, query, body):
                 "bundle": bundle,
                 "folder": os.path.isdir(folder),
                 "open": folder in open_folders,
+                "opening": now - state["launches"].get(bundle, 0) < LAUNCH_GRACE,
                 "repos": {repo: statuses[repo, bundle] for repo in names},
             },
         )
-    with state_lock:
-        state = read_state()
     return 200, {
         "bundles": rows,
         "max_windows": MAX_WINDOWS,
@@ -535,6 +537,10 @@ def open_or_enqueue(log, caller, bundle, body):
         return enqueue(caller, bundle, body["task"])
     if body.get("open", True):
         open_window(log, bundle)
+        with state_lock:
+            state = read_state()
+            state["launches"][bundle] = time.time()
+            write_state(state)
     return {"bundle": bundle}
 
 
