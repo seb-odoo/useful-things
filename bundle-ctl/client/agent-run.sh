@@ -14,7 +14,7 @@ if ! mkdir "$agent/run.lock" 2>/dev/null; then
 	exec bash -i
 fi
 
-claude -p --session-id "$session" -n "$ODOO_PROXY_HOST" --verbose --output-format stream-json \
-	<"$agent/task.md" | python3 "${0%/*}/stream-format.py" "$agent/result.md"
+claude -p --session-id "$session" -n "$ODOO_PROXY_HOST" --model default --verbose \
+	--output-format stream-json <"$agent/task.md" | python3 "${0%/*}/stream-format.py" "$agent/result.md"
 echo "${PIPESTATUS[0]}" >"$agent/done.tmp" && mv "$agent/done.tmp" "$agent/done"
 exec bash -i
