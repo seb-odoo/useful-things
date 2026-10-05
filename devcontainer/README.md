@@ -22,3 +22,29 @@ python3 config.py                             # what the placeholders expand to 
 The generated file carries no `//` notes: they live here and in each fragment, which is what a human
 reads. Every bundle symlinks `.devcontainer` to `WORKTREE_ROOT/.devcontainer`, so generating once
 covers all of them; a container has to be rebuilt to pick up a change.
+
+## What a container cannot reach
+
+The container runs as the host user (`--userns=keep-id`), so a file it can write is a file the host
+trusts. Nothing the host runs or loads as config is writable from a container: the shell helpers
+(`container-rw/`), the venv, TestWarden, DiscussModelParser, the shared `.claude` and `.vscode` of
+the bundles, `.git/config` and `.git/hooks` of every repo, the VS Code user settings, and the parts
+of `~/.claude` the host's Claude runs (settings, hooks, bin, skills, plugins, external, `.git`). The
+containers get their own `session-env`, `shell-snapshots` and Chrome cache, as the host runs those.
+
+Postgres cannot tell a container from the host (same uid on the same socket), so the role must not
+be a superuser, or `COPY ... TO PROGRAM` runs commands on the host:
+
+```bash
+psql -d postgres -c "ALTER ROLE $USER NOSUPERUSER NOCREATEROLE"   # keeps CREATEDB
+```
+
+What stays open on purpose:
+
+- the bundle folder itself: anything the host runs inside a bundle (its git hooks, npm, odoo-bin)
+  runs code the container can change;
+- the branches and objects of the shared `.git`, and the filestore and databases;
+- the SSH agent VS Code forwards into the containers it attaches to, which lets an agent fetch and
+  push;
+- `~/.claude/CLAUDE.md`, the memory and the session transcripts, which steer the host's Claude
+  without running anything.
