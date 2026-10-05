@@ -8,6 +8,8 @@ settings a container wrote: they run hooks and commands. So each container gets 
 never reads: a copy of the host's settings.json without its "model", refreshed at every start so a
 new session starts on the default model, and links to the rest of ~/.claude as the container mounts
 it. session-env and shell-snapshots stay real folders here, as the host's Claude sources its own.
+/workspace is marked trusted in the container's .claude.json, or `claude -p` ignores the permissions
+of the bundle's .claude.
 """
 
 import json
@@ -35,6 +37,13 @@ def main():
     tmp = own / "settings.json.tmp"
     tmp.write_text(json.dumps(settings, indent=2) + "\n")
     tmp.replace(own / "settings.json")
+
+    state_path = own / ".claude.json"
+    state = json.loads(state_path.read_text()) if state_path.is_file() else {}
+    state.setdefault("projects", {}).setdefault("/workspace", {})["hasTrustDialogAccepted"] = True
+    tmp = own / ".claude.json.tmp"
+    tmp.write_text(json.dumps(state, indent=2) + "\n")
+    tmp.replace(state_path)
 
     for entry in shared.iterdir():
         if entry.name in OWN | SKIPPED:
