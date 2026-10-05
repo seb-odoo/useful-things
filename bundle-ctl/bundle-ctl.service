@@ -1,0 +1,17 @@
+# Answers the bundle requests of the dev containers, see README.md.
+# Install as a systemd-user unit:
+#   ln -sfn ~/repo/useful-things/bundle-ctl/bundle-ctl.service ~/.config/systemd/user/bundle-ctl.service
+#   systemctl --user daemon-reload && systemctl --user enable --now bundle-ctl.service
+
+[Unit]
+Description=Bundle requests of the Odoo dev containers
+
+[Service]
+# Every bundle container mounts this folder: a missing mount source stops the container from starting.
+ExecStartPre=/usr/bin/mkdir -p %S/bundle-ctl/sock
+ExecStart=%h/virtualenvs/odoo20/bin/python %h/repo/useful-things/bundle-ctl/daemon.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
