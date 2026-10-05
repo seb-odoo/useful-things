@@ -1,15 +1,24 @@
 #!/usr/bin/env bash
-# Install (force, idempotent) the in-house "claude-autoopen" extension into this dev container's VS
-# Code server on every attach, so edits to the bundled .vsix propagate to already-built containers.
+# Install the in-house "claude-autoopen" extension into this dev container's VS Code server when the
+# bundled .vsix changed, so edits to the bundled .vsix propagate to already-built containers.
 # The extension opens a Claude Code tab and one terminal per repo on window open. `code` is not on
 # PATH in lifecycle hooks and the server lives under /vscode here, so locate the remote CLI and the
 # window's IPC socket explicitly, then install through the running server (correct extensions dir).
 set -u
 
 vsix="$HOME/.claude-autoopen.vsix"
+installed="$HOME/.vscode-server/extensions/local.claude-autoopen-0.0.1/extension.js"
 
-code_bin=$(find /vscode "$HOME" -maxdepth 8 -path '*remote-cli/code' -type f -printf '%T@ %p\n' 2>/dev/null \
-  | sort -nr | head -n1 | cut -d' ' -f2-)
+# Skip the install when the code is the same, as it deletes the folder other windows load from the
+# shared extensions dir. Only extension.js compares: the install adds a __metadata key to its
+# package.json.
+python3 - "$vsix" <<'EOF' 2>/dev/null | cmp -s - "$installed" && exit 0
+import sys, zipfile
+sys.stdout.buffer.write(zipfile.ZipFile(sys.argv[1]).read("extension/extension.js"))
+EOF
+
+code_bin=$(ls -t /vscode/vscode-server/bin/linux-x64/*/bin/remote-cli/code \
+  "$HOME"/.vscode-server/bin/*/bin/remote-cli/code 2>/dev/null | head -n1)
 [ -z "$code_bin" ] && exit 0
 
 # The hook-provided VSCODE_IPC_HOOK_CLI can point to an already-closed server connection
