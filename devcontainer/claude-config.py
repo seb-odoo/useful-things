@@ -9,7 +9,9 @@ never reads: a copy of the host's settings.json without its "model", refreshed a
 new session starts on the default model, and links to the rest of ~/.claude as the container mounts
 it. session-env and shell-snapshots stay real folders here, as the host's Claude sources its own.
 /workspace is marked trusted in the container's .claude.json, or `claude -p` ignores the permissions
-of the bundle's .claude.
+of the bundle's .claude. projects is an empty folder the container mounts ~/.claude/projects on,
+not a link: Claude checks a write on the path a link resolves to, which takes the memory folder out
+of its working directories.
 """
 
 import json
@@ -22,6 +24,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import config  # noqa: E402
 
 CONTAINER_CLAUDE = "/home/vscode/.claude"
+MOUNTED = {"projects"}
 OWN = {"session-env", "settings.json", "shell-snapshots"}
 SKIPPED = {".git"}
 
@@ -45,8 +48,14 @@ def main():
     tmp.write_text(json.dumps(state, indent=2) + "\n")
     tmp.replace(state_path)
 
+    for name in MOUNTED:
+        mount_point = own / name
+        if mount_point.is_symlink():
+            mount_point.unlink()
+        mount_point.mkdir(exist_ok=True)
+
     for entry in shared.iterdir():
-        if entry.name in OWN | SKIPPED:
+        if entry.name in MOUNTED | OWN | SKIPPED:
             continue
         link = own / entry.name
         target = f"{CONTAINER_CLAUDE}/{entry.name}"
