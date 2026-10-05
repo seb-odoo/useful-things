@@ -2,7 +2,7 @@ FROM mcr.microsoft.com/devcontainers/base:ubuntu-22.04
 
 # Odoo runs from the host-built venv mounted at /home/seb/virtualenvs/odoo20.
 # Its interpreter is /usr/bin/python3.12 (deadsnakes) and its compiled C-extensions
-# (python-ldap) link Jammy's OpenLDAP 2.5 — so match the host distro and provide those libs.
+# (python-ldap) link Jammy's OpenLDAP 2.5, so match the host distro and provide those libs.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends software-properties-common gnupg ca-certificates && \
     add-apt-repository -y ppa:deadsnakes/ppa && \
@@ -36,7 +36,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
 
 # Persist VS Code's extensions: devcontainer.json bind-mounts a host dir at
 # ~/.vscode-server/extensions. Pre-create the parent here owned by vscode so podman mounts the subdir
-# into an existing dir instead of auto-creating ~/.vscode-server as root — otherwise the server's
+# into an existing dir instead of auto-creating ~/.vscode-server as root. Otherwise the server's
 # `mkdir ~/.vscode-server/bin` at attach fails with "Permission denied" (vscode can't write a
 # root-owned parent, and no-new-privileges/cap-drop ALL means no runtime sudo to fix it).
 RUN mkdir -p /home/vscode/.vscode-server/extensions && \
