@@ -14,6 +14,8 @@ if ! mkdir "$agent/run.lock" 2>/dev/null; then
 	exec bash -i
 fi
 
+# Let Ctrl+C stop the run but not this script, so the tab still opens on the session.
+trap : INT
 claude -p --session-id "$session" -n "$ODOO_PROXY_HOST" --model default --verbose \
 	--output-format stream-json <"$agent/task.md" | python3 "${0%/*}/stream-format.py" "$agent/result.md"
 echo "${PIPESTATUS[0]}" >"$agent/done.tmp" && mv "$agent/done.tmp" "$agent/done"
