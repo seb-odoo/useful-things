@@ -71,6 +71,7 @@ MERGEBOT_TAGS = {
 MERGEBOT_TIMEOUT = 3
 MINOR_CHECKS = {"ci/security": "dim", "ci/style": "yellow"}
 PR_STYLES = {"closed": "red", "draft": "dim", "merged": "magenta"}
+PR_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
 R_PLUS_STATES = ("approved", "merged", "ready", "staged")
 REVIEW_TAGS = {"APPROVED": "approved", "CHANGES_REQUESTED": "[red]changes[/red]"}
 
@@ -127,6 +128,18 @@ def get_local_branches(repo):
 def get_github_repo(repo, remote=None):
     url = git(repo, "remote", "get-url", remote or get_remote_repo(repo))
     return re.search(r"github\.com[:/](.+?)(?:\.git)?$", url)[1]
+
+
+def get_pr(github_repo, number, fields):
+    res = subprocess.run(
+        ["gh", "pr", "view", number, "-R", github_repo, "--json", fields],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if res.returncode:
+        raise ValueError(f"gh failed on {github_repo}#{number}: {res.stderr.strip()}")
+    return json.loads(res.stdout)
 
 
 def get_prs(pairs):

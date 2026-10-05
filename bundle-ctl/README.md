@@ -25,7 +25,7 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `GET /whoami` | the caller's bundle, base and parent |
 | `GET /status` | every local bundle branch: base, behind and conflict per repo, folder, open |
 | `POST /create` | `gnb` with `--no-push`, then a window; refused when the bundle exists |
-| `POST /fetch` | `pfb`, then a window; refused when the folder exists or a branch has unpushed commits |
+| `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window; refused when the folder exists or a branch has unpushed commits |
 | `POST /open` | a VS Code window on a bundle folder |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
 

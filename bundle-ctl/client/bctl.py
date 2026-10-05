@@ -4,7 +4,7 @@
     bctl whoami
     bctl status [--json]
     bctl create BASE NAME [--branch-repo REPO]... [--no-open] [--task TEXT | --task-file FILE]
-    bctl fetch BUNDLE [--no-open] [--task TEXT | --task-file FILE]
+    bctl fetch BUNDLE|PR_LINK|OWNER:BRANCH [--no-open] [--task TEXT | --task-file FILE]
     bctl open BUNDLE [--task TEXT | --task-file FILE]
 
 create, fetch and open run as a job on the host: bctl prints its log until it ends, which can take
@@ -117,7 +117,10 @@ def main():
     )
     create.add_argument("--no-open", action="store_true")
     add_task_arguments(create)
-    fetch = commands.add_parser("fetch", help="an existing bundle from runbot or the dev remotes")
+    fetch = commands.add_parser(
+        "fetch",
+        help="an existing bundle from runbot or the dev remotes, or the bundle of a PR",
+    )
     fetch.add_argument("name")
     fetch.add_argument("--no-open", action="store_true")
     add_task_arguments(fetch)

@@ -8,12 +8,10 @@ Examples:
 
 import argparse
 from collections import defaultdict
-import json
 import re
-import subprocess
 
 import requests
-from branch_status import get_github_repo, git
+from branch_status import PR_URL, get_github_repo, get_pr, git
 from commands import (
     clean_bundle_name,
     get_base_for_repo,
@@ -30,8 +28,6 @@ from rich import print
 from rich.tree import Tree
 from utils import UtilsRunner
 
-PR_URL = re.compile(r"https://github\.com/([^/]+/[^/]+)/pull/(\d+)")
-
 runner = UtilsRunner()
 
 parser = argparse.ArgumentParser()
@@ -46,17 +42,11 @@ def get_bundle_names_from_pr(github_repo, number):
     if not repo:
         print(f"[red]{github_repo}[/red] is none of the cloned repos")
         raise SystemExit(1)
-    fields = "baseRefName,headRefName,headRepository"
-    res = subprocess.run(
-        ["gh", "pr", "view", number, "-R", github_repo, "--json", fields],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-    if res.returncode:
-        print(f"[red]gh failed[/red] on {github_repo}#{number}: {res.stderr.strip()}")
-        raise SystemExit(1)
-    pr = json.loads(res.stdout)
+    try:
+        pr = get_pr(github_repo, number, "baseRefName,headRefName,headRepository")
+    except ValueError as error:
+        print(f"[red]{error}[/red]")
+        raise SystemExit(1) from None
     head, base = pr["headRefName"], pr["baseRefName"]
     if not head.startswith(f"{base}-"):
         print(f"Head [red]{head}[/red] does not start with [red]{base}-[/red], not a bundle name")
