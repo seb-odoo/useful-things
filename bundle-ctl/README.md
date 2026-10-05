@@ -22,6 +22,15 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | --- | --- |
 | `GET /whoami` | the caller's bundle, base and parent |
 | `GET /status` | every local bundle branch: base, behind and conflict per repo, folder, open |
+| `POST /create` | `gnb` with `--no-push`, then a window; refused when the bundle exists |
+| `POST /fetch` | `pfb`, then a window; refused when the folder exists or a branch has unpushed commits |
+| `POST /open` | a VS Code window on a bundle folder |
+| `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
+
+`create`, `fetch` and `open` answer 202 with a job id, and the jobs run one at a time, as two
+fetches of one repo collide on its remote refs. A job takes the `DISPLAY` and `SSH_AUTH_SOCK` of the
+desktop session from `systemctl --user show-environment`, so it fails until Seb is logged in. The
+daemon never pushes.
 
 `bctl` (`client/bctl.py`, stdlib only, defined in `container-rw/devcontainer.bashrc`) calls them
 from a container or from the host: `bctl whoami`, `bctl status`. The containers mount `client/`

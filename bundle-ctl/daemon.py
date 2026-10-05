@@ -16,15 +16,20 @@ import json
 import os
 import pathlib
 import re
+import secrets
 import socket
 import socketserver
 import struct
 import subprocess
 import sys
+import threading
+import time
+import traceback
 import urllib.parse
 
 HERE = pathlib.Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent / "scripts"))
+SCRIPTS = HERE.parent / "scripts"
+sys.path.insert(0, str(SCRIPTS))
 
 from branch_status import (  # noqa: E402
     get_local_branches,
@@ -33,12 +38,16 @@ from branch_status import (  # noqa: E402
     has_write_tree,
 )
 from commands import (  # noqa: E402
+    clean_bundle_name,
     get_base_from_bundle_name,
+    get_bundle_name_from_base_and_name,
     get_repo_folder,
     get_repos,
     get_sticky_bundles,
     get_worktree_bundle_folder,
 )
+from config import STICKY_BUNDLES  # noqa: E402
+from utils import UtilsRunner  # noqa: E402
 
 
 def load_config():
@@ -51,12 +60,29 @@ def load_config():
 
 
 CONFIG = load_config()
+BUNDLE_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,99}")
 CONTAINER_ID = re.compile(r"/libpod-(?:payload-)?([0-9a-f]{64})")
 HOST = "host"
+JOB_WAIT = 50
 MAX_BODY = 64 * 1024
-SOCKET = pathlib.Path(CONFIG["STATE_ROOT"]) / "bundle-ctl" / "sock" / "ctl.sock"
+NAME = re.compile(r"[a-z0-9](?:[a-z0-9.]|-(?!-)){0,79}")
+SESSION_VARIABLES = (
+    "DBUS_SESSION_BUS_ADDRESS",
+    "DISPLAY",
+    "SSH_AUTH_SOCK",
+    "WAYLAND_DISPLAY",
+    "XAUTHORITY",
+)
+STATE = pathlib.Path(CONFIG["STATE_ROOT"]) / "bundle-ctl"
+SOCKET = STATE / "sock" / "ctl.sock"
 
 folder_by_container = {}
+jobs = {}
+work_lock = threading.Lock()
+
+
+class Refused(Exception):
+    """A request that is valid but cannot run now, answered with a 409."""
 
 
 def get_container_folder(container_id):
@@ -141,9 +167,206 @@ def status(caller, query, body):
     return 200, {"bundles": rows}
 
 
+def session_env():
+    """The daemon's environment plus the graphical session and SSH agent of the logged-in user.
+
+    A unit started at boot has neither: they reach the user manager only once the desktop session
+    imports them, so they are read again for each job.
+    """
+    env = dict(os.environ, COLUMNS="160", NO_COLOR="1", TERM="dumb")
+    out = subprocess.run(
+        ["systemctl", "--user", "show-environment"],
+        capture_output=True,
+        check=False,
+        text=True,
+    ).stdout
+    for line in out.splitlines():
+        key, _, value = line.partition("=")
+        if key in SESSION_VARIABLES:
+            env[key] = value
+    return env
+
+
+def run_script(log, script, *args):
+    log.write(f"$ {script} {' '.join(args)}\n")
+    log.flush()
+    res = subprocess.run(
+        [sys.executable, str(SCRIPTS / script), *args],
+        cwd=SCRIPTS,
+        env=session_env(),
+        stdin=subprocess.DEVNULL,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if res.returncode:
+        raise Refused(f"{script} exited with {res.returncode}")
+
+
+def open_window(log, bundle):
+    env = session_env()
+    if not env.get("DISPLAY") and not env.get("WAYLAND_DISPLAY"):
+        raise Refused("no graphical session to open a window in")
+    log.write(f"opening {bundle}\n")
+    log.flush()
+    folder = get_worktree_bundle_folder(bundle)
+    # Run code in a scope of its own, as a VS Code started here would die with the daemon's cgroup.
+    res = subprocess.run(
+        [
+            "systemd-run",
+            "--user",
+            "--scope",
+            "--collect",
+            "--quiet",
+            "code",
+            "--folder-uri",
+            UtilsRunner()._devcontainer_folder_uri(folder),
+        ],
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        check=False,
+        timeout=60,
+    )
+    if res.returncode:
+        raise Refused(f"code exited with {res.returncode}")
+
+
+def run_job(job, work):
+    with work_lock, open(job["log"], "a", buffering=1) as log:
+        job["state"] = "running"
+        try:
+            job["result"] = work(log) or {}
+            job["state"] = "done"
+        except Refused as error:
+            log.write(f"{error}\n")
+            job["result"] = {"error": str(error)}
+            job["state"] = "failed"
+        except Exception as error:
+            log.write(traceback.format_exc())
+            job["result"] = {"error": repr(error)}
+            job["state"] = "failed"
+    print(f"{job['caller']} job {job['id']} {job['verb']} {job['state']}", flush=True)
+
+
+def start_job(caller, verb, work):
+    (STATE / "jobs").mkdir(parents=True, exist_ok=True)
+    job_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}"
+    job = {
+        "caller": caller,
+        "id": job_id,
+        "log": str(STATE / "jobs" / f"{job_id}.log"),
+        "result": None,
+        "state": "waiting",
+        "verb": verb,
+    }
+    jobs[job_id] = job
+    threading.Thread(target=run_job, args=(job, work), daemon=True).start()
+    return 202, {"job": job_id}
+
+
+def get_job(caller, query, body):
+    job = jobs.get(query.get("id", [""])[0])
+    if not job:
+        raise ValueError("no such job")
+    offset = int(query.get("offset", ["0"])[0])
+    deadline = time.monotonic() + min(int(query.get("wait", ["0"])[0]), JOB_WAIT)
+    log = pathlib.Path(job["log"])
+    while job["state"] in ("waiting", "running") and time.monotonic() < deadline:
+        if log.exists() and log.stat().st_size > offset:
+            break
+        time.sleep(0.5)
+    data = log.read_bytes()[offset:] if log.exists() else b""
+    return 200, dict(job, log=data.decode(errors="replace"), offset=offset + len(data))
+
+
+def local_branches(bundle):
+    return [
+        repo
+        for repo in get_repos()
+        if subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{bundle}"],
+            capture_output=True,
+            check=False,
+            cwd=get_repo_folder(repo),
+        ).returncode
+        == 0
+    ]
+
+
+def create(caller, query, body):
+    base, name = body.get("base"), body.get("name") or ""
+    if base not in STICKY_BUNDLES:
+        raise ValueError(f"base must be one of {', '.join(STICKY_BUNDLES)}")
+    if not NAME.fullmatch(name):
+        raise ValueError("name: lowercase letters, digits, dots and single dashes")
+    bundle = get_bundle_name_from_base_and_name(base, name)
+    if get_base_from_bundle_name(bundle) != base:
+        raise ValueError(f"{bundle} would be read as a bundle of another base")
+    branch_repos = body.get("branch_repos") or ["odoo"]
+    if unknown := set(branch_repos) - set(get_repos()):
+        raise ValueError(f"unknown repos: {', '.join(sorted(unknown))}")
+    if os.path.exists(get_worktree_bundle_folder(bundle)) or local_branches(bundle):
+        raise Refused(f"{bundle} already exists")
+
+    def work(log):
+        args = [base, name, "--no-push", "--no-open"]
+        for repo in branch_repos:
+            args += ["--branch-repo", repo]
+        run_script(log, "create_bundle.py", *args)
+        if body.get("open", True):
+            open_window(log, bundle)
+        return {"bundle": bundle}
+
+    return start_job(caller, "create", work)
+
+
+def fetch(caller, query, body):
+    bundle = clean_bundle_name(body.get("name") or "")
+    if not BUNDLE_NAME.fullmatch(bundle) or get_base_from_bundle_name(bundle) not in STICKY_BUNDLES:
+        raise ValueError(f"not a bundle name: {bundle}")
+    if os.path.exists(get_worktree_bundle_folder(bundle)):
+        raise Refused(f"{bundle} is already here, open it instead")
+    for repo in local_branches(bundle):
+        unpushed = subprocess.run(
+            ["git", "log", "--oneline", f"refs/heads/{bundle}", "--not", "--remotes"],
+            capture_output=True,
+            check=False,
+            cwd=get_repo_folder(repo),
+            text=True,
+        ).stdout.strip()
+        if unpushed:
+            raise Refused(f"{bundle} has unpushed commits in {repo}, pfb would reset them")
+
+    def work(log):
+        run_script(log, "fetch_bundle.py", bundle, "--no-open")
+        if body.get("open", True):
+            open_window(log, bundle)
+        return {"bundle": bundle}
+
+    return start_job(caller, "fetch", work)
+
+
+def open_bundle(caller, query, body):
+    bundle = body.get("bundle") or ""
+    if not BUNDLE_NAME.fullmatch(bundle) or not os.path.isdir(get_worktree_bundle_folder(bundle)):
+        raise ValueError(f"no bundle folder for {bundle}")
+
+    def work(log):
+        open_window(log, bundle)
+        return {"bundle": bundle}
+
+    return start_job(caller, "open", work)
+
+
 VERBS = {
+    ("GET", "/job"): get_job,
     ("GET", "/status"): status,
     ("GET", "/whoami"): whoami,
+    ("POST", "/create"): create,
+    ("POST", "/fetch"): fetch,
+    ("POST", "/open"): open_bundle,
 }
 
 
@@ -179,6 +402,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 code, answer = verb(self.caller, urllib.parse.parse_qs(url.query), body)
             except ValueError as error:
                 code, answer = 400, {"error": str(error)}
+            except Refused as error:
+                code, answer = 409, {"error": str(error)}
         print(
             f"{self.address_string()} {method} {url.path} {code} {answer.get('error', '')}".strip(),
             flush=True,
