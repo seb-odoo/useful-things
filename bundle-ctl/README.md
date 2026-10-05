@@ -65,7 +65,8 @@ with `claude -p` in a terminal named "agent" and opens the tab on that session w
 
 No empty Claude tab opens while the run lasts, so a window holds one Claude process at a time. The
 run starts by itself and its log streams in the "agent" terminal; Ctrl+C there stops it, and the
-tab opens on its session to take over.
+tab opens on its session to take over. It opens in place of a pinned Claude tab of the window,
+unless a Claude session of the container is busy or waits for a permission.
 
 `bctl create|fetch|open ... --task-file FILE` queues the task, and the daemon opens agent windows
 from the queue while fewer than `BUNDLE_CTL_MAX_WINDOWS` (default 4) bundle windows are open, Seb's

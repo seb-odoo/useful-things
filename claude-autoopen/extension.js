@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const vscode = require("vscode");
 
@@ -26,16 +27,46 @@ const REPOS = [
   "sfu",
 ];
 
-function getClaudeTab() {
+function getClaudeTab(predicate = () => true) {
   for (const group of vscode.window.tabGroups.all) {
     for (const tab of group.tabs) {
       const input = tab.input;
-      if (input instanceof vscode.TabInputWebview && input.viewType.includes(CLAUDE_VIEWTYPE)) {
+      if (
+        input instanceof vscode.TabInputWebview &&
+        input.viewType.includes(CLAUDE_VIEWTYPE) &&
+        predicate(tab)
+      ) {
         return tab;
       }
     }
   }
   return undefined;
+}
+
+// The host and every container share this folder: keep the live processes of this pid namespace.
+function hasBusySession() {
+  const config = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
+  const folder = path.join(config, "sessions");
+  let namespace;
+  let names;
+  try {
+    namespace = fs.readlinkSync("/proc/self/ns/pid");
+    names = fs.readdirSync(folder).filter((name) => name.endsWith(".json"));
+  } catch {
+    return false;
+  }
+  return names.some((name) => {
+    try {
+      const record = JSON.parse(fs.readFileSync(path.join(folder, name), "utf8"));
+      if (!record.pidDomain?.endsWith(`:${namespace}`) || record.status === "idle") {
+        return false;
+      }
+      process.kill(record.pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 
 async function openRepoTerminals() {
@@ -161,7 +192,7 @@ async function seedSessionMode(context, root, session) {
   );
 }
 
-async function openClaudeTab(sessionId) {
+async function openClaudeTab(sessionId, viewColumn) {
   const claude = vscode.extensions.getExtension(CLAUDE_EXTENSION_ID);
   if (!claude) {
     return;
@@ -169,7 +200,7 @@ async function openClaudeTab(sessionId) {
   if (!claude.isActive) {
     await claude.activate();
   }
-  await vscode.commands.executeCommand(OPEN_COMMAND, sessionId);
+  await vscode.commands.executeCommand(OPEN_COMMAND, sessionId, undefined, viewColumn);
   // The freshly opened panel becomes the active editor, but the reveal is async: wait so it is
   // enumerated as the active tab before we pin it.
   await new Promise((resolve) => setTimeout(resolve, 500));
@@ -236,18 +267,25 @@ function watchOwnCode(context) {
 
 async function showClaudeTab(context, root) {
   const session = root && (await takeAgentSession(root));
+  let replaced;
   if (session) {
     await seedSessionMode(context, root, session);
+    // Closing a tab stops the turn running in it.
+    replaced = !hasBusySession() && getClaudeTab((tab) => tab.isPinned);
   }
   if (session || !getClaudeTab()) {
-    await openClaudeTab(session);
+    await openClaudeTab(session, replaced?.group.viewColumn);
+  }
+  // editor.open reveals the tab already on the session, which can be the pinned one.
+  if (replaced && !replaced.isActive) {
+    await vscode.window.tabGroups.close(replaced, true);
   }
   // Pin the Claude tab so it stays at the front and isn't replaced by preview editors.
   // workbench.action.pinEditor targets the ACTIVE editor (there is no API to pin an arbitrary tab),
   // so guard on isActive to avoid pinning the wrong editor when a restored Claude tab isn't focused.
   // VS Code persists pin state across reloads, so !isPinned keeps this idempotent.
-  const tab = getClaudeTab();
-  if (tab && tab.isActive) {
+  const tab = getClaudeTab((tab) => tab.isActive && tab.group.isActive);
+  if (tab) {
     if (!tab.isPinned) {
       await vscode.commands.executeCommand("workbench.action.pinEditor");
     }
