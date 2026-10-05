@@ -133,6 +133,9 @@
     "--cap-drop=ALL",
     "--security-opt=no-new-privileges",
     "--userns=keep-id",
+    // Several bundles run at once: a runaway test run gets killed in its container rather than
+    // pushing the whole host into swap.
+    "--memory=@CONTAINER_MEMORY@",
   ],
   "containerEnv": {
     // Source the dev helpers (odoo-bin/ott/obet/...) in non-interactive shells (e.g. the agent's
