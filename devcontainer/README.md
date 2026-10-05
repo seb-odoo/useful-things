@@ -29,8 +29,13 @@ The container runs as the host user (`--userns=keep-id`), so a file it can write
 trusts. Nothing the host runs or loads as config is writable from a container: the shell helpers
 (`container-rw/`), the venv, TestWarden, DiscussModelParser, the shared `.claude` and `.vscode` of
 the bundles, `.git/config` and `.git/hooks` of every repo, the VS Code user settings, and the parts
-of `~/.claude` the host's Claude runs (settings, hooks, bin, skills, plugins, external, `.git`). The
-containers get their own `session-env`, `shell-snapshots` and Chrome cache, as the host runs those.
+of `~/.claude` the host's Claude runs (settings, hooks, bin, skills, plugins, external, `.git`).
+
+Each container gets its own Chrome cache, and its own Claude config folder (`CLAUDE_CONFIG_DIR`,
+made by [`claude-config.py`](claude-config.py) before every start): a `settings.json` copied from
+the host's without its `model`, writable so a model can be picked in a tab, its own `session-env`
+and `shell-snapshots`, and links to the rest of `~/.claude`. A model picked in a container lasts
+until the container stops, and agent runs ask for the default model anyway.
 
 Postgres cannot tell a container from the host (same uid on the same socket), so the role must not
 be a superuser, or `COPY ... TO PROGRAM` runs commands on the host:
