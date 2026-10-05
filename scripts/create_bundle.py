@@ -30,6 +30,13 @@ parser.add_argument(
     type=str,
 ).completer = lambda *args, **kwargs: STICKY_BUNDLES
 parser.add_argument("name", help="Name of the bundle to create", type=str)
+parser.add_argument(
+    "--branch-repo",
+    action="append",
+    help="Repo that gets the bundle branch, repeatable (default: the repo of the current folder)",
+)
+parser.add_argument("--no-open", action="store_true", help="Do not open the bundle in VS Code")
+parser.add_argument("--no-push", action="store_true", help="Do not push the new branches")
 args = parser.parse_args()
 bundle_name = get_bundle_name_from_base_and_name(args.base, args.name)
 
@@ -39,7 +46,7 @@ def handle_repo(runner: UtilsRunner, repo):
     runner.git_fetch(repo=repo, dev=False, ref=base)
     target_ref = get_remote_branch_name(base, repo)
     worktree_bundle_repo_folder = get_worktree_bundle_repo_folder(bundle_name, repo)
-    if os.environ.get("PWD").split("/")[-1] == repo:
+    if repo in (args.branch_repo or [os.environ.get("PWD").split("/")[-1]]):
         runner.add_worktree(
             repo=repo,
             bundle_name=bundle_name,
@@ -51,10 +58,11 @@ def handle_repo(runner: UtilsRunner, repo):
                 target_ref=target_ref,
             ),
         )
-        runner.run(
-            ["git", "push", "-u", get_remote_dev_repo(repo), bundle_name],
-            cwd=worktree_bundle_repo_folder,
-        )
+        if not args.no_push:
+            runner.run(
+                ["git", "push", "-u", get_remote_dev_repo(repo), bundle_name],
+                cwd=worktree_bundle_repo_folder,
+            )
     else:
         runner.add_worktree(
             repo=repo,
@@ -70,5 +78,5 @@ def handle_repo(runner: UtilsRunner, repo):
 
 runner.prepare_worktree_bundle_folder(bundle_name=bundle_name)
 runner.parallel_run(Tree("Repositories"), get_repos(), handle_repo)
-runner.finish_worktree_bundle_folder(bundle_name=bundle_name)
+runner.finish_worktree_bundle_folder(bundle_name=bundle_name, open_window=not args.no_open)
 print("[green]Done[/green]")

@@ -28,6 +28,7 @@ runner = UtilsRunner()
 
 parser = argparse.ArgumentParser()
 parser.add_argument("name", help="Name of the bundle to fetch", type=str)
+parser.add_argument("--no-open", action="store_true", help="Do not open the bundle in VS Code")
 args = parser.parse_args()
 bundle_name = clean_bundle_name(args.name)
 base = get_base_from_bundle_name(bundle_name)
@@ -144,5 +145,5 @@ runner.parallel_run(
     handle_commit,
     lambda c: c["repo"],
 )
-runner.finish_worktree_bundle_folder(bundle_name=bundle_name)
+runner.finish_worktree_bundle_folder(bundle_name=bundle_name, open_window=not args.no_open)
 print("[green]Done[/green]")

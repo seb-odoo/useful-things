@@ -253,7 +253,7 @@ class UtilsRunner(Runner):
                 runner.run(["rm", "-rf", f"{enterprise_wt}/node_modules"])
                 runner.run(["cp", "-al", base_node_modules, f"{enterprise_wt}/node_modules"])
 
-    def finish_worktree_bundle_folder(self, *, bundle_name):
+    def finish_worktree_bundle_folder(self, *, bundle_name, open_window=True):
         bundle_folder = get_worktree_bundle_folder(bundle_name)
         base_folder = get_worktree_base_folder(get_base_from_bundle_name(bundle_name))
         runner = self.with_params(cwd=bundle_folder)
@@ -266,7 +266,8 @@ class UtilsRunner(Runner):
             ],
         )
         self._install_js_tooling(runner, bundle_name=bundle_name, base_folder=base_folder)
-        runner.run(["code", "--folder-uri", self._devcontainer_folder_uri(bundle_folder)])
+        if open_window:
+            runner.run(["code", "--folder-uri", self._devcontainer_folder_uri(bundle_folder)])
 
     def git_fetch(self, *, repo, dev, ref=None, remote_ref_manager: RemoteRefManager = None):
         if ref is not None and not ref:
