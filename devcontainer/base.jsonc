@@ -26,24 +26,6 @@
     "source=@REPO_ROOT@/upgrade-util/.git,target=@REPO_ROOT@/upgrade-util/.git,type=bind,Z",
     "source=@REPO_ROOT@/owl/.git,target=@REPO_ROOT@/owl/.git,type=bind,Z",
     "source=@REPO_ROOT@/sfu/.git,target=@REPO_ROOT@/sfu/.git,type=bind,Z",
-    // The host's git reads these on every command, in every worktree: a core.fsmonitor or a hook
-    // written from a container would run on the host. Branches, commits and rebases stay writable.
-    "source=@REPO_ROOT@/odoo/.git/config,target=@REPO_ROOT@/odoo/.git/config,type=bind,readonly,Z",
-    "source=@REPO_ROOT@/odoo/.git/hooks,target=@REPO_ROOT@/odoo/.git/hooks,type=bind,readonly,Z",
-    "source=@REPO_ROOT@/enterprise/.git/config,target=@REPO_ROOT@/enterprise/.git/config,type=bind,readonly,Z",
-    "source=@REPO_ROOT@/enterprise/.git/hooks,target=@REPO_ROOT@/enterprise/.git/hooks,type=bind,readonly,Z",
-    "source=@REPO_ROOT@/design-themes/.git/config,target=@REPO_ROOT@/design-themes/.git/config,type=bind,readonly,Z",
-    "source=@REPO_ROOT@/design-themes/.git/hooks,target=@REPO_ROOT@/design-themes/.git/hooks,type=bind,readonly,Z",
-    "source=@REPO_ROOT@/documentation/.git/config,target=@REPO_ROOT@/documentation/.git/config,type=bind,readonly,Z",
-    "source=@REPO_ROOT@/documentation/.git/hooks,target=@REPO_ROOT@/documentation/.git/hooks,type=bind,readonly,Z",
-    "source=@REPO_ROOT@/upgrade/.git/config,target=@REPO_ROOT@/upgrade/.git/config,type=bind,readonly,Z",
-    "source=@REPO_ROOT@/upgrade/.git/hooks,target=@REPO_ROOT@/upgrade/.git/hooks,type=bind,readonly,Z",
-    "source=@REPO_ROOT@/upgrade-util/.git/config,target=@REPO_ROOT@/upgrade-util/.git/config,type=bind,readonly,Z",
-    "source=@REPO_ROOT@/upgrade-util/.git/hooks,target=@REPO_ROOT@/upgrade-util/.git/hooks,type=bind,readonly,Z",
-    "source=@REPO_ROOT@/owl/.git/config,target=@REPO_ROOT@/owl/.git/config,type=bind,readonly,Z",
-    "source=@REPO_ROOT@/owl/.git/hooks,target=@REPO_ROOT@/owl/.git/hooks,type=bind,readonly,Z",
-    "source=@REPO_ROOT@/sfu/.git/config,target=@REPO_ROOT@/sfu/.git/config,type=bind,readonly,Z",
-    "source=@REPO_ROOT@/sfu/.git/hooks,target=@REPO_ROOT@/sfu/.git/hooks,type=bind,readonly,Z",
     // Workspace .claude, .vscode and odools.toml are symlinks in each bundle pointing at these
     // absolute host paths; bind them at the same path (like the .git mounts above) so the symlinks
     // resolve in the container. Without this the workspace settings.json never loads, so
@@ -71,18 +53,19 @@
     "source=@VENV_ROOT@,target=@VENV_ROOT@,type=bind,readonly,Z",
     "source=@SHARE_ROOT@/Odoo,target=/home/vscode/.local/share/Odoo,type=bind,z",
     // test-warden (parallel JS/Hoot test runner, ~/repo/TestWarden): reuse the host-built engine
-    // binary + bundled client at the same path (like the venv above), read-only as the host runs
-    // them too. It launches chrome-headless-shell (auto-downloaded to $HOME/.cache/warden), not the
-    // image's Chrome (which would need a display): the containers share a cache of their own, which
-    // the host never runs. Lowercase z: shared relabel for the parallel containers.
-    "source=@REPO_ROOT@/TestWarden,target=@REPO_ROOT@/TestWarden,type=bind,readonly,z",
-    "source=@CACHE_ROOT@/devcontainer/warden,target=/home/vscode/.cache/warden,type=bind,z",
+    // binary + bundled client at the same path (like the venv above); rw so the engine can write
+    // engine/.cache/. It launches chrome-headless-shell (auto-downloaded to $HOME/.cache/warden),
+    // not the image's Chrome (which would need a display), so share that cache to fetch it once.
+    // Lowercase z: shared relabel for the parallel containers, like the filestore/extensions mounts.
+    "source=@REPO_ROOT@/TestWarden,target=@REPO_ROOT@/TestWarden,type=bind,z",
+    "source=@CACHE_ROOT@/warden,target=/home/vscode/.cache/warden,type=bind,z",
     // DiscussModelParser (~/repo/DiscussModelParser): generates the @types/models.d.ts files
     // for the discuss/mail JS models. Same path as the host so the wrapper in
     // container-rw/devcontainer.bashrc works on both sides; dist/type-gen-idx.mjs is self-contained
     // rollup bundle (Node built-ins only), so the image's Node 22 is enough, no install.
-    // Read-only, as the host runs it too: `git pull` + `npm run build` happen on the host.
-    "source=@REPO_ROOT@/DiscussModelParser,target=@REPO_ROOT@/DiscussModelParser,type=bind,readonly,z",
+    // rw so `git pull` + `npm run build` work in here (config.json's whitelist is inlined
+    // into dist/ at build time). Lowercase z: shared relabel, like TestWarden above.
+    "source=@REPO_ROOT@/DiscussModelParser,target=@REPO_ROOT@/DiscussModelParser,type=bind,z",
     "source=@HOME@/.local/bin/gh,target=/usr/local/bin/gh,type=bind,readonly,z",
     // Persist VS Code's extensions across bundles/rebuilds so they install once, not per container.
     // Bind (not a named volume) because no-new-privileges/cap-drop ALL means no runtime sudo to chown
@@ -105,7 +88,7 @@
     "source=/var/run/postgresql,target=/var/run/postgresql,type=bind"
   ],
   // Runs on the host before each start: a missing mount source stops the container from starting.
-  "initializeCommand": "mkdir -p @CACHE_ROOT@/devcontainer/warden @STATE_ROOT@/bundle-ctl/sock && { test -e @HOME@/.claude/remote-settings.json || echo '{}' > @HOME@/.claude/remote-settings.json; } && python3 @USEFUL_THINGS@/devcontainer/claude-config.py ${localWorkspaceFolderBasename}",
+  "initializeCommand": "mkdir -p @STATE_ROOT@/bundle-ctl/sock && { test -e @HOME@/.claude/remote-settings.json || echo '{}' > @HOME@/.claude/remote-settings.json; } && python3 @USEFUL_THINGS@/devcontainer/claude-config.py ${localWorkspaceFolderBasename}",
   "postCreateCommand": "grep -q '@VENV@/bin/activate' ~/.bashrc || echo 'source @VENV@/bin/activate' >> ~/.bashrc",
   // Install the in-house claude-autoopen extension (see useful-things/claude-autoopen), which opens a
   // Claude Code tab on window open when none is present. Idempotent: skips if already installed.
@@ -160,13 +143,9 @@
     // here, so git aborts with "Couldn't load public key". A --global override loses to repo-local
     // config and editing .git/config would change the host too; GIT_CONFIG_* env takes precedence
     // over all config files and is container-only. Host commits stay signed.
-    // Same for branch.autoSetupMerge: .git/config is read-only here, so a branch made from a remote
-    // one must not try to record its upstream there.
-    "GIT_CONFIG_COUNT": "2",
+    "GIT_CONFIG_COUNT": "1",
     "GIT_CONFIG_KEY_0": "commit.gpgsign",
     "GIT_CONFIG_VALUE_0": "false",
-    "GIT_CONFIG_KEY_1": "branch.autoSetupMerge",
-    "GIT_CONFIG_VALUE_1": "false",
     "ODOO_PROXY_HOST": "${localWorkspaceFolderBasename}",
     // Make the reused 3.12 venv the default interpreter for every process (not just interactive
     // shells), so odoo-bin (#!/usr/bin/env python3) doesn't fall back to the base image's 3.10.

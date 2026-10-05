@@ -26,15 +26,15 @@ covers all of them; a container has to be rebuilt to pick up a change.
 ## What a container cannot reach
 
 The container runs as the host user (`--userns=keep-id`), so a file it can write is a file the host
-trusts. Nothing the host runs or loads as config is writable from a container: the shell helpers
-(`container-rw/`), the venv, TestWarden, DiscussModelParser, the shared `.claude` and `.vscode` of
-the bundles, `.git/config` and `.git/hooks` of every repo, the VS Code user settings, and the parts
-of `~/.claude` the host's Claude runs (settings, hooks, bin, skills, plugins, external, `.git`).
+trusts. What the host runs or loads as config, and a container has no reason to change, is
+read-only: the shell helpers (`container-rw/`), the venv, the shared `.claude` and `.vscode` of the
+bundles, the VS Code user settings, and the parts of `~/.claude` the host's Claude runs (settings,
+hooks, bin, skills, plugins, external, `.git`).
 
-Each container gets its own Chrome cache, and its own Claude config folder (`CLAUDE_CONFIG_DIR`,
-made by [`claude-config.py`](claude-config.py) before every start): a `settings.json` copied from
-the host's without its `model`, writable so a model can be picked in a tab, its own `session-env`
-and `shell-snapshots`, and links to the rest of `~/.claude`. A model picked in a container lasts
+Each container gets its own Claude config folder (`CLAUDE_CONFIG_DIR`, made by
+[`claude-config.py`](claude-config.py) before every start): a `settings.json` copied from the host's
+without its `model`, writable so a model can be picked in a tab, its own `session-env` and
+`shell-snapshots`, and links to the rest of `~/.claude`. A model picked in a container lasts
 until the container stops, and agent runs ask for the default model anyway.
 
 Postgres cannot tell a container from the host (same uid on the same socket), so the role must not
@@ -48,7 +48,11 @@ What stays open on purpose:
 
 - the bundle folder itself: anything the host runs inside a bundle (its git hooks, npm, odoo-bin)
   runs code the container can change;
-- the branches and objects of the shared `.git`, and the filestore and databases;
+- the shared `.git` of every repo, config and hooks included, as git has to work in a container
+  (`push -u`, upstreams): a `core.fsmonitor`, an alias or a hook written there runs in the host's git;
+- TestWarden and DiscussModelParser, which get fixed and committed from containers too, while the
+  host runs them;
+- the filestore and the databases;
 - the SSH agent VS Code forwards into the containers it attaches to, which lets an agent fetch and
   push;
 - `~/.claude/CLAUDE.md`, the memory and the session transcripts, which steer the host's Claude
