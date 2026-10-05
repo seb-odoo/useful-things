@@ -32,7 +32,6 @@
 [core]
 	editor = code --wait
 	untrackedCache = true
-	fsmonitor = true
 [pull]
 	ff = only
 [rerere]
