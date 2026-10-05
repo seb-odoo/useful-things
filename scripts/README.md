@@ -13,8 +13,11 @@ remove a marked block in `~/.bashrc` that sets up `create_bundle`, `delete_bundl
 
 ## Bundle management
 
-Bundles are named `<base>-<name><suffix>` where suffix is set in `config.py` (`BUNDLE_SUFFIX`, e.g. `--seb`).
-Worktrees land in `/home/seb/src/odoo/<base>/<bundle_name>/<repo>/`.
+Bundles are named `<base>-<name><suffix>`, where the suffix is `BUNDLE_SUFFIX` (default `--$USER`).
+Worktrees land in `WORKTREE_ROOT/<base>/<bundle_name>/<repo>/`. Both come from
+`~/.config/odoo-dev/config.env`, see
+[`../devcontainer/config.env.example`](../devcontainer/config.env.example); the examples below are
+from a machine where they are `--seb` and `/home/seb/src/odoo`.
 
 ### create_bundle.py
 

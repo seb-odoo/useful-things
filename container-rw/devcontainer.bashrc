@@ -1,10 +1,14 @@
 # Curated Odoo-dev subset of useful-things/.bashrc, adapted for the Claude sandbox dev container.
 # Reached as BASH_ENV and as ~/.bash_aliases in the container; the host sources it from .bashrc.
-# Only commands that work in the sandbox are kept; paths use /home/seb/... to match the mounts.
+# Only commands that work in the sandbox are kept. REPO_ROOT, VENV_ROOT and BUNDLE_SUFFIX come
+# from the container env, and default to devcontainer/config.py's defaults on the host.
 
 # Make aliases expand in non-interactive shells too (e.g. the in-container Claude Code agent's
 # `bash -c` commands, which source this file via BASH_ENV). No-op/harmless in interactive shells.
 shopt -s expand_aliases
+
+# Outside the container env, the tool repos sit beside useful-things.
+: "${REPO_ROOT:=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)}"
 
 # --- git workflow aliases ---
 alias gbd="git branch -D"
@@ -51,7 +55,7 @@ function gr()
 }
 
 # checkout an existing branch
-function gcb() { git checkout "${1}-${2}--seb"; }
+function gcb() { git checkout "${1}-${2}${BUNDLE_SUFFIX:---$USER}"; }
 
 function branchdb() {
     edition=${1}
@@ -170,11 +174,14 @@ function otta() {
 #   twc --once -t 'simple valid'   # a single test: unique substring of its full name, or 8-char id
 #   twc --flaky-check 50 -t '...'  # flaky-hunt one test  (legacy QUnit suites: --suite qunit)
 # -m matches a suite's EXACT fullName (@module/subdir/.../describe); a bare leaf name won't match.
-# See /home/seb/repo/TestWarden/README.md for the full flag list.
-function twc() { node /home/seb/repo/TestWarden/release/test-warden.cjs "$@"; }
+# See TestWarden's README.md for the full flag list.
+function twc() { node "${REPO_ROOT:-$HOME/repo}/TestWarden/release/test-warden.cjs" "$@"; }
 
 # --- bundle-ctl: create, open and list bundles through the host daemon ---
-function bctl() { python3 /home/seb/repo/useful-things/bundle-ctl/client/bctl.py "$@"; }
+function bctl() {
+	local client="${BUNDLE_CTL_CLIENT:-${REPO_ROOT:-$HOME/repo}/useful-things/bundle-ctl/client}"
+	python3 "${client}/bctl.py" "$@"
+}
 
 # --- model types (DiscussModelParser) ---
 # Regenerates the @types/models.d.ts files from the JS model definitions (community +
@@ -184,20 +191,21 @@ function bctl() { python3 /home/seb/repo/useful-things/bundle-ctl/client/bctl.py
 function model_parser() {
 	local community="../odoo"
 	[[ -d "${community}/addons/mail" ]] || community="./odoo"
-	node /home/seb/repo/DiscussModelParser/dist/type-gen-idx.mjs --path "${community}" --enterprise "$@"
+	node "${REPO_ROOT:-$HOME/repo}/DiscussModelParser/dist/type-gen-idx.mjs" \
+		--path "${community}" --enterprise "$@"
 }
 
 # kill stuck odoo process, by rde-odoo
 function killodoo() { ps aux | grep 'odoo-bin' | grep -v grep | awk '{print $2}' | xargs -r kill; }
 function killodoo9() { ps aux | grep 'odoo-bin' | grep -v grep | awk '{print $2}' | xargs -r kill -9; }
 
-# --- virtualenvs (absolute path: mounted at /home/seb/virtualenvs in the container) ---
+# --- virtualenvs (mounted at their host path in the container) ---
 function odoo-venv-17() {
-	source /home/seb/virtualenvs/odoo17/bin/activate
+	source "${VENV_ROOT:-$HOME/virtualenvs}/odoo17/bin/activate"
 }
 
 function odoo-venv() {
-	source /home/seb/virtualenvs/odoo20/bin/activate
+	source "${VENV_ROOT:-$HOME/virtualenvs}/odoo20/bin/activate"
 }
 
 # Add the claude wrapper to PATH once, as BASH_ENV re-runs this file in every nested shell.

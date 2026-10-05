@@ -1,6 +1,19 @@
-# change this config
-_ROOT = "/home/seb/repo"
-BUNDLE_SUFFIX = "--seb"
+import importlib.util
+import pathlib
+
+
+def _load_machine_config():
+    """devcontainer/config.py, under another name than this module."""
+    path = pathlib.Path(__file__).resolve().parents[1] / "devcontainer" / "config.py"
+    spec = importlib.util.spec_from_file_location("odoo_dev_config", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.load()
+
+
+_CONFIG = _load_machine_config()
+_ROOT = _CONFIG["REPO_ROOT"]
+BUNDLE_SUFFIX = _CONFIG["BUNDLE_SUFFIX"]
 folder_by_repo = {
     "design-themes": f"{_ROOT}/design-themes",
     "documentation": f"{_ROOT}/documentation",
@@ -26,15 +39,15 @@ remote_dev_by_repo = {
     "documentation": "odoo-dev",
     "enterprise": "odoo-dev",
     "odoo": "odoo-dev",
-    "owl": "seb-odoo",
+    "owl": _CONFIG["OWL_DEV_REMOTE"],
     "sfu": "origin",
     "upgrade-util": "odoo-dev",
     "upgrade": "odoo-dev",
 }
-CLAUDE_CONFIG_CONTAINER = "/home/seb/.cache/devcontainer/claude-config"
-FILESTORE_CONTAINER = "/home/seb/.local/share/Odoo/filestore"
+CLAUDE_CONFIG_CONTAINER = f"{_CONFIG['CACHE_ROOT']}/devcontainer/claude-config"
+FILESTORE_CONTAINER = f"{_CONFIG['SHARE_ROOT']}/Odoo/filestore"
 MASTER_ONLY_REPOS = ("owl", "sfu", "upgrade", "upgrade-util")
-WORKTREE_CONTAINER = "/home/seb/src/odoo"
+WORKTREE_CONTAINER = _CONFIG["WORKTREE_ROOT"]
 STICKY_BUNDLES = [
     "master",
     "20.0",

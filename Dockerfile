@@ -1,6 +1,7 @@
-FROM mcr.microsoft.com/devcontainers/base:ubuntu-22.04
+ARG BASE_IMAGE=mcr.microsoft.com/devcontainers/base:ubuntu-22.04
+FROM ${BASE_IMAGE}
 
-# Odoo runs from the host-built venv mounted at /home/seb/virtualenvs/odoo20.
+# Odoo runs from the host-built venv (VENV), mounted at its host path.
 # Its interpreter is /usr/bin/python3.12 (deadsnakes) and its compiled C-extensions
 # (python-ldap) link Jammy's OpenLDAP 2.5, so match the host distro and provide those libs.
 RUN apt-get update && \

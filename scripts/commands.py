@@ -115,7 +115,7 @@ def clean_bundle_name(bundle_name):
     """Get the cleaned bundle name, taking the dev remote prefix runbot displays.
 
     A git ref name cannot hold a `:`, so whatever comes before it is that prefix, `odoo-dev:` for
-    most repos but `seb-odoo:` for owl.
+    most repos but the owl fork's remote for owl.
     """
     return bundle_name.split(":")[-1]
 

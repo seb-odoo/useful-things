@@ -46,6 +46,8 @@ def load():
         "CACHE_ROOT": str(_xdg("XDG_CACHE_HOME", ".cache")),
         "SHARE_ROOT": str(_xdg("XDG_DATA_HOME", ".local/share")),
         "VENV_ROOT": str(HOME / "virtualenvs"),
+        "BUNDLE_SUFFIX": f"--{os.environ.get('USER', 'odoo')}",
+        "OWL_DEV_REMOTE": "origin",
         "PG_USER": os.environ.get("USER", "odoo"),
         "PG_HOST": "/var/run/postgresql",
         "CONTAINER_BASE_IMAGE": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
@@ -53,6 +55,7 @@ def load():
     }.items():
         values[key] = os.environ.get(key) or values.get(key) or default
     values["VENV"] = os.environ.get("VENV") or values.get("VENV") or f"{values['VENV_ROOT']}/odoo20"
+    values["SHARED_CLAUDE"] = os.path.realpath(f"{values['WORKTREE_ROOT']}/.claude")
     values["USEFUL_THINGS"] = str(REPO)
     return values
 

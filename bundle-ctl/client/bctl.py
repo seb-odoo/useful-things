@@ -123,7 +123,7 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("whoami", help="the bundle of this container, its base and parent")
     commands.add_parser("status", help="every local bundle: behind/conflict per repo, open")
-    create = commands.add_parser("create", help="a new bundle BASE-NAME--seb, branched on BASE")
+    create = commands.add_parser("create", help="a new bundle BASE-NAME<suffix>, branched on BASE")
     create.add_argument("base")
     create.add_argument("name")
     create.add_argument(

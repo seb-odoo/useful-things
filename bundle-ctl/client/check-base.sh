@@ -4,8 +4,10 @@
 set -u
 
 bundle="${ODOO_PROXY_HOST:-}"
+suffix="${BUNDLE_SUFFIX:-}"
+[ -n "$suffix" ] || exit 0
 case "$bundle" in
-*--seb) ;;
+*"$suffix") ;;
 *) exit 0 ;;
 esac
 case "$bundle" in
@@ -13,7 +15,7 @@ saas-*) base=$(echo "$bundle" | cut -d- -f1-2) ;;
 *) base="${bundle%%-*}" ;;
 esac
 name="${bundle#"$base"-}"
-name="${name%--seb}"
+name="${name%"$suffix"}"
 
 for repo in odoo/odoo odoo/enterprise; do
 	target=$(timeout 10 gh pr list --repo "$repo" --head "$bundle" --state open \
@@ -22,7 +24,7 @@ for repo in odoo/odoo odoo/enterprise; do
 		echo "The open PR of $bundle in $repo targets $target, but this bundle is based on $base." \
 			"To move the work, run \`bctl create $target $name --task-file <file>\` (Bash timeout" \
 			"600000) with a task asking to cherry-pick the commits $bundle has over $base: it" \
-			"opens $target-$name--seb with an agent on that task."
+			"opens $target-$name$suffix with an agent on that task."
 		exit 0
 	fi
 done

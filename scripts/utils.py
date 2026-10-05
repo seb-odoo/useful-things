@@ -29,7 +29,7 @@ WORKSPACE_FOLDER = "/workspace"
 _USEFUL_THINGS_FOLDER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Worktrees are locked so `git worktree prune`/`git gc` can't delete them. Inside a dev
-# container the base repo's .git is mounted but the worktree paths (/home/seb/src/...) are not,
+# container the base repo's .git is mounted but the worktree paths (WORKTREE_ROOT/...) are not,
 # so an in-container prune/gc would otherwise see every worktree as missing and wipe the shared
 # admin data. delete_bundle unlocks before removing.
 WORKTREE_LOCK_REASON = "managed bundle: do not prune (paths are unmounted inside dev containers)"
