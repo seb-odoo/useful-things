@@ -26,7 +26,7 @@ from commands import (
     get_worktree_bundle_folder,
     get_worktree_bundle_repo_folder,
 )
-from config import FILESTORE_CONTAINER, WORKTREE_CONTAINER
+from config import CLAUDE_CONFIG_CONTAINER, FILESTORE_CONTAINER, WORKTREE_CONTAINER
 from rich import print
 from rich.tree import Tree
 from utils import UtilsRunner
@@ -212,6 +212,7 @@ def delete_bundle(
             "delete the bundle again to remove it[/yellow]",
         )
     runner.run(["rm", "-rf", get_worktree_bundle_folder(bundle_name)])
+    runner.run(["rm", "-rf", f"{CLAUDE_CONFIG_CONTAINER}/{bundle_name}"])
 
     def handle_database(runner: UtilsRunner, name: str):
         folder = f"{FILESTORE_CONTAINER}/{name}"

@@ -31,6 +31,7 @@ remote_dev_by_repo = {
     "upgrade-util": "odoo-dev",
     "upgrade": "odoo-dev",
 }
+CLAUDE_CONFIG_CONTAINER = "/home/seb/.cache/devcontainer/claude-config"
 FILESTORE_CONTAINER = "/home/seb/.local/share/Odoo/filestore"
 MASTER_ONLY_REPOS = ("owl", "sfu", "upgrade", "upgrade-util")
 WORKTREE_CONTAINER = "/home/seb/src/odoo"
