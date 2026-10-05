@@ -1,8 +1,10 @@
 # bundle-ctl
 
-Lets an agent in a bundle's dev container ask the host for bundle work. A container reaches neither
-the host network nor podman, and has no SSH key, so `gnb`, `pfb`, `ocode` and `gbs` only run on the
-host. `daemon.py` runs them on its behalf, behind fixed verbs.
+Lets an agent in a bundle's dev container start other bundles, their containers and their agents.
+A container sees only its own bundle folder and reaches neither podman nor the host's VS Code, so a
+new bundle, its worktrees and its window only come from the host: `daemon.py` makes them on its
+behalf, behind a few fixed verbs. The git work itself (fetch, rebase, cherry-pick) stays with the
+agent of each window, as VS Code forwards the SSH agent into the containers it attaches to.
 
 - The daemon listens on `~/.local/state/bundle-ctl/sock/ctl.sock`. Every bundle container mounts
   that folder read-only at `/run/bundle-ctl`: a folder and not the socket, so a daemon restart needs
@@ -31,6 +33,19 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 fetches of one repo collide on its remote refs. A job takes the `DISPLAY` and `SSH_AUTH_SOCK` of the
 desktop session from `systemctl --user show-environment`, so it fails until Seb is logged in. The
 daemon never pushes.
+
+`bctl` (`client/bctl.py`, stdlib only, defined in `container-rw/devcontainer.bashrc`) calls them
+from a container or from the host: `bctl whoami`, `bctl status`. The containers mount `client/`
+read-only at its host path. Without the client:
+
+    curl --unix-socket ~/.local/state/bundle-ctl/sock/ctl.sock http://bundle-ctl/whoami
+
+## Wrong version
+
+`client/check-base.sh` is a SessionStart hook of the shared bundle `.claude/settings.json`: when
+the open PR of the bundle targets another base, it tells the session to `bctl create` a bundle on
+that base with a task to cherry-pick the commits. The agent of the new window does the
+cherry-pick, as all the bundles share the base repos' `.git`.
 
 ## Agent windows
 
@@ -62,9 +77,3 @@ again on every podman container start and stop, and every minute; it lives in
 holds a `parent`), so a fan-out is one level deep. A new task moves the previous `.agent/` files of
 the bundle into `.agent/history/`. Closing an agent window is Seb's call: nothing stops or deletes a
 bundle on its own.
-
-`bctl` (`client/bctl.py`, stdlib only, defined in `container-rw/devcontainer.bashrc`) calls them
-from a container or from the host: `bctl whoami`, `bctl status`. The containers mount `client/`
-read-only at its host path. Without the client:
-
-    curl --unix-socket ~/.local/state/bundle-ctl/sock/ctl.sock http://bundle-ctl/whoami
