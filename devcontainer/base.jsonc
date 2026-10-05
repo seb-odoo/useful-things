@@ -33,7 +33,7 @@
     // The shared .claude is versioned in the claude-config repo, so the host path is itself a
     // symlink into it: mount the real directory, not the link.
     "source=@HOME@/.claude/external/src-odoo-claude,target=@WORKTREE_ROOT@/.claude,type=bind,Z",
-    "source=@WORKTREE_ROOT@/.vscode,target=@WORKTREE_ROOT@/.vscode,type=bind,readonly,Z",
+    "source=@WORKTREE_ROOT@/.vscode,target=@WORKTREE_ROOT@/.vscode,type=bind,Z",
     "source=@USEFUL_THINGS@/odools.toml,target=@USEFUL_THINGS@/odools.toml,type=bind,readonly,Z",
     "source=@HOME@/.claude,target=/home/vscode/.claude,type=bind,Z",
     // The container's own CLAUDE_CONFIG_DIR, made by devcontainer/claude-config.py: a settings.json
