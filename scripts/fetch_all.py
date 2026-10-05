@@ -142,7 +142,8 @@ def handle_repo_remote(runner: UtilsRunner, repo, remote, branch_r):
         new_branches = [
             head for head in branches_to_create_by_repo.get(repo, []) if head not in to_fetch
         ]
-        to_fetch += new_branches
+        # A branch never pushed is missing from the dev remote, and git_fetch would call it gone.
+        to_fetch = [branch for branch in to_fetch if branch in remote_branches] + new_branches
     else:
         to_fetch = sticky_bundles
     # Prune this remote's namespace only: seb-odoo also has a `master`, origin/master must survive.
