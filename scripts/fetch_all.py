@@ -115,10 +115,30 @@ def handle_repo_remote(runner: UtilsRunner, repo, remote, branch_r):
     new_branches = []
     if dev:
         res = runner.run(
-            ["git", "for-each-ref", "--format=%(refname:short)", "refs/heads/"],
+            [
+                "git",
+                "for-each-ref",
+                "--format=%(refname:short) %(upstream:remotename)",
+                "refs/heads/",
+            ],
             capture_output=True,
         )
-        to_fetch = [line.strip() for line in res.stdout.splitlines()]
+        to_fetch = []
+        fork_branches_by_remote = {}
+        for line in res.stdout.splitlines():
+            branch, _, upstream_remote = line.strip().partition(" ")
+            if upstream_remote in ("", get_remote_repo(repo), remote):
+                to_fetch.append(branch)
+            else:
+                fork_branches_by_remote.setdefault(upstream_remote, []).append(branch)
+        for fork_remote, branches in fork_branches_by_remote.items():
+            runner.git_fetch(
+                repo=repo,
+                dev=dev,
+                ref=branches,
+                remote=fork_remote,
+                remote_ref_manager=remote_ref_manager,
+            )
         new_branches = [
             head for head in branches_to_create_by_repo.get(repo, []) if head not in to_fetch
         ]

@@ -124,8 +124,8 @@ def get_local_branches(repo):
     ]
 
 
-def get_github_repo(repo):
-    url = git(repo, "remote", "get-url", get_remote_repo(repo))
+def get_github_repo(repo, remote=None):
+    url = git(repo, "remote", "get-url", remote or get_remote_repo(repo))
     return re.search(r"github\.com[:/](.+?)(?:\.git)?$", url)[1]
 
 

@@ -64,6 +64,8 @@ Fetches bundle metadata from runbot and creates/updates local worktrees.
 
 Queries the runbot API, checks out each repo at the matching commit, links shared `node_modules`, runs web tooling setup, and opens the bundle in VS Code.
 
+Also takes a PR link (`fetch_bundle.py https://github.com/odoo/odoo/pull/292267`): the bundle is the PR head. When the head is on a fork, the fork is added as a remote named after its owner and the branch tracks it, so pull and push go to the PR.
+
 ```bash
 $ python scripts/fetch_bundle.py master-test--seb
 Fetching https://runbot.odoo.com/api/bundle?name=master-test--seb
@@ -191,7 +193,7 @@ Done
 
 Syncs git remotes: fetches locally checked-out branches + sticky bundles; prunes everything else.
 
-- Dev remote: fetches all locally checked-out branches
+- Dev remote: fetches all locally checked-out branches, except those tracking a fork, fetched from that fork
 - Standard remote: fetches only sticky bundles (`STICKY_BUNDLES` in `config.py`)
 - Deletes the handled remote's own refs outside those two sets
 

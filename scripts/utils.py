@@ -269,12 +269,20 @@ class UtilsRunner(Runner):
         if open_window:
             runner.run(["code", "--folder-uri", self._devcontainer_folder_uri(bundle_folder)])
 
-    def git_fetch(self, *, repo, dev, ref=None, remote_ref_manager: RemoteRefManager = None):
+    def git_fetch(
+        self,
+        *,
+        repo,
+        dev,
+        ref=None,
+        remote=None,
+        remote_ref_manager: RemoteRefManager = None,
+    ):
         if ref is not None and not ref:
             return
         if ref is None:
             ref = []
-        remote = get_remote_dev_repo(repo) if dev else get_remote_repo(repo)
+        fetch_remote = remote or (get_remote_dev_repo(repo) if dev else get_remote_repo(repo))
         ref = ref if isinstance(ref, Iterable) and not isinstance(ref, str) else [ref]
 
         def handle_fetch_exception(runner: Runner, e):
@@ -290,12 +298,13 @@ class UtilsRunner(Runner):
                     repo=repo,
                     dev=dev,
                     ref=[r for r in ref if r != gone_ref],
+                    remote=remote,
                     remote_ref_manager=remote_ref_manager,
                 )
                 return gone_ref
 
         self.run(
-            ["git", "fetch", remote, *ref, "-p"],
+            ["git", "fetch", fetch_remote, *ref, "-p"],
             cwd=get_repo_folder(repo),
             handle_exceptions=handle_fetch_exception,
             on_success=lambda: [
