@@ -16,7 +16,9 @@ fi
 
 # Let Ctrl+C stop the run but not this script, so the tab still opens on the session.
 trap : INT
-claude -p --session-id "$session" -n "$ODOO_PROXY_HOST" --model default --verbose \
-	--output-format stream-json <"$agent/task.md" | python3 "${0%/*}/stream-format.py" "$agent/result.md"
+# Record the session as the extension does: the Claude tab hides the ones `claude -p` records.
+CLAUDE_CODE_ENTRYPOINT=claude-vscode claude -p --session-id "$session" -n "$ODOO_PROXY_HOST" \
+	--model default --verbose --output-format stream-json <"$agent/task.md" \
+	| python3 "${0%/*}/stream-format.py" "$agent/result.md"
 echo "${PIPESTATUS[0]}" >"$agent/done.tmp" && mv "$agent/done.tmp" "$agent/done"
 exec bash -i
