@@ -1,4 +1,4 @@
-export PATH=$PATH:/home/seb/repo/odoo-ops-tools
+export PATH=$PATH:$HOME/repo/odoo-ops-tools
 export GIT_PROMPT_FETCH_REMOTE_STATUS=0
 
 # Odoo-dev aliases/functions shared with the dev container (single source of truth)
@@ -11,8 +11,6 @@ alias qunit_fail="python qunit_until_fail.py -m mail -m mail_enterprise -m test_
 alias pfb="python ~/repo/useful-things/scripts/fetch_bundle.py"
 alias ocode="python ~/repo/useful-things/scripts/open_bundle.py"
 alias fcode="python ~/repo/useful-things/scripts/open_folder.py"
-alias mailcode="python ~/repo/useful-things/scripts/open_folder.py ~/repo/mail-agent"
-alias mailpage="xdg-open http://127.0.0.1:8765 >/dev/null 2>&1"
 alias orepo="code ~/repo/repo.code-workspace"
 alias delete_bundle="python ~/repo/useful-things/scripts/delete_bundle.py"
 alias hoot='npm run start --'
@@ -203,14 +201,6 @@ function ocoverage() {
 	fi
 }
 
-function otunnel() {
-	ssh odoo-dev@stheys.com -f -N -T -R 18069:localhost:8069
-}
-
-function killotunnel() {
-	ps aux | grep 'ssh odoo-dev@stheys.com' | grep -v grep | awk '{print $2}' | xargs -r kill;
-}
-
 GIT_PROMPT_ONLY_IN_REPO=1
 GIT_PROMPT_THEME=Single_line_Ubuntu
 
@@ -349,3 +339,8 @@ function cherry_pick() {
 	git fetch odoo-dev $1
 	git cherry-pick $1
 }
+
+for file in ~/.config/odoo-dev/bashrc.d/*.sh; do
+	[ -r "$file" ] && source "$file"
+done
+unset file

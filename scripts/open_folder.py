@@ -1,7 +1,7 @@
 """Open VS Code attached to the dev container of any folder, bundle or not.
 
 Example:
- $ python ~/repo/useful-things/scripts/open_folder.py ~/repo/mail-agent
+ $ python ~/repo/useful-things/scripts/open_folder.py ~/repo/TestWarden
 """
 
 from rich import print
