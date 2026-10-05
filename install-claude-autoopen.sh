@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Install the in-house "claude-autoopen" extension into this dev container's VS Code server when the
 # bundled .vsix changed, so edits to the bundled .vsix propagate to already-built containers.
-# The extension opens a Claude Code tab and one terminal per repo on window open. `code` is not on
-# PATH in lifecycle hooks and the server lives under /vscode here, so locate the remote CLI and the
-# window's IPC socket explicitly, then install through the running server (correct extensions dir).
+# The extension opens a Claude Code tab and one terminal per repo on window open, and runs this
+# script itself then. `code` is not on PATH there and the server lives under /vscode here, so locate
+# the remote CLI and the window's IPC socket explicitly, then install through the running server
+# (correct extensions dir).
 set -u
 
 vsix="$HOME/.claude-autoopen/claude-autoopen-0.0.1.vsix"

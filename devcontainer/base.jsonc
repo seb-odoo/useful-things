@@ -10,7 +10,10 @@
     "dockerfile": "Dockerfile",
     // Where the image symlinks ~/.bash_aliases. Passed as an arg so the path lives here with the
     // other @KEY@ ones and the Dockerfile stays free of any absolute path of its own.
-    "args": { "CONTAINER_BASHRC": "@USEFUL_THINGS@/container-rw/devcontainer.bashrc" }
+    "args": {
+      "CONTAINER_BASHRC": "@USEFUL_THINGS@/container-rw/devcontainer.bashrc",
+      "VENV": "@VENV@"
+    }
   },
   "remoteUser": "vscode",
   // 1. Disable this to stop VS Code from corrupting Podman's keep-id user namespace mapping
@@ -81,11 +84,8 @@
     "source=/var/run/postgresql,target=/var/run/postgresql,type=bind"
   ],
   // Runs on the host before each start: a missing mount source stops the container from starting.
+  // claude-autoopen closes the "Press any key" terminal Dev Containers opens for initializeCommand.
   "initializeCommand": "mkdir -p @STATE_ROOT@/bundle-ctl/sock && python3 @USEFUL_THINGS@/devcontainer/claude-config.py ${localWorkspaceFolderBasename}",
-  "postCreateCommand": "grep -q '@VENV@/bin/activate' ~/.bashrc || echo 'source @VENV@/bin/activate' >> ~/.bashrc",
-  // Install the in-house claude-autoopen extension (see useful-things/claude-autoopen), which opens a
-  // Claude Code tab on window open when none is present. Idempotent: skips if already installed.
-  "postAttachCommand": "bash /home/vscode/.install-claude-autoopen.sh",
   // Reached via the host nginx proxy (~/repo/useful-things/proxy) by bundle name, so don't let
   // every window forward Odoo to the same host port and collide.
   "portsAttributes": {

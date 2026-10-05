@@ -1,3 +1,4 @@
+const childProcess = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
@@ -211,7 +212,11 @@ async function activate(context) {
   // otherwise a restored tab might not be enumerated yet and we would open a duplicate. The same
   // wait also lets restored terminals enumerate before openRepoTerminals() decides which to open.
   await new Promise((resolve) => setTimeout(resolve, 2000));
+  // Close the terminal Dev Containers leaves on "Press any key", even after a host-side command.
+  vscode.window.terminals.find((terminal) => terminal.name === "Configuring...")?.dispose();
   watchOwnCode(context);
+  // Update from the mounted vsix after watchOwnCode, which then offers the reload.
+  childProcess.execFile("bash", [path.join(os.homedir(), ".install-claude-autoopen.sh")], () => {});
   await openRepoTerminals();
   const root = vscode.workspace.workspaceFolders?.[0]?.uri;
   if (root) {

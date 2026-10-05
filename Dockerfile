@@ -59,3 +59,7 @@ ARG CONTAINER_BASHRC
 RUN test -n "$CONTAINER_BASHRC" && \
     ln -sfn "$CONTAINER_BASHRC" /home/vscode/.bash_aliases && \
     chown -h vscode:vscode /home/vscode/.bash_aliases
+
+# The venv's prompt in interactive shells; containerEnv already puts it first in PATH.
+ARG VENV
+RUN test -n "$VENV" && echo "source $VENV/bin/activate" >> /home/vscode/.bashrc
