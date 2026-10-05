@@ -65,13 +65,9 @@ with `claude -p` in a terminal named "agent" and opens the tab on that session w
 No empty Claude tab opens while the run lasts, so a window holds one Claude process at a time.
 
 `bctl create|fetch|open ... --task-file FILE` queues the task, and the daemon opens agent windows
-from the queue while both caps allow it:
-
-- `BUNDLE_CTL_MAX_WINDOWS` (default 4): open bundle windows, Seb's own included, plus the agent
-  windows launched in the last 15 minutes whose container is not up yet;
-- `BUNDLE_CTL_MAX_SPAWNS_PER_DAY` (default 20).
-
-Both are read from `~/.config/odoo-dev/config.env` or the unit's environment. The queue is checked
+from the queue while fewer than `BUNDLE_CTL_MAX_WINDOWS` (default 4) bundle windows are open, Seb's
+own included, plus the agent windows launched in the last 15 minutes whose container is not up yet.
+The cap is read from `~/.config/odoo-dev/config.env` or the unit's environment. The queue is checked
 again on every podman container start and stop, and every minute; it lives in
 `~/.local/state/bundle-ctl/state.json`. An agent window cannot queue a task itself (its `.agent/`
 holds a `parent`), so a fan-out is one level deep. A new task moves the previous `.agent/` files of

@@ -70,10 +70,7 @@ def print_status(answer):
         if agent:
             repos += f"  [agent {agent['state']}{' ' + agent['done'] if agent['done'] else ''}]"
         print(f"{row['bundle']:60} {state:6} {repos}")
-    print(
-        f"\n{answer['windows']}/{answer['max_windows']} windows open, "
-        f"{answer['spawns_today']}/{answer['max_spawns_per_day']} agents spawned today",
-    )
+    print(f"\n{answer['windows']}/{answer['max_windows']} windows open")
     for item in answer["queue"]:
         print(f"queued: {item['bundle']} (from {item['parent']})")
 

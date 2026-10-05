@@ -67,11 +67,6 @@ HOST = "host"
 JOB_WAIT = 50
 LAUNCH_GRACE = 15 * 60
 MAX_BODY = 64 * 1024
-MAX_SPAWNS_PER_DAY = int(
-    os.environ.get("BUNDLE_CTL_MAX_SPAWNS_PER_DAY")
-    or CONFIG.get("BUNDLE_CTL_MAX_SPAWNS_PER_DAY")
-    or 20,
-)
 MAX_TASK = 32 * 1024
 MAX_WINDOWS = int(
     os.environ.get("BUNDLE_CTL_MAX_WINDOWS") or CONFIG.get("BUNDLE_CTL_MAX_WINDOWS") or 4,
@@ -205,10 +200,8 @@ def status(caller, query, body):
         state = read_state()
     return 200, {
         "bundles": rows,
-        "max_spawns_per_day": MAX_SPAWNS_PER_DAY,
         "max_windows": MAX_WINDOWS,
         "queue": [{key: item[key] for key in ("bundle", "parent")} for item in state["queue"]],
-        "spawns_today": state["spawns"].get(time.strftime("%Y-%m-%d"), 0),
         "windows": len(get_open_windows()),
     }
 
@@ -331,7 +324,7 @@ def read_state():
     try:
         return json.loads(STATE_FILE.read_text())
     except (OSError, ValueError):
-        return {"launches": {}, "queue": [], "spawns": {}}
+        return {"launches": {}, "queue": []}
 
 
 def write_state(state):
@@ -393,20 +386,16 @@ def launch_queued():
             if now - launched < LAUNCH_GRACE
             and get_worktree_bundle_folder(bundle) not in open_windows
         }
-        today = time.strftime("%Y-%m-%d")
-        state["spawns"] = {today: state["spawns"].get(today, 0)}
         env = session_env()
         has_display = env.get("DISPLAY") or env.get("WAYLAND_DISPLAY")
         while (
             state["queue"]
             and has_display
             and len(open_windows) + len(state["launches"]) < MAX_WINDOWS
-            and state["spawns"][today] < MAX_SPAWNS_PER_DAY
         ):
             item = state["queue"].pop(0)
             write_task(item)
             state["launches"][item["bundle"]] = now
-            state["spawns"][today] += 1
             start_job(
                 item["parent"],
                 "spawn",
