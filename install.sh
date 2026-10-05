@@ -39,6 +39,8 @@ fi
 
 ln -s "${DIR}/.odoorc-dev" ~/.odoorc
 ln -s "${DIR}/.gitconfig" ~/.gitconfig
+# Your [user] (and commit signing, if any) go in ~/.gitconfig.local, which .gitconfig includes.
+touch ~/.gitconfig.local
 ln -s "${DIR}/.eslintrc" ~/.eslintrc
 ln -s "${DIR}/.odoorc-dev" "${REPO}/.odoorc"
 ln -s "${DIR}/.flake8" "${REPO}/.flake8"

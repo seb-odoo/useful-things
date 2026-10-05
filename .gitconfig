@@ -1,7 +1,3 @@
-[user]
-	name = Sébastien Theys
-	email = seb@odoo.com
-	signingKey = /home/seb/.ssh/github-seb-odoo.pub
 [push]
 	default = simple
 [diff]
@@ -26,9 +22,6 @@
 	verbosity = 5
 [alias]
 	checkoutr = checkout
-[gpg]
-	program = gpg
-	format = ssh
 [core]
 	editor = code --wait
 	untrackedCache = true
@@ -38,17 +31,6 @@
 	enabled = true
 [branch]
 	sort = -committerdate
-[commit]
-	gpgsign = true
-[maintenance]
-	repo = /home/seb/repo/design-themes
-	repo = /home/seb/repo/documentation
-	repo = /home/seb/repo/enterprise
-	repo = /home/seb/repo/odoo
-	repo = /home/seb/repo/owl
-	repo = /home/seb/repo/sfu
-	repo = /home/seb/repo/upgrade
-	repo = /home/seb/repo/upgrade-util
 [fetch]
 	writeCommitGraph = true
 [rebase]
@@ -57,3 +39,5 @@
 	workers = 0
 [maintenance "prefetch"]
 	enabled = false
+[include]
+	path = ~/.gitconfig.local

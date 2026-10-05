@@ -62,6 +62,9 @@
     // into dist/ at build time). Lowercase z: shared relabel, like TestWarden above.
     "source=@REPO_ROOT@/DiscussModelParser,target=@REPO_ROOT@/DiscussModelParser,type=bind,z",
     "source=@HOME@/.local/bin/gh,target=/usr/local/bin/gh,type=bind,readonly,z",
+    // VS Code copies ~/.gitconfig into the container without the files it includes, and the git
+    // identity lives in this one.
+    "source=@HOME@/.gitconfig.local,target=/home/vscode/.gitconfig.local,type=bind,readonly,z",
     // Persist VS Code's extensions across bundles/rebuilds so they install once, not per container.
     // Bind (not a named volume) because no-new-privileges/cap-drop ALL means no runtime sudo to chown
     // a root-owned volume; keep-id + updateRemoteUserUID maps vscode -> the host user, so a dir of
