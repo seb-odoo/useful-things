@@ -6,7 +6,7 @@
 # window's IPC socket explicitly, then install through the running server (correct extensions dir).
 set -u
 
-vsix="$HOME/.claude-autoopen.vsix"
+vsix="$HOME/.claude-autoopen/claude-autoopen-0.0.1.vsix"
 installed="$HOME/.vscode-server/extensions/local.claude-autoopen-0.0.1/extension.js"
 
 # Skip the install when the code is the same, as it deletes the folder other windows load from the

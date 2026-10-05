@@ -69,7 +69,9 @@
     // syntax error reaches every running container's next shell rather than waiting for a rebuild,
     // so `bash -n` it after editing.
     "source=@USEFUL_THINGS@/container-rw,target=@USEFUL_THINGS@/container-rw,type=bind,readonly,z",
-    "source=@USEFUL_THINGS@/claude-autoopen/claude-autoopen-0.0.1.vsix,target=/home/vscode/.claude-autoopen.vsix,type=bind,readonly,Z",
+    // The folder and not the vsix: rebuilding the vsix replaces the file, and a file bind keeps every
+    // running container on the old copy, which its next attach would install over the new one.
+    "source=@USEFUL_THINGS@/claude-autoopen,target=/home/vscode/.claude-autoopen,type=bind,readonly,Z",
     "source=@USEFUL_THINGS@/install-claude-autoopen.sh,target=/home/vscode/.install-claude-autoopen.sh,type=bind,readonly,Z",
     // bundle-ctl: the folder of the host daemon's socket, and its client at the host path so `bctl`
     // works on both sides. Read-only, so a container replaces neither the socket nor the client.

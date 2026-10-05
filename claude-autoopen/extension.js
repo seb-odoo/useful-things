@@ -1,4 +1,6 @@
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 const vscode = require("vscode");
 
 // The claude-code extension creates its panel with viewType "claudeVSCodePanel"; VS Code reports it
@@ -105,20 +107,24 @@ async function runAgent(root) {
     return false;
   }
   let session = await readAgentFile(root, "session");
+  const agentTerminals = vscode.window.terminals.filter(
+    (terminal) => terminal.name === AGENT_TERMINAL,
+  );
   if (!session) {
     session = crypto.randomUUID();
     await writeAgentFile(root, "session", session);
+    agentTerminals.forEach((terminal) => terminal.dispose());
+  } else if (agentTerminals.length) {
+    return true;
   }
-  if (!vscode.window.terminals.some((terminal) => terminal.name === AGENT_TERMINAL)) {
-    vscode.window
-      .createTerminal({
-        name: AGENT_TERMINAL,
-        cwd: root,
-        shellPath: "/bin/bash",
-        shellArgs: [`${client}/agent-run.sh`, session],
-      })
-      .show(true);
-  }
+  vscode.window
+    .createTerminal({
+      name: AGENT_TERMINAL,
+      cwd: root,
+      shellPath: "/bin/bash",
+      shellArgs: [`${client}/agent-run.sh`, session],
+    })
+    .show(true);
   return true;
 }
 
@@ -174,17 +180,58 @@ async function activate(context) {
   // otherwise a restored tab might not be enumerated yet and we would open a duplicate. The same
   // wait also lets restored terminals enumerate before openRepoTerminals() decides which to open.
   await new Promise((resolve) => setTimeout(resolve, 2000));
+  watchOwnCode(context);
   await openRepoTerminals();
   const root = vscode.workspace.workspaceFolders?.[0]?.uri;
-  if (root && (await runAgent(root))) {
-    const watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(root, `${AGENT_FOLDER}/done`),
-    );
-    watcher.onDidCreate(() => showClaudeTab(context, root));
-    context.subscriptions.push(watcher);
-    return;
+  if (root) {
+    // Poll, as the file watcher misses the .agent folder bundle-ctl creates from the host.
+    let polling = false;
+    const timer = setInterval(async () => {
+      if (!polling) {
+        polling = true;
+        await pollAgent(context, root).finally(() => (polling = false));
+      }
+    }, 5000);
+    context.subscriptions.push({ dispose: () => clearInterval(timer) });
+    if (await runAgent(root)) {
+      return;
+    }
   }
   await showClaudeTab(context, root);
+}
+
+async function pollAgent(context, root) {
+  if ((await readAgentFile(root, "session")) === undefined) {
+    await runAgent(root);
+  } else if (
+    (await readAgentFile(root, "done")) !== undefined &&
+    (await readAgentFile(root, "tab-opened")) === undefined
+  ) {
+    await showClaudeTab(context, root);
+  }
+}
+
+// Offer a reload when a container installs a new version in the shared extensions folder.
+function watchOwnCode(context) {
+  const file = path.join(context.extensionPath, "extension.js");
+  const listener = (current, previous) => {
+    if (current.mtimeMs === previous.mtimeMs) {
+      return;
+    }
+    fs.unwatchFile(file, listener);
+    vscode.window
+      .showInformationMessage(
+        "Claude Auto-Open was updated: reload the window to use it.",
+        "Reload",
+      )
+      .then((choice) => {
+        if (choice === "Reload") {
+          vscode.commands.executeCommand("workbench.action.reloadWindow");
+        }
+      });
+  };
+  fs.watchFile(file, { interval: 10000 }, listener);
+  context.subscriptions.push({ dispose: () => fs.unwatchFile(file, listener) });
 }
 
 async function showClaudeTab(context, root) {
