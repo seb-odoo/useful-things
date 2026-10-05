@@ -15,7 +15,8 @@ sudo apt install apparmor-profiles
 sudo ln -s /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/
 sudo apparmor_parser /etc/apparmor.d/bwrap-userns-restrict
 
-sudo -u postgres createuser -s $USER
+# No superuser: a dev container shares this role, see devcontainer/README.md.
+sudo -u postgres createuser --createdb $USER
 
 # wget -qO - https://download.sublimetext.com/sublimehq-pub.gpg | sudo apt-key add -
 # echo "deb https://download.sublimetext.com/ apt/stable/" | sudo tee /etc/apt/sources.list.d/sublime-text.list
@@ -44,9 +45,8 @@ touch ~/.gitconfig.local
 ln -s "${DIR}/.eslintrc" ~/.eslintrc
 ln -s "${DIR}/.odoorc-dev" "${REPO}/.odoorc"
 ln -s "${DIR}/.flake8" "${REPO}/.flake8"
-ln -s "${DIR}/.sass-lint.yml" "${REPO}/.sass-lint.yml"
 ln -s "${DIR}/odoo.sublime-project" "${REPO}/odoo.sublime-project"
-ln -s "${DIR}/../.terminator-config" ~/.config/terminator/config
+ln -s "${DIR}/terminator-config" ~/.config/terminator/config
 
 # Bind-mount source for the dev container's shared test-warden Chrome cache (must pre-exist).
 # TestWarden itself is cloned+built separately (git@github.com:tsm-odoo/TestWarden.git).
@@ -122,5 +122,3 @@ sudo npm install postcss stylelint stylelint-config-standard-scss es-check -g
 # install cinnamon desktop
 
 # vscode: eslint, prettier
-
-# rsync -avzP --exclude "*[Cc]ache/" --exclude ".[cC]ache/" --exclude '[Tt]mp/' --exclude '[tT]emp/' --exclude '[tT]rash/' --exclude '[cC]rash [Rr]eports/' /home/seb/ seb@10.30.71.138:/home/seb/
