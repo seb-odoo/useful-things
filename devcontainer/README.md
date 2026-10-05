@@ -27,9 +27,8 @@ covers all of them; a container has to be rebuilt to pick up a change.
 
 The container runs as the host user (`--userns=keep-id`), so a file it can write is a file the host
 trusts. What the host runs or loads as config, and a container has no reason to change, is
-read-only: the shell helpers (`container-rw/`), the venv, the shared `.claude` and `.vscode` of the
-bundles, the VS Code user settings, and the parts of `~/.claude` the host's Claude runs (settings,
-hooks, bin, skills, plugins, external, `.git`).
+read-only: the shell helpers (`container-rw/`), the venv, the shared `.vscode` of the bundles and the
+VS Code user settings.
 
 Each container gets its own Claude config folder (`CLAUDE_CONFIG_DIR`, made by
 [`claude-config.py`](claude-config.py) before every start): a `settings.json` copied from the host's
@@ -55,5 +54,5 @@ What stays open on purpose:
 - the filestore and the databases;
 - the SSH agent VS Code forwards into the containers it attaches to, which lets an agent fetch and
   push;
-- `~/.claude/CLAUDE.md`, the memory and the session transcripts, which steer the host's Claude
-  without running anything.
+- all of `~/.claude`, settings, hooks, skills and its `.git` included, and the bundles' shared
+  `.claude`: they get fixed and committed from containers too, while the host's Claude runs them.

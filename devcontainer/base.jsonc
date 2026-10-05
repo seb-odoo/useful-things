@@ -31,21 +31,11 @@
     // resolve in the container. Without this the workspace settings.json never loads, so
     // search.exclude (*.po/*.pot) is ignored and the Odoo extension can't read odools.toml.
     // The shared .claude is versioned in the claude-config repo, so the host path is itself a
-    // symlink into it: mount the real directory, not the link. Read-only, as the host's Claude runs
-    // its hooks too.
-    "source=@HOME@/.claude/external/src-odoo-claude,target=@WORKTREE_ROOT@/.claude,type=bind,readonly,Z",
+    // symlink into it: mount the real directory, not the link.
+    "source=@HOME@/.claude/external/src-odoo-claude,target=@WORKTREE_ROOT@/.claude,type=bind,Z",
     "source=@WORKTREE_ROOT@/.vscode,target=@WORKTREE_ROOT@/.vscode,type=bind,readonly,Z",
     "source=@USEFUL_THINGS@/odools.toml,target=@USEFUL_THINGS@/odools.toml,type=bind,readonly,Z",
     "source=@HOME@/.claude,target=/home/vscode/.claude,type=bind,Z",
-    // Read-only, everything of ~/.claude the host's Claude or git runs or loads as config.
-    "source=@HOME@/.claude/settings.json,target=/home/vscode/.claude/settings.json,type=bind,readonly,Z",
-    "source=@HOME@/.claude/remote-settings.json,target=/home/vscode/.claude/remote-settings.json,type=bind,readonly,Z",
-    "source=@HOME@/.claude/.git,target=/home/vscode/.claude/.git,type=bind,readonly,Z",
-    "source=@HOME@/.claude/bin,target=/home/vscode/.claude/bin,type=bind,readonly,Z",
-    "source=@HOME@/.claude/external,target=/home/vscode/.claude/external,type=bind,readonly,Z",
-    "source=@HOME@/.claude/hooks,target=/home/vscode/.claude/hooks,type=bind,readonly,Z",
-    "source=@HOME@/.claude/plugins,target=/home/vscode/.claude/plugins,type=bind,readonly,Z",
-    "source=@HOME@/.claude/skills,target=/home/vscode/.claude/skills,type=bind,readonly,Z",
     // The container's own CLAUDE_CONFIG_DIR, made by devcontainer/claude-config.py: a settings.json
     // it may write, and links to the rest of ~/.claude.
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename},target=/home/vscode/.claude-container,type=bind,z",
@@ -88,7 +78,7 @@
     "source=/var/run/postgresql,target=/var/run/postgresql,type=bind"
   ],
   // Runs on the host before each start: a missing mount source stops the container from starting.
-  "initializeCommand": "mkdir -p @STATE_ROOT@/bundle-ctl/sock && { test -e @HOME@/.claude/remote-settings.json || echo '{}' > @HOME@/.claude/remote-settings.json; } && python3 @USEFUL_THINGS@/devcontainer/claude-config.py ${localWorkspaceFolderBasename}",
+  "initializeCommand": "mkdir -p @STATE_ROOT@/bundle-ctl/sock && python3 @USEFUL_THINGS@/devcontainer/claude-config.py ${localWorkspaceFolderBasename}",
   "postCreateCommand": "grep -q '@VENV@/bin/activate' ~/.bashrc || echo 'source @VENV@/bin/activate' >> ~/.bashrc",
   // Install the in-house claude-autoopen extension (see useful-things/claude-autoopen), which opens a
   // Claude Code tab on window open when none is present. Idempotent: skips if already installed.
