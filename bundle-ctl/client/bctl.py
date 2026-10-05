@@ -3,12 +3,13 @@
 
     bctl whoami
     bctl status [--json]
-    bctl create BASE NAME [--branch-repo REPO]... [--no-open]
-    bctl fetch BUNDLE [--no-open]
-    bctl open BUNDLE
+    bctl create BASE NAME [--branch-repo REPO]... [--no-open] [--task TEXT | --task-file FILE]
+    bctl fetch BUNDLE [--no-open] [--task TEXT | --task-file FILE]
+    bctl open BUNDLE [--task TEXT | --task-file FILE]
 
 create, fetch and open run as a job on the host: bctl prints its log until it ends, which can take
-minutes for a new bundle.
+minutes for a new bundle. With a task, the window is an agent window: it opens once it fits under
+the window cap, runs the task with Claude, then shows the session in a Claude tab.
 """
 
 import argparse
@@ -65,7 +66,28 @@ def print_status(answer):
     for row in answer["bundles"]:
         repos = ", ".join(format_repo(repo, status) for repo, status in row["repos"].items())
         state = "open" if row["open"] else "folder" if row["folder"] else "branch"
+        agent = row["agent"]
+        if agent:
+            repos += f"  [agent {agent['state']}{' ' + agent['done'] if agent['done'] else ''}]"
         print(f"{row['bundle']:60} {state:6} {repos}")
+    print(
+        f"\n{answer['windows']}/{answer['max_windows']} windows open, "
+        f"{answer['spawns_today']}/{answer['max_spawns_per_day']} agents spawned today",
+    )
+    for item in answer["queue"]:
+        print(f"queued: {item['bundle']} (from {item['parent']})")
+
+
+def add_task_arguments(parser):
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--task", help="run this prompt in the window, unattended")
+    group.add_argument("--task-file", type=pathlib.Path, help="same, read from a file")
+
+
+def read_task(args):
+    if args.task_file:
+        return args.task_file.read_text()
+    return args.task
 
 
 def follow(job_id):
@@ -97,11 +119,14 @@ def main():
         help="repo that gets the branch, repeatable (default: odoo)",
     )
     create.add_argument("--no-open", action="store_true")
+    add_task_arguments(create)
     fetch = commands.add_parser("fetch", help="an existing bundle from runbot or the dev remotes")
     fetch.add_argument("name")
     fetch.add_argument("--no-open", action="store_true")
+    add_task_arguments(fetch)
     open_ = commands.add_parser("open", help="a VS Code window on a local bundle")
     open_.add_argument("bundle")
+    add_task_arguments(open_)
     args = parser.parse_args()
 
     printer = None
@@ -110,16 +135,21 @@ def main():
     elif args.command == "status":
         answer = request("GET", "/status")
         printer = print_status
-    elif args.command == "create":
-        body = {"base": args.base, "name": args.name, "open": not args.no_open}
-        if args.branch_repos:
-            body["branch_repos"] = args.branch_repos
-        answer = follow(request("POST", "/create", body)["job"])
-    elif args.command == "fetch":
-        body = {"name": args.name, "open": not args.no_open}
-        answer = follow(request("POST", "/fetch", body)["job"])
     else:
-        answer = follow(request("POST", "/open", {"bundle": args.bundle})["job"])
+        if args.command == "create":
+            body = {"base": args.base, "name": args.name, "open": not args.no_open}
+            if args.branch_repos:
+                body["branch_repos"] = args.branch_repos
+        elif args.command == "fetch":
+            body = {"name": args.name, "open": not args.no_open}
+        else:
+            body = {"bundle": args.bundle}
+        task = read_task(args)
+        if task is not None:
+            body["task"] = task
+        answer = request("POST", f"/{args.command}", body)
+        if "job" in answer:
+            answer = follow(answer["job"])
     if args.json or printer is None:
         print(json.dumps(answer, indent=2))
     else:

@@ -45,6 +45,7 @@ from commands import (  # noqa: E402
     get_repos,
     get_sticky_bundles,
     get_worktree_bundle_folder,
+    get_worktree_container_folder,
 )
 from config import STICKY_BUNDLES  # noqa: E402
 from utils import UtilsRunner  # noqa: E402
@@ -64,7 +65,17 @@ BUNDLE_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,99}")
 CONTAINER_ID = re.compile(r"/libpod-(?:payload-)?([0-9a-f]{64})")
 HOST = "host"
 JOB_WAIT = 50
+LAUNCH_GRACE = 15 * 60
 MAX_BODY = 64 * 1024
+MAX_SPAWNS_PER_DAY = int(
+    os.environ.get("BUNDLE_CTL_MAX_SPAWNS_PER_DAY")
+    or CONFIG.get("BUNDLE_CTL_MAX_SPAWNS_PER_DAY")
+    or 20,
+)
+MAX_TASK = 32 * 1024
+MAX_WINDOWS = int(
+    os.environ.get("BUNDLE_CTL_MAX_WINDOWS") or CONFIG.get("BUNDLE_CTL_MAX_WINDOWS") or 4,
+)
 NAME = re.compile(r"[a-z0-9](?:[a-z0-9.]|-(?!-)){0,79}")
 SESSION_VARIABLES = (
     "DBUS_SESSION_BUS_ADDRESS",
@@ -75,9 +86,11 @@ SESSION_VARIABLES = (
 )
 STATE = pathlib.Path(CONFIG["STATE_ROOT"]) / "bundle-ctl"
 SOCKET = STATE / "sock" / "ctl.sock"
+STATE_FILE = STATE / "state.json"
 
 folder_by_container = {}
 jobs = {}
+state_lock = threading.Lock()
 work_lock = threading.Lock()
 
 
@@ -125,15 +138,38 @@ def identify(connection):
     return bundle
 
 
+def read_text(path):
+    try:
+        return path.read_text().strip()
+    except OSError:
+        return None
+
+
+def get_agent_folder(bundle):
+    return pathlib.Path(get_worktree_bundle_folder(bundle)) / ".agent"
+
+
+def get_agent(bundle):
+    folder = get_agent_folder(bundle)
+    if not (folder / "task.md").is_file():
+        return None
+    done = read_text(folder / "done")
+    return {
+        "done": done,
+        "parent": read_text(folder / "parent"),
+        "result": (read_text(folder / "result.md") or "")[:500],
+        "state": "running" if done is None else "done",
+    }
+
+
 def whoami(caller, query, body):
     if caller == HOST:
         return 200, {"caller": HOST}
-    parent = pathlib.Path(get_worktree_bundle_folder(caller)) / ".agent" / "parent"
     return 200, {
         "base": get_base_from_bundle_name(caller),
         "bundle": caller,
         "caller": caller,
-        "parent": parent.read_text().strip() if parent.is_file() else None,
+        "parent": read_text(get_agent_folder(caller) / "parent"),
     }
 
 
@@ -157,6 +193,7 @@ def status(caller, query, body):
         folder = get_worktree_bundle_folder(bundle)
         rows.append(
             {
+                "agent": get_agent(bundle),
                 "base": get_base_from_bundle_name(bundle),
                 "bundle": bundle,
                 "folder": os.path.isdir(folder),
@@ -164,7 +201,16 @@ def status(caller, query, body):
                 "repos": {repo: statuses[repo, bundle] for repo in names},
             },
         )
-    return 200, {"bundles": rows}
+    with state_lock:
+        state = read_state()
+    return 200, {
+        "bundles": rows,
+        "max_spawns_per_day": MAX_SPAWNS_PER_DAY,
+        "max_windows": MAX_WINDOWS,
+        "queue": [{key: item[key] for key in ("bundle", "parent")} for item in state["queue"]],
+        "spawns_today": state["spawns"].get(time.strftime("%Y-%m-%d"), 0),
+        "windows": len(get_open_windows()),
+    }
 
 
 def session_env():
@@ -281,6 +327,134 @@ def get_job(caller, query, body):
     return 200, dict(job, log=data.decode(errors="replace"), offset=offset + len(data))
 
 
+def read_state():
+    try:
+        return json.loads(STATE_FILE.read_text())
+    except (OSError, ValueError):
+        return {"launches": {}, "queue": [], "spawns": {}}
+
+
+def write_state(state):
+    tmp = STATE_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, indent=1))
+    tmp.replace(STATE_FILE)
+
+
+def get_open_windows():
+    root = f"{get_worktree_container_folder()}/"
+    return {folder for folder in get_open_bundle_folders() if folder.startswith(root)}
+
+
+def check_task(caller, bundle, task):
+    if not isinstance(task, str) or not task.strip() or len(task) > MAX_TASK:
+        raise ValueError(f"task: a text of at most {MAX_TASK} characters")
+    if caller != HOST and read_text(get_agent_folder(caller) / "parent") is not None:
+        raise Refused("an agent spawned by bundle-ctl cannot spawn another one")
+    agent = get_agent(bundle)
+    if agent and agent["state"] == "running":
+        raise Refused(f"an agent already works in {bundle}")
+    with state_lock:
+        if any(item["bundle"] == bundle for item in read_state()["queue"]):
+            raise Refused(f"{bundle} is already queued")
+
+
+def enqueue(caller, bundle, task):
+    with state_lock:
+        state = read_state()
+        state["queue"].append({"bundle": bundle, "parent": caller, "task": task})
+        write_state(state)
+        position = len(state["queue"])
+    launch_queued()
+    return {"bundle": bundle, "queued": position}
+
+
+def write_task(item):
+    folder = get_agent_folder(item["bundle"])
+    if folder.exists():
+        history = folder / "history" / time.strftime("%Y%m%d-%H%M%S")
+        history.mkdir(parents=True)
+        for path in folder.iterdir():
+            if path.name != "history":
+                path.rename(history / path.name)
+    folder.mkdir(exist_ok=True)
+    (folder / "parent").write_text(f"{item['parent']}\n")
+    (folder / "task.md").write_text(item["task"])
+
+
+def launch_queued():
+    with state_lock:
+        state = read_state()
+        now = time.time()
+        open_windows = get_open_windows()
+        # Count a window from its launch, as its container shows in podman only once it is built.
+        state["launches"] = {
+            bundle: launched
+            for bundle, launched in state["launches"].items()
+            if now - launched < LAUNCH_GRACE
+            and get_worktree_bundle_folder(bundle) not in open_windows
+        }
+        today = time.strftime("%Y-%m-%d")
+        state["spawns"] = {today: state["spawns"].get(today, 0)}
+        env = session_env()
+        has_display = env.get("DISPLAY") or env.get("WAYLAND_DISPLAY")
+        while (
+            state["queue"]
+            and has_display
+            and len(open_windows) + len(state["launches"]) < MAX_WINDOWS
+            and state["spawns"][today] < MAX_SPAWNS_PER_DAY
+        ):
+            item = state["queue"].pop(0)
+            write_task(item)
+            state["launches"][item["bundle"]] = now
+            state["spawns"][today] += 1
+            start_job(
+                item["parent"],
+                "spawn",
+                lambda log, bundle=item["bundle"]: open_window(log, bundle),
+            )
+        write_state(state)
+
+
+def keep_launching():
+    def on_events():
+        while True:
+            proc = subprocess.Popen(
+                [
+                    "podman",
+                    "events",
+                    "--filter",
+                    "type=container",
+                    "--filter",
+                    "event=start",
+                    "--filter",
+                    "event=died",
+                    "--format",
+                    "{{.ID}}",
+                ],
+                stdout=subprocess.PIPE,
+                text=True,
+            )
+            for _line in proc.stdout:
+                launch_safely()
+            proc.wait()
+            time.sleep(5)
+
+    def every_minute():
+        while True:
+            launch_safely()
+            time.sleep(60)
+
+    threading.Thread(target=on_events, daemon=True).start()
+    threading.Thread(target=every_minute, daemon=True).start()
+
+
+def launch_safely():
+    try:
+        launch_queued()
+    except Exception:
+        traceback.print_exc()
+
+
 def local_branches(bundle):
     return [
         repo
@@ -309,15 +483,15 @@ def create(caller, query, body):
         raise ValueError(f"unknown repos: {', '.join(sorted(unknown))}")
     if os.path.exists(get_worktree_bundle_folder(bundle)) or local_branches(bundle):
         raise Refused(f"{bundle} already exists")
+    if "task" in body:
+        check_task(caller, bundle, body["task"])
 
     def work(log):
         args = [base, name, "--no-push", "--no-open"]
         for repo in branch_repos:
             args += ["--branch-repo", repo]
         run_script(log, "create_bundle.py", *args)
-        if body.get("open", True):
-            open_window(log, bundle)
-        return {"bundle": bundle}
+        return open_or_enqueue(log, caller, bundle, body)
 
     return start_job(caller, "create", work)
 
@@ -338,12 +512,12 @@ def fetch(caller, query, body):
         ).stdout.strip()
         if unpushed:
             raise Refused(f"{bundle} has unpushed commits in {repo}, pfb would reset them")
+    if "task" in body:
+        check_task(caller, bundle, body["task"])
 
     def work(log):
         run_script(log, "fetch_bundle.py", bundle, "--no-open")
-        if body.get("open", True):
-            open_window(log, bundle)
-        return {"bundle": bundle}
+        return open_or_enqueue(log, caller, bundle, body)
 
     return start_job(caller, "fetch", work)
 
@@ -352,12 +526,18 @@ def open_bundle(caller, query, body):
     bundle = body.get("bundle") or ""
     if not BUNDLE_NAME.fullmatch(bundle) or not os.path.isdir(get_worktree_bundle_folder(bundle)):
         raise ValueError(f"no bundle folder for {bundle}")
+    if "task" in body:
+        check_task(caller, bundle, body["task"])
+        return 202, enqueue(caller, bundle, body["task"])
+    return start_job(caller, "open", lambda log: open_or_enqueue(log, caller, bundle, body))
 
-    def work(log):
+
+def open_or_enqueue(log, caller, bundle, body):
+    if "task" in body:
+        return enqueue(caller, bundle, body["task"])
+    if body.get("open", True):
         open_window(log, bundle)
-        return {"bundle": bundle}
-
-    return start_job(caller, "open", work)
+    return {"bundle": bundle}
 
 
 VERBS = {
@@ -426,6 +606,7 @@ def main():
     os.umask(0o077)
     server = Server(str(SOCKET), Handler)
     print(f"listening on {SOCKET}", flush=True)
+    keep_launching()
     server.serve_forever()
 
 
