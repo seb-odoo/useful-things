@@ -23,6 +23,8 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `GET /whoami` | the caller's bundle, base and parent |
 | `GET /status` | every local bundle branch: base, behind and conflict per repo, folder, open |
 
-From the host:
+`bctl` (`client/bctl.py`, stdlib only, defined in `container-rw/devcontainer.bashrc`) calls them
+from a container or from the host: `bctl whoami`, `bctl status`. The containers mount `client/`
+read-only at its host path. Without the client:
 
     curl --unix-socket ~/.local/state/bundle-ctl/sock/ctl.sock http://bundle-ctl/whoami

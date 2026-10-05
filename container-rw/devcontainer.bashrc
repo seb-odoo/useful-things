@@ -173,6 +173,9 @@ function otta() {
 # See /home/seb/repo/TestWarden/README.md for the full flag list.
 function twc() { node /home/seb/repo/TestWarden/release/test-warden.cjs "$@"; }
 
+# --- bundle-ctl: create, open and list bundles through the host daemon ---
+function bctl() { python3 /home/seb/repo/useful-things/bundle-ctl/client/bctl.py "$@"; }
+
 # --- model types (DiscussModelParser) ---
 # Regenerates the @types/models.d.ts files from the JS model definitions (community +
 # enterprise). Run it after adding/changing a model, field or store patch; it rewrites

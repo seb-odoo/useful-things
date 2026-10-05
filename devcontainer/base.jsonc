@@ -92,6 +92,10 @@
     "source=@USEFUL_THINGS@/container-rw,target=@USEFUL_THINGS@/container-rw,type=bind,z",
     "source=@USEFUL_THINGS@/claude-autoopen/claude-autoopen-0.0.1.vsix,target=/home/vscode/.claude-autoopen.vsix,type=bind,readonly,Z",
     "source=@USEFUL_THINGS@/install-claude-autoopen.sh,target=/home/vscode/.install-claude-autoopen.sh,type=bind,readonly,Z",
+    // bundle-ctl: the folder of the host daemon's socket, and its client at the host path so `bctl`
+    // works on both sides. Read-only, so a container replaces neither the socket nor the client.
+    "source=@STATE_ROOT@/bundle-ctl/sock,target=/run/bundle-ctl,type=bind,readonly,z",
+    "source=@USEFUL_THINGS@/bundle-ctl/client,target=@USEFUL_THINGS@/bundle-ctl/client,type=bind,readonly,z",
     "source=/var/run/postgresql,target=/var/run/postgresql,type=bind"
   ],
   "postCreateCommand": "grep -q '@VENV@/bin/activate' ~/.bashrc || echo 'source @VENV@/bin/activate' >> ~/.bashrc",
