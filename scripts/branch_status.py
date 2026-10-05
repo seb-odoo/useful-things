@@ -415,18 +415,20 @@ def main():
         ask_tags = {}
         delegated = False
         for repo in sorted(dates, key=lambda repo: repo != "odoo"):
+            pr = prs.get((repo, branch))
+            facts = get_pr_facts(pr, repo) if pr else {}
             status = statuses[repo, branch]
-            if status is None:
+            push, unpushed = pushes[repo, branch]
+            if facts.get("state") == "merged":
+                behind = conflict = push = ""
+            elif status is None:
                 behind = conflict = "-"
             else:
                 style = next(style for limit, style in BEHIND_STYLES if status["behind"] >= limit)
                 behind = f"[{style}]{status['behind']}[/{style}]"
                 conflict = "[red]yes[/red]" if status["conflict"] else ""
-            pr = prs.get((repo, branch))
-            facts = get_pr_facts(pr, repo) if pr else {}
             number, tags = format_pr(pr, facts)
             delegated |= bool(facts) and facts["delegated"] and pr["mergebot"] not in R_PLUS_STATES
-            push, unpushed = pushes[repo, branch]
             if BUNDLE_SUFFIX in branch:
                 bundle_groups.append(get_group(pr, facts, status, unpushed))
                 if bundle_groups[-1][0] == "reviewer":
