@@ -1,7 +1,7 @@
 [user]
 	name = Sébastien Theys
 	email = seb@odoo.com
-	signingKey = /home/seb/.ssh/id_rsa.pub
+	signingKey = /home/seb/.ssh/github-seb-odoo.pub
 [push]
 	default = simple
 [diff]
