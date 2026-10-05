@@ -3,13 +3,17 @@
 
     bctl whoami
     bctl status [--json]
-    bctl create BASE NAME [--branch-repo REPO]... [--no-open] [--task TEXT | --task-file FILE]
-    bctl fetch BUNDLE|PR_LINK|OWNER:BRANCH [--no-open] [--task TEXT | --task-file FILE]
-    bctl open BUNDLE [--task TEXT | --task-file FILE]
+    bctl create BASE NAME [--branch-repo REPO]... [--no-open] [TASK]
+    bctl fetch BUNDLE|PR_LINK|OWNER:BRANCH [--no-open] [TASK]
+    bctl open BUNDLE [TASK]
+
+TASK is --task TEXT or --task-file FILE, with an optional --priority N.
 
 create, fetch and open run as a job on the host: bctl prints its log until it ends, which can take
 minutes for a new bundle. With a task, the window is an agent window: it opens once it fits under
-the window cap, runs the task with Claude, then shows the session in a Claude tab.
+the window cap, runs the task with Claude, then shows the session in a Claude tab. The queue runs
+the highest priority first (-100 to 100, default 0), then in arrival order: bctl status lists it in
+that order.
 """
 
 import argparse
@@ -76,14 +80,22 @@ def print_status(answer):
             repos += f"  [agent {agent['state']}{' ' + agent['done'] if agent['done'] else ''}]"
         print(f"{row['bundle']:60} {state:7} {repos}")
     print(f"\n{answer['windows']}/{answer['max_windows']} windows open")
-    for item in answer["queue"]:
-        print(f"queued: {item['bundle']} (from {item['parent']})")
+    for position, item in enumerate(answer["queue"], 1):
+        print(
+            f"queued {position}: {item['bundle']} (priority {item['priority']},"
+            f" from {item['parent']})",
+        )
 
 
 def add_task_arguments(parser):
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--task", help="run this prompt in the window, unattended")
     group.add_argument("--task-file", type=pathlib.Path, help="same, read from a file")
+    parser.add_argument(
+        "--priority",
+        type=int,
+        help="with a task: higher leaves the queue first, from -100 to 100 (default 0)",
+    )
 
 
 def read_task(args):
@@ -152,6 +164,8 @@ def main():
         task = read_task(args)
         if task is not None:
             body["task"] = task
+        if args.priority is not None:
+            body["priority"] = args.priority
         answer = request("POST", f"/{args.command}", body)
         if "job" in answer:
             answer = follow(answer["job"])

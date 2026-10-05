@@ -69,6 +69,7 @@ HOST = "host"
 JOB_WAIT = 50
 LAUNCH_GRACE = 15 * 60
 MAX_BODY = 64 * 1024
+MAX_PRIORITY = 100
 MAX_TASK = 32 * 1024
 MAX_WINDOWS = int(
     os.environ.get("BUNDLE_CTL_MAX_WINDOWS") or CONFIG.get("BUNDLE_CTL_MAX_WINDOWS") or 4,
@@ -205,7 +206,10 @@ def status(caller, query, body):
     return 200, {
         "bundles": rows,
         "max_windows": MAX_WINDOWS,
-        "queue": [{key: item[key] for key in ("bundle", "parent")} for item in state["queue"]],
+        "queue": [
+            dict(bundle=item["bundle"], parent=item["parent"], priority=item.get("priority", 0))
+            for item in state["queue"]
+        ],
         "windows": len(get_open_windows()),
     }
 
@@ -342,9 +346,16 @@ def get_open_windows():
     return {folder for folder in get_open_bundle_folders() if folder.startswith(root)}
 
 
-def check_task(caller, bundle, task):
+def check_task(caller, bundle, body):
+    if "task" not in body:
+        if "priority" in body:
+            raise ValueError("priority: only with a task")
+        return
+    task, priority = body["task"], body.get("priority", 0)
     if not isinstance(task, str) or not task.strip() or len(task) > MAX_TASK:
         raise ValueError(f"task: a text of at most {MAX_TASK} characters")
+    if type(priority) is not int or abs(priority) > MAX_PRIORITY:
+        raise ValueError(f"priority: an integer from -{MAX_PRIORITY} to {MAX_PRIORITY}")
     if caller != HOST and (run := get_agent(caller)) and run["state"] == "running":
         raise Refused("an agent run cannot queue a task before it ends")
     agent = get_agent(bundle)
@@ -355,14 +366,22 @@ def check_task(caller, bundle, task):
             raise Refused(f"{bundle} is already queued")
 
 
-def enqueue(caller, bundle, task):
+def enqueue(caller, bundle, body):
+    priority = body.get("priority", 0)
     with state_lock:
         state = read_state()
-        state["queue"].append({"bundle": bundle, "parent": caller, "task": task})
+        queue = state["queue"]
+        position = next(
+            (index for index, item in enumerate(queue) if item.get("priority", 0) < priority),
+            len(queue),
+        )
+        queue.insert(
+            position,
+            {"bundle": bundle, "parent": caller, "priority": priority, "task": body["task"]},
+        )
         write_state(state)
-        position = len(state["queue"])
     launch_queued()
-    return {"bundle": bundle, "queued": position}
+    return {"bundle": bundle, "priority": priority, "queued": position + 1}
 
 
 def write_task(item):
@@ -476,8 +495,7 @@ def create(caller, query, body):
         raise ValueError(f"unknown repos: {', '.join(sorted(unknown))}")
     if os.path.exists(get_worktree_bundle_folder(bundle)) or local_branches(bundle):
         raise Refused(f"{bundle} already exists")
-    if "task" in body:
-        check_task(caller, bundle, body["task"])
+    check_task(caller, bundle, body)
 
     def work(log):
         args = [base, name, "--no-push", "--no-open"]
@@ -512,8 +530,7 @@ def fetch(caller, query, body):
         ).stdout.strip()
         if unpushed:
             raise Refused(f"{bundle} has unpushed commits in {repo}, pfb would reset them")
-    if "task" in body:
-        check_task(caller, bundle, body["task"])
+    check_task(caller, bundle, body)
 
     def work(log):
         run_script(log, "fetch_bundle.py", name, "--no-open")
@@ -526,15 +543,15 @@ def open_bundle(caller, query, body):
     bundle = body.get("bundle") or ""
     if not BUNDLE_NAME.fullmatch(bundle) or not os.path.isdir(get_worktree_bundle_folder(bundle)):
         raise ValueError(f"no bundle folder for {bundle}")
+    check_task(caller, bundle, body)
     if "task" in body:
-        check_task(caller, bundle, body["task"])
-        return 202, enqueue(caller, bundle, body["task"])
+        return 202, enqueue(caller, bundle, body)
     return start_job(caller, "open", lambda log: open_or_enqueue(log, caller, bundle, body))
 
 
 def open_or_enqueue(log, caller, bundle, body):
     if "task" in body:
-        return enqueue(caller, bundle, body["task"])
+        return enqueue(caller, bundle, body)
     if body.get("open", True):
         open_window(log, bundle)
         with state_lock:

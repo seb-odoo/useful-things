@@ -71,6 +71,9 @@ unless a Claude session of the container is busy or waits for a permission.
 `bctl create|fetch|open ... --task-file FILE` queues the task, and the daemon opens agent windows
 from the queue while fewer than `BUNDLE_CTL_MAX_WINDOWS` (default 4) bundle windows are open, Seb's
 own included, plus the agent windows launched in the last 15 minutes whose container is not up yet.
+`--priority N` (-100 to 100, default 0) puts the task ahead of the ones with a lower priority; equal
+priorities leave in arrival order. `bctl status` lists the queue in that order with each priority
+and the bundle that queued it, so a caller can pick where it goes.
 The cap is read from `~/.config/odoo-dev/config.env` or the unit's environment. The queue is checked
 again on every podman container start and stop, and every minute; it lives in
 `~/.local/state/bundle-ctl/state.json`. An agent run cannot queue a task before it ends, so a
