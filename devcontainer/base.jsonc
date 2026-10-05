@@ -140,6 +140,8 @@
     // the ~/.bash_aliases symlink is there; that symlink is what ~/.bashrc, install-claude-path.sh
     // and the Bash( ... ) permission rules still reach it by.
     "BASH_ENV": "@USEFUL_THINGS@/container-rw/devcontainer.bashrc",
+    // Where claude-autoopen finds agent-run.sh, the mount above.
+    "BUNDLE_CTL_CLIENT": "@USEFUL_THINGS@/bundle-ctl/client",
     "HOME": "/home/vscode",
     "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
     // Disable commit signing in the sandbox. The repo's bind-mounted .git/config (shared with the

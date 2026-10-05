@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const vscode = require("vscode");
 
 // The claude-code extension creates its panel with viewType "claudeVSCodePanel"; VS Code reports it
@@ -6,6 +7,9 @@ const vscode = require("vscode");
 const CLAUDE_VIEWTYPE = "claudeVSCodePanel";
 const CLAUDE_EXTENSION_ID = "anthropic.claude-code";
 const OPEN_COMMAND = "claude-vscode.editor.open";
+// bundle-ctl writes the task of an agent window there (bundle-ctl/README.md).
+const AGENT_FOLDER = ".agent";
+const AGENT_TERMINAL = "agent";
 
 // Every /workspace bundle is created with these repo worktrees (useful-things/scripts/config.py
 // folder_by_repo). One terminal each, cd'd into the worktree.
@@ -76,24 +80,96 @@ async function openRepoTerminals() {
   }
 }
 
-async function activate() {
+async function readAgentFile(root, name) {
+  try {
+    const data = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, AGENT_FOLDER, name));
+    return new TextDecoder().decode(data).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+async function writeAgentFile(root, name, text) {
+  const uri = vscode.Uri.joinPath(root, AGENT_FOLDER, name);
+  await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(text));
+}
+
+async function runAgent(root) {
+  const client = process.env.BUNDLE_CTL_CLIENT;
+  if (
+    !client ||
+    (await readAgentFile(root, "task.md")) === undefined ||
+    (await readAgentFile(root, "done")) !== undefined
+  ) {
+    return false;
+  }
+  let session = await readAgentFile(root, "session");
+  if (!session) {
+    session = crypto.randomUUID();
+    await writeAgentFile(root, "session", session);
+  }
+  if (!vscode.window.terminals.some((terminal) => terminal.name === AGENT_TERMINAL)) {
+    vscode.window
+      .createTerminal({
+        name: AGENT_TERMINAL,
+        cwd: root,
+        shellPath: "/bin/bash",
+        shellArgs: [`${client}/agent-run.sh`, session],
+      })
+      .show(true);
+  }
+  return true;
+}
+
+async function takeAgentSession(root) {
+  const session = await readAgentFile(root, "session");
+  if (
+    !session ||
+    (await readAgentFile(root, "done")) === undefined ||
+    (await readAgentFile(root, "tab-opened")) !== undefined
+  ) {
+    return undefined;
+  }
+  await writeAgentFile(root, "tab-opened", "");
+  return session;
+}
+
+async function openClaudeTab(sessionId) {
+  const claude = vscode.extensions.getExtension(CLAUDE_EXTENSION_ID);
+  if (!claude) {
+    return;
+  }
+  if (!claude.isActive) {
+    await claude.activate();
+  }
+  await vscode.commands.executeCommand(OPEN_COMMAND, sessionId);
+  // The freshly opened panel becomes the active editor, but the reveal is async: wait so it is
+  // enumerated as the active tab before we pin it.
+  await new Promise((resolve) => setTimeout(resolve, 500));
+}
+
+async function activate(context) {
   // Let restored editor/webview tabs settle before deciding whether a Claude tab already exists,
   // otherwise a restored tab might not be enumerated yet and we would open a duplicate. The same
   // wait also lets restored terminals enumerate before openRepoTerminals() decides which to open.
   await new Promise((resolve) => setTimeout(resolve, 2000));
   await openRepoTerminals();
-  if (!getClaudeTab()) {
-    const claude = vscode.extensions.getExtension(CLAUDE_EXTENSION_ID);
-    if (!claude) {
-      return;
-    }
-    if (!claude.isActive) {
-      await claude.activate();
-    }
-    await vscode.commands.executeCommand(OPEN_COMMAND);
-    // The freshly opened panel becomes the active editor, but the reveal is async: wait so it is
-    // enumerated as the active tab before we pin it.
-    await new Promise((resolve) => setTimeout(resolve, 500));
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+  if (root && (await runAgent(root))) {
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(root, `${AGENT_FOLDER}/done`),
+    );
+    watcher.onDidCreate(() => showClaudeTab(root));
+    context.subscriptions.push(watcher);
+    return;
+  }
+  await showClaudeTab(root);
+}
+
+async function showClaudeTab(root) {
+  const session = root && (await takeAgentSession(root));
+  if (session || !getClaudeTab()) {
+    await openClaudeTab(session);
   }
   // Pin the Claude tab so it stays at the front and isn't replaced by preview editors.
   // workbench.action.pinEditor targets the ACTIVE editor (there is no API to pin an arbitrary tab),

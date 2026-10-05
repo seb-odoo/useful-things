@@ -32,6 +32,23 @@ fetches of one repo collide on its remote refs. A job takes the `DISPLAY` and `S
 desktop session from `systemctl --user show-environment`, so it fails until Seb is logged in. The
 daemon never pushes.
 
+## Agent windows
+
+A bundle whose folder holds `.agent/task.md` opens as an agent window. The Claude tab cannot start
+work by itself (`claude-vscode.editor.open` only fills its input), so claude-autoopen runs the task
+with `claude -p` in a terminal named "agent" and opens the tab on that session when it ends:
+
+| file in `.agent/` | written by | meaning |
+| --- | --- | --- |
+| `task.md` | bundle-ctl | the prompt |
+| `session` | claude-autoopen | the session id, chosen before the run |
+| `run.lock` | `client/agent-run.sh` | the run started; a relaunched terminal does not run it again |
+| `result.md` | `client/stream-format.py` | the last answer of the run |
+| `done` | `client/agent-run.sh` | the exit code of `claude -p`, or `interrupted` |
+| `tab-opened` | claude-autoopen | the tab was opened on the session once |
+
+No empty Claude tab opens while the run lasts, so a window holds one Claude process at a time.
+
 `bctl` (`client/bctl.py`, stdlib only, defined in `container-rw/devcontainer.bashrc`) calls them
 from a container or from the host: `bctl whoami`, `bctl status`. The containers mount `client/`
 read-only at its host path. Without the client:
