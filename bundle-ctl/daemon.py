@@ -343,8 +343,8 @@ def get_open_windows():
 def check_task(caller, bundle, task):
     if not isinstance(task, str) or not task.strip() or len(task) > MAX_TASK:
         raise ValueError(f"task: a text of at most {MAX_TASK} characters")
-    if caller != HOST and read_text(get_agent_folder(caller) / "parent") is not None:
-        raise Refused("an agent spawned by bundle-ctl cannot spawn another one")
+    if caller != HOST and (run := get_agent(caller)) and run["state"] == "running":
+        raise Refused("an agent run cannot queue a task before it ends")
     agent = get_agent(bundle)
     if agent and agent["state"] == "running":
         raise Refused(f"an agent already works in {bundle}")
