@@ -59,6 +59,7 @@ with `claude -p` in a terminal named "agent" and opens the tab on that session w
 | `session` | claude-autoopen | the session id, chosen before the run |
 | `run.lock` | `client/agent-run.sh` | the run started; a relaunched terminal does not run it again |
 | `result.md` | `client/stream-format.py` | the last answer of the run |
+| `mode` | `client/stream-format.py` | the permission mode of the run, which the tab resumes the session in |
 | `done` | `client/agent-run.sh` | the exit code of `claude -p`, or `interrupted` |
 | `tab-opened` | claude-autoopen | the tab was opened on the session once |
 

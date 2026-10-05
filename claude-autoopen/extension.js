@@ -135,6 +135,26 @@ async function takeAgentSession(root) {
   return session;
 }
 
+// Resume the agent session in the mode of its run: the Claude tab reads it from this store of the
+// Claude extension, and falls back to claudeCode.initialPermissionMode.
+async function seedSessionMode(context, root, session) {
+  const mode = await readAgentFile(root, "mode");
+  if (!mode) {
+    return;
+  }
+  const store = vscode.Uri.joinPath(
+    context.globalStorageUri,
+    "..",
+    CLAUDE_EXTENSION_ID,
+    "session-permission-modes",
+  );
+  await vscode.workspace.fs.createDirectory(store);
+  await vscode.workspace.fs.writeFile(
+    vscode.Uri.joinPath(store, `${session}.json`),
+    new TextEncoder().encode(JSON.stringify({ mode, updatedAt: Date.now() })),
+  );
+}
+
 async function openClaudeTab(sessionId) {
   const claude = vscode.extensions.getExtension(CLAUDE_EXTENSION_ID);
   if (!claude) {
@@ -160,15 +180,18 @@ async function activate(context) {
     const watcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(root, `${AGENT_FOLDER}/done`),
     );
-    watcher.onDidCreate(() => showClaudeTab(root));
+    watcher.onDidCreate(() => showClaudeTab(context, root));
     context.subscriptions.push(watcher);
     return;
   }
-  await showClaudeTab(root);
+  await showClaudeTab(context, root);
 }
 
-async function showClaudeTab(root) {
+async function showClaudeTab(context, root) {
   const session = root && (await takeAgentSession(root));
+  if (session) {
+    await seedSessionMode(context, root, session);
+  }
   if (session || !getClaudeTab()) {
     await openClaudeTab(session);
   }

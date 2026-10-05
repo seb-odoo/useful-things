@@ -5,6 +5,7 @@
 """
 
 import json
+import pathlib
 import sys
 
 INPUT_KEYS = ("command", "file_path", "pattern", "path", "url", "description", "prompt")
@@ -27,6 +28,8 @@ def main():
             continue
         if event.get("type") == "system" and event.get("subtype") == "init":
             print(f"session {event.get('session_id')}, model {event.get('model')}")
+            if mode := event.get("permissionMode"):
+                pathlib.Path(result_path).with_name("mode").write_text(mode)
         elif event.get("type") == "assistant":
             for block in event.get("message", {}).get("content", []):
                 if block.get("type") == "text":
