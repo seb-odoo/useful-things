@@ -46,7 +46,8 @@ async function openRepoTerminals() {
   // duplicate, mirroring hasClaudeTab()'s "open only if absent" guard.
   const open = new Set(vscode.window.terminals.map((terminal) => terminal.name));
   // createTerminal on a missing cwd pops an error, and a workspace can lack any of these repos:
-  // workflow-hub has none, a bundle older than a repo's folder_by_repo entry has all but that one.
+  // a folder opened with fcode can have none, a bundle older than a repo's folder_by_repo entry has
+  // all but that one.
   let entries;
   try {
     entries = await vscode.workspace.fs.readDirectory(root);

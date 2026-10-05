@@ -13,7 +13,6 @@ alias ocode="python ~/repo/useful-things/scripts/open_bundle.py"
 alias fcode="python ~/repo/useful-things/scripts/open_folder.py"
 alias mailcode="python ~/repo/useful-things/scripts/open_folder.py ~/repo/mail-agent"
 alias mailpage="xdg-open http://127.0.0.1:8765 >/dev/null 2>&1"
-alias hubcode="~/repo/workflow-hub/bin/hub-open"
 alias orepo="code ~/repo/repo.code-workspace"
 alias delete_bundle="python ~/repo/useful-things/scripts/delete_bundle.py"
 alias hoot='npm run start --'
