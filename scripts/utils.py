@@ -34,6 +34,8 @@ _USEFUL_THINGS_FOLDER = os.path.dirname(os.path.dirname(os.path.abspath(__file__
 # admin data. delete_bundle unlocks before removing.
 WORKTREE_LOCK_REASON = "managed bundle: do not prune (paths are unmounted inside dev containers)"
 
+FORK_REMOTE_MARK = "bundleFork"
+
 
 class RemoteRefManager:
     gone_repos_by_ref = defaultdict(set)
@@ -145,12 +147,34 @@ class UtilsRunner(Runner):
 
         return handle
 
+    def add_fork_remote(self, *, repo, remote, url):
+        runner = self.with_params(cwd=get_repo_folder(repo))
+        if runner.run(
+            ["git", "remote", "add", remote, url],
+            handle_exceptions={f"error: remote {remote} already exists.": ignore_error},
+        ):
+            runner.run(["git", "config", f"remote.{remote}.{FORK_REMOTE_MARK}", "true"])
+
     def delete_branch_and_remote_ref(self, *, repo, bundle_name, handle_exceptions=None):
         runner = self.with_params(cwd=get_repo_folder(repo))
         runner.run(["git", "update-ref", "-d", get_remote_ref(bundle_name, repo)])
         runner.run(["git", "update-ref", "-d", get_remote_dev_ref(bundle_name, repo)])
         self._release_branch_from_worktrees(runner, bundle_name)
+        upstream_format = "--format=%(upstream:remotename)"
+        res = runner.run(["git", "for-each-ref", upstream_format, f"refs/heads/{bundle_name}"])
+        upstream_remote = res.stdout.strip()
         runner.run(["git", "branch", "-D", bundle_name], handle_exceptions=handle_exceptions)
+        if upstream_remote:
+            self._remove_unused_fork_remote(runner, upstream_remote)
+
+    def _remove_unused_fork_remote(self, runner, remote):
+        mark = f"remote.{remote}.{FORK_REMOTE_MARK}"
+        res = runner.run(["git", "config", "--bool", "--default", "false", mark])
+        if res.stdout.strip() != "true":
+            return
+        res = runner.run(["git", "for-each-ref", "--format=%(upstream:remotename)", "refs/heads/"])
+        if remote not in res.stdout.split():
+            runner.run(["git", "remote", "remove", remote])
 
     def _release_branch_from_worktrees(self, runner, branch, prunable_only=False):
         """Take `branch` out of the worktrees holding it, which otherwise block `git branch -D`.

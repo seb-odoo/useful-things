@@ -3,6 +3,7 @@
 Examples:
  $ python ~/repo/useful-things/scripts/fetch_bundle.py master-bundle-name-ngram
  $ python ~/repo/useful-things/scripts/fetch_bundle.py https://github.com/odoo/odoo/pull/292267
+ $ python ~/repo/useful-things/scripts/fetch_bundle.py contributor:20.0-fix-name
 """
 
 import argparse
@@ -13,7 +14,6 @@ import subprocess
 
 import requests
 from branch_status import get_github_repo, git
-from command_runner import ignore_error
 from commands import (
     clean_bundle_name,
     get_base_for_repo,
@@ -69,29 +69,40 @@ def get_bundle_names_from_pr(github_repo, number):
     fork_remote = head_github_repo.split("/")[0]
     dev_url = git(repo, "remote", "get-url", dev_remote)
     fork_url = dev_url.replace(dev_github_repo, head_github_repo)
-    runner.run(
-        ["git", "remote", "add", fork_remote, fork_url],
-        cwd=get_repo_folder(repo),
-        handle_exceptions={f"error: remote {fork_remote} already exists.": ignore_error},
-    )
+    runner.add_fork_remote(repo=repo, remote=fork_remote, url=fork_url)
     fork_remote_by_repo[repo] = fork_remote
     return head, f"{fork_remote}:{head}"
 
 
+def get_runbot_bundle(name):
+    url = f"https://runbot.odoo.com/api/bundle?name={name}"
+    print(f"Fetching {url}")
+    try:
+        response = requests.request("GET", url, timeout=3).json()
+    except requests.RequestException as e:
+        print(f"[red]No answer from runbot[/red] about {name}: {e}")
+        raise SystemExit(1) from None
+    print(response)
+    return response
+
+
+dev_remotes = {get_remote_dev_repo(repo) for repo in get_repos()}
 if pr_match := PR_URL.match(args.name):
     bundle_name, runbot_bundle_name = get_bundle_names_from_pr(*pr_match.groups())
+    response = get_runbot_bundle(runbot_bundle_name)
+elif (owner := args.name.rpartition(":")[0]) and owner not in dev_remotes:
+    response = get_runbot_bundle(args.name)
+    pr = next((branch for branch in response.get("branches", []) if branch["is_pr"]), None)
+    if not pr:
+        print(f"Runbot has no PR for [red]{args.name}[/red]")
+        raise SystemExit(1)
+    github_repo = re.search(r"github\.com[:/](.+?)(?:\.git)?$", pr["remote"])[1]
+    bundle_name, _ = get_bundle_names_from_pr(github_repo, pr["name"])
 else:
-    bundle_name = runbot_bundle_name = clean_bundle_name(args.name)
+    bundle_name = clean_bundle_name(args.name)
+    response = get_runbot_bundle(bundle_name)
 base = get_base_from_bundle_name(bundle_name)
 wt_bundle_folder = get_worktree_bundle_folder(bundle_name)
-url = f"https://runbot.odoo.com/api/bundle?name={runbot_bundle_name}"
-print(f"Fetching {url}")
-try:
-    response = requests.request("GET", url, timeout=3).json()
-except requests.RequestException as e:
-    print(f"[red]No answer from runbot[/red] about {bundle_name}: {e}")
-    raise SystemExit(1) from None
-print(response)
 
 runbot_bundle = bool(response.get("id"))
 if not runbot_bundle:

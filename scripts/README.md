@@ -64,7 +64,7 @@ Fetches bundle metadata from runbot and creates/updates local worktrees.
 
 Queries the runbot API, checks out each repo at the matching commit, links shared `node_modules`, runs web tooling setup, and opens the bundle in VS Code.
 
-Also takes a PR link (`fetch_bundle.py https://github.com/odoo/odoo/pull/292267`): the bundle is the PR head. When the head is on a fork, the fork is added as a remote named after its owner and the branch tracks it, so pull and push go to the PR.
+Also takes a PR link (`fetch_bundle.py https://github.com/odoo/odoo/pull/292267`), or the `owner:branch` label runbot shows for a fork PR: the bundle is the PR head. When the head is on a fork, the fork is added as a remote named after its owner and the branch tracks it, so pull and push go to the PR. Deleting the last bundle tracking that remote removes it.
 
 ```bash
 $ python scripts/fetch_bundle.py master-test--seb
