@@ -411,7 +411,11 @@ def enqueue(caller, bundle, body):
         )
         write_state(state)
     launch_queued()
-    return {"bundle": bundle, "priority": priority, "queued": position + 1}
+    with state_lock:
+        queue = [item["bundle"] for item in read_state()["queue"]]
+    if bundle in queue:
+        return {"bundle": bundle, "priority": priority, "queued": queue.index(bundle) + 1}
+    return {"bundle": bundle, "priority": priority, "started": True}
 
 
 def write_task(item):
