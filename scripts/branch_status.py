@@ -266,8 +266,12 @@ def get_status(repo, branch, write_tree):
     base_ref = get_remote_ref(get_base_for_repo(get_base_from_bundle_name(branch), repo), repo)
     if git(repo, "rev-parse", "--verify", "--quiet", base_ref) is None:
         return None
-    behind = int(git(repo, "rev-list", "--count", f"{branch}..{base_ref}"))
+    ahead, behind = map(
+        int,
+        git(repo, "rev-list", "--left-right", "--count", f"{branch}...{base_ref}").split(),
+    )
     return {
+        "ahead": ahead,
         "behind": behind,
         "conflict": behind > 0 and has_conflict(repo, branch, base_ref, write_tree),
     }
@@ -450,6 +454,7 @@ def get_bundles():
                 get_group(facts, status, push) if BUNDLE_SUFFIX in branch else ("others", None)
             )
             repos_of_bundle[repo] = {
+                "ahead": status and status["ahead"],
                 "behind": status and status["behind"],
                 "conflict": status and status["conflict"],
                 "group": group,
