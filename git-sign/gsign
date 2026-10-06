@@ -1,0 +1,8 @@
+#!/bin/sh
+set -e
+ram=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ssh-sign.sock
+session=$(bw unlock --raw)
+trap 'bw lock >/dev/null' EXIT
+bw sync --session "$session" >/dev/null
+bw get item github-seb-odoo-signing --session "$session" | jq -r .sshKey.privateKey \
+    | SSH_AUTH_SOCK=$ram ssh-add -

@@ -1,0 +1,13 @@
+# The agent holding the commit signing key in memory until reboot, see README.md.
+
+[Unit]
+Description=SSH agent holding the commit signing key until reboot
+
+[Service]
+ExecStartPre=/usr/bin/rm -f %t/ssh-sign.sock
+ExecStart=/usr/bin/ssh-agent -D -a %t/ssh-sign.sock
+ExecStopPost=/usr/bin/rm -f %t/ssh-sign.sock
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,9 @@
+#!/bin/sh
+ram=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ssh-sign.sock
+if SSH_AUTH_SOCK=$ram ssh-add -l >/dev/null 2>&1; then
+    export SSH_AUTH_SOCK=$ram
+else
+    # Ask Bitwarden itself, as the filtered SSH_AUTH_SOCK only shows the GitHub key.
+    export SSH_AUTH_SOCK=~/snap/bitwarden/current/.bitwarden-ssh-agent.sock
+fi
+exec ssh-keygen "$@"
