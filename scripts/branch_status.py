@@ -5,8 +5,10 @@ Reads local refs only: run `gfa` first for fresh numbers.
 
 Examples:
  $ python ~/repo/useful-things/scripts/branch_status.py
+ $ python ~/repo/useful-things/scripts/branch_status.py --json
 """
 
+import argparse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import json
@@ -116,12 +118,12 @@ def get_local_branches(repo):
     out = git(
         repo,
         "for-each-ref",
-        "--format=%(refname:short) %(committerdate:unix) %(worktreepath)",
+        "--format=%(refname:short) %(committerdate:unix) %(objectname) %(worktreepath)",
         "refs/heads/",
     )
     return [
-        (name, int(date), any(path))
-        for name, date, *path in (line.split(" ", 2) for line in out.splitlines())
+        (name, int(date), head, any(path))
+        for name, date, head, *path in (line.split(" ", 3) for line in out.splitlines())
     ]
 
 
@@ -231,14 +233,19 @@ def get_mergebot_state(pr):
 def get_push(repo, branch):
     remote_ref = get_remote_dev_ref(branch, repo)
     if git(repo, "rev-parse", "--verify", "--quiet", remote_ref) is None:
-        return "[dim]no remote[/dim]", True
+        return None
     counts = git(repo, "rev-list", "--left-right", "--count", f"{branch}...{remote_ref}")
     ahead, behind = counts.split()
-    markup = " ".join(
-        [f"[yellow]+{ahead}[/yellow]"] * (ahead != "0")
-        + [f"[yellow]-{behind}[/yellow]"] * (behind != "0"),
+    return {"ahead": int(ahead), "behind": int(behind)}
+
+
+def format_push(push):
+    if push is None:
+        return "[dim]no remote[/dim]"
+    return " ".join(
+        [f"[yellow]+{push['ahead']}[/yellow]"] * bool(push["ahead"])
+        + [f"[yellow]-{push['behind']}[/yellow]"] * bool(push["behind"]),
     )
-    return markup, bool(markup)
 
 
 def has_conflict(repo, branch, base_ref, write_tree):
@@ -292,7 +299,7 @@ def get_batch(context):
     return int(match[1]) if match else None
 
 
-def get_pr_facts(pr, repo):
+def get_pr_facts(pr, repo, now):
     state = "draft" if pr["isDraft"] and pr["state"] == "OPEN" else pr["state"].lower()
     if pr["mergebot"] == "merged":
         state = "merged"
@@ -323,29 +330,37 @@ def get_pr_facts(pr, repo):
         if (t["comments"]["nodes"][0]["author"] or {}).get("login") != pr["viewer"]
     ]
     return {
+        "ask": dict(zip(("style", "label", "date"), get_ask(pr, now))),
         "delegated": any(DELEGATE.search(body) for body in bodies),
         "failing": [
-            c for c in contexts if c["state"] in ("ERROR", "FAILURE") and c["context"] not in stale
+            {"context": c["context"], "url": c["targetUrl"]}
+            for c in contexts
+            if c["state"] in ("ERROR", "FAILURE") and c["context"] not in stale
         ],
-        "pending": ci_not_started or running,
-        "state": state,
+        "mergebot": pr["mergebot"],
+        "number": pr["number"],
+        "open": pr["state"] == "OPEN",
+        "pending": bool(ci_not_started or running),
         "replied": len(open_threads) - len(to_answer),
+        "review": pr["reviewDecision"],
+        "state": state,
         "threads": len(to_answer),
+        "url": pr["url"],
     }
 
 
-def format_pr(pr, facts):
-    if not pr:
+def format_pr(facts):
+    if not facts:
         return "", ""
     state = facts["state"]
     style = PR_STYLES.get(state)
     tags = [f"[{style}]{state}[/{style}]"] if style and state != "draft" else []
-    if pr["state"] == "OPEN":
-        if mergebot := MERGEBOT_TAGS.get(pr["mergebot"]):
+    if facts["open"]:
+        if mergebot := MERGEBOT_TAGS.get(facts["mergebot"]):
             tags.append(mergebot)
         elif facts["delegated"]:
             tags.append("[green]delegated[/green]")
-        elif review := REVIEW_TAGS.get(pr["reviewDecision"]):
+        elif review := REVIEW_TAGS.get(facts["review"]):
             tags.append(review)
         if threads := facts["threads"]:
             tags.append(f"[yellow]{threads} thread{'s' * (threads > 1)}[/yellow]")
@@ -353,57 +368,59 @@ def format_pr(pr, facts):
             tags.append(f"[dim]{replied} replied[/dim]")
         tags += [
             f"[{MINOR_CHECKS.get(c['context'], 'red')}]"
-            f"[link={c['targetUrl']}]{c['context'].removeprefix('ci/')}[/link][/]"
+            f"[link={c['url']}]{c['context'].removeprefix('ci/')}[/link][/]"
             for c in facts["failing"]
         ]
         if facts["pending"]:
             tags.append(CI_RUNNING)
-    number = f"[link={pr['url']}]{pr['number']}[/link]"
+    number = f"[link={facts['url']}]{facts['number']}[/link]"
     return f"[{style}]{number}[/{style}]" if style else number, " ".join(tags)
 
 
-def format_ask(pr, now):
-    style, label, date = get_ask(pr, now)
-    return f"[{style}]{label} {format_age(now - date, plain=True)}[/{style}]"
+def format_ask(ask, now):
+    age = format_age(now - ask["date"], plain=True)
+    return f"[{ask['style']}]{ask['label']} {age}[/{ask['style']}]"
 
 
-def get_group(pr, facts, status, unpushed):
-    if not pr:
+def get_group(facts, status, push):
+    if not facts:
         return "me", "wip"
-    if facts["state"] in ("closed", "merged") or pr["mergebot"] in ("ready", "staged"):
+    if facts["state"] in ("closed", "merged") or facts["mergebot"] in ("ready", "staged"):
         return "mergebot", None
     if (
         (status and status["conflict"])
         or any(c["context"] not in MINOR_CHECKS for c in facts["failing"])
-        or pr["mergebot"] == "error"
+        or facts["mergebot"] == "error"
     ):
         return "me", "red"
+    unpushed = push is None or any(push.values())
     if unpushed or any(c["context"] == "ci/style" for c in facts["failing"]):
         return "me", "wip"
     if (
         facts["threads"]
-        or pr["reviewDecision"] == "CHANGES_REQUESTED"
-        or (facts["delegated"] and pr["mergebot"] not in R_PLUS_STATES)
+        or facts["review"] == "CHANGES_REQUESTED"
+        or (facts["delegated"] and facts["mergebot"] not in R_PLUS_STATES)
     ):
         return "me", "review"
-    if facts["pending"] or pr["mergebot"] == "approved":
+    if facts["pending"] or facts["mergebot"] == "approved":
         return "ci", None
     if facts["state"] == "draft":
         return "drafts", None
     return "reviewer", None
 
 
-def main():
+def get_bundles():
     repos = [repo for repo in get_repos() if os.path.isdir(get_repo_folder(repo))]
     write_tree = has_write_tree()
     bundles = {}
+    heads = {}
     worktree_branches = set()
-    console = Console()
-    with console.status("Reading branches and PRs"), ThreadPoolExecutor() as executor:
+    with ThreadPoolExecutor() as executor:
         for repo, branches in zip(repos, executor.map(get_local_branches, repos)):
-            for branch, date, in_worktree in branches:
+            for branch, date, head, in_worktree in branches:
                 if branch not in get_sticky_bundles(repo):
                     bundles.setdefault(branch, {})[repo] = date
+                    heads[repo, branch] = head
                     if in_worktree:
                         worktree_branches.add(branch)
         pairs = [(repo, branch) for branch, dates in bundles.items() for repo in dates]
@@ -419,61 +436,105 @@ def main():
     groups = {group: [] for group in GROUPS}
     now = time.time()
     for branch, dates in sorted(bundles.items(), key=lambda item: -max(item[1].values())):
-        age = format_age(now - max(dates.values()))
-        label = f"[cyan]{branch}[/cyan]" if branch in worktree_branches else branch
-        icon = "\N{OPEN FILE FOLDER}" if branch in worktree_branches else "\N{INBOX TRAY}"
-        opener = f"[link=odoo-bundle://{branch}]{icon}[/link]"
-        rows = []
-        bundle_groups = []
-        ask_tags = {}
+        repos_of_bundle = {}
         delegated = False
         for repo in sorted(dates, key=lambda repo: repo != "odoo"):
             pr = prs.get((repo, branch))
-            facts = get_pr_facts(pr, repo) if pr else {}
+            facts = get_pr_facts(pr, repo, now) if pr else None
             status = statuses[repo, branch]
-            push, unpushed = pushes[repo, branch]
-            if facts.get("state") == "merged":
-                behind = conflict = push = ""
-            elif status is None:
-                behind = conflict = "-"
-            else:
-                style = next(style for limit, style in BEHIND_STYLES if status["behind"] >= limit)
-                behind = f"[{style}]{status['behind']}[/{style}]"
-                conflict = "[red]yes[/red]" if status["conflict"] else ""
-            number, tags = format_pr(pr, facts)
-            delegated |= bool(facts) and facts["delegated"] and pr["mergebot"] not in R_PLUS_STATES
-            if BUNDLE_SUFFIX in branch:
-                bundle_groups.append(get_group(pr, facts, status, unpushed))
-                if bundle_groups[-1][0] == "reviewer":
-                    ask_tags[len(rows)] = format_ask(pr, now)
-            else:
-                bundle_groups.append(("others", None))
-                tags = dim_markup(tags)
-            rows.append((age, opener, label, repo, push, behind, conflict, number, tags))
-            age = opener = label = ""
-        group = min((group for group, _kind in bundle_groups), key=GROUP_PRECEDENCE.index)
-        if get_worktree_bundle_folder(branch) in open_folders:
-            group = "open"
-        kinds = {kind for row_group, kind in bundle_groups if row_group == group and kind}
-        worst = max(kinds, key=list(ISSUE_RANKS).index, default=None)
-        urgency = ISSUE_RANKS.get(worst, 0)
-        if group == "ci":
-            rows = [(*row[:-1], row[-1].removesuffix(CI_RUNNING).rstrip()) for row in rows]
-        if group == "reviewer":
-            for i, ask_tag in ask_tags.items():
-                rows[i] = (*rows[i][:-1], f"{ask_tag} {rows[i][-1]}".rstrip())
-            waiting = [prs[repo, branch] for repo in dates if (repo, branch) in prs]
-            asks = [get_ask(pr, now) for pr in waiting]
-            urgency = min(ASK_SEVERITIES[style] for style, _label, _date in asks)
-            date = min(date for style, _label, date in asks if ASK_SEVERITIES[style] == urgency)
-        else:
-            date = max(dates.values())
-        groups[group].append((not delegated, urgency, date, rows))
+            push = pushes[repo, branch]
+            delegated |= (
+                bool(facts) and facts["delegated"] and facts["mergebot"] not in R_PLUS_STATES
+            )
+            group, issue = (
+                get_group(facts, status, push) if BUNDLE_SUFFIX in branch else ("others", None)
+            )
+            repos_of_bundle[repo] = {
+                "behind": status and status["behind"],
+                "conflict": status and status["conflict"],
+                "group": group,
+                "head": heads[repo, branch],
+                "issue": issue,
+                "pr": facts,
+                "push": push,
+            }
+        group = min((row["group"] for row in repos_of_bundle.values()), key=GROUP_PRECEDENCE.index)
+        issues = {row["issue"] for row in repos_of_bundle.values() if row["group"] == group}
+        issue = max(issues - {None}, key=list(ISSUE_RANKS).index, default=None)
+        is_open = get_worktree_bundle_folder(branch) in open_folders
+        bundle = {
+            "bundle": branch,
+            "date": max(dates.values()),
+            "delegated": delegated,
+            "group": group,
+            "issue": issue,
+            "open": is_open,
+            "repos": repos_of_bundle,
+            "worktree": branch in worktree_branches,
+        }
+        urgency, date = 0 if is_open else ISSUE_RANKS.get(issue, 0), bundle["date"]
+        if group == "reviewer" and not is_open:
+            asks = [row["pr"]["ask"] for row in repos_of_bundle.values() if row["pr"]]
+            urgency = min(ASK_SEVERITIES[ask["style"]] for ask in asks)
+            date = min(ask["date"] for ask in asks if ASK_SEVERITIES[ask["style"]] == urgency)
+        groups["open" if is_open else group].append(((not delegated, urgency, date), bundle))
+    ordered = [
+        bundle
+        for bundles_of_group in groups.values()
+        for _key, bundle in sorted(bundles_of_group, key=lambda item: item[0])
+    ]
+    return ordered, errors
 
-    counts = {group: len(bundles_of_group) for group, bundles_of_group in groups.items()}
-    for group, bundles_of_group in groups.items():
-        bundles_of_group.sort(key=lambda bundle: bundle[:3])
-        groups[group] = [row for bundle in bundles_of_group for row in bundle[3]]
+
+def get_rows(bundle, group, now):
+    branch = bundle["bundle"]
+    age = format_age(now - bundle["date"])
+    label = f"[cyan]{branch}[/cyan]" if bundle["worktree"] else branch
+    icon = "\N{OPEN FILE FOLDER}" if bundle["worktree"] else "\N{INBOX TRAY}"
+    opener = f"[link=odoo-bundle://{branch}]{icon}[/link]"
+    rows = []
+    for repo, row in bundle["repos"].items():
+        facts = row["pr"]
+        push = format_push(row["push"])
+        if facts and facts["state"] == "merged":
+            behind = conflict = push = ""
+        elif row["behind"] is None:
+            behind = conflict = "-"
+        else:
+            style = next(style for limit, style in BEHIND_STYLES if row["behind"] >= limit)
+            behind = f"[{style}]{row['behind']}[/{style}]"
+            conflict = "[red]yes[/red]" if row["conflict"] else ""
+        number, tags = format_pr(facts)
+        if group == "ci":
+            tags = tags.removesuffix(CI_RUNNING).rstrip()
+        if group == "reviewer" and row["group"] == "reviewer":
+            tags = f"{format_ask(facts['ask'], now)} {tags}".rstrip()
+        if row["group"] == "others":
+            tags = dim_markup(tags)
+        rows.append((age, opener, label, repo, push, behind, conflict, number, tags))
+        age = opener = label = ""
+    return rows
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--json", action="store_true", help="print the bundles as JSON")
+    args = parser.parse_args()
+    if args.json:
+        bundles, errors = get_bundles()
+        print(json.dumps({"bundles": bundles, "errors": errors}))
+        return
+
+    console = Console()
+    with console.status("Reading branches and PRs"):
+        bundles, errors = get_bundles()
+    now = time.time()
+    groups = {group: [] for group in GROUPS}
+    counts = dict.fromkeys(GROUPS, 0)
+    for bundle in bundles:
+        group = "open" if bundle["open"] else bundle["group"]
+        groups[group] += get_rows(bundle, group, now)
+        counts[group] += 1
     rows = [row for group_rows in groups.values() for row in group_rows]
     table = Table(box=None, header_style="bold")
     for i, column in enumerate(("age", "", "branch", "repo", "push", "behind", "conflict", "PR")):

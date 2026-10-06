@@ -185,6 +185,7 @@ function bctl() {
 	local client="${BUNDLE_CTL_CLIENT:-${REPO_ROOT:-$HOME/repo}/useful-things/bundle-ctl/client}"
 	python3 "${client}/bctl.py" "$@"
 }
+alias gbs="bctl branches"
 
 # --- model types (DiscussModelParser) ---
 # Regenerates the @types/models.d.ts files from the JS model definitions (community +

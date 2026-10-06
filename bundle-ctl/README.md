@@ -23,6 +23,7 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | verb | answer |
 | --- | --- |
 | `GET /whoami` | the caller's bundle, base and parent |
+| `GET /branches` | `gbs --json` run on the host; `?format=table&width=N`: its colored table |
 | `GET /status` | every local bundle branch: base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open |
 | `POST /create` | `gnb` with `--no-push`, then a window; refused when the bundle exists |
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window; refused when the folder exists or a branch has unpushed commits |

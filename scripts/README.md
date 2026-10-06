@@ -278,6 +278,10 @@ CI state. Reads local refs only, so run `gfa` first for fresh numbers.
 
 Each branch name is an `odoo-bundle://` link, see `bundle_open.py`.
 
+`--json` prints the same data for a script: per bundle its group, issue and open state, per repo its
+head, push, behind, conflict and PR. A dev container cannot run it (no `scripts/`, no podman): there
+`gbs` is `bctl branches`, and `bctl --json branches` gives the JSON, both run on the host.
+
 ### bundle_open.py
 
 Opens an `odoo-bundle://<bundle>` link: in its dev container when the worktree exists, like

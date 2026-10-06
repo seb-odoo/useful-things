@@ -3,6 +3,7 @@
 
     bctl whoami
     bctl status [--json]
+    bctl branches [--json]
     bctl create BASE NAME [--branch-repo REPO]... [--no-open] [TASK]
     bctl fetch BUNDLE|PR_LINK|OWNER:BRANCH [--no-open] [TASK]
     bctl open BUNDLE [TASK]
@@ -14,6 +15,8 @@ minutes for a new bundle. With a task, the window is an agent window: it opens o
 the window cap, runs the task with Claude, then shows the session in a Claude tab. The queue runs
 the highest priority first (-100 to 100, default 0), then in arrival order: bctl status lists it in
 that order.
+
+branches is gbs run on the host: the table, or with --json the data agents read.
 """
 
 import argparse
@@ -21,6 +24,7 @@ import http.client
 import json
 import os
 import pathlib
+import shutil
 import socket
 import sys
 
@@ -87,6 +91,10 @@ def print_status(answer):
         )
 
 
+def print_table(answer):
+    sys.stdout.write(answer["table"])
+
+
 def add_task_arguments(parser):
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--task", help="run this prompt in the window, unattended")
@@ -123,6 +131,7 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("whoami", help="the bundle of this container, its base and parent")
     commands.add_parser("status", help="every local bundle: behind/conflict per repo, open")
+    commands.add_parser("branches", help="gbs: every local bundle with its PR, grouped")
     create = commands.add_parser("create", help="a new bundle BASE-NAME<suffix>, branched on BASE")
     create.add_argument("base")
     create.add_argument("name")
@@ -152,6 +161,12 @@ def main():
     elif args.command == "status":
         answer = request("GET", "/status")
         printer = print_status
+    elif args.command == "branches" and args.json:
+        answer = request("GET", "/branches", timeout=150)
+    elif args.command == "branches":
+        width = shutil.get_terminal_size().columns
+        answer = request("GET", f"/branches?format=table&width={width}", timeout=150)
+        printer = print_table
     else:
         if args.command == "create":
             body = {"base": args.base, "name": args.name, "open": not args.no_open}

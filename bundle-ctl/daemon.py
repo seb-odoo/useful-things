@@ -62,6 +62,7 @@ def load_config():
 
 
 CONFIG = load_config()
+BRANCHES_TIMEOUT = 120
 BUNDLE_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,99}")
 CONTAINER_ID = re.compile(r"/libpod-(?:payload-)?([0-9a-f]{64})")
 GITHUB_OWNER = re.compile(r"[A-Za-z0-9-]{1,39}")
@@ -71,6 +72,7 @@ LAUNCH_GRACE = 15 * 60
 MAX_BODY = 64 * 1024
 MAX_PRIORITY = 100
 MAX_TASK = 32 * 1024
+MAX_WIDTH = 400
 MAX_WINDOWS = int(
     os.environ.get("BUNDLE_CTL_MAX_WINDOWS") or CONFIG.get("BUNDLE_CTL_MAX_WINDOWS") or 4,
 )
@@ -171,13 +173,41 @@ def whoami(caller, query, body):
     }
 
 
+def branches(caller, query, body):
+    command = [sys.executable, str(SCRIPTS / "branch_status.py")]
+    env = dict(os.environ)
+    table = query.get("format") == ["table"]
+    if table:
+        width = min(max(int(query.get("width", [MAX_WIDTH])[0]), 40), MAX_WIDTH)
+        env.pop("NO_COLOR", None)
+        env.update(COLUMNS=str(width), FORCE_COLOR="1", TTY_INTERACTIVE="0")
+    else:
+        command.append("--json")
+    try:
+        res = subprocess.run(
+            command,
+            capture_output=True,
+            check=False,
+            cwd=SCRIPTS,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            timeout=BRANCHES_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        raise Refused(f"branch_status.py took over {BRANCHES_TIMEOUT}s") from None
+    if res.returncode:
+        raise Refused(f"branch_status.py exited with {res.returncode}: {res.stderr[-500:].strip()}")
+    return 200, {"table": res.stdout} if table else json.loads(res.stdout)
+
+
 def status(caller, query, body):
     repos = [repo for repo in get_repos() if os.path.isdir(get_repo_folder(repo))]
     write_tree = has_write_tree()
     repos_by_bundle = {}
     with ThreadPoolExecutor() as executor:
         for repo, branches in zip(repos, executor.map(get_local_branches, repos)):
-            for branch, _date, _in_worktree in branches:
+            for branch, _date, _head, _in_worktree in branches:
                 if branch not in get_sticky_bundles(repo):
                     repos_by_bundle.setdefault(branch, []).append(repo)
         pairs = [(repo, bundle) for bundle, names in repos_by_bundle.items() for repo in names]
@@ -562,6 +592,7 @@ def open_or_enqueue(log, caller, bundle, body):
 
 
 VERBS = {
+    ("GET", "/branches"): branches,
     ("GET", "/job"): get_job,
     ("GET", "/status"): status,
     ("GET", "/whoami"): whoami,
