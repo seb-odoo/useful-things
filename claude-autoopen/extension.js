@@ -134,19 +134,16 @@ async function runAgent(root) {
   if (
     !client ||
     (await readAgentFile(root, "task.md")) === undefined ||
-    (await readAgentFile(root, "done")) !== undefined
+    (await isAgentStopped(root))
   ) {
     return false;
   }
   let session = await readAgentFile(root, "session");
-  const agentTerminals = vscode.window.terminals.filter(
-    (terminal) => terminal.name === AGENT_TERMINAL,
-  );
   if (!session) {
     session = crypto.randomUUID();
     await writeAgentFile(root, "session", session);
-    agentTerminals.forEach((terminal) => terminal.dispose());
-  } else if (agentTerminals.length) {
+    closeAgentTerminals();
+  } else if (getAgentTerminals().length) {
     return true;
   }
   vscode.window
@@ -160,11 +157,26 @@ async function runAgent(root) {
   return true;
 }
 
+function getAgentTerminals() {
+  return vscode.window.terminals.filter((terminal) => terminal.name === AGENT_TERMINAL);
+}
+
+function closeAgentTerminals() {
+  getAgentTerminals().forEach((terminal) => terminal.dispose());
+}
+
+async function isAgentStopped(root) {
+  return (
+    (await readAgentFile(root, "done")) !== undefined ||
+    (await readAgentFile(root, "handoff")) !== undefined
+  );
+}
+
 async function takeAgentSession(root) {
   const session = await readAgentFile(root, "session");
   if (
     !session ||
-    (await readAgentFile(root, "done")) === undefined ||
+    !(await isAgentStopped(root)) ||
     (await readAgentFile(root, "tab-opened")) !== undefined
   ) {
     return undefined;
@@ -239,11 +251,19 @@ async function activate(context) {
 async function pollAgent(context, root) {
   if ((await readAgentFile(root, "session")) === undefined) {
     await runAgent(root);
+  } else if ((await readAgentFile(root, "tab-opened")) === undefined) {
+    if (await isAgentStopped(root)) {
+      await showClaudeTab(context, root);
+    }
   } else if (
-    (await readAgentFile(root, "done")) !== undefined &&
-    (await readAgentFile(root, "tab-opened")) === undefined
+    (await readAgentFile(root, "handoff")) !== undefined &&
+    (await readAgentFile(root, "done")) === undefined &&
+    (await readAgentFile(root, "restarted")) === undefined &&
+    !hasBusySession()
   ) {
-    await showClaudeTab(context, root);
+    await writeAgentFile(root, "restarted", "");
+    // The Claude tab reruns an interrupted turn only in a tab revived by a window reload.
+    await vscode.commands.executeCommand("workbench.action.reloadWindow");
   }
 }
 
@@ -280,6 +300,9 @@ async function showClaudeTab(context, root) {
   }
   if (session || !getClaudeTab()) {
     await openClaudeTab(session, replaced?.group.viewColumn);
+  }
+  if (session && ["0", undefined].includes(await readAgentFile(root, "done"))) {
+    closeAgentTerminals();
   }
   // editor.open reveals the tab already on the session, which can be the pinned one.
   if (replaced && !replaced.isActive) {

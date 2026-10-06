@@ -2,6 +2,7 @@
 """Print a `claude -p --output-format stream-json` run as a readable log, and its result to a file.
 
     claude -p ... --verbose --output-format stream-json | stream-format.py .agent/result.md
+    ... | stream-format.py --until-tool-use .agent/result.md   # exit 0 at the first tool call, else 1
 """
 
 import json
@@ -19,7 +20,8 @@ def summary(tool_input):
 
 
 def main():
-    result_path = sys.argv[1]
+    *flags, result_path = sys.argv[1:]
+    until_tool_use = "--until-tool-use" in flags
     for line in sys.stdin:
         try:
             event = json.loads(line)
@@ -36,6 +38,8 @@ def main():
                     print(block["text"])
                 elif block.get("type") == "tool_use":
                     print(f"> {block['name']} {summary(block.get('input') or {})}")
+                    if until_tool_use:
+                        return 0
         elif event.get("type") == "result":
             result = event.get("result") or ""
             with open(result_path, "w") as file:
@@ -46,7 +50,8 @@ def main():
                 f"${event.get('total_cost_usd') or 0:.2f}",
             )
         sys.stdout.flush()
+    return 1 if until_tool_use else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

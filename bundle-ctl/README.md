@@ -51,8 +51,12 @@ cherry-pick, as all the bundles share the base repos' `.git`.
 ## Agent windows
 
 A bundle whose folder holds `.agent/task.md` opens as an agent window. The Claude tab cannot start
-work by itself (`claude-vscode.editor.open` only fills its input), so claude-autoopen runs the task
-with `claude -p` in a terminal named "agent" and opens the tab on that session when it ends:
+work by itself (`claude-vscode.editor.open` only fills its input), but a tab revived by a window
+reload reruns the interrupted turn of its session (`claudeCode.continueAfterReload`). So
+claude-autoopen starts the task with `claude -p` in a terminal named "agent", which stops it at its
+first tool call, opens the tab on that session, and reloads the window once: the tab then runs the
+task live. An extension host restart would revive the tab too, but in a dev container it loses the
+remote connection ("Cannot reconnect"). A run that ends without a tool call opens the tab on the finished session.
 
 | file in `.agent/` | written by | meaning |
 | --- | --- | --- |
@@ -61,13 +65,19 @@ with `claude -p` in a terminal named "agent" and opens the tab on that session w
 | `run.lock` | `client/agent-run.sh` | the run started; a relaunched terminal does not run it again |
 | `result.md` | `client/stream-format.py` | the last answer of the run |
 | `mode` | `client/stream-format.py` | the permission mode of the run, which the tab resumes the session in |
-| `done` | `client/agent-run.sh` | the exit code of `claude -p`, or `interrupted` |
+| `handoff` | `client/agent-run.sh` | `claude -p` was stopped at its first tool call, for the tab to rerun |
+| `done` | `client/agent-run.sh`, `client/agent-stop.py` | the exit code of `claude -p`, or `interrupted`; `0` when the tab's turn ends after a handoff |
 | `tab-opened` | claude-autoopen | the tab was opened on the session once |
+| `restarted` | claude-autoopen | the window was reloaded once for the handoff |
 
-No empty Claude tab opens while the run lasts, so a window holds one Claude process at a time. The
-run starts by itself and its log streams in the "agent" terminal; Ctrl+C there stops it, and the
-tab opens on its session to take over. It opens in place of a pinned Claude tab of the window,
-unless a Claude session of the container is busy or waits for a permission.
+The reload waits while a Claude session of the container is busy or waits for a permission. If the
+tab does not rerun the turn (a claude-code change), the session waits there with its prompt
+unanswered: "continue" resumes it. `client/agent-stop.py`, a Stop hook of the bundles' Claude
+settings (`/home/seb/src/odoo/.claude/settings.json`), writes `done` and `result.md` when the tab's
+turn ends. Ctrl+C in the "agent" terminal before the first tool call stops the run, and the tab
+opens on its session. The "agent" terminal closes when the tab opens, unless `claude -p` failed: its
+log is then the only trace of the error. The tab opens in place of a pinned Claude tab of the window, unless a Claude
+session of the container is busy or waits for a permission.
 
 `bctl create|fetch|open ... --task-file FILE` queues the task, and the daemon opens agent windows
 from the queue while fewer than `BUNDLE_CTL_MAX_WINDOWS` (default 4) bundle windows are open, Seb's
