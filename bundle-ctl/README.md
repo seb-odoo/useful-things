@@ -24,7 +24,7 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | --- | --- |
 | `GET /whoami` | the caller's bundle, base and parent |
 | `GET /branches` | `gbs --json` run on the host; `?format=table&width=N`: its colored table |
-| `GET /status` | every local bundle branch: base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open |
+| `GET /status` | every local bundle branch: base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open, and its agent: state (`running`, `waiting`, `done`), when it ended, `stale` when a branch of the bundle got a commit, or its dev remote ref an update (the mtime of its reflog), after that end, retry, and the last write to its session transcript (`active N min ago`, or `idle since HH:MM` after 15 minutes) |
 | `POST /create` | `gnb` with `--no-push`, then a window; refused when the bundle exists |
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window; refused when the folder exists or a branch has unpushed commits |
 | `POST /open` | a VS Code window on a bundle folder |
@@ -67,15 +67,18 @@ remote connection ("Cannot reconnect"). A run that ends without a tool call open
 | `mode` | `client/stream-format.py` | the permission mode of the run, which the tab resumes the session in |
 | `handoff` | `client/agent-run.sh` | `claude -p` was stopped at its first tool call, for the tab to rerun |
 | `retry` | `client/agent-run.sh` | `auth failed, retry n/3`: the run failed to authenticate and starts again |
-| `done` | `client/agent-run.sh`, `client/agent-stop.py` | the exit code of `claude -p`, or `interrupted`; `0` when the tab's turn ends after a handoff |
+| `waiting` | `client/agent-stop.py` | a turn of the tab ended without a verdict; its mtime is when |
+| `done` | `client/agent-run.sh`, `client/agent-stop.py` | the exit code of `claude -p`, or `interrupted`; `0` when a turn of the tab ends on a verdict |
 | `tab-opened` | claude-autoopen | the tab was opened on the session once |
 | `restarted` | claude-autoopen | the window was reloaded once for the handoff |
 
 The reload waits while a Claude session of the container is busy or waits for a permission. If the
 tab does not rerun the turn (a claude-code change), the session waits there with its prompt
 unanswered: "continue" resumes it. `client/agent-stop.py`, a Stop hook of the bundles' Claude
-settings (`/home/seb/src/odoo/.claude/settings.json`), writes `done` and `result.md` when the tab's
-turn ends. Ctrl+C in the "agent" terminal before the first tool call stops the run, and the tab
+settings (`/home/seb/src/odoo/.claude/settings.json`), writes `result.md` when a turn of the tab
+ends, and `done` when its first line is a verdict: `ready to push`, `needs Seb:`, `blocked:` or
+`nothing to do:`. A turn that ends on anything else (a background job still running) leaves
+`waiting`. Ctrl+C in the "agent" terminal before the first tool call stops the run, and the tab
 opens on its session. The "agent" terminal closes when the tab opens, unless `claude -p` failed: its
 log is then the only trace of the error. The tab opens in place of a pinned Claude tab of the window, unless a Claude
 session of the container is busy or waits for a permission.
@@ -93,7 +96,9 @@ again on every podman container start and stop, and every minute; it lives in
 is the only bound on a fan-out. A task given to a bundle whose window is open starts there within 5
 seconds, even at the cap, as it takes no new window. A new task moves the previous `.agent/` files
 of the bundle into `.agent/history/`. Closing an agent window is Seb's call: nothing stops or
-deletes a bundle on its own.
+deletes a bundle on its own. `done` only says the run reached its verdict, as Seb often goes on in
+the tab: when the queue waits on the cap, `bctl status` names the agent windows that are done and
+idle, the ones he can close.
 
 The agent runs of all the containers start at least 10 seconds apart (a lock in the shared
 `~/.claude`), as `claude -p` processes started together fail each other's OAuth token refresh. A

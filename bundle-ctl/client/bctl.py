@@ -74,7 +74,16 @@ def format_agent(agent):
     words = [agent["state"]]
     if agent["done"]:
         words.append(agent["done"])
-    return ", ".join(filter(None, [" ".join(words), agent.get("retry")]))
+    if agent.get("ended"):
+        words.append(f"at {agent['ended']}")
+    if agent.get("stale"):
+        words.append("stale")
+    return ", ".join(filter(None, [" ".join(words), agent.get("retry"), agent.get("activity")]))
+
+
+def is_idle(row):
+    agent = row["agent"]
+    return row["open"] and agent and agent["state"] == "done" and agent.get("idle")
 
 
 def print_status(answer):
@@ -90,6 +99,11 @@ def print_status(answer):
             repos += f"  [agent {format_agent(row['agent'])}]"
         print(f"{row['bundle']:60} {state:7} {repos}")
     print(f"\n{answer['windows']}/{answer['max_windows']} windows open")
+    idle = [
+        f"{row['bundle']} ({row['agent']['activity']})" for row in answer["bundles"] if is_idle(row)
+    ]
+    if answer["queue"] and answer["windows"] >= answer["max_windows"] and idle:
+        print(f"the queue waits for a window; agent windows done and idle: {', '.join(idle)}")
     for position, item in enumerate(answer["queue"], 1):
         print(
             f"queued {position}: {item['bundle']} (priority {item['priority']},"

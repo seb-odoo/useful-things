@@ -42,6 +42,7 @@ from branch_status import (  # noqa: E402
 from commands import (  # noqa: E402
     get_base_from_bundle_name,
     get_bundle_name_from_base_and_name,
+    get_remote_dev_ref,
     get_repo_folder,
     get_repos,
     get_sticky_bundles,
@@ -67,6 +68,7 @@ BUNDLE_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,99}")
 CONTAINER_ID = re.compile(r"/libpod-(?:payload-)?([0-9a-f]{64})")
 GITHUB_OWNER = re.compile(r"[A-Za-z0-9-]{1,39}")
 HOST = "host"
+IDLE_AFTER = 15 * 60
 JOB_WAIT = 50
 LAUNCH_GRACE = 15 * 60
 MAX_BODY = 64 * 1024
@@ -77,6 +79,8 @@ MAX_WINDOWS = int(
     os.environ.get("BUNDLE_CTL_MAX_WINDOWS") or CONFIG.get("BUNDLE_CTL_MAX_WINDOWS") or 4,
 )
 NAME = re.compile(r"[a-z0-9](?:[a-z0-9.]|-(?!-)){0,79}")
+SESSION_ID = re.compile(r"[0-9a-f-]{36}")
+SESSIONS = pathlib.Path.home() / ".claude" / "projects" / "-workspace"
 SESSION_VARIABLES = (
     "DBUS_SESSION_BUS_ADDRESS",
     "DISPLAY",
@@ -149,17 +153,51 @@ def get_agent_folder(bundle):
     return pathlib.Path(get_worktree_bundle_folder(bundle)) / ".agent"
 
 
-def get_agent(bundle):
+def get_mtime(path):
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None
+
+
+def format_time(stamp):
+    today = time.strftime("%F") == time.strftime("%F", time.localtime(stamp))
+    return time.strftime("%H:%M" if today else "%m-%d %H:%M", time.localtime(stamp))
+
+
+def get_activity(session):
+    active = SESSION_ID.fullmatch(session or "") and get_mtime(SESSIONS / f"{session}.jsonl")
+    if not active:
+        return None, False
+    age = time.time() - active
+    if age > IDLE_AFTER:
+        return f"idle since {format_time(active)}", True
+    return f"active {max(1, int(age // 60))} min ago", False
+
+
+def get_agent(bundle, head_date=0):
     folder = get_agent_folder(bundle)
     if not (folder / "task.md").is_file():
         return None
     done = read_text(folder / "done")
+    ended = get_mtime(folder / ("waiting" if done is None else "done"))
+    if done is not None:
+        state = "done"
+    elif ended is not None:
+        state = "waiting"
+    else:
+        state = "running"
+    activity, idle = get_activity(read_text(folder / "session"))
     return {
+        "activity": activity,
         "done": done,
+        "ended": ended and format_time(ended),
+        "idle": idle,
         "parent": read_text(folder / "parent"),
         "result": (read_text(folder / "result.md") or "")[:500],
         "retry": read_text(folder / "retry"),
-        "state": "running" if done is None else "done",
+        "stale": state == "done" and head_date > (ended or time.time()),
+        "state": state,
     }
 
 
@@ -206,11 +244,15 @@ def status(caller, query, body):
     repos = [repo for repo in get_repos() if os.path.isdir(get_repo_folder(repo))]
     write_tree = has_write_tree()
     repos_by_bundle = {}
+    dates = {}
     with ThreadPoolExecutor() as executor:
         for repo, branches in zip(repos, executor.map(get_local_branches, repos)):
-            for branch, _date, _head, _in_worktree in branches:
+            for branch, date, _head, _in_worktree in branches:
                 if branch not in get_sticky_bundles(repo):
                     repos_by_bundle.setdefault(branch, []).append(repo)
+                    reflog = f"{get_repo_folder(repo)}/.git/logs/{get_remote_dev_ref(branch, repo)}"
+                    pushed = get_mtime(pathlib.Path(reflog)) or 0
+                    dates[branch] = max(dates.get(branch, 0), date, pushed)
         pairs = [(repo, bundle) for bundle, names in repos_by_bundle.items() for repo in names]
         open_future = executor.submit(get_open_bundle_folders)
         statuses = dict(
@@ -225,7 +267,7 @@ def status(caller, query, body):
         folder = get_worktree_bundle_folder(bundle)
         rows.append(
             {
-                "agent": get_agent(bundle),
+                "agent": get_agent(bundle, dates[bundle]),
                 "base": get_base_from_bundle_name(bundle),
                 "bundle": bundle,
                 "folder": os.path.isdir(folder),
@@ -392,7 +434,7 @@ def check_task(bundle, body):
     if type(priority) is not int or abs(priority) > MAX_PRIORITY:
         raise ValueError(f"priority: an integer from -{MAX_PRIORITY} to {MAX_PRIORITY}")
     agent = get_agent(bundle)
-    if agent and agent["state"] == "running":
+    if agent and agent["state"] != "done":
         raise Refused(f"an agent already works in {bundle}")
     with state_lock:
         if any(item["bundle"] == bundle for item in read_state()["queue"]):
