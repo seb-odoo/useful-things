@@ -1,0 +1,22 @@
+# The shared connection to github.com, started by ssh-github-mux.path, see README.md.
+# %h/.local/state and not %S, here and in the .path: systemd 249 resolves %S to ~/.config.
+
+[Unit]
+Description=Shared SSH connection to github.com
+StartLimitIntervalSec=0
+
+[Service]
+ExecStartPre=/usr/bin/mkdir -p %h/.local/state/ssh-github-mux/sock
+ExecStart=/usr/bin/ssh -F none -N \
+    -o BatchMode=yes \
+    -o ControlMaster=yes \
+    -o ControlPath=%h/.local/state/ssh-github-mux/sock/github \
+    -o ControlPersist=no \
+    -o IdentitiesOnly=yes \
+    -o IdentityAgent=%t/ssh-github.sock \
+    -o IdentityFile=%h/.ssh/github-seb-odoo.pub \
+    -o ServerAliveCountMax=3 \
+    -o ServerAliveInterval=10 \
+    git@github.com
+ExecStopPost=/usr/bin/rm -f %h/.local/state/ssh-github-mux/sock/github
+ExecStopPost=/usr/bin/touch %h/.local/state/ssh-github-mux/sock/stopped

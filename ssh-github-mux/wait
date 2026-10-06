@@ -1,0 +1,13 @@
+#!/bin/sh
+dir=~/.local/state/ssh-github-mux
+[ -S "$dir/sock/github" ] && exit 0
+mkdir -p "$dir/request" && date > "$dir/request/start" || exit 1
+i=0
+while [ $i -lt 120 ]; do
+    sleep 0.5
+    [ -S "$dir/sock/github" ] && exit 0
+    # Stop waiting when the unit stops, as Bitwarden refused or the network is down.
+    [ "$dir/sock/stopped" -nt "$dir/request/start" ] && exit 1
+    i=$((i + 1))
+done
+exit 1

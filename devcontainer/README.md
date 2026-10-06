@@ -27,7 +27,8 @@ covers all of them; a container has to be rebuilt to pick up a change.
 
 The container runs as the host user (`--userns=keep-id`), so a file it can write is a file the host
 trusts. What the host runs or loads as config, and a container has no reason to change, is
-read-only: the shell helpers (`container-rw/`), the venv and the VS Code user settings.
+read-only: the shell helpers (`container-rw/`), the venv, the VS Code user settings and the socket
+folder of [`ssh-github-mux`](../ssh-github-mux/README.md) (host git goes through any socket there).
 
 Claude in a container uses the host's `~/.claude` as its config folder (`CLAUDE_CONFIG_DIR`), so
 it shares the host's login: a token refresh is locked and saved in that folder. Never give a

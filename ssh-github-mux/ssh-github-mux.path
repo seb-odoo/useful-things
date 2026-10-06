@@ -1,0 +1,8 @@
+[Unit]
+Description=Open the shared SSH connection to github.com when a git command asks for it
+
+[Path]
+PathModified=%h/.local/state/ssh-github-mux/request/start
+
+[Install]
+WantedBy=paths.target
