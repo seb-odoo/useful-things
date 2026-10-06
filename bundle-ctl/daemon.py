@@ -189,7 +189,7 @@ def get_activity(bundle, session):
     return f"active {max(1, int(age // 60))} min ago", False
 
 
-def get_agent(bundle, head_date=0):
+def get_agent(bundle, head_date=0, alive=True):
     folder = get_agent_folder(bundle)
     if not (folder / "task.md").is_file():
         return None
@@ -197,6 +197,8 @@ def get_agent(bundle, head_date=0):
     ended = get_mtime(folder / ("waiting" if done is None else "done"))
     if done is not None:
         state = "done"
+    elif not alive:
+        state = "stopped"
     elif ended is not None:
         state = "waiting"
     else:
@@ -279,14 +281,16 @@ def status(caller, query, body):
     rows = []
     for bundle, names in sorted(repos_by_bundle.items()):
         folder = get_worktree_bundle_folder(bundle)
+        is_open = folder in open_folders
+        opening = now - state["launches"].get(bundle, 0) < LAUNCH_GRACE
         rows.append(
             {
-                "agent": get_agent(bundle, dates[bundle]),
+                "agent": get_agent(bundle, dates[bundle], is_open or opening),
                 "base": get_base_from_bundle_name(bundle),
                 "bundle": bundle,
                 "folder": os.path.isdir(folder),
-                "open": folder in open_folders,
-                "opening": now - state["launches"].get(bundle, 0) < LAUNCH_GRACE,
+                "open": is_open,
+                "opening": opening,
                 "repos": {repo: statuses[repo, bundle] for repo in names},
             },
         )
@@ -447,12 +451,17 @@ def check_task(bundle, body):
         raise ValueError(f"task: a text of at most {MAX_TASK} characters")
     if type(priority) is not int or abs(priority) > MAX_PRIORITY:
         raise ValueError(f"priority: an integer from -{MAX_PRIORITY} to {MAX_PRIORITY}")
-    agent = get_agent(bundle)
-    if agent and agent["state"] != "done":
-        raise Refused(f"an agent already works in {bundle}")
     with state_lock:
-        if any(item["bundle"] == bundle for item in read_state()["queue"]):
-            raise Refused(f"{bundle} is already queued")
+        state = read_state()
+    alive = (
+        get_worktree_bundle_folder(bundle) in get_open_bundle_folders()
+        or time.time() - state["launches"].get(bundle, 0) < LAUNCH_GRACE
+    )
+    agent = get_agent(bundle, alive=alive)
+    if agent and agent["state"] not in ("done", "stopped"):
+        raise Refused(f"an agent already works in {bundle}")
+    if any(item["bundle"] == bundle for item in state["queue"]):
+        raise Refused(f"{bundle} is already queued")
 
 
 def enqueue(caller, bundle, body):
