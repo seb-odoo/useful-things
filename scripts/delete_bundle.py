@@ -145,9 +145,29 @@ def delete_bundle(
 
     Returns that work by repo and by kind, empty once the bundle is deleted. Nothing is touched
     when there is some: the bundle folder goes as a whole below, and the branch with it.
+    Nothing is touched either while the dev container of the bundle runs: VS Code stops it when
+    its window closes, but only while the bundle folder is still there.
     """
     if not force and (unsaved := _unsaved_work(runner, bundle_name)):
         return unsaved
+    containers = runner.run(
+        [
+            "podman",
+            "ps",
+            "--all",
+            "--format",
+            "{{.ID}} {{.State}}",
+            "--filter",
+            f"label=devcontainer.local_folder={get_worktree_bundle_folder(bundle_name)}",
+        ],
+    ).stdout.split("\n")
+    states = dict(line.split() for line in containers if line.strip())
+    if any(state == "running" for state in states.values()):
+        print(
+            f"[yellow]{bundle_name}: not deleted, its dev container still runs, close its VS Code "
+            "window and delete the bundle again[/yellow]",
+        )
+        return {}
 
     def handle_repo(runner: UtilsRunner, repo: str):
         # Every step below writes into the shared repository (worktree metadata, refs):
@@ -192,25 +212,8 @@ def delete_bundle(
                 )
 
     runner.parallel_run(Tree("Repositories"), get_repos(), handle_repo)
-    containers = runner.run(
-        [
-            "podman",
-            "ps",
-            "--all",
-            "--format",
-            "{{.ID}} {{.State}}",
-            "--filter",
-            f"label=devcontainer.local_folder={get_worktree_bundle_folder(bundle_name)}",
-        ],
-    ).stdout.split("\n")
-    states = dict(line.split() for line in containers if line.strip())
-    if stopped := [container for container, state in states.items() if state != "running"]:
-        runner.run(["podman", "rm", *stopped])
-    if any(state == "running" for state in states.values()):
-        print(
-            f"[yellow]{bundle_name}: its dev container still runs, close its VS Code window and "
-            "delete the bundle again to remove it[/yellow]",
-        )
+    if states:
+        runner.run(["podman", "rm", *states])
     runner.run(["rm", "-rf", get_worktree_bundle_folder(bundle_name)])
     runner.run(["rm", "-rf", f"{CLAUDE_CONFIG_CONTAINER}/{bundle_name}"])
 
