@@ -95,6 +95,7 @@ STATE_FILE = STATE / "state.json"
 folder_by_container = {}
 jobs = {}
 state_lock = threading.Lock()
+title_by_session = {}
 work_lock = threading.Lock()
 
 
@@ -165,8 +166,21 @@ def format_time(stamp):
     return time.strftime("%H:%M" if today else "%m-%d %H:%M", time.localtime(stamp))
 
 
-def get_activity(session):
-    active = SESSION_ID.fullmatch(session or "") and get_mtime(SESSIONS / f"{session}.jsonl")
+def get_session_title(path):
+    if path not in title_by_session:
+        try:
+            with path.open() as file:
+                title_by_session[path] = json.loads(file.readline()).get("customTitle")
+        except (OSError, ValueError):
+            return None
+    return title_by_session[path]
+
+
+def get_activity(bundle, session):
+    paths = [path for path in SESSIONS.glob("*.jsonl") if get_session_title(path) == bundle]
+    if SESSION_ID.fullmatch(session or ""):
+        paths.append(SESSIONS / f"{session}.jsonl")
+    active = max(filter(None, map(get_mtime, paths)), default=None)
     if not active:
         return None, False
     age = time.time() - active
@@ -187,7 +201,7 @@ def get_agent(bundle, head_date=0):
         state = "waiting"
     else:
         state = "running"
-    activity, idle = get_activity(read_text(folder / "session"))
+    activity, idle = get_activity(bundle, read_text(folder / "session"))
     return {
         "activity": activity,
         "done": done,
