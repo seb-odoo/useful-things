@@ -11,7 +11,8 @@ it. session-env and shell-snapshots stay real folders here, as the host's Claude
 /workspace is marked trusted in the container's .claude.json, or `claude -p` ignores the permissions
 of the bundle's .claude. projects is an empty folder the container mounts ~/.claude/projects on,
 not a link: Claude checks a write on the path a link resolves to, which takes the memory folder out
-of its working directories.
+of its working directories. No .credentials.json is linked or kept, as a token refresh in a
+container revokes the host's login: the container logs in with CLAUDE_CODE_OAUTH_TOKEN.
 """
 
 import json
@@ -26,7 +27,7 @@ import config  # noqa: E402
 CONTAINER_CLAUDE = "/home/vscode/.claude"
 MOUNTED = {"projects"}
 OWN = {"session-env", "settings.json", "shell-snapshots"}
-SKIPPED = {".git"}
+SKIPPED = {".credentials.json", ".git"}
 
 
 def main():
@@ -47,6 +48,8 @@ def main():
     tmp = own / ".claude.json.tmp"
     tmp.write_text(json.dumps(state, indent=2) + "\n")
     tmp.replace(state_path)
+
+    (own / ".credentials.json").unlink(missing_ok=True)
 
     for name in MOUNTED:
         mount_point = own / name

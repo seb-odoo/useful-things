@@ -135,6 +135,8 @@
     // Like REPO_ROOT and VENV_ROOT below: host values the shell helpers and check-base.sh read, as
     // their $HOME default is wrong here.
     "BUNDLE_SUFFIX": "@BUNDLE_SUFFIX@",
+    // Log in with a token, as a container refreshing the host's login revokes the host's copy.
+    "CLAUDE_CODE_OAUTH_TOKEN": "@CLAUDE_CODE_OAUTH_TOKEN@",
     "CLAUDE_CONFIG_DIR": "/home/vscode/.claude-container",
     "HOME": "/home/vscode",
     "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",

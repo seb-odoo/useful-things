@@ -33,7 +33,9 @@ Each container gets its own Claude config folder (`CLAUDE_CONFIG_DIR`, made by
 [`claude-config.py`](claude-config.py) before every start): a `settings.json` copied from the host's
 without its `model`, writable so a model can be picked in a tab, its own `session-env` and
 `shell-snapshots`, and links to the rest of `~/.claude`. A model picked in a container lasts
-until the container stops, and agent runs ask for the default model anyway.
+until the container stops, and agent runs ask for the default model anyway. The host's
+`.credentials.json` is not linked: a token refresh replaces the link with a copy and revokes the
+host's login, so a container logs in with the `CLAUDE_CODE_OAUTH_TOKEN` of `config.env`.
 
 Postgres cannot tell a container from the host (same uid on the same socket), so the role must not
 be a superuser, or `COPY ... TO PROGRAM` runs commands on the host:
