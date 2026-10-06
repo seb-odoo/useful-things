@@ -6,9 +6,10 @@
 The container's CLAUDE_CONFIG_DIR is the host's ~/.claude itself, so it shares the host's login:
 Claude locks a token refresh and saves the new token in that folder, and any copy or link of
 .credentials.json elsewhere gets revoked by the next refresh. session-env and shell-snapshots are
-mounted from a folder of the bundle, as the host's Claude sources its own. /workspace is marked
-trusted in the .claude.json of that folder, or `claude -p` ignores the permissions of the bundle's
-.claude.
+mounted from a folder of the bundle, as the host's Claude sources its own. So is extension-storage,
+where the Claude tab keeps the permission mode of each session: in the container, a rebuild wipes
+it and the tab resumes in plan. /workspace is marked trusted in the .claude.json of that folder, or
+`claude -p` ignores the permissions of the bundle's .claude.
 """
 
 import json
@@ -19,7 +20,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import config  # noqa: E402
 
-OWN = ("session-env", "shell-snapshots")
+OWN = ("extension-storage", "session-env", "shell-snapshots")
 
 
 def main():

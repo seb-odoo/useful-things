@@ -33,7 +33,8 @@ folder of [`ssh-github-mux`](../ssh-github-mux/README.md) (host git goes through
 Claude in a container uses the host's `~/.claude` as its config folder (`CLAUDE_CONFIG_DIR`), so
 it shares the host's login: a token refresh is locked and saved in that folder. Never give a
 container a copy or a link of `.credentials.json`: a refresh replaces the link with a copy and
-revokes every other one. Each container gets its own `session-env` and `shell-snapshots`, made by
+revokes every other one. Each container gets its own `session-env`, `shell-snapshots` and storage
+of the Claude extension (the permission mode of each session, kept over a rebuild), made by
 [`claude-config.py`](claude-config.py) before every start.
 
 Postgres cannot tell a container from the host (same uid on the same socket), so the role must not

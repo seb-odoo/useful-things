@@ -35,12 +35,14 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
 
-# Persist VS Code's extensions: devcontainer.json bind-mounts a host dir at
-# ~/.vscode-server/extensions. Pre-create the parent here owned by vscode so podman mounts the subdir
-# into an existing dir instead of auto-creating ~/.vscode-server as root. Otherwise the server's
-# `mkdir ~/.vscode-server/bin` at attach fails with "Permission denied" (vscode can't write a
-# root-owned parent, and no-new-privileges/cap-drop ALL means no runtime sudo to fix it).
-RUN mkdir -p /home/vscode/.vscode-server/extensions && \
+# Persist VS Code's extensions and the Claude extension's storage: devcontainer.json bind-mounts
+# host dirs at ~/.vscode-server/extensions and in ~/.vscode-server/data/User/globalStorage.
+# Pre-create the parents here owned by vscode so podman mounts the subdirs into existing dirs
+# instead of auto-creating them as root. Otherwise the server's `mkdir ~/.vscode-server/bin` at
+# attach fails with "Permission denied" (vscode can't write a root-owned parent, and
+# no-new-privileges/cap-drop ALL means no runtime sudo to fix it).
+RUN mkdir -p /home/vscode/.vscode-server/extensions \
+        /home/vscode/.vscode-server/data/User/globalStorage && \
     chown -R vscode:vscode /home/vscode/.vscode-server
 
 # Same root-owned-parent problem for ~/.local/share/Odoo and ~/.cache/warden, which devcontainer.json

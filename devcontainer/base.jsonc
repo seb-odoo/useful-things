@@ -43,6 +43,8 @@
     // Claude sources these before each Bash command: the containers get their own.
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/session-env,target=/home/vscode/.claude/session-env,type=bind,z",
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/shell-snapshots,target=/home/vscode/.claude/shell-snapshots,type=bind,z",
+    // Where the Claude tab stores the permission mode of each session: kept over a rebuild.
+    "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/extension-storage,target=/home/vscode/.vscode-server/data/User/globalStorage/anthropic.claude-code,type=bind,z",
     "source=@CONFIG_ROOT@/Code/User,target=/home/vscode/.config/Code/User,type=bind,readonly,Z",
     "source=@VENV_ROOT@,target=@VENV_ROOT@,type=bind,readonly,Z",
     "source=@SHARE_ROOT@/Odoo,target=/home/vscode/.local/share/Odoo,type=bind,z",
