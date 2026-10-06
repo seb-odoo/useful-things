@@ -70,6 +70,13 @@ def format_repo(repo, status):
     return f"{repo} -{status['behind']}{' conflict' if status['conflict'] else ''}"
 
 
+def format_agent(agent):
+    words = [agent["state"]]
+    if agent["done"]:
+        words.append(agent["done"])
+    return ", ".join(filter(None, [" ".join(words), agent.get("retry")]))
+
+
 def print_status(answer):
     for row in answer["bundles"]:
         repos = ", ".join(format_repo(repo, status) for repo, status in row["repos"].items())
@@ -79,9 +86,8 @@ def print_status(answer):
             state = "opening"
         else:
             state = "folder" if row["folder"] else "branch"
-        agent = row["agent"]
-        if agent:
-            repos += f"  [agent {agent['state']}{' ' + agent['done'] if agent['done'] else ''}]"
+        if row["agent"]:
+            repos += f"  [agent {format_agent(row['agent'])}]"
         print(f"{row['bundle']:60} {state:7} {repos}")
     print(f"\n{answer['windows']}/{answer['max_windows']} windows open")
     for position, item in enumerate(answer["queue"], 1):

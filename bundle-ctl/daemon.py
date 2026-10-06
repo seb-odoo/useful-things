@@ -158,6 +158,7 @@ def get_agent(bundle):
         "done": done,
         "parent": read_text(folder / "parent"),
         "result": (read_text(folder / "result.md") or "")[:500],
+        "retry": read_text(folder / "retry"),
         "state": "running" if done is None else "done",
     }
 

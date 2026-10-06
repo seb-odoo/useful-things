@@ -66,6 +66,7 @@ remote connection ("Cannot reconnect"). A run that ends without a tool call open
 | `result.md` | `client/stream-format.py` | the last answer of the run |
 | `mode` | `client/stream-format.py` | the permission mode of the run, which the tab resumes the session in |
 | `handoff` | `client/agent-run.sh` | `claude -p` was stopped at its first tool call, for the tab to rerun |
+| `retry` | `client/agent-run.sh` | `auth failed, retry n/3`: the run failed to authenticate and starts again |
 | `done` | `client/agent-run.sh`, `client/agent-stop.py` | the exit code of `claude -p`, or `interrupted`; `0` when the tab's turn ends after a handoff |
 | `tab-opened` | claude-autoopen | the tab was opened on the session once |
 | `restarted` | claude-autoopen | the window was reloaded once for the handoff |
@@ -93,3 +94,8 @@ is the only bound on a fan-out. A task given to a bundle whose window is open st
 seconds, even at the cap, as it takes no new window. A new task moves the previous `.agent/` files
 of the bundle into `.agent/history/`. Closing an agent window is Seb's call: nothing stops or
 deletes a bundle on its own.
+
+The agent runs of all the containers start at least 10 seconds apart (a lock in the shared
+`~/.claude`), as `claude -p` processes started together fail each other's OAuth token refresh. A
+run that still fails with `Failed to refresh OAuth token` or `Failed to authenticate` before its
+first tool call starts again 1 to 2 minutes later with a new session, at most 3 times.

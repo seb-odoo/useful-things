@@ -16,19 +16,34 @@ fi
 
 # Let Ctrl+C stop the run but not this script, so the tab still opens on the session.
 trap : INT
-# Record the session as the extension does: the Claude tab hides the ones `claude -p` records.
-exec {stream}< <(
-	CLAUDE_CODE_ENTRYPOINT=claude-vscode exec claude -p --session-id "$session" -n "$ODOO_PROXY_HOST" \
-		--model default --verbose --output-format stream-json <"$agent/task.md"
-)
-claude=$!
-python3 "${0%/*}/stream-format.py" --until-tool-use "$agent/result.md" <&"$stream"
-format=$?
-exec {stream}<&-
-kill -TERM "$claude" 2>/dev/null
-wait "$claude"
-code=$?
+retry=0
+while :; do
+	# Every container shares ~/.claude: starts at the same time fail each other's token refresh.
+	flock "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/agent-start.lock" sleep 10
+	# Record the session as the extension does: the Claude tab hides the ones `claude -p` records.
+	exec {stream}< <(
+		CLAUDE_CODE_ENTRYPOINT=claude-vscode exec claude -p --session-id "$session" -n "$ODOO_PROXY_HOST" \
+			--model default --verbose --output-format stream-json <"$agent/task.md"
+	)
+	claude=$!
+	python3 "${0%/*}/stream-format.py" --until-tool-use "$agent/result.md" <&"$stream"
+	format=$?
+	exec {stream}<&-
+	kill -TERM "$claude" 2>/dev/null
+	wait "$claude"
+	code=$?
+	if [ "$format" = 0 ] || [ "$retry" = 3 ] ||
+		! grep -qE '^Failed to (refresh OAuth token|authenticate)' "$agent/result.md"; then
+		break
+	fi
+	retry=$((retry + 1))
+	echo "auth failed, retry $retry/3" >"$agent/retry"
+	sleep $((60 + RANDOM % 61))
+	session=$(cat /proc/sys/kernel/random/uuid)
+	echo "$session" >"$agent/session"
+done
 if [ "$format" = 0 ]; then
+	rm -f "$agent/retry"
 	: >"$agent/handoff"
 else
 	echo "$code" >"$agent/done.tmp" && mv "$agent/done.tmp" "$agent/done"
