@@ -303,6 +303,7 @@ async function showClaudeTab(context, root) {
   }
   if (session && ["0", undefined].includes(await readAgentFile(root, "done"))) {
     closeAgentTerminals();
+    vscode.window.terminals.find((terminal) => terminal.name === REPOS[0])?.show(true);
   }
   // editor.open reveals the tab already on the session, which can be the pinned one.
   if (replaced && !replaced.isActive) {
