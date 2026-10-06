@@ -129,14 +129,17 @@ function odoo-bin-params() {
 	iface=""
 	if [[ -n "${ODOO_PROXY_HOST}" && "${edition}" != *[sp]* ]]; then
 		# In-container only: bind the bridge IP so the nginx proxy can reach Odoo (master's
-		# default is now 127.0.0.1), trust the proxy's forwarded headers, and load demo data in
-		# new DBs. Placed before ${rest} so an explicit flag can override.
+		# default is now 127.0.0.1), trust the proxy's forwarded headers, and load demo and test
+		# data in new DBs. Placed before ${rest} so an explicit flag can override.
 		demo=""
 		if grep -q '"--with-demo"' ./odoo/tools/config.py 2>/dev/null; then
 			# The demo default flipped to none in saas-18.3, which added --with-demo;
 			# saas-18.2 and before load demo data by default and reject the option
 			# (optparse errors out before ${rest} could override it).
 			demo="--with-demo "
+		fi
+		if grep -q '"--with-test-data"' ./odoo/tools/config.py 2>/dev/null; then
+			demo="${demo}--with-test-data "
 		fi
 		iface="--http-interface=0.0.0.0 --proxy-mode ${demo}"
 	fi
