@@ -145,6 +145,9 @@
     // The host's folder, so the login is shared: a refresh is locked and saved in it. Set to keep
     // .claude.json there too, out of the home a rebuild wipes.
     "CLAUDE_CONFIG_DIR": "/home/vscode/.claude",
+    // Set, so the Dev Containers extension does not forward the host display: through it, a
+    // container reads every key typed on the host. Nothing in the container needs a display.
+    "DISPLAY": ":none",
     "HOME": "/home/vscode",
     "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
     // Disable commit signing in the sandbox. The repo's bind-mounted .git/config (shared with the
