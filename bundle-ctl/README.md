@@ -88,8 +88,8 @@ window was free. `bctl status` lists the queue in that order with each priority 
 queued it, so a caller can pick where it goes.
 The cap is read from `~/.config/odoo-dev/config.env` or the unit's environment. The queue is checked
 again on every podman container start and stop, and every minute; it lives in
-`~/.local/state/bundle-ctl/state.json`. An agent run cannot queue a task before it ends, so a
-fan-out is one level deep; the session Seb continues in the tab afterwards can. A task given to a
-bundle whose window is open starts there within 5 seconds. A new task moves the previous `.agent/`
-files of the bundle into `.agent/history/`. Closing an agent window is Seb's call: nothing stops or
+`~/.local/state/bundle-ctl/state.json`. Any session can queue, agent runs included: the window cap
+is the only bound on a fan-out. A task given to a bundle whose window is open starts there within 5
+seconds, even at the cap, as it takes no new window. A new task moves the previous `.agent/` files
+of the bundle into `.agent/history/`. Closing an agent window is Seb's call: nothing stops or
 deletes a bundle on its own.

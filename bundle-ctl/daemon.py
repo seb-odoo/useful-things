@@ -380,7 +380,7 @@ def get_open_windows():
     }
 
 
-def check_task(caller, bundle, body):
+def check_task(bundle, body):
     if "task" not in body:
         if "priority" in body:
             raise ValueError("priority: only with a task")
@@ -390,8 +390,6 @@ def check_task(caller, bundle, body):
         raise ValueError(f"task: a text of at most {MAX_TASK} characters")
     if type(priority) is not int or abs(priority) > MAX_PRIORITY:
         raise ValueError(f"priority: an integer from -{MAX_PRIORITY} to {MAX_PRIORITY}")
-    if caller != HOST and (run := get_agent(caller)) and run["state"] == "running":
-        raise Refused("an agent run cannot queue a task before it ends")
     agent = get_agent(bundle)
     if agent and agent["state"] == "running":
         raise Refused(f"an agent already works in {bundle}")
@@ -449,19 +447,21 @@ def launch_queued():
         }
         env = session_env()
         has_display = env.get("DISPLAY") or env.get("WAYLAND_DISPLAY")
-        while (
-            state["queue"]
-            and has_display
-            and len(open_windows) + len(state["launches"]) < MAX_WINDOWS
-        ):
-            item = state["queue"].pop(0)
-            write_task(item)
-            state["launches"][item["bundle"]] = now
-            start_job(
-                item["parent"],
-                "spawn",
-                lambda log, bundle=item["bundle"]: open_window(log, bundle),
-            )
+        queue = []
+        for item in state["queue"]:
+            if get_worktree_bundle_folder(item["bundle"]) in open_windows:
+                write_task(item)
+            elif has_display and len(open_windows) + len(state["launches"]) < MAX_WINDOWS:
+                write_task(item)
+                state["launches"][item["bundle"]] = now
+                start_job(
+                    item["parent"],
+                    "spawn",
+                    lambda log, bundle=item["bundle"]: open_window(log, bundle),
+                )
+            else:
+                queue.append(item)
+        state["queue"] = queue
         write_state(state)
 
 
@@ -533,7 +533,7 @@ def create(caller, query, body):
         raise ValueError(f"unknown repos: {', '.join(sorted(unknown))}")
     if os.path.exists(get_worktree_bundle_folder(bundle)) or local_branches(bundle):
         raise Refused(f"{bundle} already exists")
-    check_task(caller, bundle, body)
+    check_task(bundle, body)
 
     def work(log):
         args = [base, name, "--no-push", "--no-open"]
@@ -568,7 +568,7 @@ def fetch(caller, query, body):
         ).stdout.strip()
         if unpushed:
             raise Refused(f"{bundle} has unpushed commits in {repo}, pfb would reset them")
-    check_task(caller, bundle, body)
+    check_task(bundle, body)
 
     def work(log):
         run_script(log, "fetch_bundle.py", name, "--no-open")
@@ -581,7 +581,7 @@ def open_bundle(caller, query, body):
     bundle = body.get("bundle") or ""
     if not BUNDLE_NAME.fullmatch(bundle) or not os.path.isdir(get_worktree_bundle_folder(bundle)):
         raise ValueError(f"no bundle folder for {bundle}")
-    check_task(caller, bundle, body)
+    check_task(bundle, body)
     if "task" in body:
         return 202, enqueue(caller, bundle, body)
     return start_job(caller, "open", lambda log: open_or_enqueue(log, caller, bundle, body))
