@@ -3,6 +3,7 @@ set -e
 ram=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ssh-sign.sock
 session=$(bw unlock --raw)
 trap 'bw lock >/dev/null' EXIT
-bw sync --session "$session" >/dev/null
+# Offline at login is fine, bw get reads the local copy of the vault.
+bw sync --session "$session" >/dev/null 2>&1 || true
 bw get item github-seb-odoo-signing --session "$session" | jq -r .sshKey.privateKey \
     | SSH_AUTH_SOCK=$ram ssh-add -

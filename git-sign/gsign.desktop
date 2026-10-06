@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=gsign
+Comment=Load the commit signing key from Bitwarden until reboot
+Exec=gnome-terminal -- bash -ic "~/repo/useful-things/git-sign/gsign || read -rp 'gsign failed, Enter to close'"
+X-GNOME-Autostart-enabled=true

@@ -7,6 +7,8 @@ boot into an ssh-agent that holds it in memory until reboot.
 - `gsign` asks the master password (bw CLI), loads `github-seb-odoo-signing` into
   `ssh-agent-sign.service`, and locks the CLI again. The key goes through a pipe, never a file.
 - `sign` is `gpg.ssh.program`: it signs with that agent, or asks Bitwarden before `gsign` ran.
+- `gsign.desktop` opens a terminal running `gsign` at each login, so only the master password is
+  left to type.
 
 The key can sign but not push: GitHub knows it as a "Signing Key" only.
 
@@ -24,4 +26,4 @@ Once:
    (git does not expand `~` there) and
    `git config --file ~/.gitconfig.local user.signingKey $HOME/.ssh/github-seb-odoo-signing.pub`.
 
-Then `gsign` once per boot.
+7. `ln -sfn ~/repo/useful-things/git-sign/gsign.desktop ~/.config/autostart/`.
