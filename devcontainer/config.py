@@ -52,7 +52,6 @@ def load():
         "PG_HOST": "/var/run/postgresql",
         "CONTAINER_BASE_IMAGE": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
         "CONTAINER_MEMORY": "8g",
-        "CLAUDE_CODE_OAUTH_TOKEN": "",
     }.items():
         values[key] = os.environ.get(key) or values.get(key) or default
     values["VENV"] = os.environ.get("VENV") or values.get("VENV") or f"{values['VENV_ROOT']}/odoo20"

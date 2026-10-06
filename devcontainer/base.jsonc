@@ -40,11 +40,9 @@
     "source=@WORKTREE_ROOT@/.vscode,target=@WORKTREE_ROOT@/.vscode,type=bind,Z",
     "source=@USEFUL_THINGS@/odools.toml,target=@USEFUL_THINGS@/odools.toml,type=bind,readonly,Z",
     "source=@HOME@/.claude,target=/home/vscode/.claude,type=bind,Z",
-    // The container's own CLAUDE_CONFIG_DIR, made by devcontainer/claude-config.py: a settings.json
-    // it may write, and links to the rest of ~/.claude.
-    "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename},target=/home/vscode/.claude-container,type=bind,z",
-    "source=@HOME@/.claude/plans,target=/home/vscode/.claude-container/plans,type=bind,z",
-    "source=@HOME@/.claude/projects,target=/home/vscode/.claude-container/projects,type=bind,z",
+    // Claude sources these before each Bash command: the containers get their own.
+    "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/session-env,target=/home/vscode/.claude/session-env,type=bind,z",
+    "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/shell-snapshots,target=/home/vscode/.claude/shell-snapshots,type=bind,z",
     "source=@CONFIG_ROOT@/Code/User,target=/home/vscode/.config/Code/User,type=bind,readonly,Z",
     "source=@VENV_ROOT@,target=@VENV_ROOT@,type=bind,readonly,Z",
     "source=@SHARE_ROOT@/Odoo,target=/home/vscode/.local/share/Odoo,type=bind,z",
@@ -136,9 +134,9 @@
     // Like REPO_ROOT and VENV_ROOT below: host values the shell helpers and check-base.sh read, as
     // their $HOME default is wrong here.
     "BUNDLE_SUFFIX": "@BUNDLE_SUFFIX@",
-    // Log in with a token, as a container refreshing the host's login revokes the host's copy.
-    "CLAUDE_CODE_OAUTH_TOKEN": "@CLAUDE_CODE_OAUTH_TOKEN@",
-    "CLAUDE_CONFIG_DIR": "/home/vscode/.claude-container",
+    // The host's folder, so the login is shared: a refresh is locked and saved in it. Set to keep
+    // .claude.json there too, out of the home a rebuild wipes.
+    "CLAUDE_CONFIG_DIR": "/home/vscode/.claude",
     "HOME": "/home/vscode",
     "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
     // Disable commit signing in the sandbox. The repo's bind-mounted .git/config (shared with the

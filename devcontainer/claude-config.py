@@ -1,23 +1,17 @@
 #!/usr/bin/env python3
-"""Prepare the Claude config folder of one bundle container, its CLAUDE_CONFIG_DIR.
+"""Prepare the Claude folders of one bundle container.
 
     python3 claude-config.py <bundle folder name>     # initializeCommand, on the host
 
-Claude writes its user settings when a model is picked in a tab, and the host must never load
-settings a container wrote: they run hooks and commands. So each container gets a folder the host
-never reads: a copy of the host's settings.json without its "model", refreshed at every start so a
-new session starts on the default model, and links to the rest of ~/.claude as the container mounts
-it. session-env and shell-snapshots stay real folders here, as the host's Claude sources its own.
-/workspace is marked trusted in the container's .claude.json, or `claude -p` ignores the permissions
-of the bundle's .claude. plans and projects are empty folders the container mounts ~/.claude/plans
-and ~/.claude/projects on, not links: Claude checks a write on the path a link resolves to, which
-takes the plan file and the memory folder out of what it lets the agent write. No .credentials.json
-is linked or kept, as a token refresh in a container revokes the host's login: the container logs
-in with CLAUDE_CODE_OAUTH_TOKEN.
+The container's CLAUDE_CONFIG_DIR is the host's ~/.claude itself, so it shares the host's login:
+Claude locks a token refresh and saves the new token in that folder, and any copy or link of
+.credentials.json elsewhere gets revoked by the next refresh. session-env and shell-snapshots are
+mounted from a folder of the bundle, as the host's Claude sources its own. /workspace is marked
+trusted in the .claude.json of that folder, or `claude -p` ignores the permissions of the bundle's
+.claude.
 """
 
 import json
-import os
 import pathlib
 import sys
 
@@ -25,51 +19,24 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import config  # noqa: E402
 
-CONTAINER_CLAUDE = "/home/vscode/.claude"
-MOUNTED = {"plans", "projects"}
-OWN = {"session-env", "settings.json", "shell-snapshots"}
-SKIPPED = {".credentials.json", ".git"}
+OWN = ("session-env", "shell-snapshots")
 
 
 def main():
     values = config.load()
-    shared = pathlib.Path(values["HOME"]) / ".claude"
     own = pathlib.Path(values["CACHE_ROOT"]) / "devcontainer" / "claude-config" / sys.argv[1]
-    own.mkdir(parents=True, exist_ok=True)
+    for name in OWN:
+        (own / name).mkdir(parents=True, exist_ok=True)
 
-    settings = json.loads((shared / "settings.json").read_text())
-    settings.pop("model", None)
-    tmp = own / "settings.json.tmp"
-    tmp.write_text(json.dumps(settings, indent=2) + "\n")
-    tmp.replace(own / "settings.json")
-
-    state_path = own / ".claude.json"
+    state_path = pathlib.Path(values["HOME"]) / ".claude" / ".claude.json"
     state = json.loads(state_path.read_text()) if state_path.is_file() else {}
-    state.setdefault("projects", {}).setdefault("/workspace", {})["hasTrustDialogAccepted"] = True
-    tmp = own / ".claude.json.tmp"
+    workspace = state.setdefault("projects", {}).setdefault("/workspace", {})
+    if workspace.get("hasTrustDialogAccepted"):
+        return
+    workspace["hasTrustDialogAccepted"] = True
+    tmp = state_path.with_name(".claude.json.tmp")
     tmp.write_text(json.dumps(state, indent=2) + "\n")
     tmp.replace(state_path)
-
-    (own / ".credentials.json").unlink(missing_ok=True)
-
-    for name in MOUNTED:
-        mount_point = own / name
-        if mount_point.is_symlink():
-            mount_point.unlink()
-        mount_point.mkdir(exist_ok=True)
-
-    for entry in shared.iterdir():
-        if entry.name in MOUNTED | OWN | SKIPPED:
-            continue
-        link = own / entry.name
-        target = f"{CONTAINER_CLAUDE}/{entry.name}"
-        if link.is_symlink():
-            if os.readlink(link) == target:
-                continue
-            link.unlink()
-        elif link.exists():
-            continue
-        link.symlink_to(target)
 
 
 if __name__ == "__main__":
