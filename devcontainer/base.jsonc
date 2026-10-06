@@ -43,6 +43,7 @@
     // The container's own CLAUDE_CONFIG_DIR, made by devcontainer/claude-config.py: a settings.json
     // it may write, and links to the rest of ~/.claude.
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename},target=/home/vscode/.claude-container,type=bind,z",
+    "source=@HOME@/.claude/plans,target=/home/vscode/.claude-container/plans,type=bind,z",
     "source=@HOME@/.claude/projects,target=/home/vscode/.claude-container/projects,type=bind,z",
     "source=@CONFIG_ROOT@/Code/User,target=/home/vscode/.config/Code/User,type=bind,readonly,Z",
     "source=@VENV_ROOT@,target=@VENV_ROOT@,type=bind,readonly,Z",

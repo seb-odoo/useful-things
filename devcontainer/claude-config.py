@@ -9,10 +9,11 @@ never reads: a copy of the host's settings.json without its "model", refreshed a
 new session starts on the default model, and links to the rest of ~/.claude as the container mounts
 it. session-env and shell-snapshots stay real folders here, as the host's Claude sources its own.
 /workspace is marked trusted in the container's .claude.json, or `claude -p` ignores the permissions
-of the bundle's .claude. projects is an empty folder the container mounts ~/.claude/projects on,
-not a link: Claude checks a write on the path a link resolves to, which takes the memory folder out
-of its working directories. No .credentials.json is linked or kept, as a token refresh in a
-container revokes the host's login: the container logs in with CLAUDE_CODE_OAUTH_TOKEN.
+of the bundle's .claude. plans and projects are empty folders the container mounts ~/.claude/plans
+and ~/.claude/projects on, not links: Claude checks a write on the path a link resolves to, which
+takes the plan file and the memory folder out of what it lets the agent write. No .credentials.json
+is linked or kept, as a token refresh in a container revokes the host's login: the container logs
+in with CLAUDE_CODE_OAUTH_TOKEN.
 """
 
 import json
@@ -25,7 +26,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import config  # noqa: E402
 
 CONTAINER_CLAUDE = "/home/vscode/.claude"
-MOUNTED = {"projects"}
+MOUNTED = {"plans", "projects"}
 OWN = {"session-env", "settings.json", "shell-snapshots"}
 SKIPPED = {".credentials.json", ".git"}
 
