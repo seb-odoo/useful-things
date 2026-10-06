@@ -373,7 +373,11 @@ def write_state(state):
 
 def get_open_windows():
     root = f"{get_worktree_container_folder()}/"
-    return {folder for folder in get_open_bundle_folders() if folder.startswith(root)}
+    return {
+        folder
+        for folder in get_open_bundle_folders()
+        if folder.startswith(root) and os.path.isdir(folder)
+    }
 
 
 def check_task(caller, bundle, body):
