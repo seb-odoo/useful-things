@@ -299,6 +299,7 @@ its default values.
 
 ## Support modules
 
+- **agents.py**: the bundle-ctl queue and the `.agent/` files of each bundle, read by the daemon and `branch_status.py`
 - **config.py** — central configuration (repo paths, remotes, bundle suffix, sticky bundles); **edit this file to match your own setup**
 - **commands.py** — pure helpers: name/path derivation for bundles, worktrees, and remotes
 - **utils.py** — `Runner` subclass with Odoo-specific git operations (add/delete worktrees, fetch, branch switch)

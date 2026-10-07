@@ -31,6 +31,16 @@ HERE = pathlib.Path(__file__).resolve().parent
 SCRIPTS = HERE.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
+from agents import (  # noqa: E402
+    LAUNCH_GRACE,
+    STATE,
+    STATE_FILE,
+    get_agent,
+    get_agent_folder,
+    get_mtime,
+    read_state,
+    read_text,
+)
 from branch_status import (  # noqa: E402
     PR_URL,
     get_local_branches,
@@ -68,9 +78,7 @@ BUNDLE_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,99}")
 CONTAINER_ID = re.compile(r"/libpod-(?:payload-)?([0-9a-f]{64})")
 GITHUB_OWNER = re.compile(r"[A-Za-z0-9-]{1,39}")
 HOST = "host"
-IDLE_AFTER = 15 * 60
 JOB_WAIT = 50
-LAUNCH_GRACE = 15 * 60
 MAX_BODY = 64 * 1024
 MAX_PRIORITY = 100
 MAX_RELAUNCHES = 3
@@ -80,8 +88,6 @@ MAX_WINDOWS = int(
     os.environ.get("BUNDLE_CTL_MAX_WINDOWS") or CONFIG.get("BUNDLE_CTL_MAX_WINDOWS") or 4,
 )
 NAME = re.compile(r"[a-z0-9](?:[a-z0-9.]|-(?!-)){0,79}")
-SESSION_ID = re.compile(r"[0-9a-f-]{36}")
-SESSIONS = pathlib.Path.home() / ".claude" / "projects" / "-workspace"
 SESSION_VARIABLES = (
     "DBUS_SESSION_BUS_ADDRESS",
     "DISPLAY",
@@ -89,14 +95,11 @@ SESSION_VARIABLES = (
     "WAYLAND_DISPLAY",
     "XAUTHORITY",
 )
-STATE = pathlib.Path(CONFIG["STATE_ROOT"]) / "bundle-ctl"
 SOCKET = STATE / "sock" / "ctl.sock"
-STATE_FILE = STATE / "state.json"
 
 folder_by_container = {}
 jobs = {}
 state_lock = threading.Lock()
-title_by_session = {}
 work_lock = threading.Lock()
 
 
@@ -142,80 +145,6 @@ def identify(connection):
     if not bundle or folder != get_worktree_bundle_folder(bundle):
         return None
     return bundle
-
-
-def read_text(path):
-    try:
-        return path.read_text().strip()
-    except OSError:
-        return None
-
-
-def get_agent_folder(bundle):
-    return pathlib.Path(get_worktree_bundle_folder(bundle)) / ".agent"
-
-
-def get_mtime(path):
-    try:
-        return path.stat().st_mtime
-    except OSError:
-        return None
-
-
-def format_time(stamp):
-    today = time.strftime("%F") == time.strftime("%F", time.localtime(stamp))
-    return time.strftime("%H:%M" if today else "%m-%d %H:%M", time.localtime(stamp))
-
-
-def get_session_title(path):
-    if path not in title_by_session:
-        try:
-            with path.open() as file:
-                title_by_session[path] = json.loads(file.readline()).get("customTitle")
-        except (OSError, ValueError):
-            return None
-    return title_by_session[path]
-
-
-def get_activity(bundle, session):
-    paths = [path for path in SESSIONS.glob("*.jsonl") if get_session_title(path) == bundle]
-    if SESSION_ID.fullmatch(session or ""):
-        paths.append(SESSIONS / f"{session}.jsonl")
-    active = max(filter(None, map(get_mtime, paths)), default=None)
-    if not active:
-        return None, False
-    age = time.time() - active
-    if age > IDLE_AFTER:
-        return f"idle since {format_time(active)}", True
-    return f"active {max(1, int(age // 60))} min ago", False
-
-
-def get_agent(bundle, head_date=0, alive=True):
-    folder = get_agent_folder(bundle)
-    if not (folder / "task.md").is_file():
-        return None
-    done = read_text(folder / "done")
-    ended = get_mtime(folder / ("waiting" if done is None else "done"))
-    if done is not None:
-        state = "done"
-    elif not alive:
-        state = "stopped"
-    elif ended is not None:
-        state = "waiting"
-    else:
-        state = "running"
-    activity, idle = get_activity(bundle, read_text(folder / "session"))
-    return {
-        "activity": activity,
-        "done": done,
-        "ended": ended and format_time(ended),
-        "idle": idle,
-        "parent": read_text(folder / "parent"),
-        "result": (read_text(folder / "result.md") or "")[:500],
-        "retry": read_text(folder / "retry"),
-        "stale": state == "done" and head_date > (ended or time.time()),
-        "state": state,
-    }
 
 
 def whoami(caller, query, body):
@@ -421,13 +350,6 @@ def get_job(caller, query, body):
         time.sleep(0.5)
     data = log.read_bytes()[offset:] if log.exists() else b""
     return 200, dict(job, log=data.decode(errors="replace"), offset=offset + len(data))
-
-
-def read_state():
-    try:
-        return json.loads(STATE_FILE.read_text())
-    except (OSError, ValueError):
-        return {"launches": {}, "queue": []}
 
 
 def write_state(state):
