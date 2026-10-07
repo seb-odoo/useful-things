@@ -5,6 +5,10 @@ Also creates the local branch of each open PR of mine, and of each forward-port 
 on me: a conflict, a red CI, or a chain tip nobody gave r+ yet. Mergebot merges the other ones by
 itself.
 
+Also deletes a bundle branch never pushed while another repo of the bundle has an open PR of mine:
+pushing the other repos alone left it out. Its worktree stays on the commit, detached. Skipped
+while the bundle has an agent at work or a running dev container.
+
 Examples:
  $ python ~/repo/useful-things/scripts/fetch_all.py
 """
@@ -13,13 +17,23 @@ import json
 import os
 import re
 import subprocess
+import time
 
 from rich import print
 from rich.tree import Tree
 
 from utils import RemoteRefManager, UtilsRunner
 
-from branch_status import get_github_repo
+from agents import read_state
+from branch_status import (
+    AGENT_WORKING,
+    get_bundle_agent,
+    get_github_repo,
+    get_local_branches,
+    get_open_bundle_folders,
+    get_push,
+    get_status,
+)
 from commands import (
     BUNDLE_SUFFIX,
     get_remote_dev_branch_name,
@@ -30,6 +44,7 @@ from commands import (
     get_sticky_bundles,
     get_repo_folder,
     get_repos,
+    get_worktree_bundle_folder,
 )
 from delete_bundle import delete_bundle
 
@@ -67,7 +82,7 @@ def needs_me(pr):
 
 def get_branches_to_create():
     if not (login := gh("api", "user", "--jq", ".login")):
-        return {}
+        return {}, {}
     repo_by_github_repo = {
         get_github_repo(repo): repo for repo in get_repos() if os.path.isdir(get_repo_folder(repo))
     }
@@ -81,10 +96,10 @@ def get_branches_to_create():
         "commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } "
         "comments(last: 50) { nodes { author { login } body } } } } } "
         f"mine: search(query: {json.dumps(mine_search)}, type: ISSUE, first: 100) {{ nodes {{ "
-        "... on PullRequest { headRefName repository { nameWithOwner } } } } }"
+        "... on PullRequest { headRefName number repository { nameWithOwner } } } } }"
     )
     if not (out := gh("api", "graphql", "-f", f"query={query}")):
-        return {}
+        return {}, {}
     data = json.loads(out)["data"]
     heads_by_repo = {}
     fw_heads = [
@@ -98,10 +113,14 @@ def get_branches_to_create():
     for pr in fw_heads + mine_heads:
         repo = repo_by_github_repo[pr["repository"]["nameWithOwner"]]
         heads_by_repo.setdefault(repo, []).append(pr["headRefName"])
-    return heads_by_repo
+    open_prs_by_head = {}
+    for pr in mine_heads:
+        repo = repo_by_github_repo[pr["repository"]["nameWithOwner"]]
+        open_prs_by_head.setdefault(pr["headRefName"], {})[repo] = pr["number"]
+    return heads_by_repo, open_prs_by_head
 
 
-branches_to_create_by_repo = get_branches_to_create()
+branches_to_create_by_repo, open_prs_by_head = get_branches_to_create()
 
 
 def handle_repo_remote(runner: UtilsRunner, repo, remote, branch_r):
@@ -163,6 +182,29 @@ def handle_repo_remote(runner: UtilsRunner, repo, remote, branch_r):
             )
 
 
+def drop_unpushed_branches(runner: UtilsRunner):
+    open_folders = get_open_bundle_folders()
+    agent_state = read_state()
+    now = time.time()
+    for repo in get_repos():
+        if not os.path.isdir(get_repo_folder(repo)):
+            continue
+        for branch, _date, head, _in_worktree in get_local_branches(repo):
+            prs = open_prs_by_head.get(branch, {})
+            if not prs or repo in prs or get_push(repo, branch) is not None:
+                continue
+            status = get_status(repo, branch, write_tree=False)
+            if not status or not status["ahead"]:
+                continue
+            is_open = get_worktree_bundle_folder(branch) in open_folders
+            agent = get_bundle_agent(branch, agent_state, is_open, now)
+            if is_open or (agent and agent["state"] in AGENT_WORKING):
+                continue
+            runner.delete_branch_and_remote_ref(repo=repo, bundle_name=branch)
+            links = ", ".join(f"{pr_repo}#{number}" for pr_repo, number in prs.items())
+            print(f"Dropped {repo}/{branch} at {head[:10]}: never pushed, PR {links}")
+
+
 def handle_repo(runner: UtilsRunner, repo):
     runner = runner.with_params(cwd=get_repo_folder(repo))
     res = runner.run(["git", "branch", "-r"], capture_output=True)
@@ -181,3 +223,4 @@ for repo, ref in remote_ref_manager.repo_ref_to_clean:
 for ref in remote_ref_manager.refs_to_prompt_for_deletion:
     if input(f"Gone ref: {ref}. Delete it? (Y/n)").lower() in ["", "y"]:
         delete_bundle(runner=runner, bundle_name=ref, force=True, also_remote=False)
+drop_unpushed_branches(runner)
