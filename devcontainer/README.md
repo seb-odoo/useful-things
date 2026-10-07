@@ -23,6 +23,11 @@ The generated file carries no `//` notes: they live here and in each fragment, w
 reads. Every bundle symlinks `.devcontainer` to `WORKTREE_ROOT/.devcontainer`, so generating once
 covers all of them; a container has to be rebuilt to pick up a change.
 
+VS Code runs podman through [`vscode-podman.sh`](vscode-podman.sh) (`dev.containers.dockerPath`).
+After `podman run`, Dev Containers waits for the start event of the container on a `podman events`
+started at the same moment. When that `podman events` subscribes after the start, the window stays
+on "Starting Dev Container" forever, so the wrapper adds `--since` to replay the event.
+
 ## What a container cannot reach
 
 The container runs as the host user (`--userns=keep-id`), so a file it can write is a file the host
