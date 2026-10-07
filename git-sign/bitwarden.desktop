@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Bitwarden
+Comment=Open the Bitwarden window at login, for the SSH agent behind the github.com pushes
+Exec=bitwarden
+X-GNOME-Autostart-enabled=true

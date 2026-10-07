@@ -9,6 +9,8 @@ boot into an ssh-agent that holds it in memory until reboot.
 - `sign` is `gpg.ssh.program`: it signs with that agent, or asks Bitwarden before `gsign` ran.
 - `gsign.desktop` opens a terminal running `gsign` at each login, so only the master password is
   left to type.
+- `bitwarden.desktop` opens the Bitwarden window at each login, for the github.com pushes. The
+  app's own "Start automatically on login" uses `--autostart`, which keeps it hidden in the tray.
 
 The key can sign but not push: GitHub knows it as a "Signing Key" only.
 
@@ -27,3 +29,5 @@ Once:
    `git config --file ~/.gitconfig.local user.signingKey $HOME/.ssh/github-seb-odoo-signing.pub`.
 
 7. `ln -sfn ~/repo/useful-things/git-sign/gsign.desktop ~/.config/autostart/`.
+8. Bitwarden app, Settings: uncheck "Start automatically on login", then
+   `ln -sfn ~/repo/useful-things/git-sign/bitwarden.desktop ~/.config/autostart/`.
