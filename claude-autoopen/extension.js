@@ -45,7 +45,7 @@ function getClaudeTab(predicate = () => true) {
 }
 
 // The host and every container share this folder: keep the live processes of this pid namespace.
-function hasBusySession() {
+function getLiveSessions() {
   const config = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
   const folder = path.join(config, "sessions");
   let namespace;
@@ -54,20 +54,24 @@ function hasBusySession() {
     namespace = fs.readlinkSync("/proc/self/ns/pid");
     names = fs.readdirSync(folder).filter((name) => name.endsWith(".json"));
   } catch {
-    return false;
+    return [];
   }
-  return names.some((name) => {
+  return names.flatMap((name) => {
     try {
       const record = JSON.parse(fs.readFileSync(path.join(folder, name), "utf8"));
-      if (!record.pidDomain?.endsWith(`:${namespace}`) || record.status === "idle") {
-        return false;
+      if (!record.pidDomain?.endsWith(`:${namespace}`)) {
+        return [];
       }
       process.kill(record.pid, 0);
-      return true;
+      return [record];
     } catch {
-      return false;
+      return [];
     }
   });
+}
+
+function hasBusySession() {
+  return getLiveSessions().some((record) => record.status !== "idle");
 }
 
 async function openRepoTerminals() {
@@ -258,12 +262,18 @@ async function pollAgent(context, root) {
   } else if (
     (await readAgentFile(root, "handoff")) !== undefined &&
     (await readAgentFile(root, "done")) === undefined &&
-    (await readAgentFile(root, "restarted")) === undefined &&
-    !hasBusySession()
+    (await readAgentFile(root, "restarted")) === undefined
   ) {
-    await writeAgentFile(root, "restarted", "");
-    // The Claude tab reruns an interrupted turn only in a tab revived by a window reload.
-    await vscode.commands.executeCommand("workbench.action.reloadWindow");
+    const session = await readAgentFile(root, "session");
+    const sessions = getLiveSessions();
+    // A reload reruns the turn only in a tab that loaded the session, which starts its process.
+    if (
+      sessions.some((record) => record.sessionId === session) &&
+      sessions.every((record) => record.status === "idle")
+    ) {
+      await writeAgentFile(root, "restarted", "");
+      await vscode.commands.executeCommand("workbench.action.reloadWindow");
+    }
   }
 }
 
