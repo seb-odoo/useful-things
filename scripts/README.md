@@ -282,6 +282,10 @@ A bundle that would be in Waits on me goes to Waits on agents while a bundle-ctl
 or its task is queued, until the agent ends on a verdict. An agent whose window closed before its
 verdict shows `agent stopped`: nothing runs it any more.
 
+A pushed branch without PR shows `create PR`, a link to the GitHub compare page that opens one. A
+branch with no commit on its base and no PR shows `no commit` and does not count for the group of
+its bundle: it is the worktree's checkout of the base in a repo the bundle does not change.
+
 `--json` prints the same data for a script: per bundle its group, issue, open state and agent, per
 repo its head, push, behind, conflict and PR. A dev container cannot run it (no `scripts/`, no
 podman): there `gbs` is `bctl branches`, and `bctl --json branches` gives the JSON, both run on

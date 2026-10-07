@@ -30,6 +30,7 @@ from commands import (
     get_base_for_repo,
     get_base_from_bundle_name,
     get_remote_dev_ref,
+    get_remote_dev_repo,
     get_remote_ref,
     get_remote_repo,
     get_repo_folder,
@@ -180,7 +181,7 @@ def get_prs(pairs):
         text=True,
     )
     if res.returncode:
-        return {}, [f"GitHub: {res.stderr.strip() or 'gh failed'}"]
+        return None, [f"GitHub: {res.stderr.strip() or 'gh failed'}"]
     data = json.loads(res.stdout)["data"]
     prs = {
         pair: nodes[0]
@@ -434,6 +435,12 @@ def format_agent(agent):
     return AGENT_TAGS.get(agent["state"], "").format(**agent) if agent else ""
 
 
+def get_compare_url(repo, branch):
+    base = get_base_for_repo(get_base_from_bundle_name(branch), repo)
+    owner = get_github_repo(repo, get_remote_dev_repo(repo)).split("/")[0]
+    return f"https://github.com/{get_github_repo(repo)}/compare/{base}...{owner}:{branch}?expand=1"
+
+
 def get_bundles():
     repos = [repo for repo in get_repos() if os.path.isdir(get_repo_folder(repo))]
     write_tree = has_write_tree()
@@ -465,7 +472,7 @@ def get_bundles():
         repos_of_bundle = {}
         delegated = False
         for repo in sorted(dates, key=lambda repo: repo != "odoo"):
-            pr = prs.get((repo, branch))
+            pr = (prs or {}).get((repo, branch))
             facts = get_pr_facts(pr, repo, now) if pr else None
             status = statuses[repo, branch]
             push = pushes[repo, branch]
@@ -475,18 +482,27 @@ def get_bundles():
             group, issue = (
                 get_group(facts, status, push) if BUNDLE_SUFFIX in branch else ("others", None)
             )
+            empty = (
+                not facts and bool(status) and not status["ahead"] and not (push and push["behind"])
+            )
+            pushed = push is not None and not any(push.values())
+            create_pr = prs is not None and group == "me" and not facts and not empty and pushed
             repos_of_bundle[repo] = {
                 "ahead": status and status["ahead"],
                 "behind": status and status["behind"],
                 "conflict": status and status["conflict"],
+                "create_pr": get_compare_url(repo, branch) if create_pr else None,
+                "empty": empty,
                 "group": group,
                 "head": heads[repo, branch],
                 "issue": issue,
                 "pr": facts,
                 "push": push,
             }
-        group = min((row["group"] for row in repos_of_bundle.values()), key=GROUP_PRECEDENCE.index)
-        issues = {row["issue"] for row in repos_of_bundle.values() if row["group"] == group}
+        rows = [row for row in repos_of_bundle.values() if not row["empty"]]
+        rows = rows or list(repos_of_bundle.values())
+        group = min((row["group"] for row in rows), key=GROUP_PRECEDENCE.index)
+        issues = {row["issue"] for row in rows if row["group"] == group}
         issue = max(issues - {None}, key=list(ISSUE_RANKS).index, default=None)
         is_open = get_worktree_bundle_folder(branch) in open_folders
         agent = get_bundle_agent(branch, agent_state, is_open, now)
@@ -537,6 +553,10 @@ def get_rows(bundle, group, now):
             behind = f"[{style}]{row['behind']}[/{style}]"
             conflict = "[red]yes[/red]" if row["conflict"] else ""
         number, tags = format_pr(facts)
+        if row["empty"]:
+            tags = "[dim]no commit[/dim]"
+        elif row["create_pr"] and bundle["group"] == "me":
+            tags = f"[yellow][link={row['create_pr']}]create PR[/link][/yellow]"
         if group == "ci":
             tags = tags.removesuffix(CI_RUNNING).rstrip()
         if group == "reviewer" and row["group"] == "reviewer":
