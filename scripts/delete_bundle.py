@@ -69,11 +69,16 @@ def _unsaved_work(runner: UtilsRunner, bundle_name: str):
             if res and res.stdout.strip():
                 found["uncommitted files"] = res.stdout.strip().splitlines()
         res = runner.run(
-            ["git", "log", "--format=%h %s", f"refs/heads/{bundle_name}", "--not", "--remotes"],
+            [
+                "git",
+                "log",
+                "--format=%h %s",
+                "--ignore-missing",
+                f"refs/heads/{bundle_name}",
+                "--not",
+                "--remotes",
+            ],
             cwd=get_repo_folder(repo),
-            handle_exceptions={
-                f"fatal: ambiguous argument 'refs/heads/{bundle_name}'": ignore_error,
-            },
         )
         if res and res.stdout.strip():
             found["unpushed commits"] = res.stdout.strip().splitlines()
