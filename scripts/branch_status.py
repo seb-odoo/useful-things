@@ -24,6 +24,7 @@ from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 
+from agents import LAUNCH_GRACE, get_agent, read_state
 from commands import (
     BUNDLE_SUFFIX,
     get_base_for_repo,
@@ -38,6 +39,13 @@ from commands import (
 )
 
 AGE_UNITS = (("d", 86400), ("h", 3600), ("m", 60))
+AGENT_TAGS = {
+    "queued": "[dim]queued {queued}[/dim]",
+    "running": "[dim]running[/dim]",
+    "stopped": "[yellow]agent stopped[/yellow]",
+    "waiting": "[dim]waiting[/dim]",
+}
+AGENT_WORKING = ("queued", "running", "waiting")
 ASK_SEVERITIES = {"dim": 2, "red": 0, "yellow": 1}
 ASKED_STYLES = ((7 * 86400, "red"), (2 * 86400, "yellow"), (0, "dim"))
 AUTO_ASKED_STYLES = ((7 * 86400, "red"), (86400, "yellow"), (0, "dim"))
@@ -50,6 +58,7 @@ GROUPS = {
     "drafts": "Drafts",
     "reviewer": "Waits on a reviewer",
     "ci": "Waits on CI",
+    "agents": "Waits on agents",
     "mergebot": "Waits on mergebot",
     "others": "Not mine",
 }
@@ -413,6 +422,18 @@ def get_group(facts, status, push):
     return "reviewer", None
 
 
+def get_bundle_agent(bundle, state, is_open, now):
+    queue = [item["bundle"] for item in state["queue"]]
+    if bundle in queue:
+        return {"queued": queue.index(bundle) + 1, "state": "queued"}
+    alive = is_open or now - state["launches"].get(bundle, 0) < LAUNCH_GRACE
+    return get_agent(bundle, alive=alive)
+
+
+def format_agent(agent):
+    return AGENT_TAGS.get(agent["state"], "").format(**agent) if agent else ""
+
+
 def get_bundles():
     repos = [repo for repo in get_repos() if os.path.isdir(get_repo_folder(repo))]
     write_tree = has_write_tree()
@@ -437,6 +458,7 @@ def get_bundles():
         prs, errors = prs_future.result()
         open_folders = open_future.result()
 
+    agent_state = read_state()
     groups = {group: [] for group in GROUPS}
     now = time.time()
     for branch, dates in sorted(bundles.items(), key=lambda item: -max(item[1].values())):
@@ -467,7 +489,11 @@ def get_bundles():
         issues = {row["issue"] for row in repos_of_bundle.values() if row["group"] == group}
         issue = max(issues - {None}, key=list(ISSUE_RANKS).index, default=None)
         is_open = get_worktree_bundle_folder(branch) in open_folders
+        agent = get_bundle_agent(branch, agent_state, is_open, now)
+        if group == "me" and agent and agent["state"] in AGENT_WORKING:
+            group, issue = "agents", None
         bundle = {
+            "agent": agent,
             "bundle": branch,
             "date": max(dates.values()),
             "delegated": delegated,
@@ -497,6 +523,7 @@ def get_rows(bundle, group, now):
     label = f"[cyan]{branch}[/cyan]" if bundle["worktree"] else branch
     icon = "\N{OPEN FILE FOLDER}" if bundle["worktree"] else "\N{INBOX TRAY}"
     opener = f"[link=odoo-bundle://{branch}]{icon}[/link]"
+    agent = format_agent(bundle["agent"])
     rows = []
     for repo, row in bundle["repos"].items():
         facts = row["pr"]
@@ -514,10 +541,11 @@ def get_rows(bundle, group, now):
             tags = tags.removesuffix(CI_RUNNING).rstrip()
         if group == "reviewer" and row["group"] == "reviewer":
             tags = f"{format_ask(facts['ask'], now)} {tags}".rstrip()
+        tags = f"{agent} {tags}".strip()
         if row["group"] == "others":
             tags = dim_markup(tags)
         rows.append((age, opener, label, repo, push, behind, conflict, number, tags))
-        age = opener = label = ""
+        age = agent = opener = label = ""
     return rows
 
 

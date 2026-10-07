@@ -278,9 +278,14 @@ CI state. Reads local refs only, so run `gfa` first for fresh numbers.
 
 Each branch name is an `odoo-bundle://` link, see `bundle_open.py`.
 
-`--json` prints the same data for a script: per bundle its group, issue and open state, per repo its
-head, push, behind, conflict and PR. A dev container cannot run it (no `scripts/`, no podman): there
-`gbs` is `bctl branches`, and `bctl --json branches` gives the JSON, both run on the host.
+A bundle that would be in Waits on me goes to Waits on agents while a bundle-ctl agent works on it
+or its task is queued, until the agent ends on a verdict. An agent whose window closed before its
+verdict shows `agent stopped`: nothing runs it any more.
+
+`--json` prints the same data for a script: per bundle its group, issue, open state and agent, per
+repo its head, push, behind, conflict and PR. A dev container cannot run it (no `scripts/`, no
+podman): there `gbs` is `bctl branches`, and `bctl --json branches` gives the JSON, both run on
+the host.
 
 ### bundle_open.py
 
