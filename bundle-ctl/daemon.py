@@ -284,9 +284,12 @@ def status(caller, query, body):
         folder = get_worktree_bundle_folder(bundle)
         is_open = folder in open_folders
         opening = now - state["launches"].get(bundle, 0) < LAUNCH_GRACE
+        agent = get_agent(bundle, dates[bundle], is_open or opening)
+        if agent and agent["state"] == "stopped":
+            agent["task"] = read_text(get_agent_folder(bundle) / "task.md")
         rows.append(
             {
-                "agent": get_agent(bundle, dates[bundle], is_open or opening),
+                "agent": agent,
                 "base": get_base_from_bundle_name(bundle),
                 "bundle": bundle,
                 "folder": os.path.isdir(folder),
