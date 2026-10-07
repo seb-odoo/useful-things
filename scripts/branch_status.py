@@ -434,8 +434,10 @@ def get_bundle_agent(bundle, state, is_open, now):
     return get_agent(bundle, alive=alive)
 
 
-def format_agent(agent):
-    return AGENT_TAGS.get(agent["state"], "").format(**agent) if agent else ""
+def format_agent(agent, group):
+    if not agent or (agent["state"] == "stopped" and group != "me"):
+        return ""
+    return AGENT_TAGS.get(agent["state"], "").format(**agent)
 
 
 def get_compare_url(repo, branch):
@@ -542,7 +544,7 @@ def get_rows(bundle, group, now):
     label = f"[cyan]{branch}[/cyan]" if bundle["worktree"] else branch
     icon = "\N{OPEN FILE FOLDER}" if bundle["worktree"] else "\N{INBOX TRAY}"
     opener = f"[link=odoo-bundle://{branch}]{icon}[/link]"
-    agent = format_agent(bundle["agent"])
+    agent = format_agent(bundle["agent"], bundle["group"])
     rows = []
     for repo, row in bundle["repos"].items():
         facts = row["pr"]
