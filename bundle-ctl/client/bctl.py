@@ -78,7 +78,19 @@ def format_agent(agent):
         words.append(f"at {agent['ended']}")
     if agent.get("stale"):
         words.append("stale")
-    return ", ".join(filter(None, [" ".join(words), agent.get("retry"), agent.get("activity")]))
+    queued, started = agent.get("queued"), agent.get("started")
+    return ", ".join(
+        filter(
+            None,
+            [
+                " ".join(words),
+                queued and queued != started and f"queued {queued}",
+                started and f"started {started}",
+                agent.get("retry"),
+                agent.get("activity"),
+            ],
+        ),
+    )
 
 
 def is_idle(row):
@@ -105,9 +117,10 @@ def print_status(answer):
     if answer["queue"] and answer["windows"] >= answer["max_windows"] and idle:
         print(f"the queue waits for a window; agent windows done and idle: {', '.join(idle)}")
     for position, item in enumerate(answer["queue"], 1):
+        since = f", since {item['queued']}" if item.get("queued") else ""
         print(
             f"queued {position}: {item['bundle']} (priority {item['priority']},"
-            f" from {item['parent']})",
+            f" from {item['parent']}{since})",
         )
 
 

@@ -35,6 +35,7 @@ from agents import (  # noqa: E402
     LAUNCH_GRACE,
     STATE,
     STATE_FILE,
+    format_time,
     get_agent,
     get_agent_folder,
     get_mtime,
@@ -231,7 +232,12 @@ def status(caller, query, body):
         "bundles": rows,
         "max_windows": MAX_WINDOWS,
         "queue": [
-            dict(bundle=item["bundle"], parent=item["parent"], priority=item.get("priority", 0))
+            dict(
+                bundle=item["bundle"],
+                parent=item["parent"],
+                priority=item.get("priority", 0),
+                queued=item.get("queued") and format_time(item["queued"]),
+            )
             for item in state["queue"]
         ],
         "windows": len(get_open_windows()),
@@ -401,7 +407,13 @@ def enqueue(caller, bundle, body):
         )
         queue.insert(
             position,
-            {"bundle": bundle, "parent": caller, "priority": priority, "task": body["task"]},
+            {
+                "bundle": bundle,
+                "parent": caller,
+                "priority": priority,
+                "queued": time.time(),
+                "task": body["task"],
+            },
         )
         state.get("relaunches", {}).pop(bundle, None)
         write_state(state)
@@ -425,6 +437,8 @@ def write_task(item):
                 path.rename(history / path.name)
     folder.mkdir(exist_ok=True)
     (folder / "parent").write_text(f"{item['parent']}\n")
+    if "queued" in item:
+        (folder / "queued").write_text(f"{item['queued']}\n")
     (folder / "task.md").write_text(item["task"])
 
 
@@ -457,7 +471,14 @@ def launch_queued():
             ):
                 relaunches[bundle] = relaunches.get(bundle, 0) + 1
                 parent = read_text(task.parent / "parent")
-                stranded.append({"bundle": bundle, "parent": parent, "task": task.read_text()})
+                stranded.append(
+                    {
+                        "bundle": bundle,
+                        "parent": parent,
+                        "queued": float(read_text(task.parent / "queued") or now),
+                        "task": task.read_text(),
+                    },
+                )
         state["queue"][:0] = stranded
         env = session_env()
         has_display = env.get("DISPLAY") or env.get("WAYLAND_DISPLAY")

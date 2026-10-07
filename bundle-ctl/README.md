@@ -24,7 +24,7 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | --- | --- |
 | `GET /whoami` | the caller's bundle, base and parent |
 | `GET /branches` | `gbs --json` run on the host; `?format=table&width=N`: its colored table |
-| `GET /status` | every local bundle branch: base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open, and its agent: state (`running`, `waiting`, `done`, or `stopped` when its window closed before the verdict: nothing runs it any more, and a new task may replace it; a stopped agent carries its `task` text, to queue it again as it was), when it ended, `stale` when a branch of the bundle got a commit, or its dev remote ref an update (the mtime of its reflog), after that end, retry, and the last write to a session titled with the bundle, its own or an earlier agent's tab Seb went on in (`active N min ago`, or `idle since HH:MM` after 15 minutes; a tab opened by hand has no title and does not count) |
+| `GET /status` | every local bundle branch: base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open, and its agent: state (`running`, `waiting`, `done`, or `stopped` when its window closed before the verdict: nothing runs it any more, and a new task may replace it; a stopped agent carries its `task` text, to queue it again as it was), when it was queued, when its run started (none for a task no window took), when it ended, `stale` when a branch of the bundle got a commit, or its dev remote ref an update (the mtime of its reflog), after that end, retry, and the last write to a session titled with the bundle, its own or an earlier agent's tab Seb went on in (`active N min ago`, or `idle since HH:MM` after 15 minutes; a tab opened by hand has no title and does not count); the queue, each task with its priority, the bundle that queued it and when |
 | `POST /create` | `gnb` with `--no-push`, then a window; refused when the bundle exists |
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window; refused when the folder exists or a branch has unpushed commits |
 | `POST /open` | a VS Code window on a bundle folder |
@@ -61,8 +61,9 @@ remote connection ("Cannot reconnect"). A run that ends without a tool call open
 | file in `.agent/` | written by | meaning |
 | --- | --- | --- |
 | `task.md` | bundle-ctl | the prompt |
+| `queued` | bundle-ctl | when the task entered the queue (epoch seconds), kept when a task no window took is queued again |
 | `session` | claude-autoopen | the session id, chosen before the run |
-| `run.lock` | `client/agent-run.sh` | the run started; a relaunched terminal does not run it again |
+| `run.lock` | `client/agent-run.sh` | the run started, its mtime is when; a relaunched terminal does not run it again |
 | `result.md` | `client/stream-format.py` | the last answer of the run |
 | `mode` | `client/stream-format.py` | the permission mode of the run, which the tab resumes the session in |
 | `handoff` | `client/agent-run.sh` | `claude -p` was stopped at its first tool call, for the tab to rerun |
@@ -88,8 +89,8 @@ from the queue while fewer than `BUNDLE_CTL_MAX_WINDOWS` (default 4) bundle wind
 own included, plus the agent windows launched in the last 15 minutes whose container is not up yet.
 `--priority N` (-100 to 100, default 0) puts the task ahead of the ones with a lower priority; equal
 priorities leave in arrival order. The answer is the task's place (`queued`), or `started` when a
-window was free. `bctl status` lists the queue in that order with each priority and the bundle that
-queued it, so a caller can pick where it goes.
+window was free. `bctl status` lists the queue in that order with each priority, the bundle that
+queued it and since when, so a caller can pick where it goes.
 The cap is read from `~/.config/odoo-dev/config.env` or the unit's environment. The queue is checked
 again on every podman container start and stop, and every minute; it lives in
 `~/.local/state/bundle-ctl/state.json`. Any session can queue, agent runs included: the window cap

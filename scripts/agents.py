@@ -82,15 +82,19 @@ def get_agent(bundle, head_date=0, alive=True):
     else:
         state = "running"
     activity, idle = get_activity(bundle, read_text(folder / "session"))
+    queued = read_text(folder / "queued")
+    started = get_mtime(folder / "run.lock")
     return {
         "activity": activity,
         "done": done,
         "ended": ended and format_time(ended),
         "idle": idle,
         "parent": read_text(folder / "parent"),
+        "queued": queued and format_time(float(queued)),
         "result": (read_text(folder / "result.md") or "")[:500],
         "retry": read_text(folder / "retry"),
         "stale": state == "done" and head_date > (ended or time.time()),
+        "started": started and format_time(started),
         "state": state,
     }
 
