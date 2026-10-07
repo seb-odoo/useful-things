@@ -73,6 +73,7 @@ JOB_WAIT = 50
 LAUNCH_GRACE = 15 * 60
 MAX_BODY = 64 * 1024
 MAX_PRIORITY = 100
+MAX_RELAUNCHES = 3
 MAX_TASK = 32 * 1024
 MAX_WIDTH = 400
 MAX_WINDOWS = int(
@@ -477,6 +478,7 @@ def enqueue(caller, bundle, body):
             position,
             {"bundle": bundle, "parent": caller, "priority": priority, "task": body["task"]},
         )
+        state.get("relaunches", {}).pop(bundle, None)
         write_state(state)
     launch_queued()
     with state_lock:
@@ -488,7 +490,9 @@ def enqueue(caller, bundle, body):
 
 def write_task(item):
     folder = get_agent_folder(item["bundle"])
-    if folder.exists():
+    if folder.exists() and (
+        (folder / "session").exists() or read_text(folder / "task.md") != item["task"].strip()
+    ):
         history = folder / "history" / time.strftime("%Y%m%d-%H%M%S")
         history.mkdir(parents=True)
         for path in folder.iterdir():
@@ -511,6 +515,25 @@ def launch_queued():
             if now - launched < LAUNCH_GRACE
             and get_worktree_bundle_folder(bundle) not in open_windows
         }
+        # VS Code drops a launch at logout or when it restores its windows: take the task again.
+        queued = {item["bundle"] for item in state["queue"]}
+        relaunches = state.setdefault("relaunches", {})
+        stranded = []
+        root = pathlib.Path(get_worktree_container_folder())
+        for task in sorted(root.glob("*/*/.agent/task.md")):
+            bundle = task.parent.parent.name
+            if (task.parent / "session").exists():
+                relaunches.pop(bundle, None)
+            elif (
+                str(task.parent.parent) not in open_windows
+                and bundle not in state["launches"]
+                and bundle not in queued
+                and relaunches.get(bundle, 0) < MAX_RELAUNCHES
+            ):
+                relaunches[bundle] = relaunches.get(bundle, 0) + 1
+                parent = read_text(task.parent / "parent")
+                stranded.append({"bundle": bundle, "parent": parent, "task": task.read_text()})
+        state["queue"][:0] = stranded
         env = session_env()
         has_display = env.get("DISPLAY") or env.get("WAYLAND_DISPLAY")
         queue = []

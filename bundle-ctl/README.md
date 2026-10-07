@@ -94,8 +94,12 @@ The cap is read from `~/.config/odoo-dev/config.env` or the unit's environment. 
 again on every podman container start and stop, and every minute; it lives in
 `~/.local/state/bundle-ctl/state.json`. Any session can queue, agent runs included: the window cap
 is the only bound on a fan-out. A task given to a bundle whose window is open starts there within 5
-seconds, even at the cap, as it takes no new window. A new task moves the previous `.agent/` files
-of the bundle into `.agent/history/`. Closing an agent window is Seb's call: nothing stops or
+seconds, even at the cap, as it takes no new window. A launched task no window took (no
+`.agent/session` once the launch is 15 minutes old and no container is up) goes back at the head
+of the queue, 3 times at most: VS Code drops the windows launched while the desktop session ends,
+and the ones asked for while it starts and restores its own. A new task moves the previous
+`.agent/` files of the bundle into `.agent/history/`, unless it is the same task relaunched before
+any run started. Closing an agent window is Seb's call: nothing stops or
 deletes a bundle on its own. `done` only says the run reached its verdict, as Seb often goes on in
 the tab: when the queue waits on the cap, `bctl status` names the agent windows that are done and
 idle, the ones he can close.
