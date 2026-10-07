@@ -235,9 +235,10 @@ async function activate(context) {
   childProcess.execFile("bash", [path.join(os.homedir(), ".install-claude-autoopen.sh")], () => {});
   await openRepoTerminals();
   const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+  // Two runAgent at once each write a session and dispose the other's terminal.
+  let polling = true;
   if (root) {
     // Poll, as the file watcher misses the .agent folder bundle-ctl creates from the host.
-    let polling = false;
     const timer = setInterval(async () => {
       if (!polling) {
         polling = true;
@@ -245,11 +246,14 @@ async function activate(context) {
       }
     }, 5000);
     context.subscriptions.push({ dispose: () => clearInterval(timer) });
-    if (await runAgent(root)) {
-      return;
-    }
   }
-  await showClaudeTab(context, root);
+  try {
+    if (!root || !(await runAgent(root))) {
+      await showClaudeTab(context, root);
+    }
+  } finally {
+    polling = false;
+  }
 }
 
 async function pollAgent(context, root) {
