@@ -41,12 +41,13 @@ from commands import (
 
 AGE_UNITS = (("d", 86400), ("h", 3600), ("m", 60))
 AGENT_TAGS = {
+    "building": "[dim]building[/dim]",
     "queued": "[dim]queued {queued}[/dim]",
     "running": "[dim]running[/dim]",
     "stopped": "[yellow]agent stopped[/yellow]",
     "waiting": "[dim]waiting[/dim]",
 }
-AGENT_WORKING = ("queued", "running", "waiting")
+AGENT_WORKING = ("building", "queued", "running", "waiting")
 ASK_SEVERITIES = {"dim": 2, "red": 0, "yellow": 1}
 ASKED_STYLES = ((7 * 86400, "red"), (2 * 86400, "yellow"), (0, "dim"))
 AUTO_ASKED_STYLES = ((7 * 86400, "red"), (86400, "yellow"), (0, "dim"))
@@ -427,6 +428,8 @@ def get_bundle_agent(bundle, state, is_open, now):
     queue = [item["bundle"] for item in state["queue"]]
     if bundle in queue:
         return {"queued": queue.index(bundle) + 1, "state": "queued"}
+    if bundle in state.get("building", []):
+        return {"state": "building"}
     alive = is_open or now - state["launches"].get(bundle, 0) < LAUNCH_GRACE
     return get_agent(bundle, alive=alive)
 

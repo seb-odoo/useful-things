@@ -574,8 +574,7 @@ def create(caller, query, body):
         args = [base, name, "--no-push", "--no-open"]
         for repo in branch_repos:
             args += ["--branch-repo", repo]
-        run_script(log, "create_bundle.py", *args)
-        return open_or_enqueue(log, caller, bundle, body)
+        return build(log, caller, bundle, body, "create_bundle.py", *args)
 
     return start_job(caller, "create", work)
 
@@ -606,8 +605,7 @@ def fetch(caller, query, body):
     check_task(bundle, body)
 
     def work(log):
-        run_script(log, "fetch_bundle.py", name, "--no-open")
-        return open_or_enqueue(log, caller, bundle, body)
+        return build(log, caller, bundle, body, "fetch_bundle.py", name, "--no-open")
 
     return start_job(caller, "fetch", work)
 
@@ -620,6 +618,26 @@ def open_bundle(caller, query, body):
     if "task" in body:
         return 202, enqueue(caller, bundle, body)
     return start_job(caller, "open", lambda log: open_or_enqueue(log, caller, bundle, body))
+
+
+def set_building(bundle, building):
+    with state_lock:
+        state = read_state()
+        others = [name for name in state.get("building", []) if name != bundle]
+        state["building"] = others + [bundle] * building
+        write_state(state)
+
+
+def build(log, caller, bundle, body, script, *args):
+    for_agent = "task" in body
+    if for_agent:
+        set_building(bundle, True)
+    try:
+        run_script(log, script, *args)
+        return open_or_enqueue(log, caller, bundle, body)
+    finally:
+        if for_agent:
+            set_building(bundle, False)
 
 
 def open_or_enqueue(log, caller, bundle, body):
@@ -700,6 +718,10 @@ def main():
     SOCKET.unlink(missing_ok=True)
     os.umask(0o077)
     server = Server(str(SOCKET), Handler)
+    with state_lock:
+        state = read_state()
+        state["building"] = []
+        write_state(state)
     print(f"listening on {SOCKET}", flush=True)
     keep_launching()
     server.serve_forever()
