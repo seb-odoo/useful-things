@@ -10,9 +10,8 @@ set -u
 vsix="$HOME/.claude-autoopen/claude-autoopen-0.0.1.vsix"
 installed="$HOME/.vscode-server/extensions/local.claude-autoopen-0.0.1/extension.js"
 
-# Skip the install when the code is the same, as it deletes the folder other windows load from the
-# shared extensions dir. Only extension.js compares: the install adds a __metadata key to its
-# package.json.
+# Skip the install when the code is the same. Only extension.js compares: the install adds a
+# __metadata key to its package.json.
 python3 - "$vsix" <<'EOF' 2>/dev/null | cmp -s - "$installed" && exit 0
 import sys, zipfile
 sys.stdout.buffer.write(zipfile.ZipFile(sys.argv[1]).read("extension/extension.js"))

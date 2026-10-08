@@ -66,11 +66,12 @@
     // VS Code copies ~/.gitconfig into the container without the files it includes, and the git
     // identity lives in this one.
     "source=@HOME@/.gitconfig.local,target=/home/vscode/.gitconfig.local,type=bind,readonly,z",
-    // Persist VS Code's extensions across bundles/rebuilds so they install once, not per container.
+    // VS Code's extensions, kept over a rebuild. One store per bundle, as two servers writing the
+    // same extensions.json corrupt it. extensions.py hard-links each store from a template.
     // Bind (not a named volume) because no-new-privileges/cap-drop ALL means no runtime sudo to chown
     // a root-owned volume; keep-id + updateRemoteUserUID maps vscode -> the host user, so a dir of
     // that user is writable. Lowercase z: shared SELinux relabel for the parallel containers.
-    "source=@CACHE_ROOT@/devcontainer/vscode-server-extensions,target=/home/vscode/.vscode-server/extensions,type=bind,z",
+    "source=@CACHE_ROOT@/devcontainer/vscode-extensions/${localWorkspaceFolderBasename},target=/home/vscode/.vscode-server/extensions,type=bind,z",
     // The shell helpers, reached as BASH_ENV and through the ~/.bash_aliases symlink the image
     // makes. The directory and not the file: a bind of a file pins its inode, and an editor that
     // writes by renaming over it leaves every running container on the dead copy, silently.
@@ -96,7 +97,7 @@
   ],
   // Runs on the host before each start: a missing mount source stops the container from starting.
   // claude-autoopen closes the "Press any key" terminal Dev Containers opens for initializeCommand.
-  "initializeCommand": "mkdir -p @STATE_ROOT@/bundle-ctl/sock @STATE_ROOT@/ssh-github-mux/request @STATE_ROOT@/ssh-github-mux/sock && python3 @USEFUL_THINGS@/devcontainer/claude-config.py ${localWorkspaceFolderBasename}",
+  "initializeCommand": "mkdir -p @STATE_ROOT@/bundle-ctl/sock @STATE_ROOT@/ssh-github-mux/request @STATE_ROOT@/ssh-github-mux/sock && python3 @USEFUL_THINGS@/devcontainer/claude-config.py ${localWorkspaceFolderBasename} && python3 @USEFUL_THINGS@/devcontainer/extensions.py ${localWorkspaceFolderBasename} ${localWorkspaceFolder}",
   // Reached via the host nginx proxy (~/repo/useful-things/proxy) by bundle name, so don't let
   // every window forward Odoo to the same host port and collide.
   "portsAttributes": {

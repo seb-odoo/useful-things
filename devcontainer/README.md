@@ -42,6 +42,19 @@ revokes every other one. Each container gets its own `session-env`, `shell-snaps
 of the Claude extension (the permission mode of each session, kept over a rebuild), made by
 [`claude-config.py`](claude-config.py) before every start.
 
+Each container also gets its own VS Code extension store, made by
+[`extensions.py`](extensions.py) before every start. A VS Code server rewrites `extensions.json` in
+place and locks nothing between processes, so two servers on one store corrupt it, and every window
+opened after that loads no extension. The stores are hard-link clones of a template only the host
+writes (`~/.cache/devcontainer/vscode-extensions-template`): what a server installed goes to the
+template at its bundle's next start, and reaches another bundle at the next start that finds its
+container down. The files are the same inodes in every store, so a write in place to an extension's
+file in one container reaches the others. An uninstall in one bundle is not followed:
+
+```bash
+python3 devcontainer/extensions.py --remove <publisher.name>   # drops it from every store
+```
+
 Postgres cannot tell a container from the host (same uid on the same socket), so the role must not
 be a superuser, or `COPY ... TO PROGRAM` runs commands on the host:
 
