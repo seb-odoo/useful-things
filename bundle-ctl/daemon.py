@@ -500,8 +500,32 @@ def launch_queued():
         write_state(state)
 
 
+def log_addresses(*containers):
+    """Print the bundle or the container behind each address, as a gateway log shows only that."""
+    inspect = subprocess.run(
+        ["podman", "inspect", *containers],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    for container in json.loads(inspect.stdout or "[]"):
+        folder = (container["Config"].get("Labels") or {}).get("devcontainer.local_folder")
+        name = os.path.basename(folder) if folder else container["Name"]
+        for network in (container["NetworkSettings"].get("Networks") or {}).values():
+            if network.get("IPAddress"):
+                print(f"address {network['IPAddress']} {name}", flush=True)
+
+
 def keep_launching():
     def on_events():
+        running = subprocess.run(
+            ["podman", "ps", "-q"],
+            capture_output=True,
+            check=False,
+            text=True,
+        ).stdout.split()
+        if running:
+            log_addresses(*running)
         while True:
             proc = subprocess.Popen(
                 [
@@ -514,12 +538,15 @@ def keep_launching():
                     "--filter",
                     "event=died",
                     "--format",
-                    "{{.ID}}",
+                    "{{.ID}} {{.Status}}",
                 ],
                 stdout=subprocess.PIPE,
                 text=True,
             )
-            for _line in proc.stdout:
+            for line in proc.stdout:
+                container, _, status = line.strip().partition(" ")
+                if status == "start":
+                    log_addresses(container)
                 launch_safely()
             proc.wait()
             time.sleep(5)

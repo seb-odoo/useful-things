@@ -12,7 +12,9 @@ agent of each window, as VS Code forwards the SSH agent into the containers it a
 - The caller is identified by the kernel: the peer pid of the connection, its cgroup
   (`libpod-<id>.scope`), then the `devcontainer.local_folder` label of that container. A process on
   the host is `host`; any container that is not a bundle gets 403.
-- One journal line per request: `journalctl --user -u bundle-ctl -f`.
+- One journal line per request: `journalctl --user -u bundle-ctl -f`. Also `address <ip> <name>`
+  for each container that starts (and each one running when the daemon starts), the bundle or the
+  container name behind an address, which the gateway logs see alone.
 
 ## Install
 
