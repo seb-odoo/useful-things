@@ -294,6 +294,76 @@ repo its head, push, behind, conflict and PR. A dev container cannot run it (no 
 podman): there `gbs` is `bctl branches`, and `bctl --json branches` gives the JSON, both run on
 the host.
 
+#### Groups
+
+Each bundle sits in one group, the most urgent among its repos. On screen, in this order:
+
+| Group | A bundle is there when |
+| --- | --- |
+| Open in VS Code | its dev container runs, so a window is open on it |
+| Waits on me | no PR, a branch that is not pushed, a conflict, a failing check other than security, review threads someone else wrote last, changes requested, a staging error, a delegation with no r+ |
+| Drafts | a draft of mine with nothing to do and no CI running |
+| Waits on a reviewer | the PR is ready and nobody answered yet |
+| Waits on CI | checks are running, or an r+ waits for them |
+| Waits on agents | it would wait on me, but a bundle-ctl agent is being built, queued, running or between two turns |
+| Waits on mergebot | ready or staged, merged or closed |
+| Not mine | the branch of a colleague: no `BUNDLE_SUFFIX`, the fw-bot heads of my PRs count as mine |
+
+When the repos of a bundle disagree, the bundle takes the first of: me, CI, drafts, reviewer,
+mergebot, not mine.
+
+Inside a group, a bundle delegated to me that still waits for my r+ comes first. Then:
+
+- Waits on me goes by closeness to a merge: review feedback only, then red (conflict, failing
+  check, staging error), then work in progress (no PR, not pushed, failing style).
+- Waits on a reviewer goes by the colour of its ask tag, red first, the oldest wait first.
+- Every other group shows the oldest first.
+
+The ask tag of Waits on a reviewer says who asked, and how long ago:
+
+| Tag | Meaning | Colour |
+| --- | --- | --- |
+| `not asked since push 2h` | the last ask is older than the last push, so it no longer counts | yellow |
+| `auto-requested 3d` | only a bot or the opening of the PR asked for a review | dim under a day, yellow from a day, red from a week |
+| `asked 3d` | a comment or a review request of mine | dim under 2 days, yellow from 2 days, red from a week |
+
+#### Columns
+
+Age, link, branch, repo with the PR as `repo/number`, push, behind, conflict, state.
+
+- Age is dim past a week. The branch is cyan when a worktree has it checked out.
+- Push is `+N` / `-N` against `odoo-dev/<branch>`, or `no remote`.
+- Behind counts the commits of `odoo/<base>` the branch lacks: yellow from 150, red above 500.
+- Conflict says whether a rebase on the base would conflict (`git merge-tree`).
+- A merged PR leaves push, behind and conflict empty: the local copy is stale by then. A closed
+  one keeps them, the local work may still matter.
+
+One meaning per colour, in every column: red is act now, yellow is act soon, green is nothing
+left to do, dim is background, cyan is a worktree, magenta is merged.
+
+#### State
+
+- The agent tag comes first: `building`, `queued N`, `running`, `waiting`, and a yellow
+  `agent stopped` in Waits on me.
+- CI counts as running while the main check of the repo is not posted on the head commit
+  (`ci/runbot`, or `ci/runbot (light)` on a draft, `ci/documentation`, `ci/design-theme`,
+  `ci/sfu`). Right after a push only the quick checks are there, all green, and the PR would read
+  as done.
+- A failure posted by an older runbot batch than the newest one on the commit is dropped while a
+  check is still pending. `codeowner` is never shown, `security` is dim as it gets overridden,
+  `style` is yellow.
+- The mergebot state is read from `mergebot.odoo.com/<owner>/<repo>/pull/<n>.json`: green for
+  `ready` and `staged`, a green `r+` for approved, red for an error. It also tells a PR the bot
+  merged from one that was closed, which GitHub shows the same way.
+- `delegated`, in green, is a review or a comment holding `@robodoo delegate+`.
+- Review threads count apart: a yellow `N threads` when someone else wrote last, a dim
+  `N replied` when I did.
+- The state of a colleague's PR is dim as a whole.
+
+All the PRs come from one GraphQL query, one alias per repo and branch, sent while git works. A
+`gh` call that fails or a mergebot that does not answer prints `PR state incomplete, <source>:
+<reason>` under the table, and `create PR` only shows when the PR query worked.
+
 ### bundle_open.py
 
 Opens an `odoo-bundle://<bundle>` link: in its dev container when the worktree exists, like
