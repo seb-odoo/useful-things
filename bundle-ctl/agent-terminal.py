@@ -159,6 +159,8 @@ def main():
             ending = f"claude ended with code {code}"
     except Failure as error:
         ending = str(error)
+        (agent / "result.md").write_text(f"{ending}\n")
+        (agent / "done").write_text("failed\n")
     finally:
         (agent / "terminal").unlink(missing_ok=True)
         taken_over = (agent / "handoff").exists() or (container and has_window(container))

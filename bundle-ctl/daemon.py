@@ -461,11 +461,13 @@ def launch_queued():
         now = time.time()
         open_windows = get_open_windows()
         # Count a window from its launch, as its container shows in podman only once it is built.
+        # Free the slot of a launch agent-terminal.py marked `done`: no container could start.
         state["launches"] = {
             bundle: launched
             for bundle, launched in state["launches"].items()
             if now - launched < LAUNCH_GRACE
             and get_worktree_bundle_folder(bundle) not in open_windows
+            and (get_mtime(get_agent_folder(bundle) / "done") or 0) < launched
         }
         # VS Code drops a launch at logout or when it restores its windows: take the task again.
         queued = {item["bundle"] for item in state["queue"]}
@@ -603,6 +605,24 @@ def local_branches(bundle):
     ]
 
 
+def is_made(folder):
+    """Whether create or fetch reached its end: the dev container config is their last step."""
+    return os.path.isfile(f"{folder}/.devcontainer/devcontainer.json")
+
+
+def check_unpushed(bundle, script):
+    for repo in local_branches(bundle):
+        unpushed = subprocess.run(
+            ["git", "log", "--oneline", f"refs/heads/{bundle}", "--not", "--remotes"],
+            capture_output=True,
+            check=False,
+            cwd=get_repo_folder(repo),
+            text=True,
+        ).stdout.strip()
+        if unpushed:
+            raise Refused(f"{bundle} has unpushed commits in {repo}, {script} would reset them")
+
+
 def create(caller, query, body):
     base, name = body.get("base"), body.get("name") or ""
     if base not in STICKY_BUNDLES:
@@ -615,8 +635,10 @@ def create(caller, query, body):
     branch_repos = body.get("branch_repos") or ["odoo"]
     if unknown := set(branch_repos) - set(get_repos()):
         raise ValueError(f"unknown repos: {', '.join(sorted(unknown))}")
-    if os.path.exists(get_worktree_bundle_folder(bundle)) or local_branches(bundle):
+    folder = get_worktree_bundle_folder(bundle)
+    if is_made(folder) or (not os.path.exists(folder) and local_branches(bundle)):
         raise Refused(f"{bundle} already exists")
+    check_unpushed(bundle, "gnb")
     check_task(bundle, body)
 
     def work(log):
@@ -641,18 +663,9 @@ def fetch(caller, query, body):
         base = get_base_from_bundle_name(bundle)
     if not BUNDLE_NAME.fullmatch(bundle) or base not in STICKY_BUNDLES:
         raise ValueError(f"not a bundle name: {bundle}")
-    if os.path.exists(get_worktree_bundle_folder(bundle)):
+    if is_made(get_worktree_bundle_folder(bundle)):
         raise Refused(f"{bundle} is already here, open it instead")
-    for repo in local_branches(bundle):
-        unpushed = subprocess.run(
-            ["git", "log", "--oneline", f"refs/heads/{bundle}", "--not", "--remotes"],
-            capture_output=True,
-            check=False,
-            cwd=get_repo_folder(repo),
-            text=True,
-        ).stdout.strip()
-        if unpushed:
-            raise Refused(f"{bundle} has unpushed commits in {repo}, pfb would reset them")
+    check_unpushed(bundle, "pfb")
     check_task(bundle, body)
 
     def work(log):
@@ -665,6 +678,8 @@ def open_bundle(caller, query, body):
     bundle = body.get("bundle") or ""
     if not BUNDLE_NAME.fullmatch(bundle) or not os.path.isdir(get_worktree_bundle_folder(bundle)):
         raise ValueError(f"no bundle folder for {bundle}")
+    if not is_made(get_worktree_bundle_folder(bundle)):
+        raise Refused(f"{bundle} is half-made (its create or fetch failed): do it again")
     check_task(bundle, body)
     if "task" in body:
         return 202, enqueue(caller, bundle, body)

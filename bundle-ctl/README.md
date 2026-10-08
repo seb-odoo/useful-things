@@ -28,10 +28,14 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `GET /whoami` | the caller's bundle, base and parent |
 | `GET /branches` | `gbs --json` run on the host; `?format=table&width=N`: its colored table |
 | `GET /status` | every local bundle branch: base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open, and its agent: state (`running`, `waiting`, `done`, or `stopped` when its terminal or its window closed before the verdict: nothing runs it any more, and a new task may replace it; a stopped agent carries its `task` text, to queue it again as it was), when it was queued, when its run started (none for a task no window took), when it ended, `stale` when a branch of the bundle got a commit, or its dev remote ref an update (the mtime of its reflog), after that end, retry, and the last write to a session titled with the bundle, its own or an earlier agent's tab Seb went on in (`active N min ago`, or `idle since HH:MM` after 15 minutes; a tab opened by hand has no title and does not count); the queue, each task with its priority, the bundle that queued it and when |
-| `POST /create` | `gnb` with `--no-push`, then a window, or with a task its agent; refused when the bundle exists |
-| `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window, or with a task its agent; refused when the folder exists or a branch has unpushed commits |
-| `POST /open` | a VS Code window on a bundle folder, or with a task its agent |
+| `POST /create` | `gnb` with `--no-push`, then a window, or with a task its agent; refused when the bundle exists or a branch has unpushed commits |
+| `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window, or with a task its agent; refused when the bundle is here or a branch has unpushed commits |
+| `POST /open` | a VS Code window on a bundle folder, or with a task its agent; refused on a half-made bundle |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
+
+A `create` or a `fetch` that fails leaves a half-made bundle: a folder with no `.devcontainer`,
+which the scripts link last, so no container can start in it. The same `create` or `fetch` sent
+again finishes it.
 
 `create`, `fetch` and `open` answer 202 with a job id, and the jobs run one at a time, as two
 fetches of one repo collide on its remote refs. A job takes the `DISPLAY` and `SSH_AUTH_SOCK` of the
@@ -73,6 +77,9 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
 - A claude that ends on an error leaves the terminal open on its exit code and on the tool calls
   and answers of the session (`client/stream-format.py` on its transcript): claude draws on the
   alternate screen, which empties when claude ends.
+- When no container could start (a failed `up`), the terminal stays open on the reason, and the
+  wrapper writes it to `result.md` with `done` as `failed`: `bctl status` shows it to the bundle
+  that queued the task, and the launch gives its slot back at the next check of the queue.
 
 A VS Code window opened on the bundle (the folder icon of `gbs`, `ocode`) attaches to the same
 container and takes the session over, before or after its verdict: claude-autoopen sees
@@ -102,12 +109,12 @@ remote connection ("Cannot reconnect"). A run that ends without a tool call open
 | `terminal` | `agent-terminal.py` | the agent runs in a terminal of the host; removed when it ends, or by `client/agent-takeover.py` when a window takes the session over |
 | `session` | `agent-terminal.py`, claude-autoopen | the session id, chosen before the run |
 | `run.lock` | `client/agent-run.sh` | the run started, its mtime is when; a relaunched terminal does not run it again |
-| `result.md` | `client/stream-format.py`, `client/agent-stop.py` | the last answer of the run |
+| `result.md` | `client/stream-format.py`, `client/agent-stop.py`, `agent-terminal.py` | the last answer of the run, or why no container could start |
 | `mode` | `client/stream-format.py`, `client/agent-takeover.py` | the permission mode of the run, which the tab resumes the session in |
 | `handoff` | `client/agent-run.sh`, `client/agent-takeover.py` | claude was stopped for the tab to go on: `claude -p` at its first tool call, or the claude of a terminal |
 | `retry` | `client/agent-run.sh` | `auth failed, retry n/3`: the run failed to authenticate and starts again |
 | `waiting` | `client/agent-stop.py` | a turn of the terminal or of the tab ended without a verdict; its mtime is when |
-| `done` | `client/agent-run.sh`, `client/agent-stop.py` | the exit code of `claude -p`, or `interrupted`; `0` when a turn of the terminal or of the tab ends on a verdict |
+| `done` | `client/agent-run.sh`, `client/agent-stop.py`, `agent-terminal.py` | the exit code of `claude -p`, or `interrupted`; `0` when a turn of the terminal or of the tab ends on a verdict; `failed` when no container could start |
 | `tab-opened` | claude-autoopen | the tab was opened on the session once |
 | `restarted` | claude-autoopen, `client/agent-takeover.py` | the window was reloaded once for the handoff, or needs no reload (the session was idle when taken over) |
 
@@ -125,7 +132,7 @@ session of the container is busy or waits for a permission.
 `bctl create|fetch|open ... --task-file FILE` queues the task, and the daemon starts agents from
 the queue while fewer than `BUNDLE_CTL_MAX_WINDOWS` (default 8) bundle containers run, the agents
 in a terminal and Seb's windows alike, plus the agents launched in the last 15 minutes whose
-container is not up yet.
+container is not up yet and that did not fail to start.
 `--priority N` (-100 to 100, default 0) puts the task ahead of the ones with a lower priority; equal
 priorities leave in arrival order. The answer is the task's place (`queued`), or `started` when a
 slot was free. `bctl status` lists the queue in that order with each priority, the bundle that
