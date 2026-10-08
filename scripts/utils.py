@@ -344,8 +344,12 @@ class UtilsRunner(Runner):
         """Same, for any folder holding a .devcontainer, bundle or not."""
         self.run(["code", "--folder-uri", self._devcontainer_folder_uri(folder)])
 
-    def prepare_worktree_bundle_folder(self, *, bundle_name):
-        worktree_bundle_folder = get_worktree_bundle_folder(bundle_name)
+    def prepare_worktree_bundle_folder(self, *, bundle_name, base=None):
+        worktree_bundle_folder = (
+            f"{get_worktree_base_folder(base)}/{bundle_name}"
+            if base
+            else get_worktree_bundle_folder(bundle_name)
+        )
         self.run(["mkdir", "-p", worktree_bundle_folder])
         self.run(
             [

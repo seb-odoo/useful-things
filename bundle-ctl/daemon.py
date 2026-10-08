@@ -75,7 +75,7 @@ def load_config():
 
 CONFIG = load_config()
 BRANCHES_TIMEOUT = 120
-BUNDLE_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,99}")
+BUNDLE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 CONTAINER_ID = re.compile(r"/libpod-(?:payload-)?([0-9a-f]{64})")
 GITHUB_OWNER = re.compile(r"[A-Za-z0-9-]{1,39}")
 HOST = "host"
@@ -583,12 +583,14 @@ def fetch(caller, query, body):
     name = body.get("name") or ""
     if pr_match := PR_URL.match(name):
         name = pr_match[0]
-        bundle = get_pr(*pr_match.groups(), "headRefName")["headRefName"]
+        pr = get_pr(*pr_match.groups(), "baseRefName,headRefName")
+        bundle, base = pr["headRefName"], pr["baseRefName"]
     else:
         owner, _, bundle = name.rpartition(":")
         if owner and not GITHUB_OWNER.fullmatch(owner):
             raise ValueError(f"not a runbot label: {name}")
-    if not BUNDLE_NAME.fullmatch(bundle) or get_base_from_bundle_name(bundle) not in STICKY_BUNDLES:
+        base = get_base_from_bundle_name(bundle)
+    if not BUNDLE_NAME.fullmatch(bundle) or base not in STICKY_BUNDLES:
         raise ValueError(f"not a bundle name: {bundle}")
     if os.path.exists(get_worktree_bundle_folder(bundle)):
         raise Refused(f"{bundle} is already here, open it instead")

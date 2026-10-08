@@ -1,5 +1,8 @@
 """Various utility methods."""
 
+import glob
+import os
+
 import fire
 
 from config import (
@@ -20,9 +23,13 @@ def get_base_for_repo(base, repo):
 
 
 def get_base_from_bundle_name(bundle_name):
-    """Get the base name from a bundle name."""
+    """Get the base name from a bundle name, or from the folder of a PR fetched on another base."""
     parts = bundle_name.split("-")
-    return f"{parts[0]}-{parts[1]}" if parts[0] == "saas" else parts[0]
+    base = f"{parts[0]}-{parts[1]}" if parts[0] == "saas" else parts[0]
+    if os.path.isdir(f"{WORKTREE_CONTAINER}/{base}/{bundle_name}"):
+        return base
+    folders = glob.glob(f"{glob.escape(WORKTREE_CONTAINER)}/*/{glob.escape(bundle_name)}")
+    return os.path.basename(os.path.dirname(folders[0])) if len(folders) == 1 else base
 
 
 def get_bundle_name_from_base_and_name(base, name):

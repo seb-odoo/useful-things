@@ -21,7 +21,6 @@ from commands import (
     get_repo_folder,
     get_repos,
     get_sticky_bundles,
-    get_worktree_bundle_folder,
     get_worktree_bundle_repo_folder,
 )
 from rich import print
@@ -48,20 +47,17 @@ def get_bundle_names_from_pr(github_repo, number):
         print(f"[red]{error}[/red]")
         raise SystemExit(1) from None
     head, base = pr["headRefName"], pr["baseRefName"]
-    if not head.startswith(f"{base}-"):
-        print(f"Head [red]{head}[/red] does not start with [red]{base}-[/red], not a bundle name")
-        raise SystemExit(1)
     dev_remote = get_remote_dev_repo(repo)
     dev_github_repo = get_github_repo(repo, dev_remote)
     head_github_repo = pr["headRepository"]["nameWithOwner"]
     if head_github_repo == dev_github_repo:
-        return head, head
+        return head, head, base
     fork_remote = head_github_repo.split("/")[0]
     dev_url = git(repo, "remote", "get-url", dev_remote)
     fork_url = dev_url.replace(dev_github_repo, head_github_repo)
     runner.add_fork_remote(repo=repo, remote=fork_remote, url=fork_url)
     fork_remote_by_repo[repo] = fork_remote
-    return head, f"{fork_remote}:{head}"
+    return head, f"{fork_remote}:{head}", base
 
 
 def get_runbot_bundle(name):
@@ -78,7 +74,7 @@ def get_runbot_bundle(name):
 
 dev_remotes = {get_remote_dev_repo(repo) for repo in get_repos()}
 if pr_match := PR_URL.match(args.name):
-    bundle_name, runbot_bundle_name = get_bundle_names_from_pr(*pr_match.groups())
+    bundle_name, runbot_bundle_name, pr_base = get_bundle_names_from_pr(*pr_match.groups())
     response = get_runbot_bundle(runbot_bundle_name)
 elif (owner := args.name.rpartition(":")[0]) and owner not in dev_remotes:
     response = get_runbot_bundle(args.name)
@@ -87,12 +83,11 @@ elif (owner := args.name.rpartition(":")[0]) and owner not in dev_remotes:
         print(f"Runbot has no PR for [red]{args.name}[/red]")
         raise SystemExit(1)
     github_repo = re.search(r"github\.com[:/](.+?)(?:\.git)?$", pr["remote"])[1]
-    bundle_name, _ = get_bundle_names_from_pr(github_repo, pr["name"])
+    bundle_name, _, pr_base = get_bundle_names_from_pr(github_repo, pr["name"])
 else:
-    bundle_name = clean_bundle_name(args.name)
+    bundle_name, pr_base = clean_bundle_name(args.name), None
     response = get_runbot_bundle(bundle_name)
-base = get_base_from_bundle_name(bundle_name)
-wt_bundle_folder = get_worktree_bundle_folder(bundle_name)
+cross_base = bool(pr_base) and not bundle_name.startswith(f"{pr_base}-")
 
 runbot_bundle = bool(response.get("id"))
 if not runbot_bundle:
@@ -130,7 +125,7 @@ if not runbot_bundle and not any([*make_branch_by_repo.values(), *local_branch_b
     print(f"Bundle [red]{bundle_name}[/red] found on neither runbot, the dev remotes nor locally")
     raise SystemExit(1)
 
-runner.prepare_worktree_bundle_folder(bundle_name=bundle_name)
+runner.prepare_worktree_bundle_folder(bundle_name=bundle_name, base=pr_base)
 
 
 def handle_commit(runner: UtilsRunner, commit):
@@ -170,7 +165,7 @@ def handle_commit(runner: UtilsRunner, commit):
             ),
         )
     else:
-        if commit_hash := commit.get("name"):
+        if (commit_hash := commit.get("name")) and not cross_base:
             fetch_ref = target_ref = commit_hash
         else:
             base = get_base_for_repo(get_base_from_bundle_name(bundle_name), repo)

@@ -19,6 +19,9 @@ Worktrees land in `WORKTREE_ROOT/<base>/<bundle_name>/<repo>/`. Both come from
 [`../devcontainer/config.env.example`](../devcontainer/config.env.example); the examples below are
 from a machine where they are `--seb` and `/home/seb/src/odoo`.
 
+A PR fetched by `fetch_bundle.py` keeps its branch name. When that name starts with another version
+than the PR target (or with none), its folder sits under the target, which is then its base.
+
 ### create_bundle.py
 
 Creates a new bundle locally for a given base branch across all configured repos.
