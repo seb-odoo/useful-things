@@ -28,6 +28,44 @@ After `podman run`, Dev Containers waits for the start event of the container on
 started at the same moment. When that `podman events` subscribes after the start, the window stays
 on "Starting Dev Container" forever, so the wrapper adds `--since` to replay the event.
 
+## How it runs Odoo
+
+The container reuses the venv built on the host (`VENV`, mounted read-only): nothing is installed
+with pip inside. The rest follows from that choice.
+
+- **The base stays Ubuntu 22.04.** The `python-ldap` of the venv is linked against OpenLDAP 2.5,
+  which Jammy ships. A newer base has 2.6 and breaks it.
+- **System packages go in the [`Dockerfile`](../Dockerfile), at build time**: Python 3.12, the LDAP
+  and SASL libraries, the postgres client, fonts, wkhtmltopdf, Chrome from Google's own package
+  (Jammy's `chromium` is a snap stub that does not run in a container) and Node 22 (Jammy's is too
+  old for Odoo's JS tooling). The container runs with `no-new-privileges` as a non-root user, so
+  nothing can be installed once it is up.
+- **The venv is first in `PATH` for every process**, through `containerEnv`, with the standard
+  directories written out: `${containerEnv:PATH}` is not expanded there and would replace the whole
+  `PATH`. The `python3` of the image is 3.10, and `odoo-bin` or a test started outside an
+  interactive shell would pick it.
+- **The database is the host's**, over its unix socket: `/var/run/postgresql` is mounted, with
+  `PGHOST` and `PGUSER` set. `--userns=keep-id` gives the container the uid of the host user, so
+  peer authentication sees the same role as on the host. The host's postgres only listens on
+  localhost, so TCP from the container would be refused.
+- **Browser tests run inside.** Odoo starts Chrome with `--no-sandbox --disable-dev-shm-usage`,
+  which is enough under `--cap-drop=ALL` and the small `/dev/shm`.
+- **Commits are not signed in a container.** The `.git/config` shared with the host asks for a
+  signature with a key the container does not have. `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_0` and
+  `GIT_CONFIG_VALUE_0` in `containerEnv` turn it off there only: the environment wins over every
+  config file, and the host keeps signing.
+- **The shell helpers reach non-interactive shells** through `BASH_ENV`, which points at
+  `container-rw/devcontainer.bashrc`: an agent runs `bash -c`, which does not read `~/.bashrc`.
+
+A change to `containerEnv` needs a rebuild: "Reopen in Container" reuses the container that exists.
+A container left half-made by a failed build blocks the next start with "container state
+improper": remove it.
+
+`scripts/utils.py` opens a bundle straight in its container, with
+`code --folder-uri vscode-remote://dev-container+<hex>/workspace`, where `<hex>` is the hex of the
+JSON VS Code itself writes for that container: the host path, the podman socket, the config file.
+If a VS Code release changes that format, read the new one in its storage and match it.
+
 ## What a container cannot reach
 
 The container runs as the host user (`--userns=keep-id`), so a file it can write is a file the host
