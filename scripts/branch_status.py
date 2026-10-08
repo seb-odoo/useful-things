@@ -11,6 +11,7 @@ Examples:
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+import functools
 import json
 import os
 import re
@@ -85,6 +86,7 @@ MERGEBOT_TIMEOUT = 3
 MINOR_CHECKS = {"ci/security": "dim", "ci/style": "yellow"}
 PR_STYLES = {"closed": "red", "draft": "dim", "merged": "magenta"}
 PR_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
+PRS_PER_QUERY = 5
 R_PLUS_STATES = ("approved", "merged", "ready", "staged")
 REVIEW_TAGS = {"APPROVED": "approved", "CHANGES_REQUESTED": "[red]changes[/red]"}
 
@@ -138,6 +140,7 @@ def get_local_branches(repo):
     ]
 
 
+@functools.cache
 def get_github_repo(repo, remote=None):
     url = git(repo, "remote", "get-url", remote or get_remote_repo(repo))
     return re.search(r"github\.com[:/](.+?)(?:\.git)?$", url)[1]
@@ -155,7 +158,7 @@ def get_pr(github_repo, number, fields):
     return json.loads(res.stdout)
 
 
-def get_prs(pairs):
+def read_prs(pairs):
     queries = []
     for i, (repo, branch) in enumerate(pairs):
         owner, name = get_github_repo(repo).split("/")
@@ -182,7 +185,7 @@ def get_prs(pairs):
         text=True,
     )
     if res.returncode:
-        return None, [f"GitHub: {res.stderr.strip() or 'gh failed'}"]
+        raise ValueError(res.stderr.strip() or "gh failed")
     data = json.loads(res.stdout)["data"]
     prs = {
         pair: nodes[0]
@@ -193,6 +196,17 @@ def get_prs(pairs):
         pr["asked"], pr["auto_asked"] = get_asks(pr, data["viewer"]["login"])
         pr["viewer"] = data["viewer"]["login"]
         pr["pushed"] = get_last_push(pr)
+    return prs
+
+
+def get_prs(pairs):
+    chunks = [pairs[i : i + PRS_PER_QUERY] for i in range(0, len(pairs), PRS_PER_QUERY)]
+    try:
+        with ThreadPoolExecutor(max_workers=max(len(chunks), 1)) as executor:
+            found = list(executor.map(read_prs, chunks))
+    except ValueError as error:
+        return None, [f"GitHub: {error}"]
+    prs = {pair: pr for chunk in found for pair, pr in chunk.items()}
     errors = set()
     with ThreadPoolExecutor(max_workers=max(len(prs), 1)) as executor:
         for pr, (state, error) in zip(prs.values(), executor.map(get_mergebot_state, prs.values())):

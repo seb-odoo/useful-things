@@ -360,9 +360,11 @@ left to do, dim is background, cyan is a worktree, magenta is merged.
   `N replied` when I did.
 - The state of a colleague's PR is dim as a whole.
 
-All the PRs come from one GraphQL query, one alias per repo and branch, sent while git works. A
-`gh` call that fails or a mergebot that does not answer prints `PR state incomplete, <source>:
-<reason>` under the table, and `create PR` only shows when the PR query worked.
+All the PRs come from GraphQL queries of 5 branches each, one alias per repo and branch, sent
+together while git works: GitHub takes about 0.1 s per PR of a query, so one query for every
+branch made the table wait 5 s or more. A `gh` call that fails or a mergebot that does not answer
+prints `PR state incomplete, <source>: <reason>` under the table, and `create PR` only shows when
+the PR queries worked.
 
 ### bundle_open.py
 
