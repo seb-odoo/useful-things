@@ -111,11 +111,11 @@ def print_status(answer):
         if row["agent"]:
             repos += f"  [agent {format_agent(row['agent'])}]"
         print(f"{row['bundle']:60} {state:7} {repos}")
-    print(f"\n{answer['windows']}/{answer['max_windows']} bundles running")
+    print(f"\n{answer['agents']}/{answer['max_agents']} agents in a terminal")
     idle = [
         f"{row['bundle']} ({row['agent']['activity']})" for row in answer["bundles"] if is_idle(row)
     ]
-    if answer["queue"] and answer["windows"] >= answer["max_windows"] and idle:
+    if answer["queue"] and answer["agents"] >= answer["max_agents"] and idle:
         print(f"the queue waits for a slot; agents done and idle, to close: {', '.join(idle)}")
     for position, item in enumerate(answer["queue"], 1):
         since = f", since {item['queued']}" if item.get("queued") else ""

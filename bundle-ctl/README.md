@@ -130,9 +130,10 @@ log is then the only trace of the error. The tab opens in place of a pinned Clau
 session of the container is busy or waits for a permission.
 
 `bctl create|fetch|open ... --task-file FILE` queues the task, and the daemon starts agents from
-the queue while fewer than `BUNDLE_CTL_MAX_WINDOWS` (default 8) bundle containers run, the agents
-in a terminal and Seb's windows alike, plus the agents launched in the last 15 minutes whose
-container is not up yet and that did not fail to start.
+the queue while fewer than `BUNDLE_CTL_MAX_AGENTS` (default 8) agents hold a terminal, plus the
+ones launched in the last 15 minutes whose container is not up yet and that did not fail to start.
+A bundle open in a VS Code window does not count, a session a window took over included: the cap
+bounds what the agents spend, and Seb's windows are his.
 `--priority N` (-100 to 100, default 0) puts the task ahead of the ones with a lower priority; equal
 priorities leave in arrival order. The answer is the task's place (`queued`), or `started` when a
 slot was free. `bctl status` lists the queue in that order with each priority, the bundle that

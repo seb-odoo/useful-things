@@ -84,14 +84,14 @@ CONTAINER_ID = re.compile(r"/libpod-(?:payload-)?([0-9a-f]{64})")
 GITHUB_OWNER = re.compile(r"[A-Za-z0-9-]{1,39}")
 HOST = "host"
 JOB_WAIT = 50
+MAX_AGENTS = int(
+    os.environ.get("BUNDLE_CTL_MAX_AGENTS") or CONFIG.get("BUNDLE_CTL_MAX_AGENTS") or 8,
+)
 MAX_BODY = 64 * 1024
 MAX_PRIORITY = 100
 MAX_RELAUNCHES = 3
 MAX_TASK = 32 * 1024
 MAX_WIDTH = 400
-MAX_WINDOWS = int(
-    os.environ.get("BUNDLE_CTL_MAX_WINDOWS") or CONFIG.get("BUNDLE_CTL_MAX_WINDOWS") or 8,
-)
 NAME = re.compile(r"[a-z0-9](?:[a-z0-9.]|-(?!-)){0,79}")
 SESSION_VARIABLES = (
     "DBUS_SESSION_BUS_ADDRESS",
@@ -233,8 +233,9 @@ def status(caller, query, body):
             },
         )
     return 200, {
+        "agents": count_agents(get_open_windows()),
         "bundles": rows,
-        "max_windows": MAX_WINDOWS,
+        "max_agents": MAX_AGENTS,
         "queue": [
             dict(
                 bundle=item["bundle"],
@@ -244,7 +245,6 @@ def status(caller, query, body):
             )
             for item in state["queue"]
         ],
-        "windows": len(get_open_windows()),
     }
 
 
@@ -386,6 +386,10 @@ def get_open_windows():
     }
 
 
+def count_agents(folders):
+    return sum(os.path.exists(f"{folder}/.agent/terminal") for folder in folders)
+
+
 def check_task(bundle, body):
     if "task" not in body:
         if "priority" in body:
@@ -502,7 +506,7 @@ def launch_queued():
             bundle = item["bundle"]
             is_running = get_worktree_bundle_folder(bundle) in open_windows
             container = is_running and get_bundle_container(bundle)
-            has_room = len(open_windows) + len(state["launches"]) < MAX_WINDOWS
+            has_room = count_agents(open_windows) + len(state["launches"]) < MAX_AGENTS
             if container and has_window(container):
                 # The claude-autoopen extension of the window starts it.
                 write_task(item)
