@@ -6,6 +6,7 @@ Read by the bundle-ctl daemon and by branch_status.py.
 import json
 import pathlib
 import re
+import subprocess
 import time
 
 from commands import get_worktree_bundle_folder
@@ -30,6 +31,29 @@ def read_text(path):
 
 def get_agent_folder(bundle):
     return pathlib.Path(get_worktree_bundle_folder(bundle)) / ".agent"
+
+
+def get_bundle_container(bundle):
+    """The id of the bundle's running container, None when it has none."""
+    folder = get_worktree_bundle_folder(bundle)
+    out = subprocess.run(
+        ["podman", "ps", "--quiet", "--filter", f"label=devcontainer.local_folder={folder}"],
+        capture_output=True,
+        check=False,
+        text=True,
+    ).stdout.split()
+    return out[0] if out else None
+
+
+def has_window(container):
+    """Whether a VS Code window is attached to the container: its server then runs in it."""
+    out = subprocess.run(
+        ["podman", "top", container, "args"],
+        capture_output=True,
+        check=False,
+        text=True,
+    ).stdout
+    return "server-main.js" in out
 
 
 def get_mtime(path):

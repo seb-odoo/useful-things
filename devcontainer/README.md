@@ -59,7 +59,8 @@ What stays open on purpose:
   host runs them;
 - the filestore and the databases;
 - the SSH agent VS Code forwards into the containers it attaches to, which lets an agent fetch and
-  push;
+  push (the container of an agent in a terminal has none, and reaches github.com through
+  ssh-github-mux alone);
 - all of `~/.claude`, settings, hooks, skills and its `.git` included, and the bundles' shared
   `.claude`: they get fixed and committed from containers too, while the host's Claude runs them.
 - the bundles' shared `.vscode`, as its workspace settings are changed from the container windows.

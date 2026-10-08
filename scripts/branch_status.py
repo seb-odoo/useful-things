@@ -55,7 +55,7 @@ BEHIND_STYLES = ((501, "red"), (150, "yellow"), (0, "default"))
 CI_RUNNING = "[dim]ci running[/dim]"
 DELEGATE = re.compile(r"@robodoo\b.*\bdelegate[+=]")
 GROUPS = {
-    "open": "Open in VS Code",
+    "open": "Running",
     "me": "Waits on me",
     "drafts": "Drafts",
     "reviewer": "Waits on a reviewer",

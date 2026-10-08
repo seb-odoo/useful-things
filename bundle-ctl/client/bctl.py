@@ -11,10 +11,11 @@
 TASK is --task TEXT or --task-file FILE, with an optional --priority N.
 
 create, fetch and open run as a job on the host: bctl prints its log until it ends, which can take
-minutes for a new bundle. With a task, the window is an agent window: it opens once it fits under
-the window cap, runs the task with Claude, then shows the session in a Claude tab. The queue runs
-the highest priority first (-100 to 100, default 0), then in arrival order: bctl status lists it in
-that order.
+minutes for a new bundle. With a task, no window opens: once the bundle fits under the cap of
+running bundles, Claude runs the task in a terminal of the host, in the bundle's container, and a
+VS Code window opened on the bundle later takes the session over in a Claude tab. A bundle whose
+window is already open runs the task in that window. The queue runs the highest priority first
+(-100 to 100, default 0), then in arrival order: bctl status lists it in that order.
 
 branches is gbs run on the host: the table, or with --json the data agents read.
 """
@@ -110,12 +111,12 @@ def print_status(answer):
         if row["agent"]:
             repos += f"  [agent {format_agent(row['agent'])}]"
         print(f"{row['bundle']:60} {state:7} {repos}")
-    print(f"\n{answer['windows']}/{answer['max_windows']} windows open")
+    print(f"\n{answer['windows']}/{answer['max_windows']} bundles running")
     idle = [
         f"{row['bundle']} ({row['agent']['activity']})" for row in answer["bundles"] if is_idle(row)
     ]
     if answer["queue"] and answer["windows"] >= answer["max_windows"] and idle:
-        print(f"the queue waits for a window; agent windows done and idle: {', '.join(idle)}")
+        print(f"the queue waits for a slot; agents done and idle, to close: {', '.join(idle)}")
     for position, item in enumerate(answer["queue"], 1):
         since = f", since {item['queued']}" if item.get("queued") else ""
         print(
@@ -130,7 +131,7 @@ def print_table(answer):
 
 def add_task_arguments(parser):
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--task", help="run this prompt in the window, unattended")
+    group.add_argument("--task", help="run this prompt in the bundle, with Claude")
     group.add_argument("--task-file", type=pathlib.Path, help="same, read from a file")
     parser.add_argument(
         "--priority",

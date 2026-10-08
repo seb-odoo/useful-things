@@ -17,6 +17,7 @@ import os
 import pathlib
 import re
 import secrets
+import shlex
 import socket
 import socketserver
 import struct
@@ -38,7 +39,9 @@ from agents import (  # noqa: E402
     format_time,
     get_agent,
     get_agent_folder,
+    get_bundle_container,
     get_mtime,
+    has_window,
     read_state,
     read_text,
 )
@@ -74,6 +77,7 @@ def load_config():
 
 
 CONFIG = load_config()
+AGENT_TERMINAL = CONFIG.get("AGENT_TERMINAL") or "gnome-terminal --window --title {bundle} --"
 BRANCHES_TIMEOUT = 120
 BUNDLE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 CONTAINER_ID = re.compile(r"/libpod-(?:payload-)?([0-9a-f]{64})")
@@ -86,7 +90,7 @@ MAX_RELAUNCHES = 3
 MAX_TASK = 32 * 1024
 MAX_WIDTH = 400
 MAX_WINDOWS = int(
-    os.environ.get("BUNDLE_CTL_MAX_WINDOWS") or CONFIG.get("BUNDLE_CTL_MAX_WINDOWS") or 4,
+    os.environ.get("BUNDLE_CTL_MAX_WINDOWS") or CONFIG.get("BUNDLE_CTL_MAX_WINDOWS") or 8,
 )
 NAME = re.compile(r"[a-z0-9](?:[a-z0-9.]|-(?!-)){0,79}")
 SESSION_VARIABLES = (
@@ -280,25 +284,19 @@ def run_script(log, script, *args):
         raise Refused(f"{script} exited with {res.returncode}")
 
 
-def open_window(log, bundle):
+def run_in_session(log, *command, scope=True):
+    """Run a command of the graphical session in a unit of its own.
+
+    Started here, it would die with the daemon's cgroup. A scope waits for the command to end, a
+    service does not.
+    """
     env = session_env()
     if not env.get("DISPLAY") and not env.get("WAYLAND_DISPLAY"):
         raise Refused("no graphical session to open a window in")
-    log.write(f"opening {bundle}\n")
-    log.flush()
-    folder = get_worktree_bundle_folder(bundle)
-    # Run code in a scope of its own, as a VS Code started here would die with the daemon's cgroup.
+    session = [f"--setenv={key}={env[key]}" for key in SESSION_VARIABLES if key in env]
+    unit = ["--scope"] if scope else session
     res = subprocess.run(
-        [
-            "systemd-run",
-            "--user",
-            "--scope",
-            "--collect",
-            "--quiet",
-            "code",
-            "--folder-uri",
-            UtilsRunner()._devcontainer_folder_uri(folder),
-        ],
+        ["systemd-run", "--user", "--collect", "--quiet", *unit, *command],
         env=env,
         stdin=subprocess.DEVNULL,
         stdout=log,
@@ -307,7 +305,22 @@ def open_window(log, bundle):
         timeout=60,
     )
     if res.returncode:
-        raise Refused(f"code exited with {res.returncode}")
+        raise Refused(f"{command[0]} exited with {res.returncode}")
+
+
+def open_window(log, bundle):
+    log.write(f"opening {bundle}\n")
+    log.flush()
+    folder = get_worktree_bundle_folder(bundle)
+    run_in_session(log, "code", "--folder-uri", UtilsRunner()._devcontainer_folder_uri(folder))
+
+
+def open_terminal(log, bundle):
+    log.write(f"starting the agent of {bundle} in a terminal\n")
+    log.flush()
+    terminal = shlex.split(AGENT_TERMINAL.format(bundle=bundle))
+    agent = [sys.executable, str(HERE / "agent-terminal.py"), bundle]
+    run_in_session(log, *terminal, *agent, scope=False)
 
 
 def run_job(job, work):
@@ -484,15 +497,24 @@ def launch_queued():
         has_display = env.get("DISPLAY") or env.get("WAYLAND_DISPLAY")
         queue = []
         for item in state["queue"]:
-            if get_worktree_bundle_folder(item["bundle"]) in open_windows:
+            bundle = item["bundle"]
+            is_running = get_worktree_bundle_folder(bundle) in open_windows
+            container = is_running and get_bundle_container(bundle)
+            has_room = len(open_windows) + len(state["launches"]) < MAX_WINDOWS
+            if container and has_window(container):
+                # The claude-autoopen extension of the window starts it.
                 write_task(item)
-            elif has_display and len(open_windows) + len(state["launches"]) < MAX_WINDOWS:
+            elif container and (get_agent_folder(bundle) / "terminal").exists():
+                # Wait for its last terminal to close: the `died` event comes back here.
+                queue.append(item)
+            elif has_display and (is_running or has_room):
                 write_task(item)
-                state["launches"][item["bundle"]] = now
+                if not is_running:
+                    state["launches"][bundle] = now
                 start_job(
                     item["parent"],
                     "spawn",
-                    lambda log, bundle=item["bundle"]: open_window(log, bundle),
+                    lambda log, bundle=bundle: open_terminal(log, bundle),
                 )
             else:
                 queue.append(item)

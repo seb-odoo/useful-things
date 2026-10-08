@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Write .agent/done once a turn of an agent run handed over to the Claude tab ends on a verdict.
+"""Write .agent/done once a turn of an agent run ends on a verdict.
 
-agent-run.sh stops `claude -p` at its first tool call and the tab reruns that turn. A turn that
-ends without a verdict line (a background job still running) leaves .agent/waiting instead.
+The run is either in a terminal (agent-terminal.py) or handed over to the Claude tab: agent-run.sh
+stops `claude -p` at its first tool call and the tab reruns that turn. A turn that ends without a
+verdict line (a background job still running) leaves .agent/waiting instead.
 """
 
 import json
@@ -25,7 +26,7 @@ def main():
     hook = json.load(sys.stdin)
     if (
         hook.get("session_id") != read("session")
-        or read("handoff") is None
+        or (read("handoff") is None and read("terminal") is None)
         or read("done") is not None
     ):
         return

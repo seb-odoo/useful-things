@@ -135,11 +135,15 @@ async function writeAgentFile(root, name, text) {
 
 async function runAgent(root) {
   const client = process.env.BUNDLE_CTL_CLIENT;
-  if (
-    !client ||
-    (await readAgentFile(root, "task.md")) === undefined ||
-    (await isAgentStopped(root))
-  ) {
+  if (!client || (await readAgentFile(root, "task.md")) === undefined) {
+    return false;
+  }
+  if ((await readAgentFile(root, "terminal")) !== undefined) {
+    // Free the session from its host terminal: the poll opens the tab once .agent/terminal is gone.
+    childProcess.execFile("python3", [`${client}/agent-takeover.py`], () => {});
+    return true;
+  }
+  if (await isAgentStopped(root)) {
     return false;
   }
   let session = await readAgentFile(root, "session");
@@ -260,7 +264,10 @@ async function pollAgent(context, root) {
   if ((await readAgentFile(root, "session")) === undefined) {
     await runAgent(root);
   } else if ((await readAgentFile(root, "tab-opened")) === undefined) {
-    if (await isAgentStopped(root)) {
+    if (
+      (await isAgentStopped(root)) &&
+      (await readAgentFile(root, "terminal")) === undefined
+    ) {
       await showClaudeTab(context, root);
     }
   } else if (
@@ -310,7 +317,7 @@ async function showClaudeTab(context, root) {
   if (session) {
     await seedSessionMode(context, root, session);
     // Closing a tab stops the turn running in it.
-    replaced = !hasBusySession() && getClaudeTab((tab) => tab.isPinned);
+    replaced = hasBusySession() ? undefined : getClaudeTab((tab) => tab.isPinned);
   }
   if (session || !getClaudeTab()) {
     await openClaudeTab(session, replaced?.group.viewColumn);

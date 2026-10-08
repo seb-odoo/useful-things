@@ -9,7 +9,8 @@ Claude locks a token refresh and saves the new token in that folder, and any cop
 mounted from a folder of the bundle, as the host's Claude sources its own. So is extension-storage,
 where the Claude tab keeps the permission mode of each session: in the container, a rebuild wipes
 it and the tab resumes in plan. /workspace is marked trusted in the .claude.json of that folder, or
-`claude -p` ignores the permissions of the bundle's .claude.
+`claude -p` ignores the permissions of the bundle's .claude. The onboarding is marked done there
+too, or the interactive claude of an agent terminal stops on its theme picker.
 """
 
 import json
@@ -32,9 +33,10 @@ def main():
     state_path = pathlib.Path(values["HOME"]) / ".claude" / ".claude.json"
     state = json.loads(state_path.read_text()) if state_path.is_file() else {}
     workspace = state.setdefault("projects", {}).setdefault("/workspace", {})
-    if workspace.get("hasTrustDialogAccepted"):
+    if workspace.get("hasTrustDialogAccepted") and state.get("hasCompletedOnboarding"):
         return
     workspace["hasTrustDialogAccepted"] = True
+    state["hasCompletedOnboarding"] = True
     tmp = state_path.with_name(".claude.json.tmp")
     tmp.write_text(json.dumps(state, indent=2) + "\n")
     tmp.replace(state_path)
