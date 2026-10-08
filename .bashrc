@@ -12,7 +12,16 @@ alias qunit_fail="python qunit_until_fail.py -m mail -m mail_enterprise -m test_
 alias pfb="python ~/repo/useful-things/scripts/fetch_bundle.py"
 alias ocode="python ~/repo/useful-things/scripts/open_bundle.py"
 alias fcode="python ~/repo/useful-things/scripts/open_folder.py"
-alias orepo="code ~/repo/repo.code-workspace"
+function orepo() {
+	local config="${XDG_CONFIG_HOME:-$HOME/.config}/odoo-dev/config.env"
+	local folder
+	folder=$(sed -n 's/^BUNDLE_CTL_HOST_FOLDER=//p' "${config}" 2>/dev/null)
+	if [[ "${1:-}" == "--host" || -z "${folder}" ]]; then
+		code ~/repo/repo.code-workspace
+	else
+		python ~/repo/useful-things/scripts/open_folder.py "${folder}"
+	fi
+}
 alias delete_bundle="python ~/repo/useful-things/scripts/delete_bundle.py"
 alias hoot='npm run start --'
 alias hoot_mail='npm run start -- -m "@mail"'

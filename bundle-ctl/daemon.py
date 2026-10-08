@@ -83,6 +83,7 @@ BUNDLE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 CONTAINER_ID = re.compile(r"/libpod-(?:payload-)?([0-9a-f]{64})")
 GITHUB_OWNER = re.compile(r"[A-Za-z0-9-]{1,39}")
 HOST = "host"
+HOST_FOLDER = CONFIG.get("BUNDLE_CTL_HOST_FOLDER")
 JOB_WAIT = 50
 MAX_AGENTS = int(
     os.environ.get("BUNDLE_CTL_MAX_AGENTS") or CONFIG.get("BUNDLE_CTL_MAX_AGENTS") or 8,
@@ -146,6 +147,8 @@ def identify(connection):
         return HOST
     match = CONTAINER_ID.search(cgroup)
     folder = match and get_container_folder(match[1])
+    if folder and folder == HOST_FOLDER:
+        return HOST
     bundle = os.path.basename(folder or "")
     if not bundle or folder != get_worktree_bundle_folder(bundle):
         return None

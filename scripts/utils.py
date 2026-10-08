@@ -22,8 +22,6 @@ from commands import (
     get_worktree_container_folder,
 )
 
-# Mirrors `workspaceFolder` in useful-things/devcontainer.json (kept in sync by hand: the JSONC file
-# isn't trivially parseable and the value is stable for this setup).
 WORKSPACE_FOLDER = "/workspace"
 
 _USEFUL_THINGS_FOLDER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -227,7 +225,13 @@ class UtilsRunner(Runner):
             },
         }
         hex_authority = json.dumps(authority, separators=(",", ":")).encode().hex()
-        return f"vscode-remote://dev-container+{hex_authority}/{WORKSPACE_FOLDER}"
+        try:
+            with open(config_file) as file:
+                declared = re.search(r'"workspaceFolder"\s*:\s*"(/[^"$]*)"', file.read())
+        except OSError:
+            declared = None
+        workspace_folder = declared[1] if declared else WORKSPACE_FOLDER
+        return f"vscode-remote://dev-container+{hex_authority}/{workspace_folder}"
 
     @staticmethod
     def _node_modules_ready(node_modules):
