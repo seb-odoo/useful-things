@@ -10,9 +10,10 @@ loads no extension. So each bundle mounts a store of its own, cloned with hard l
 template only this script writes, and a new bundle still starts with every extension installed.
 
 Before each start, under a lock: what the server of the bundle installed goes to the template
-(per extension, the greater version then the later install wins), then a bundle that differs from
-the template is cloned again. Only while its container is down, as a running server is the one
-writer of its store. An uninstall in a bundle is not followed: --remove lists the extension in
+(per extension the greater version wins, and for a .vsix of the same version the later install),
+then a bundle that differs from the template, or holds a copy of its own of the same files, is
+cloned again. Only while its container is down, as a running server is the one writer of its
+store. An uninstall in a bundle is not followed: --remove lists the extension in
 the template's `removed` file, delete its line there to allow it again.
 """
 
@@ -53,20 +54,34 @@ def write(store, by_id):
     tmp.replace(store / MANIFEST)
 
 
+def installed(entry):
+    metadata = entry.get("metadata") or {}
+    # Compare the install time of a .vsix only, as a failed gallery update rewrites that time.
+    return metadata.get("installedTimestamp", 0) if metadata.get("source") == "vsix" else 0
+
+
 def key(entries):
     return max(
-        (
-            tuple(int(part) for part in re.findall(r"\d+", entry["version"])),
-            (entry.get("metadata") or {}).get("installedTimestamp", 0),
-        )
+        (tuple(int(part) for part in re.findall(r"\d+", entry["version"])), installed(entry))
         for entry in entries
     )
 
 
-def state(by_id):
+def inode(folder):
+    try:
+        return (folder / "package.json").stat().st_ino
+    except OSError:
+        return 0
+
+
+def state(store, by_id):
     if by_id is None:
         return None
-    return {(e["relativeLocation"], key([e])) for entries in by_id.values() for e in entries}
+    return {
+        (entry["relativeLocation"], key([entry]), inode(store / entry["relativeLocation"]))
+        for entries in by_id.values()
+        for entry in entries
+    }
 
 
 def folders(by_id):
@@ -104,7 +119,7 @@ def harvest(source, root, template, store, skip):
 
 
 def clone(template, store, own, mine):
-    keep = {name for name, _ in (state(mine) or set()) & state(template)}
+    keep = {name for name, *_ in (state(own, mine) or set()) & state(store, template)}
     for path in own.iterdir():
         if path.name in keep:
             continue
@@ -151,7 +166,7 @@ def sync(template, store, root, own, folder):
     mine = read(own)
     if mine:
         harvest(mine, own, template, store, skip)
-    if not template or state(mine) == state(template):
+    if not template or state(own, mine) == state(store, template):
         return
     if not any(own.iterdir()) or not is_running(folder):
         clone(template, store, own, mine)
