@@ -397,6 +397,8 @@ def check_task(bundle, body):
     if "task" not in body:
         if "priority" in body:
             raise ValueError("priority: only with a task")
+        if body.get("resume"):
+            raise ValueError("resume: only with a task")
         return
     task, priority = body["task"], body.get("priority", 0)
     if not isinstance(task, str) or not task.strip() or len(task) > MAX_TASK:
@@ -414,6 +416,12 @@ def check_task(bundle, body):
         raise Refused(f"an agent already works in {bundle}")
     if any(item["bundle"] == bundle for item in state["queue"]):
         raise Refused(f"{bundle} is already queued")
+    if body.get("resume"):
+        if not (get_agent_folder(bundle) / "session").exists():
+            raise Refused(f"{bundle} has no session to resume")
+        container = get_bundle_container(bundle)
+        if container and has_window(container):
+            raise Refused(f"{bundle} is open in a window: its session goes on in its Claude tab")
 
 
 def enqueue(caller, bundle, body):
@@ -432,6 +440,7 @@ def enqueue(caller, bundle, body):
                 "parent": caller,
                 "priority": priority,
                 "queued": time.time(),
+                "resume": bool(body.get("resume")),
                 "task": body["task"],
             },
         )
@@ -452,8 +461,9 @@ def write_task(item):
     ):
         history = folder / "history" / time.strftime("%Y%m%d-%H%M%S")
         history.mkdir(parents=True)
+        kept = {"history", "session"} if item.get("resume") else {"history"}
         for path in folder.iterdir():
-            if path.name != "history":
+            if path.name not in kept:
                 path.rename(history / path.name)
     folder.mkdir(exist_ok=True)
     (folder / "parent").write_text(f"{item['parent']}\n")

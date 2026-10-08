@@ -31,7 +31,7 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `GET /status` | every local bundle branch: base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open, and its agent: state (`running`, `waiting`, `done`, or `stopped` when its terminal or its window closed before the verdict: nothing runs it any more, and a new task may replace it; a stopped agent carries its `task` text, to queue it again as it was), when it was queued, when its run started (none for a task no window took), when it ended, `stale` when a branch of the bundle got a commit, or its dev remote ref an update (the mtime of its reflog), after that end, retry, and the last write to a session titled with the bundle, its own or an earlier agent's tab Seb went on in (`active N min ago`, or `idle since HH:MM` after 15 minutes; a tab opened by hand has no title and does not count); the queue, each task with its priority, the bundle that queued it and when |
 | `POST /create` | `gnb` with `--no-push`, then a window, or with a task its agent; refused when the bundle exists or a branch has unpushed commits |
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window, or with a task its agent; refused when the bundle is here or a branch has unpushed commits |
-| `POST /open` | a VS Code window on a bundle folder, or with a task its agent; refused on a half-made bundle |
+| `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`; refused on a half-made bundle |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
 
 A `create` or a `fetch` that fails leaves a half-made bundle: a folder with no `.devcontainer`,
@@ -148,7 +148,12 @@ seconds, even at the cap, as it takes no new container. A launched task nothing 
 of the queue, 3 times at most: a terminal asked for while the desktop session ends never starts.
 A new task moves the previous
 `.agent/` files of the bundle into `.agent/history/`, unless it is the same task relaunched before
-any run started. Closing the terminal or the window of an agent is Seb's call: nothing else stops a
+any run started. `bctl open BUNDLE --resume` leaves `session` in place: the terminal goes on with
+that session (`agent-run.sh` resumes a session that has a transcript), and the task is its next
+prompt, `Continue from where you left off.` when none is given. This is how an agent cut before its
+verdict (`stopped`) starts again with what it knew. It is refused when the bundle has no session,
+or is open in a window, where the session goes on in its Claude tab.
+Closing the terminal or the window of an agent is Seb's call: nothing else stops a
 container, and nothing deletes a bundle on its own. `done` only says the run reached its verdict,
 as Seb often goes on in the session: when the queue waits on the cap, `bctl status` names the
 agents that are done and idle, the ones he can close. A task for a bundle whose last session still

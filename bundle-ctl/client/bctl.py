@@ -6,7 +6,7 @@
     bctl branches [--json]
     bctl create BASE NAME [--branch-repo REPO]... [--no-open] [TASK]
     bctl fetch BUNDLE|PR_LINK|OWNER:BRANCH [--no-open] [TASK]
-    bctl open BUNDLE [TASK]
+    bctl open BUNDLE [TASK] [--resume]
 
 TASK is --task TEXT or --task-file FILE, with an optional --priority N.
 
@@ -16,6 +16,9 @@ running bundles, Claude runs the task in a terminal of the host, in the bundle's
 VS Code window opened on the bundle later takes the session over in a Claude tab. A bundle whose
 window is already open runs the task in that window. The queue runs the highest priority first
 (-100 to 100, default 0), then in arrival order: bctl status lists it in that order.
+
+open --resume gives the task to the last Claude session of the bundle as its next prompt, where a
+task alone starts a new session. Without a task, the session is told to go on.
 
 branches is gbs run on the host: the table, or with --json the data agents read.
 """
@@ -34,6 +37,7 @@ SOCKETS = (
     pathlib.Path(os.environ.get("XDG_STATE_HOME") or pathlib.Path.home() / ".local/state")
     / "bundle-ctl/sock/ctl.sock",
 )
+GO_ON = "Continue from where you left off."
 
 
 class UnixConnection(http.client.HTTPConnection):
@@ -187,6 +191,11 @@ def main():
     open_ = commands.add_parser("open", help="a VS Code window on a local bundle")
     open_.add_argument("bundle")
     add_task_arguments(open_)
+    open_.add_argument(
+        "--resume",
+        action="store_true",
+        help="go on with the bundle's last Claude session: the task is its next prompt",
+    )
     args = parser.parse_args()
 
     printer = None
@@ -211,6 +220,9 @@ def main():
         else:
             body = {"bundle": args.bundle}
         task = read_task(args)
+        if getattr(args, "resume", False):
+            body["resume"] = True
+            task = task or GO_ON
         if task is not None:
             body["task"] = task
         if args.priority is not None:

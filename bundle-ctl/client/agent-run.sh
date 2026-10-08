@@ -31,8 +31,12 @@ space_starts() {
 
 if [ -n "$terminal" ]; then
 	space_starts
+	start=(--session-id "$session")
+	if [ -e "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/-workspace/$session.jsonl" ]; then
+		start=(--resume "$session")
+	fi
 	# The mode `claude -p` runs in: the Claude tab does not restore the bundles' default, dontAsk.
-	exec claude --session-id "$session" -n "$ODOO_PROXY_HOST" --model default \
+	exec claude "${start[@]}" -n "$ODOO_PROXY_HOST" --model default \
 		--permission-mode auto -- "$(cat "$agent/task.md")"
 fi
 
