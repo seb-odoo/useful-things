@@ -27,11 +27,15 @@ alias hoot='npm run start --'
 alias hoot_mail='npm run start -- -m "@mail"'
 alias mailhog='~/gocode/bin/MailHog'
 
+# Start an app in its own scope, as systemd-oomd kills a whole cgroup at once.
+function own_scope() {
+	systemd-run --user --scope --collect --quiet "$@" </dev/null &>/dev/null &
+}
 function tog() {
-	terminator -l 'odoo gits' </dev/null &>/dev/null &
+	own_scope terminator -l 'odoo gits'
 }
 function tos() {
-	terminator -l 'odoo shell' </dev/null &>/dev/null &
+	own_scope terminator -l 'odoo shell'
 }
 
 alias ubash="source ~/.bashrc"
@@ -176,12 +180,12 @@ function manycurltime() {
 function gogogo() {
 	firefox &
 	tog &
-	code &
+	own_scope code
 	# git-cola -r ~/repo/odoo &
 	# git-cola -r ~/repo/enterprise &
 	# git-cola -r ~/repo/upgrade &
 	tos &
-	nohup google-chrome-stable > /dev/null 2>&1 &
+	own_scope nohup google-chrome-stable
 	nohup flatpak run com.discordapp.Discord > /dev/null 2>&1 &
 	echo "All set, have a wonderful day!" &
 	date
