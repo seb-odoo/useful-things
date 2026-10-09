@@ -56,6 +56,8 @@ def write_settings(claude, own):
     settings.pop("model", None)
     if picked:
         settings["model"] = picked
+    # An ask rule prompts even when a hook allowed the call, and in a container the hooks decide.
+    settings.get("permissions", {}).pop("ask", None)
     path.write_text(json.dumps(settings, indent=2) + "\n")
 
 

@@ -85,7 +85,8 @@ What a tab has to write is a file of the bundle, made by [`claude-config.py`](cl
 before every start:
 
 - `settings.json`, a copy of the host's, where a model picked in a tab is kept. Claude saves it by
-  rename, which fails on a mounted file, and then writes it in place.
+  rename, which fails on a mounted file, and then writes it in place. The copy has no `ask` rule:
+  such a rule prompts even when a hook allowed the call, and in a container the hooks decide.
 - the project `.claude`, a folder of the bundle where the files all bundles share (`CLAUDE.md`,
   `settings.json`) are links into a read-only mount, and `settings.local.json` is its own: an
   "always allow" holds for that bundle.
