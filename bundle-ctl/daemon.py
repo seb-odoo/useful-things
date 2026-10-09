@@ -54,6 +54,7 @@ from branch_status import (  # noqa: E402
     has_write_tree,
 )
 from commands import (  # noqa: E402
+    MADE,
     get_base_from_bundle_name,
     get_bundle_name_from_base_and_name,
     get_remote_dev_ref,
@@ -623,8 +624,8 @@ def local_branches(bundle):
 
 
 def is_made(folder):
-    """Whether create or fetch reached its end: the dev container config is their last step."""
-    return os.path.isfile(f"{folder}/.devcontainer/devcontainer.json")
+    """Whether create or fetch reached its end, where they leave this file (a link, before)."""
+    return os.path.exists(f"{folder}/{MADE}") or os.path.islink(f"{folder}/.devcontainer")
 
 
 def check_unpushed(bundle, script):

@@ -27,6 +27,8 @@ than the PR target (or with none), its folder sits under the target, which is th
 Creates a new bundle locally for a given base branch across all configured repos.
 Fetches the base branch, creates worktrees, and (if run from inside a repo dir) pushes a local branch to the dev remote.
 Links shared `node_modules`, runs web tooling setup, and opens the bundle in VS Code.
+The setup script (`enable.sh`) comes from the branch: with `HOST_BOX` in `config.env` it runs boxed,
+with no network, and a base with no `node_modules` yet takes the one of another bundle of that base.
 
 ```bash
 $ python scripts/create_bundle.py master test

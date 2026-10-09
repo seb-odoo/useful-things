@@ -12,8 +12,8 @@ base, and it still builds and runs. That is the point of generating the file rat
 one.
 
 Arrays append in repo-name order. A containerEnv key ending in `+` appends to the comma-separated
-value already there, so two fragments can add to one variable. @KEY@ placeholders come from
-config.py.
+value already there, so two fragments can add to one variable. A fragment naming others under
+"replaces" is merged in their place. @KEY@ placeholders come from config.py.
 """
 
 import argparse
@@ -97,14 +97,18 @@ def read_jsonc(path):
 
 
 def fragments(repo_root, target):
-    """Every fragment for this target, in repo-name order so the merge is reproducible."""
-    found = []
+    """Every fragment for this target, in repo-name order so the merge is reproducible.
+
+    A fragment that lists others under "replaces" takes their place for the targets it has.
+    """
+    found, replaced = [], set()
     for path in sorted(pathlib.Path(repo_root).glob("*/devcontainer.fragment.json")):
         fragment = read_jsonc(path)
         piece = fragment.get("targets", {}).get(target)
         if piece:
             found.append((fragment.get("name") or fragment.get("gateway") or path.parent.name, piece))
-    return found
+            replaced.update(fragment.get("replaces", []))
+    return [(name, piece) for name, piece in found if name not in replaced]
 
 
 def merge(into, piece, source):

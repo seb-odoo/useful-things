@@ -69,49 +69,77 @@ If a VS Code release changes that format, read the new one in its storage and ma
 ## What a container cannot reach
 
 The container runs as the host user (`--userns=keep-id`), so a file it can write is a file the host
-trusts. What the host runs or loads as config, and a container has no reason to change, is
-read-only: the shell helpers (`container-rw/`), the venv, the VS Code user settings and the socket
-folder of [`ssh-github-mux`](../ssh-github-mux/README.md) (host git goes through any socket there).
+trusts. The rule: the host never runs, and never loads as config, a file a bundle container can
+write. So these are read-only in a bundle: the shell helpers (`container-rw/`), the venv, the VS
+Code user settings, TestWarden and DiscussModelParser (the cache of the test-warden engine comes
+back writable over it), and what the next paragraphs name.
 
-Claude in a container uses the host's `~/.claude` as its config folder (`CLAUDE_CONFIG_DIR`), so
+**Claude.** A container uses the host's `~/.claude` as its config folder (`CLAUDE_CONFIG_DIR`), so
 it shares the host's login: a token refresh is locked and saved in that folder. Never give a
 container a copy or a link of `.credentials.json`: a refresh replaces the link with a copy and
-revokes every other one. Each container gets its own `session-env`, `shell-snapshots` and storage
-of the Claude extension (the permission mode of each session, kept over a rebuild), made by
-[`claude-config.py`](claude-config.py) before every start.
+revokes every other one. The root of the folder stays writable for that, and what a session takes
+as orders or runs comes back read-only over it: `CLAUDE.md`, `hooks`, `skills`, `bin`, `agents`,
+`commands`, `output-styles`, `plugins`, `external`, and the memory of the host sessions. The host's
+Claude reads the same files, so a hook a bundle could write would run on the host.
+What a tab has to write is a file of the bundle, made by [`claude-config.py`](claude-config.py)
+before every start:
 
-Each container also gets its own VS Code extension store, made by
-[`extensions.py`](extensions.py) before every start. A VS Code server rewrites `extensions.json` in
-place and locks nothing between processes, so two servers on one store corrupt it, and every window
-opened after that loads no extension. The stores are hard-link clones of a template only the host
-writes (`~/.cache/devcontainer/vscode-extensions-template`): what a server installed goes to the
-template at its bundle's next start, and reaches another bundle at the next start that finds its
-container down. The files are the same inodes in every store, so a write in place to an extension's
-file in one container reaches the others. An uninstall in one bundle is not followed:
+- `settings.json`, a copy of the host's, where a model picked in a tab is kept. Claude saves it by
+  rename, which fails on a mounted file, and then writes it in place.
+- the project `.claude`, a folder of the bundle where the files all bundles share (`CLAUDE.md`,
+  `settings.json`) are links into a read-only mount, and `settings.local.json` is its own: an
+  "always allow" holds for that bundle.
+- `session-env`, `shell-snapshots`, and the storage of the Claude extension (the permission mode
+  of each session, kept over a rebuild).
+
+A bundle agent that has a fix for one of the read-only files hands it over instead of writing it.
+
+**VS Code extensions.** Each container mounts a store of its own, read-only: code in an extension
+runs in a window, and a window can type in a terminal of the host. The stores are hard-link clones
+of a template only the host writes (`~/.cache/devcontainer/vscode-extensions-template`), made by
+[`extensions.py`](extensions.py) before every start, and a bundle is cloned again when its
+container is down and the template moved. A window cannot install or update an extension: the
+installer of the VS Code server runs on the template, in a throwaway container that mounts nothing
+else.
 
 ```bash
-python3 devcontainer/extensions.py --remove <publisher.name>   # drops it from every store
+python3 devcontainer/extensions.py --add <publisher.name or file.vsix>   # in the template
+python3 devcontainer/extensions.py --update                             # the newest of each
+python3 devcontainer/extensions.py --remove <publisher.name>            # drops it from every store
 ```
 
-Postgres cannot tell a container from the host (same uid on the same socket), so the role must not
-be a superuser, or `COPY ... TO PROGRAM` runs commands on the host:
+[`extensions-update.timer`](extensions-update.timer) runs the update once a day. The bundled
+claude-autoopen is added the same way after a change of its `.vsix`.
+
+**The container config.** The tools name it at `WORKTREE_ROOT/.devcontainer/devcontainer.json`
+(`get_devcontainer_config` in `scripts/commands.py`), never through the bundle folder: its
+`initializeCommand` and its mounts apply on the host at the next start, and a container writes its
+bundle folder. Open a bundle with `ocode`, a gbs link or `bctl`, which all carry that path.
+
+**GitHub.** A container has no key. Its git goes through the connection the host keeps open, by
+the mounts of the [`ssh-github-mux`](../ssh-github-mux/README.md) fragment at the root of this
+repo, where the socket folder is read-only (host git goes through any socket there). Whoever holds
+that socket pushes to any repo the account writes: a fragment of another repo can take its place
+(`"replaces"`, see `build.py`) to put a policy between a container and GitHub.
+
+**Postgres** cannot tell a container from the host (same uid on the same socket), so the role must
+not be a superuser, or `COPY ... TO PROGRAM` runs commands on the host:
 
 ```bash
 psql -d postgres -c "ALTER ROLE $USER NOSUPERUSER NOCREATEROLE"   # keeps CREATEDB
 ```
 
-What stays open on purpose:
+What stays open, and what closes it:
 
-- the bundle folder itself: anything the host runs inside a bundle (its git hooks, npm, odoo-bin)
-  runs code the container can change;
 - the shared `.git` of every repo, config and hooks included, as git has to work in a container
-  (`push -u`, upstreams): a `core.fsmonitor`, an alias or a hook written there runs in the host's git;
-- TestWarden and DiscussModelParser, which get fixed and committed from containers too, while the
-  host runs them;
-- the filestore and the databases;
-- the SSH agent VS Code forwards into the containers it attaches to, which lets an agent fetch and
-  push (the container of an agent in a terminal has none, and reaches github.com through
-  ssh-github-mux alone);
-- all of `~/.claude`, settings, hooks, skills and its `.git` included, and the bundles' shared
-  `.claude`: they get fixed and committed from containers too, while the host's Claude runs them.
-- the bundles' shared `.vscode`, as its workspace settings are changed from the container windows.
+  (`push -u`, upstreams): a `core.fsmonitor`, an alias or a hook written there runs in the git of
+  the host. So does what the host runs from a bundle folder, like the `enable.sh` of a fetched
+  branch. A machine closes both with `HOST_BOX` in `config.env`: a command that runs its arguments
+  with the bundle repos and nothing else of the machine. The bundle scripts run `enable.sh` through
+  it, with no network, and the git of the host can be a wrapper that does the same for these repos;
+- the filestore and the databases, which the bundles share;
+- the SSH agent VS Code forwards into the containers it attaches to (the container of an agent in
+  a terminal has none);
+- the bundles' shared `.vscode`, as its workspace settings are changed from the container windows;
+- a VS Code window trusts the container it is attached to: with the stores read-only no code of
+  ours or of a bundle gets into an extension, the rest is VS Code's own remote protocol.

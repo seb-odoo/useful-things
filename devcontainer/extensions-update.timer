@@ -1,0 +1,12 @@
+# See extensions-update.service.
+
+[Unit]
+Description=Update the VS Code extensions of the dev containers once a day
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=15min
+
+[Install]
+WantedBy=timers.target

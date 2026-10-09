@@ -1,0 +1,13 @@
+{
+  "name": "ssh-github-mux",
+  "targets": {
+    "odoo-dev": {
+      "mounts": [
+        "source=@USEFUL_THINGS@/ssh-github-mux,target=/etc/ssh/ssh_config.d,type=bind,readonly,z",
+        "source=@USEFUL_THINGS@/ssh-github-mux,target=/home/vscode/.local/share/ssh-github-mux,type=bind,readonly,z",
+        "source=@STATE_ROOT@/ssh-github-mux/request,target=/home/vscode/.local/state/ssh-github-mux/request,type=bind,z",
+        "source=@STATE_ROOT@/ssh-github-mux/sock,target=/home/vscode/.local/state/ssh-github-mux/sock,type=bind,readonly,z"
+      ]
+    }
+  }
+}

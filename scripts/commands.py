@@ -16,6 +16,8 @@ from config import (
     WORKTREE_CONTAINER,
 )
 
+MADE = ".made"
+
 
 def get_base_for_repo(base, repo):
     """Get the base a given repo builds against: repos without version branches live on master."""
@@ -116,6 +118,17 @@ def get_worktree_bundle_repo_folder(bundle_name, repo):
 def get_worktree_container_folder():
     """Get the worktree container folder."""
     return WORKTREE_CONTAINER
+
+
+def get_devcontainer_config(folder):
+    """The dev container config of a folder: its own, or for a bundle the one all bundles share.
+
+    The shared one is named by its own path and never through the bundle: a container writes its
+    bundle folder, and the config says what the host runs and mounts at the next start.
+    """
+    if os.path.realpath(folder).startswith(f"{os.path.realpath(WORKTREE_CONTAINER)}/"):
+        folder = WORKTREE_CONTAINER
+    return f"{folder}/.devcontainer/devcontainer.json"
 
 
 def clean_bundle_name(bundle_name):

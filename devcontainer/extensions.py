@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
-"""Give one bundle container its own VS Code extension store.
+"""Give one bundle container its VS Code extension store, and keep the template they come from.
 
     python3 extensions.py <bundle folder name> <bundle folder>   # initializeCommand, on the host
+    python3 extensions.py --add <extension id or .vsix>...       # install it in the template
+    python3 extensions.py --update [<extension id>...]           # the newest version, of all or these
     python3 extensions.py --remove <extension id>                # drop it from every store
+    python3 extensions.py --store <folder> --add|--update ...    # on another store than the template
 
-A VS Code server rewrites extensions.json in place and locks nothing between processes: two
-servers on one store end with a file that does not parse, and every window opened after that
-loads no extension. So each bundle mounts a store of its own, cloned with hard links from a
-template only this script writes, and a new bundle still starts with every extension installed.
+Each bundle mounts a store of its own, read-only, cloned with hard links from a template only this
+script writes. Code in an extension runs in a VS Code window, and a window can type in a terminal
+of the host: so a container must not be able to change an extension, its own or another bundle's.
+A store per bundle and not the template itself, so that an update of the template leaves a running
+window on the files it loaded.
 
-Before each start, under a lock: what the server of the bundle installed goes to the template
-(per extension the greater version wins, and for a .vsix of the same version the later install),
-then a bundle that differs from the template, or holds a copy of its own of the same files, is
-cloned again. Only while its container is down, as a running server is the one writer of its
-store. An uninstall in a bundle is not followed: --remove lists the extension in
-the template's `removed` file, delete its line there to allow it again.
+An extension is installed or updated in the template by the installer of the VS Code server, run in
+a throwaway container that mounts nothing else. Before each start, under a lock, a bundle whose
+container is down and whose store differs from the template is cloned again. --remove lists the
+extension in the template's `removed` file, delete its line there to allow it again. --store
+names the store of a container that is no bundle and mounts it read-only the same way.
 """
 
 import fcntl
@@ -29,6 +32,12 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import config  # noqa: E402
 
+# Where a dev container mounts its store: the installer records that path in the manifest.
+INSIDE = "/home/vscode/.vscode-server/extensions"
+INSTALLER = (
+    'server=$(ls -t /vscode/vscode-server/bin/linux-x64/*/bin/code-server | head -n1) &&'
+    f' exec "$server" --extensions-dir {INSIDE} "$@"'
+)
 MANIFEST = "extensions.json"
 
 
@@ -88,14 +97,6 @@ def folders(by_id):
     return {entry["relativeLocation"] for entries in by_id.values() for entry in entries}
 
 
-def link(source, target):
-    tmp = target.with_name(f".{target.name}.tmp")
-    shutil.rmtree(tmp, ignore_errors=True)
-    subprocess.run(["cp", "-al", str(source), str(tmp)], check=True)
-    shutil.rmtree(target, ignore_errors=True)
-    tmp.rename(target)
-
-
 def prune(store, by_id):
     keep = folders(by_id)
     for path in store.iterdir():
@@ -103,19 +104,44 @@ def prune(store, by_id):
             shutil.rmtree(path, ignore_errors=True)
 
 
-def harvest(source, root, template, store, skip):
-    """Take into the template the extensions `source` (a store at `root`) has newer."""
-    changed = False
-    for name, entries in source.items():
-        if name in skip or (name in template and key(entries) <= key(template[name])):
-            continue
-        for entry in entries:
-            link(root / entry["relativeLocation"], store / entry["relativeLocation"])
-        template[name] = entries
-        changed = True
-    if changed:
-        write(store, template)
+def listed():
+    """The extensions the dev container config of the bundles asks for."""
+    path = pathlib.Path(config.load()["WORKTREE_ROOT"]) / ".devcontainer/devcontainer.json"
+    try:
+        lines = [line for line in path.read_text().splitlines() if line[:2] != "//"]
+        return json.loads("\n".join(lines))["customizations"]["vscode"]["extensions"]
+    except (KeyError, OSError, ValueError):
+        return []
+
+
+def install(store, names, in_use=False):
+    """Install extensions in the template, by id or .vsix, at their newest version."""
+    if not names:
+        return 0
+    volumes, args = [], []
+    for name in names:
+        path = pathlib.Path(name)
+        if path.suffix == ".vsix" and path.is_file():
+            volumes += ["--volume", f"{path.resolve()}:/vsix/{path.name}:ro"]
+            name = f"/vsix/{path.name}"
+        args += ["--install-extension", name]
+    # No keep-id: the installer runs as the root of the container, which is the host user then.
+    # With keep-id it is a sub-uid, whose files the host user can neither hard-link nor remove.
+    command = ["podman", "run", "--rm", "--cap-drop=ALL"]
+    command += ["--security-opt=no-new-privileges", "--tmpfs", "/tmp", "--env", "HOME=/tmp"]
+    # The home of the image belongs to its own user: without capabilities, root cannot enter it.
+    command += ["--tmpfs", "/home/vscode"]
+    command += ["--volume", "vscode:/vscode:ro", "--volume", f"{store}:{INSIDE}", *volumes]
+    command += [config.load()["CONTAINER_BASE_IMAGE"], "sh", "-c", INSTALLER, "sh", *args, "--force"]
+    res = subprocess.run(command, check=False)
+    removed = store / "removed"
+    skip = set(removed.read_text().split()) if removed.is_file() else set()
+    template = {name: entries for name, entries in (read(store) or {}).items() if name not in skip}
+    write(store, template)
+    # A store a container mounts itself keeps the version a running window loaded.
+    if not in_use:
         prune(store, template)
+    return res.returncode
 
 
 def clone(template, store, own, mine):
@@ -157,15 +183,10 @@ def remove(template, store, name):
     print(f"to allow it again, delete its line in {store / 'removed'}")
 
 
-def sync(template, store, root, own, folder):
-    removed = store / "removed"
-    skip = set(removed.read_text().split()) if removed.is_file() else set()
-    if not template:
-        old = root / "vscode-server-extensions"
-        harvest(read(old) or {}, old, template, store, skip)
+def sync(template, store, own, folder):
+    if not template and install(store, listed()) == 0:
+        template.update(read(store) or {})
     mine = read(own)
-    if mine:
-        harvest(mine, own, template, store, skip)
     if not template or state(own, mine) == state(store, template):
         return
     if not any(own.iterdir()) or not is_running(folder):
@@ -175,21 +196,30 @@ def sync(template, store, root, own, folder):
 def main():
     root = pathlib.Path(config.load()["CACHE_ROOT"]) / "devcontainer"
     store = root / "vscode-extensions-template"
+    args, in_use = sys.argv[1:], False
+    if args[:1] == ["--store"]:
+        store, args, in_use = pathlib.Path(args[1]), args[2:], True
+    command, names = args[0], args[1:]
     own = None
-    if sys.argv[1] != "--remove":
-        bundle = sys.argv[1]
-        if not bundle or "/" in bundle or bundle.startswith("."):
-            sys.exit(f"not a bundle folder name: {bundle!r}")
-        own = root / "vscode-extensions" / bundle
+    if not command.startswith("--"):
+        if not command or "/" in command or command.startswith("."):
+            sys.exit(f"not a bundle folder name: {command!r}")
+        own = root / "vscode-extensions" / command
         own.mkdir(parents=True, exist_ok=True)
     store.mkdir(parents=True, exist_ok=True)
     with (store / ".lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         template = read(store) or {}
         if own:
-            sync(template, store, root, own, sys.argv[2])
+            sync(template, store, own, names[0])
+        elif command == "--remove":
+            remove(template, store, names[0])
+        elif command in ("--add", "--update"):
+            gallery = [name for name, entries in template.items() if not installed(entries[0])]
+            names = names or (gallery if command == "--update" else [])
+            sys.exit(install(store, names, in_use))
         else:
-            remove(template, store, sys.argv[2])
+            sys.exit(__doc__.strip())
 
 
 if __name__ == "__main__":

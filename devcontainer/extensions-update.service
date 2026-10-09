@@ -1,0 +1,13 @@
+# Takes the newest version of the VS Code extensions of the dev containers, see README.md.
+# A bundle cannot install or update one itself: its store is read-only.
+# Install as a systemd-user unit, with its timer:
+#   ln -sfn ~/repo/useful-things/devcontainer/extensions-update.service ~/.config/systemd/user/
+#   ln -sfn ~/repo/useful-things/devcontainer/extensions-update.timer ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now extensions-update.timer
+
+[Unit]
+Description=Newest version of the VS Code extensions of the dev containers
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/repo/useful-things/devcontainer/extensions.py --update

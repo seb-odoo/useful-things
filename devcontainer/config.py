@@ -8,6 +8,7 @@ the home directory or overridden in that config.
 
 import os
 import pathlib
+import re
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 HOME = pathlib.Path.home()
@@ -55,6 +56,7 @@ def load():
     }.items():
         values[key] = os.environ.get(key) or values.get(key) or default
     values["VENV"] = os.environ.get("VENV") or values.get("VENV") or f"{values['VENV_ROOT']}/odoo20"
+    values["HOST_PROJECT"] = re.sub(r"[^A-Za-z0-9]", "-", values["REPO_ROOT"])
     values["SHARED_CLAUDE"] = os.path.realpath(f"{values['WORKTREE_ROOT']}/.claude")
     values["USEFUL_THINGS"] = str(REPO)
     return values

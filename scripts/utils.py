@@ -2,6 +2,7 @@
 
 from collections import defaultdict
 from collections.abc import Iterable
+import glob
 import json
 import os
 import re
@@ -9,7 +10,9 @@ import re
 from command_runner import Runner, ignore_error
 from commands import (
     BUNDLE_SUFFIX,
+    MADE,
     get_base_from_bundle_name,
+    get_devcontainer_config,
     get_remote_dev_branch_name,
     get_remote_dev_repo,
     get_remote_dev_ref,
@@ -21,6 +24,7 @@ from commands import (
     get_worktree_bundle_repo_folder,
     get_worktree_container_folder,
 )
+from config import HOST_BOX
 
 WORKSPACE_FOLDER = "/workspace"
 
@@ -211,7 +215,7 @@ class UtilsRunner(Runner):
         Reproduces the `dev-container+<hex>` authority VS Code writes itself, so opening it reuses a
         running container (matched by the `devcontainer.local_folder` label) or builds+starts one.
         """
-        config_file = f"{bundle_folder}/.devcontainer/devcontainer.json"
+        config_file = get_devcontainer_config(bundle_folder)
         authority = {
             "hostPath": bundle_folder,
             "localDocker": False,
@@ -238,6 +242,15 @@ class UtilsRunner(Runner):
         """A node_modules is usable once npm install has created its `.bin` directory."""
         return os.path.isdir(os.path.join(node_modules, ".bin"))
 
+    def _seed_base_node_modules(self, runner, base_folder):
+        """Take the node_modules of a bundle of this base that has one, as the shared one."""
+        ready = sorted(glob.glob(f"{glob.escape(base_folder)}/*/odoo/node_modules/.bin"))
+        if ready:
+            odoo_wt = os.path.dirname(os.path.dirname(ready[0]))
+            runner.run(["rm", "-rf", f"{base_folder}/node_modules"])
+            runner.run(["cp", "-al", f"{odoo_wt}/node_modules", f"{base_folder}/node_modules"])
+            runner.run(["cp", f"{odoo_wt}/package-lock.json", f"{base_folder}/package-lock.json"])
+
     def _install_js_tooling(self, runner, *, bundle_name, base_folder):
         """Give the bundle's repos their node_modules and their web/tooling config files."""
         odoo_wt = get_worktree_bundle_repo_folder(bundle_name, "odoo")
@@ -254,6 +267,8 @@ class UtilsRunner(Runner):
         # idempotently - `npm install` no-ops when the tree already matches.
         base_node_modules = f"{base_folder}/node_modules"
         base_lock = f"{base_folder}/package-lock.json"
+        if not self._node_modules_ready(base_node_modules):
+            self._seed_base_node_modules(runner, base_folder)
         base_ready = self._node_modules_ready(base_node_modules)
         if base_ready:
             # Reuse: hard-link the shared node_modules into both repos and seed odoo's lockfile so
@@ -263,15 +278,23 @@ class UtilsRunner(Runner):
                 runner.run(["cp", "-al", base_node_modules, f"{repo_wt}/node_modules"])
             if os.path.exists(base_lock):
                 runner.run(["cp", base_lock, f"{odoo_wt}/package-lock.json"])
-        runner.run(
-            ["bash", "./odoo/addons/web/tooling/enable.sh"],
-            input="y\n" if has_enterprise else "n\n",
-        )
+        enable = ["bash", "./odoo/addons/web/tooling/enable.sh"]
+        if HOST_BOX:
+            # enable.sh and what npm runs come from the fetched branch: boxed, with no network.
+            offline = [f"npm_config_{key}" for key in ("offline=true", "audit=false", "fund=false")]
+            folder = get_worktree_bundle_folder(bundle_name)
+            enable = [HOST_BOX, "--dir", folder, "--", "env", *offline, *enable]
+        runner.run(enable, input="y\n" if has_enterprise else "n\n")
         if base_ready and has_enterprise:
             # enable.sh copies community's node_modules into enterprise's, so it lands one level
             # inside the hard-linked one: drop that full copy, nothing resolves through it.
             runner.run(["rm", "-rf", f"{enterprise_wt}/node_modules/node_modules"])
-        if not base_ready:
+        if not base_ready and not self._node_modules_ready(f"{odoo_wt}/node_modules"):
+            print(
+                "No node_modules yet for this base: run odoo/addons/web/tooling/enable.sh in the"
+                " bundle's container, the next bundle of the base takes it from there.",
+            )
+        elif not base_ready:
             # First worktree of this base: seed the shared base with hard links from the fresh
             # build, then re-link enterprise so both repos point at the same inodes.
             runner.run(["rm", "-rf", base_node_modules])
@@ -285,14 +308,7 @@ class UtilsRunner(Runner):
         bundle_folder = get_worktree_bundle_folder(bundle_name)
         base_folder = get_worktree_base_folder(get_base_from_bundle_name(bundle_name))
         runner = self.with_params(cwd=bundle_folder)
-        runner.run(
-            [
-                "ln",
-                "-sfn",
-                f"{get_worktree_container_folder()}/.devcontainer",
-                f"{bundle_folder}/.devcontainer",
-            ],
-        )
+        runner.run(["touch", f"{bundle_folder}/{MADE}"])
         self._install_js_tooling(runner, bundle_name=bundle_name, base_folder=base_folder)
         if open_window:
             runner.run(["code", "--folder-uri", self._devcontainer_folder_uri(bundle_folder)])

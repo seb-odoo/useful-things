@@ -34,12 +34,32 @@
     // absolute host paths; bind them at the same path (like the .git mounts above) so the symlinks
     // resolve in the container. Without this the workspace settings.json never loads, so
     // search.exclude (*.po/*.pot) is ignored and the Odoo extension can't read odools.toml.
+    // The project .claude of a bundle is a folder of its own (claude-config.py), so a tab can keep
+    // an "always allow" there. What the bundles share is linked into it from a read-only mount: a
+    // bundle that writes the shared CLAUDE.md or a hook gives orders to every other one.
     // The shared .claude may itself be a symlink on the host: SHARED_CLAUDE is the folder it
     // resolves to, as the mount needs the real directory, not the link.
-    "source=@SHARED_CLAUDE@,target=@WORKTREE_ROOT@/.claude,type=bind,Z",
+    "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/project,target=@WORKTREE_ROOT@/.claude,type=bind,z",
+    "source=@SHARED_CLAUDE@,target=/home/vscode/.claude-project,type=bind,readonly,z",
     "source=@WORKTREE_ROOT@/.vscode,target=@WORKTREE_ROOT@/.vscode,type=bind,Z",
     "source=@USEFUL_THINGS@/odools.toml,target=@USEFUL_THINGS@/odools.toml,type=bind,readonly,Z",
     "source=@HOME@/.claude,target=/home/vscode/.claude,type=bind,Z",
+    // What a session takes as orders or runs comes back read-only over it: the host's Claude reads
+    // the same files, so a hook written from a bundle would run on the host. The root stays
+    // writable, as the login is saved there by rename. settings.json is a copy of the bundle
+    // (claude-config.py), where a model picked in a tab is kept. HOST_PROJECT holds the memory of
+    // the host sessions.
+    "source=@HOME@/.claude/CLAUDE.md,target=/home/vscode/.claude/CLAUDE.md,type=bind,readonly,z",
+    "source=@HOME@/.claude/agents,target=/home/vscode/.claude/agents,type=bind,readonly,z",
+    "source=@HOME@/.claude/bin,target=/home/vscode/.claude/bin,type=bind,readonly,z",
+    "source=@HOME@/.claude/commands,target=/home/vscode/.claude/commands,type=bind,readonly,z",
+    "source=@HOME@/.claude/external,target=/home/vscode/.claude/external,type=bind,readonly,z",
+    "source=@HOME@/.claude/hooks,target=/home/vscode/.claude/hooks,type=bind,readonly,z",
+    "source=@HOME@/.claude/output-styles,target=/home/vscode/.claude/output-styles,type=bind,readonly,z",
+    "source=@HOME@/.claude/plugins,target=/home/vscode/.claude/plugins,type=bind,readonly,z",
+    "source=@HOME@/.claude/projects/@HOST_PROJECT@,target=/home/vscode/.claude/projects/@HOST_PROJECT@,type=bind,readonly,z",
+    "source=@HOME@/.claude/skills,target=/home/vscode/.claude/skills,type=bind,readonly,z",
+    "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/settings.json,target=/home/vscode/.claude/settings.json,type=bind,z",
     // Claude sources these before each Bash command: the containers get their own.
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/session-env,target=/home/vscode/.claude/session-env,type=bind,z",
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/shell-snapshots,target=/home/vscode/.claude/shell-snapshots,type=bind,z",
@@ -49,29 +69,31 @@
     "source=@VENV_ROOT@,target=@VENV_ROOT@,type=bind,readonly,Z",
     "source=@SHARE_ROOT@/Odoo,target=/home/vscode/.local/share/Odoo,type=bind,z",
     // test-warden (parallel JS/Hoot test runner, ~/repo/TestWarden): reuse the host-built engine
-    // binary + bundled client at the same path (like the venv above); rw so the engine can write
-    // engine/.cache/. It launches chrome-headless-shell (auto-downloaded to $HOME/.cache/warden),
-    // not the image's Chrome (which would need a display), so share that cache to fetch it once.
+    // binary + bundled client at the same path (like the venv above). Read-only, as the host runs
+    // it too; the engine writes only its engine/.cache, which comes back writable over it. It
+    // launches chrome-headless-shell (auto-downloaded to $HOME/.cache/warden), not the image's
+    // Chrome (which would need a display), so share that cache to fetch it once.
     // Lowercase z: shared relabel for the parallel containers, like the filestore/extensions mounts.
-    "source=@REPO_ROOT@/TestWarden,target=@REPO_ROOT@/TestWarden,type=bind,z",
+    "source=@REPO_ROOT@/TestWarden,target=@REPO_ROOT@/TestWarden,type=bind,readonly,z",
+    "source=@REPO_ROOT@/TestWarden/engine/.cache,target=@REPO_ROOT@/TestWarden/engine/.cache,type=bind,z",
     "source=@CACHE_ROOT@/warden,target=/home/vscode/.cache/warden,type=bind,z",
     // DiscussModelParser (~/repo/DiscussModelParser): generates the @types/models.d.ts files
     // for the discuss/mail JS models. Same path as the host so the wrapper in
     // container-rw/devcontainer.bashrc works on both sides; dist/type-gen-idx.mjs is self-contained
     // rollup bundle (Node built-ins only), so the image's Node 22 is enough, no install.
-    // rw so `git pull` + `npm run build` work in here (config.json's whitelist is inlined
-    // into dist/ at build time). Lowercase z: shared relabel, like TestWarden above.
-    "source=@REPO_ROOT@/DiscussModelParser,target=@REPO_ROOT@/DiscussModelParser,type=bind,z",
+    // Read-only, as the host runs it too: `git pull` + `npm run build` are done from the host
+    // (config.json's whitelist is inlined into dist/ at build time). Lowercase z: shared relabel,
+    // like TestWarden above.
+    "source=@REPO_ROOT@/DiscussModelParser,target=@REPO_ROOT@/DiscussModelParser,type=bind,readonly,z",
     "source=@HOME@/.local/bin/gh,target=/usr/local/bin/gh,type=bind,readonly,z",
     // VS Code copies ~/.gitconfig into the container without the files it includes, and the git
     // identity lives in this one.
     "source=@HOME@/.gitconfig.local,target=/home/vscode/.gitconfig.local,type=bind,readonly,z",
-    // VS Code's extensions, kept over a rebuild. One store per bundle, as two servers writing the
-    // same extensions.json corrupt it. extensions.py hard-links each store from a template.
-    // Bind (not a named volume) because no-new-privileges/cap-drop ALL means no runtime sudo to chown
-    // a root-owned volume; keep-id + updateRemoteUserUID maps vscode -> the host user, so a dir of
-    // that user is writable. Lowercase z: shared SELinux relabel for the parallel containers.
-    "source=@CACHE_ROOT@/devcontainer/vscode-extensions/${localWorkspaceFolderBasename},target=/home/vscode/.vscode-server/extensions,type=bind,z",
+    // VS Code's extensions, kept over a rebuild. Read-only: code in an extension runs in a window,
+    // and a window can type in a terminal of the host. One store per bundle, which extensions.py
+    // hard-links from a template only the host writes, so that an update leaves a running window
+    // on the files it loaded. Lowercase z: shared SELinux relabel for the parallel containers.
+    "source=@CACHE_ROOT@/devcontainer/vscode-extensions/${localWorkspaceFolderBasename},target=/home/vscode/.vscode-server/extensions,type=bind,readonly,z",
     // The shell helpers, reached as BASH_ENV and through the ~/.bash_aliases symlink the image
     // makes. The directory and not the file: a bind of a file pins its inode, and an editor that
     // writes by renaming over it leaves every running container on the dead copy, silently.
@@ -87,17 +109,11 @@
     // works on both sides. Read-only, so a container replaces neither the socket nor the client.
     "source=@STATE_ROOT@/bundle-ctl/sock,target=/run/bundle-ctl,type=bind,readonly,z",
     "source=@USEFUL_THINGS@/bundle-ctl/client,target=@USEFUL_THINGS@/bundle-ctl/client,type=bind,readonly,z",
-    // ssh-github-mux: git goes through the host's GitHub connection. The socket folder is read-only,
-    // so a container cannot put a socket there that host git would trust.
-    "source=@USEFUL_THINGS@/ssh-github-mux,target=/etc/ssh/ssh_config.d,type=bind,readonly,z",
-    "source=@USEFUL_THINGS@/ssh-github-mux,target=/home/vscode/.local/share/ssh-github-mux,type=bind,readonly,z",
-    "source=@STATE_ROOT@/ssh-github-mux/request,target=/home/vscode/.local/state/ssh-github-mux/request,type=bind,z",
-    "source=@STATE_ROOT@/ssh-github-mux/sock,target=/home/vscode/.local/state/ssh-github-mux/sock,type=bind,readonly,z",
     "source=/var/run/postgresql,target=/var/run/postgresql,type=bind"
   ],
   // Runs on the host before each start: a missing mount source stops the container from starting.
   // claude-autoopen closes the "Press any key" terminal Dev Containers opens for initializeCommand.
-  "initializeCommand": "mkdir -p @STATE_ROOT@/bundle-ctl/sock @STATE_ROOT@/ssh-github-mux/request @STATE_ROOT@/ssh-github-mux/sock && python3 @USEFUL_THINGS@/devcontainer/claude-config.py ${localWorkspaceFolderBasename} && python3 @USEFUL_THINGS@/devcontainer/extensions.py ${localWorkspaceFolderBasename} ${localWorkspaceFolder}",
+  "initializeCommand": "mkdir -p @REPO_ROOT@/TestWarden/engine/.cache @STATE_ROOT@/bundle-ctl/sock @STATE_ROOT@/ssh-github-mux/request @STATE_ROOT@/ssh-github-mux/sock && python3 @USEFUL_THINGS@/devcontainer/claude-config.py ${localWorkspaceFolderBasename} && python3 @USEFUL_THINGS@/devcontainer/extensions.py ${localWorkspaceFolderBasename} ${localWorkspaceFolder}",
   // Reached via the host nginx proxy (~/repo/useful-things/proxy) by bundle name, so don't let
   // every window forward Odoo to the same host port and collide.
   "portsAttributes": {
