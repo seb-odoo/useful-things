@@ -111,6 +111,7 @@ def get_agent(bundle, head_date=0, alive=True):
     return {
         "activity": activity,
         "done": done,
+        "effort": read_text(folder / "effort"),
         "ended": ended and format_time(ended),
         "idle": idle,
         "model": read_text(folder / "model"),

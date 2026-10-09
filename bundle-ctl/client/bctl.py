@@ -90,6 +90,7 @@ def format_agent(agent):
             [
                 " ".join(words),
                 agent.get("model") and f"on {agent['model']}",
+                agent.get("effort") and f"effort {agent['effort']}",
                 queued and queued != started and f"queued {queued}",
                 started and f"started {started}",
                 agent.get("retry"),
@@ -123,10 +124,11 @@ def print_status(answer):
     if answer["queue"] and answer["agents"] >= answer["max_agents"] and idle:
         print(f"the queue waits for a slot; agents done and idle, to close: {', '.join(idle)}")
     for position, item in enumerate(answer["queue"], 1):
-        model = f", on {item['model']}" if item.get("model") else ""
+        asked = f", on {item['model']}" if item.get("model") else ""
+        asked += f", effort {item['effort']}" if item.get("effort") else ""
         since = f", since {item['queued']}" if item.get("queued") else ""
         print(
-            f"queued {position}: {item['bundle']} (priority {item['priority']}{model},"
+            f"queued {position}: {item['bundle']} (priority {item['priority']}{asked},"
             f" from {item['parent']}{since})",
         )
 
@@ -148,6 +150,11 @@ def add_task_arguments(parser):
         "--model",
         choices=("haiku", "opus", "sonnet"),
         help="with a task: the model of its agent (default opus)",
+    )
+    parser.add_argument(
+        "--effort",
+        choices=("low", "medium", "high", "xhigh"),
+        help="with a task: the effort of its agent (default medium)",
     )
 
 
@@ -236,6 +243,8 @@ def main():
             body["priority"] = args.priority
         if args.model is not None:
             body["model"] = args.model
+        if args.effort is not None:
+            body["effort"] = args.effort
         answer = request("POST", f"/{args.command}", body)
         if "job" in answer:
             answer = follow(answer["job"])
