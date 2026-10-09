@@ -3,6 +3,8 @@
 
     bctl whoami
     bctl status [--json]
+    bctl queue [--json]
+    bctl force-queue
     bctl branches [--json]
     bctl create BASE NAME [--branch-repo REPO]... [--no-open] [TASK]
     bctl fetch BUNDLE|PR_LINK|OWNER:BRANCH [--no-open] [TASK]
@@ -18,7 +20,12 @@ running bundles, Claude runs the task in a terminal of the host, in the bundle's
 VS Code window opened on the bundle later takes the session over in a Claude tab. A bundle whose
 window is already open runs the task in that window. A task for a bundle whose agent has not ended
 is queued behind it. The queue runs the highest priority first (-100 to 100, default 0), then in
-arrival order: bctl status lists it in that order, with what each task waits for.
+arrival order: bctl status lists it in that order, with what each task waits for. One agent
+starts at a time: the next task waits until the run of the last one began.
+
+queue is that list alone, at once, with the memory left on the host. force-queue lets the tasks
+queued now start over the cap, still one at a time; a task queued later waits for a slot again.
+Only the host may ask it: a container gets a 403.
 
 open --resume gives the task to the last Claude session of the bundle as its next prompt, where a
 task alone starts a new session. Without a task, the session is told to go on.
@@ -135,8 +142,16 @@ def print_status(answer):
     ]
     if answer["queue"] and answer["agents"] >= answer["max_agents"] and idle:
         print(f"the queue waits for a slot; agents done and idle, to close: {', '.join(idle)}")
-    for position, item in enumerate(answer["queue"], 1):
-        asked = f", on {item['model']}" if item.get("model") else ""
+    print_queued(answer["queue"])
+    runs = answer.get("runs")
+    if runs and (runs["running"] or runs["queue"]):
+        print(f"{len(runs['running'])} runs, {len(runs['queue'])} queued: bctl runs")
+
+
+def print_queued(queue):
+    for position, item in enumerate(queue, 1):
+        asked = ", over the cap" if item.get("forced") else ""
+        asked += f", on {item['model']}" if item.get("model") else ""
         asked += f", effort {item['effort']}" if item.get("effort") else ""
         since = f", since {item['queued']}" if item.get("queued") else ""
         since += f", waits for {item['waits_for']}" if item.get("waits_for") else ""
@@ -144,9 +159,28 @@ def print_status(answer):
             f"queued {position}: {item['bundle']} (priority {item['priority']}{asked},"
             f" from {item['parent']}{since})",
         )
-    runs = answer.get("runs")
-    if runs and (runs["running"] or runs["queue"]):
-        print(f"{len(runs['running'])} runs, {len(runs['queue'])} queued: bctl runs")
+
+
+def format_memory(memory):
+    """What the host has left, as one line that starts with a warning when it is short of it."""
+    figures = (
+        f"{memory['available']} GB available, {memory['swap']} GB in swap,"
+        f" programs stalled {memory['stall']:.0f}% of the last minute"
+    )
+    return f"the host is short of memory: {figures}" if memory["short"] else f"memory: {figures}"
+
+
+def print_queue(answer):
+    if answer.get("forced"):
+        count = len(answer["forced"])
+        print(f"{count} queued task{'s' * (count != 1)} may start over the cap, one at a time")
+        for bundle in answer["started"]:
+            print(f"started: {bundle}")
+    print(f"{answer['agents']}/{answer['max_agents']} agents in a terminal")
+    if not answer["queue"]:
+        print("no task is queued")
+    print_queued(answer["queue"])
+    print(format_memory(answer["memory"]))
 
 
 def print_table(answer):
@@ -317,6 +351,8 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("whoami", help="the bundle of this container, its base and parent")
     commands.add_parser("status", help="every local bundle: behind/conflict per repo, open")
+    commands.add_parser("queue", help="the agent tasks that wait, and the memory left on the host")
+    commands.add_parser("force-queue", help="let the tasks queued now start over the cap")
     commands.add_parser("branches", help="gbs: every local bundle with its PR, grouped")
     create = commands.add_parser("create", help="a new bundle BASE-NAME<suffix>, branched on BASE")
     create.add_argument("base")
@@ -368,6 +404,12 @@ def main():
     elif args.command == "status":
         answer = request("GET", "/status")
         printer = print_status
+    elif args.command == "queue":
+        answer = request("GET", "/queue")
+        printer = print_queue
+    elif args.command == "force-queue":
+        answer = request("POST", "/force-queue", {})
+        printer = print_queue
     elif args.command == "branches" and args.json:
         answer = request("GET", "/branches", timeout=150)
     elif args.command == "branches":

@@ -34,6 +34,8 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window, or with a task its agent; refused when the bundle is here or a branch has unpushed commits |
 | `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`; refused on a half-made bundle |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
+| `GET /queue` | the queue of `GET /status` alone, at once: the agents that hold a terminal, the cap, each task with what it waits for, and the memory left on the host, `short` when a start would add to a host that already lacks it |
+| `POST /force-queue` | the tasks queued now may start over the cap; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
 | `POST /run` | a heavy command waits for cores: one JSON line each time its place changes, then the CPUs it got (see Runs) |
 | `GET /runs` | the runs that hold cores and the ones that wait, the pool and the memory available |
 
@@ -244,8 +246,19 @@ A task for a bundle whose agent has not ended is queued behind it, so the caller
 try again: it waits for `its agent to end`, the verdict of an agent in a window, and for an agent
 in a terminal `then its terminal to close`. A bundle holds one queued task: a second one is
 refused.
+One agent starts at a time, as several containers and claude sessions that start together take
+the memory of the host at once: the next task waits for `the agent of BUNDLE to start`, until the
+run of that agent began (its `.agent/run.lock`), its launch failed, or 15 minutes passed.
+`bctl force-queue` lets the tasks queued now start over the cap, still one at a time and each
+after what else it waits for; `bctl status` shows them `over the cap`, and a task queued later
+waits for a slot again. Only a process of the host may ask it: a container gets a 403, the one
+of `BUNDLE_CTL_HOST_FOLDER` too, so that going over the cap stays Seb's call. `bctl queue` lists
+the queue alone, at once, and ends on the memory of the host: `the host is short of memory` when
+less is available than the runs keep free, or when tasks stalled on memory 5% of the last minute
+or more.
 The cap is read from `~/.config/odoo-dev/config.env` or the unit's environment. The queue is checked
-again on every podman container start and stop, and every minute; it lives in
+again on every podman container start and stop, every minute, and every 10 seconds while a task
+waits for an agent to start; it lives in
 `~/.local/state/bundle-ctl/state.json`. Any session can queue, agent runs included: the cap
 is the only bound on a fan-out. A task given to a bundle whose window is open starts there within 5
 seconds, even at the cap, as it takes no new container; behind an agent of that window, within a
@@ -254,7 +267,8 @@ minute of its verdict. A launched task nothing took (no
 of the queue, 3 times at most: a terminal asked for while the desktop session ends never starts.
 A task queued behind it meanwhile replaces it, as it replaces a stopped agent.
 A queued task whose bundle folder is gone is dropped, and so is one its agent already runs (a pass
-that dies after a launch saves no state): `python3 test_queue.py` runs a pass on each case.
+that dies after a launch saves no state): `python3 test_queue.py` runs a pass on each case, and
+real clients that read and force the queue.
 A new task moves the previous
 `.agent/` files of the bundle into `.agent/history/`, unless it is the same task relaunched before
 any run started. `bctl open BUNDLE --resume` leaves `session` in place: the terminal goes on with

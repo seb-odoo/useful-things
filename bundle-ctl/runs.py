@@ -98,12 +98,24 @@ def read_memory():
     """The gigabytes available, and the percent of the last 10 seconds tasks stalled on memory."""
     meminfo = pathlib.Path("/proc/meminfo").read_text()
     available = int(re.search(r"MemAvailable:\s+(\d+)", meminfo)[1])
+    return available * 1024 / GIGABYTE, read_stall()
+
+
+def read_stall(seconds=10):
+    """The percent of the last 10, 60 or 300 seconds tasks stalled on memory."""
     try:
         pressure = pathlib.Path("/proc/pressure/memory").read_text()
-        stall = float(re.search(r"full avg10=([\d.]+)", pressure)[1])
+        return float(re.search(rf"full avg{seconds}=([\d.]+)", pressure)[1])
     except (OSError, TypeError):
-        stall = 0.0
-    return available * 1024 / GIGABYTE, stall
+        return 0.0
+
+
+def read_swap():
+    """The gigabytes in swap."""
+    meminfo = pathlib.Path("/proc/meminfo").read_text()
+    total = int(re.search(r"SwapTotal:\s+(\d+)", meminfo)[1])
+    free = int(re.search(r"SwapFree:\s+(\d+)", meminfo)[1])
+    return (total - free) * 1024 / GIGABYTE
 
 
 def get_cgroup(pid):

@@ -91,6 +91,7 @@ EFFORTS = ("low", "medium", "high", "xhigh")
 GITHUB_OWNER = re.compile(r"[A-Za-z0-9-]{1,39}")
 HOST = "host"
 HOST_FOLDER = CONFIG.get("BUNDLE_CTL_HOST_FOLDER")
+HOST_ONLY = {("POST", "/force-queue")}
 JOB_WAIT = 50
 MAX_AGENTS = int(
     os.environ.get("BUNDLE_CTL_MAX_AGENTS") or CONFIG.get("BUNDLE_CTL_MAX_AGENTS") or 8,
@@ -119,6 +120,7 @@ SESSION_VARIABLES = (
     "XAUTHORITY",
 )
 SOCKET = STATE / "sock" / "ctl.sock"
+START_CHECK = 10
 
 folder_by_container = {}
 jobs = {}
@@ -150,15 +152,27 @@ def get_container_folder(container_id):
     return folder_by_container[container_id]
 
 
-def identify(connection):
-    """The bundle of the container running the peer process, HOST, or None when refused."""
+def read_cgroup(connection):
+    """The cgroup of the peer process, None when that process is gone."""
     pid, _uid, _gid = struct.unpack(
         "3i",
         connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")),
     )
     try:
-        cgroup = pathlib.Path(f"/proc/{pid}/cgroup").read_text()
+        return pathlib.Path(f"/proc/{pid}/cgroup").read_text()
     except OSError:
+        return None
+
+
+def is_in_container(connection):
+    """Whether the peer process runs in a container, the one of HOST_FOLDER included."""
+    return "libpod" in (read_cgroup(connection) or "libpod")
+
+
+def identify(connection):
+    """The bundle of the container running the peer process, HOST, or None when refused."""
+    cgroup = read_cgroup(connection)
+    if cgroup is None:
         return None
     if "libpod" not in cgroup:
         return HOST
@@ -256,20 +270,64 @@ def status(caller, query, body):
         "agents": count_agents(get_open_windows()),
         "bundles": rows,
         "max_agents": MAX_AGENTS,
-        "queue": [
-            dict(
-                bundle=item["bundle"],
-                effort=item.get("effort"),
-                model=item.get("model"),
-                parent=item["parent"],
-                priority=item.get("priority", 0),
-                queued=item.get("queued") and format_time(item["queued"]),
-                waits_for=item.get("waits_for"),
-            )
-            for item in state["queue"]
-        ],
+        "queue": describe_queue(state),
         "runs": RUNS.describe(),
     }
+
+
+def describe_queue(state):
+    return [
+        dict(
+            bundle=item["bundle"],
+            effort=item.get("effort"),
+            forced=item.get("forced", False),
+            model=item.get("model"),
+            parent=item["parent"],
+            priority=item.get("priority", 0),
+            queued=item.get("queued") and format_time(item["queued"]),
+            waits_for=item.get("waits_for"),
+        )
+        for item in state["queue"]
+    ]
+
+
+def describe_memory():
+    """What the host has left, and whether it is short of it: less available than the runs keep
+    free, or tasks that stalled on memory in the last minute as much as holds a run back.
+    """
+    available, _stall = runs.read_memory()
+    stall = runs.read_stall(60)
+    return {
+        "available": round(available, 1),
+        "short": available < RUN_MIN_FREE or stall >= runs.MAX_STALL,
+        "stall": stall,
+        "swap": round(runs.read_swap(), 1),
+    }
+
+
+def get_queue(caller, query, body):
+    with state_lock:
+        state = read_state()
+    return 200, {
+        "agents": count_agents(get_open_windows()),
+        "max_agents": MAX_AGENTS,
+        "memory": describe_memory(),
+        "queue": describe_queue(state),
+    }
+
+
+def force_queue(caller, query, body):
+    """Let the tasks queued now start over the cap. The ones queued later wait for a slot."""
+    with state_lock:
+        state = read_state()
+        forced = [item["bundle"] for item in state["queue"]]
+        for item in state["queue"]:
+            item["forced"] = True
+        write_state(state)
+    launch_queued()
+    code, answer = get_queue(caller, query, body)
+    left = {item["bundle"] for item in answer["queue"]}
+    return code, dict(answer, forced=forced, started=[name for name in forced if name not in left])
 
 
 def list_runs(caller, query, body):
@@ -498,6 +556,25 @@ def is_busy(bundle, alive):
     return alive and (folder / "task.md").is_file() and not (folder / "done").exists()
 
 
+def get_starting(launches, open_windows, now):
+    """The bundle of an agent that was launched and has not begun its run, None when no such.
+
+    A terminal that begins no run counts for LAUNCH_GRACE, as a launch with no container does.
+    """
+    held = sorted(os.path.basename(folder) for folder in open_windows)
+    for bundle in (*launches, *held):
+        folder = get_agent_folder(bundle)
+        launched = launches.get(bundle) or get_mtime(folder / "terminal") or 0
+        if (
+            now - launched < LAUNCH_GRACE
+            and (folder / "task.md").is_file()
+            and not (folder / "run.lock").exists()
+            and not (folder / "done").exists()
+        ):
+            return bundle
+    return None
+
+
 def write_task(item):
     folder = get_agent_folder(item["bundle"])
     if folder.exists() and (
@@ -522,6 +599,7 @@ def write_task(item):
 
 
 def launch_queued():
+    """Start what the queue can start now. Return whether a task waits for an agent to start."""
     with state_lock:
         state = read_state()
         now = time.time()
@@ -565,6 +643,8 @@ def launch_queued():
         state["queue"][:0] = stranded
         env = session_env()
         has_display = env.get("DISPLAY") or env.get("WAYLAND_DISPLAY")
+        starting = get_starting(state["launches"], open_windows, now)
+        paced = False
         queue = []
         for item in state["queue"]:
             bundle = item["bundle"]
@@ -579,7 +659,10 @@ def launch_queued():
                 continue
             is_running = get_worktree_bundle_folder(bundle) in open_windows
             container = is_running and get_bundle_container(bundle)
-            has_room = count_agents(open_windows) + len(state["launches"]) < MAX_AGENTS
+            has_room = item.get("forced") or (
+                count_agents(open_windows) + len(state["launches"]) < MAX_AGENTS
+            )
+            can_start = has_display and (is_running or has_room)
             in_terminal = container and (folder / "terminal").exists()
             if is_busy(bundle, is_running or bundle in state["launches"]):
                 item["waits_for"] = "its agent to end" + (
@@ -592,7 +675,10 @@ def launch_queued():
             elif in_terminal:
                 # Wait for its last terminal to close: the `died` event comes back here.
                 item["waits_for"] = "its terminal to close"
-            elif has_display and (is_running or has_room):
+            elif can_start and starting:
+                item["waits_for"] = f"the agent of {starting} to start"
+                paced = True
+            elif can_start:
                 write_task(item)
                 if not is_running:
                     state["launches"][bundle] = now
@@ -601,12 +687,14 @@ def launch_queued():
                     "spawn",
                     lambda log, bundle=bundle: open_terminal(log, bundle),
                 )
+                starting = bundle
                 continue
             else:
                 item["waits_for"] = "a slot" if has_display else "a desktop session"
             queue.append(item)
         state["queue"] = queue
         write_state(state)
+    return paced
 
 
 def log_addresses(*containers):
@@ -660,20 +748,20 @@ def keep_launching():
             proc.wait()
             time.sleep(5)
 
-    def every_minute():
+    def on_timer():
         while True:
-            launch_safely()
-            time.sleep(60)
+            time.sleep(START_CHECK if launch_safely() else 60)
 
     threading.Thread(target=on_events, daemon=True).start()
-    threading.Thread(target=every_minute, daemon=True).start()
+    threading.Thread(target=on_timer, daemon=True).start()
 
 
 def launch_safely():
     try:
-        launch_queued()
+        return launch_queued()
     except Exception:
         traceback.print_exc()
+        return False
 
 
 def local_branches(bundle):
@@ -806,11 +894,13 @@ def open_or_enqueue(log, caller, bundle, body):
 VERBS = {
     ("GET", "/branches"): branches,
     ("GET", "/job"): get_job,
+    ("GET", "/queue"): get_queue,
     ("GET", "/runs"): list_runs,
     ("GET", "/status"): status,
     ("GET", "/whoami"): whoami,
     ("POST", "/create"): create,
     ("POST", "/fetch"): fetch,
+    ("POST", "/force-queue"): force_queue,
     ("POST", "/open"): open_bundle,
 }
 
@@ -850,6 +940,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         elif verb is None:
             code, answer = 404, {"error": f"no verb {method} {url.path}"}
+        elif (method, url.path) in HOST_ONLY and is_in_container(self.request):
+            code, answer = 403, {"error": "only from the host, a container cannot ask it"}
         else:
             try:
                 body = json.loads(self.rfile.read(length)) if length else {}
