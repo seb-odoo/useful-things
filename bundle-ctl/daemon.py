@@ -82,6 +82,7 @@ AGENT_TERMINAL = CONFIG.get("AGENT_TERMINAL") or "gnome-terminal --window --titl
 BRANCHES_TIMEOUT = 120
 BUNDLE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 CONTAINER_ID = re.compile(r"/libpod-(?:payload-)?([0-9a-f]{64})")
+DEFAULT_MODEL = "opus"
 GITHUB_OWNER = re.compile(r"[A-Za-z0-9-]{1,39}")
 HOST = "host"
 HOST_FOLDER = CONFIG.get("BUNDLE_CTL_HOST_FOLDER")
@@ -94,6 +95,7 @@ MAX_PRIORITY = 100
 MAX_RELAUNCHES = 3
 MAX_TASK = 32 * 1024
 MAX_WIDTH = 400
+MODELS = ("haiku", "opus", "sonnet")
 NAME = re.compile(r"[a-z0-9](?:[a-z0-9.]|-(?!-)){0,79}")
 SESSION_VARIABLES = (
     "DBUS_SESSION_BUS_ADDRESS",
@@ -243,6 +245,7 @@ def status(caller, query, body):
         "queue": [
             dict(
                 bundle=item["bundle"],
+                model=item.get("model"),
                 parent=item["parent"],
                 priority=item.get("priority", 0),
                 queued=item.get("queued") and format_time(item["queued"]),
@@ -396,6 +399,8 @@ def count_agents(folders):
 
 def check_task(bundle, body):
     if "task" not in body:
+        if "model" in body:
+            raise ValueError("model: only with a task")
         if "priority" in body:
             raise ValueError("priority: only with a task")
         if body.get("resume"):
@@ -406,6 +411,8 @@ def check_task(bundle, body):
         raise ValueError(f"task: a text of at most {MAX_TASK} characters")
     if type(priority) is not int or abs(priority) > MAX_PRIORITY:
         raise ValueError(f"priority: an integer from -{MAX_PRIORITY} to {MAX_PRIORITY}")
+    if body.get("model", DEFAULT_MODEL) not in MODELS:
+        raise ValueError(f"model: one of {', '.join(MODELS)}")
     with state_lock:
         state = read_state()
     alive = (
@@ -427,6 +434,7 @@ def check_task(bundle, body):
 
 def enqueue(caller, bundle, body):
     priority = body.get("priority", 0)
+    model = body.get("model")
     with state_lock:
         state = read_state()
         queue = state["queue"]
@@ -438,6 +446,7 @@ def enqueue(caller, bundle, body):
             position,
             {
                 "bundle": bundle,
+                "model": None if model == DEFAULT_MODEL else model,
                 "parent": caller,
                 "priority": priority,
                 "queued": time.time(),
@@ -471,6 +480,10 @@ def write_task(item):
     if "queued" in item:
         (folder / "queued").write_text(f"{item['queued']}\n")
     (folder / "task.md").write_text(item["task"])
+    if item.get("model"):
+        (folder / "model").write_text(f"{item['model']}\n")
+    else:
+        (folder / "model").unlink(missing_ok=True)
 
 
 def launch_queued():
@@ -507,6 +520,7 @@ def launch_queued():
                 stranded.append(
                     {
                         "bundle": bundle,
+                        "model": read_text(task.parent / "model"),
                         "parent": parent,
                         "queued": float(read_text(task.parent / "queued") or now),
                         "task": task.read_text(),

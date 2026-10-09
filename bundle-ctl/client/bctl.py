@@ -89,6 +89,7 @@ def format_agent(agent):
             None,
             [
                 " ".join(words),
+                agent.get("model") and f"on {agent['model']}",
                 queued and queued != started and f"queued {queued}",
                 started and f"started {started}",
                 agent.get("retry"),
@@ -122,9 +123,10 @@ def print_status(answer):
     if answer["queue"] and answer["agents"] >= answer["max_agents"] and idle:
         print(f"the queue waits for a slot; agents done and idle, to close: {', '.join(idle)}")
     for position, item in enumerate(answer["queue"], 1):
+        model = f", on {item['model']}" if item.get("model") else ""
         since = f", since {item['queued']}" if item.get("queued") else ""
         print(
-            f"queued {position}: {item['bundle']} (priority {item['priority']},"
+            f"queued {position}: {item['bundle']} (priority {item['priority']}{model},"
             f" from {item['parent']}{since})",
         )
 
@@ -141,6 +143,11 @@ def add_task_arguments(parser):
         "--priority",
         type=int,
         help="with a task: higher leaves the queue first, from -100 to 100 (default 0)",
+    )
+    parser.add_argument(
+        "--model",
+        choices=("haiku", "opus", "sonnet"),
+        help="with a task: the model of its agent (default opus)",
     )
 
 
@@ -227,6 +234,8 @@ def main():
             body["task"] = task
         if args.priority is not None:
             body["priority"] = args.priority
+        if args.model is not None:
+            body["model"] = args.model
         answer = request("POST", f"/{args.command}", body)
         if "job" in answer:
             answer = follow(answer["job"])

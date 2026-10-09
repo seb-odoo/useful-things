@@ -20,6 +20,13 @@ session="$1"
 agent=/workspace/.agent
 cd /workspace || exit 1
 
+# Run on opus unless the task asked for haiku or sonnet: the bundle can write this file.
+case $(cat "$agent/model" 2>/dev/null) in
+haiku) model=haiku ;;
+sonnet) model=sonnet ;;
+*) model=opus ;;
+esac
+
 # VS Code relaunches a persistent terminal's command after a container restart: never run twice.
 reopen=
 if ! mkdir "$agent/run.lock" 2>/dev/null; then
@@ -43,11 +50,11 @@ if [ -n "$terminal" ]; then
 	fi
 	if [ -n "$reopen" ]; then
 		mode=$(cat "$agent/mode" 2>/dev/null)
-		exec claude "${start[@]}" -n "$ODOO_PROXY_HOST" --model opus \
+		exec claude "${start[@]}" -n "$ODOO_PROXY_HOST" --model "$model" \
 			--permission-mode "${mode:-auto}" ${2:+-- "$2"}
 	fi
 	# The mode `claude -p` runs in: the Claude tab does not restore the bundles' default, dontAsk.
-	exec claude "${start[@]}" -n "$ODOO_PROXY_HOST" --model opus \
+	exec claude "${start[@]}" -n "$ODOO_PROXY_HOST" --model "$model" \
 		--permission-mode auto -- "$(cat "$agent/task.md")"
 fi
 
@@ -59,7 +66,7 @@ while :; do
 	# Record the session as the extension does: the Claude tab hides the ones `claude -p` records.
 	exec {stream}< <(
 		CLAUDE_CODE_ENTRYPOINT=claude-vscode exec claude -p --session-id "$session" -n "$ODOO_PROXY_HOST" \
-			--model opus --verbose --output-format stream-json <"$agent/task.md"
+			--model "$model" --verbose --output-format stream-json <"$agent/task.md"
 	)
 	claude=$!
 	python3 "${0%/*}/stream-format.py" --until-tool-use "$agent/result.md" <&"$stream"

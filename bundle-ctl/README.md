@@ -70,8 +70,9 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   has no identity there otherwise.
 - It runs the interactive `claude` in the container (`client/agent-run.sh --terminal`), on the task
   as its prompt, in `auto` like the `claude -p` of an agent window. Seb can type in that terminal.
-  Both run on `--model opus`: `default` is the default of the account, which Anthropic sets and
-  which is not the `ANTHROPIC_MODEL` of the settings.
+  Both run on `opus`, or on the `haiku` or `sonnet` its task asked for. Never on `default`, the
+  default of the account, which Anthropic sets and which is not the `ANTHROPIC_MODEL` of the
+  settings.
 - A turn that ends on a verdict writes `done` (`client/agent-stop.py`), a turn that ends on
   anything else `waiting`. Either way the claude session stays open in its terminal, for Seb to
   read what ran and to type in, and its container keeps its slot.
@@ -133,6 +134,7 @@ remote connection ("Cannot reconnect"). A run that ends without a tool call open
 | file in `.agent/` | written by | meaning |
 | --- | --- | --- |
 | `task.md` | bundle-ctl | the prompt |
+| `model` | bundle-ctl | the model the task asked for, `haiku` or `sonnet`; no file for `opus` |
 | `queued` | bundle-ctl | when the task entered the queue (epoch seconds), kept when a task no window took is queued again |
 | `terminal` | `agent-terminal.py` | the agent runs in a terminal of the host; removed when it ends, or by `client/agent-takeover.py` when a window takes the session over |
 | `container` | `agent-terminal.py` | the id of the container the terminal's agent runs in, for its shell pane; removed when it ends |
@@ -163,6 +165,9 @@ the queue while fewer than `BUNDLE_CTL_MAX_AGENTS` (default 8) agents hold a ter
 ones launched in the last 15 minutes whose container is not up yet and that did not fail to start.
 A bundle open in a VS Code window does not count, a session a window took over included: the cap
 bounds what the agents spend, and Seb's windows are his.
+`--model haiku|sonnet|opus` (default `opus`) is the model of the task's agent, for the one that
+queues to send a job that needs less to a model that costs less. The daemon refuses any other
+name, and `client/agent-run.sh` runs on `opus` when `.agent/model` holds anything else.
 `--priority N` (-100 to 100, default 0) puts the task ahead of the ones with a lower priority; equal
 priorities leave in arrival order. The answer is the task's place (`queued`), or `started` when a
 slot was free. `bctl status` lists the queue in that order with each priority, the bundle that

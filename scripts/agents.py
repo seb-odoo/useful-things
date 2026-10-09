@@ -113,6 +113,7 @@ def get_agent(bundle, head_date=0, alive=True):
         "done": done,
         "ended": ended and format_time(ended),
         "idle": idle,
+        "model": read_text(folder / "model"),
         "parent": read_text(folder / "parent"),
         "queued": queued and format_time(float(queued)),
         "result": (read_text(folder / "result.md") or "")[:500],
