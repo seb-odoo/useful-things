@@ -123,6 +123,11 @@ repo, where the socket folder is read-only (host git goes through any socket the
 that socket pushes to any repo the account writes: a fragment of another repo can take its place
 (`"replaces"`, see `build.py`) to put a policy between a container and GitHub.
 
+VS Code relays the SSH agent of the environment it was started from (`SSH_AUTH_SOCK`) into every
+container it attaches to, as `/tmp/vscode-ssh-auth-*.sock`, and has no setting against it. So the
+agent of the session holds no key: each host of `~/.ssh/config` names its own with
+`IdentityAgent`. `ssh-add -l` in a container window must list nothing.
+
 **Postgres** cannot tell a container from the host (same uid on the same socket), so the role must
 not be a superuser, or `COPY ... TO PROGRAM` runs commands on the host:
 
@@ -139,8 +144,11 @@ What stays open, and what closes it:
   with the bundle repos and nothing else of the machine. The bundle scripts run `enable.sh` through
   it, with no network, and the git of the host can be a wrapper that does the same for these repos;
 - the filestore and the databases, which the bundles share;
-- the SSH agent VS Code forwards into the containers it attaches to (the container of an agent in
-  a terminal has none);
+- the gpg agent and the git credential helper of the host, which VS Code relays into the
+  containers it attaches to like the SSH agent. A secret gpg key of the host signs from a
+  container, behind its passphrase: mask `gpg-agent-extra.socket` on the host, the socket that is
+  relayed. The helper relay has no switch (`gitCredentialHelperConfigLocation` only stops writing
+  the git config): a helper of the host answers `git credential fill` there, so the host has none;
 - the bundles' shared `.vscode`, as its workspace settings are changed from the container windows;
 - a VS Code window trusts the container it is attached to: with the stores read-only no code of
   ours or of a bundle gets into an extension, the rest is VS Code's own remote protocol.
