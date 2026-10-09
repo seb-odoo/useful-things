@@ -2,6 +2,7 @@
 """Run the task of a bundle with Claude Code in this terminal, in the bundle's dev container.
 
     agent-terminal.py BUNDLE
+    agent-terminal.py BUNDLE --shell    a shell in that container, for a pane next to the agent
 
 The bundle-ctl daemon starts it in a terminal window for a queued task, so that an agent costs no
 VS Code window. The container is the one VS Code would make: `up` of the devcontainer CLI that the
@@ -23,6 +24,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -35,6 +37,7 @@ CLI = "ms-vscode-remote.remote-containers-*/dist/spec-node/devContainersSpecCLI.
 CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
 # Leave the alternate screen and the mouse modes a killed claude stays in, and show the cursor.
 RESET = "\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m"
+SHELL_WAIT = 60
 TRANSCRIPTS = pathlib.Path.home() / ".claude" / "projects" / "-workspace"
 USER = "vscode"
 
@@ -132,8 +135,35 @@ def keep_open(ending, session=None):
     os.execvp("sh", ["sh", "-c", wait, ending])
 
 
+def shell(bundle):
+    """Run a shell in the container of the bundle's agent, once it is up."""
+    agent = get_agent_folder(bundle)
+    deadline = time.monotonic() + SHELL_WAIT
+    waiting = False
+    while not (container := read_text(agent / "container")):
+        # Both panes start together: the agent may not have written .agent/terminal yet.
+        if not (agent / "terminal").exists() and time.monotonic() > deadline:
+            return
+        if not waiting:
+            print(f"{bundle}: waiting for the container", flush=True)
+            waiting = True
+        time.sleep(1)
+    has_odoo = os.path.isdir(f"{get_worktree_bundle_folder(bundle)}/odoo")
+    link = f"\x1b]8;;odoo-bundle://{bundle}\x1b\\ocode\x1b]8;;\x1b\\"
+    print(f"{bundle}: {link} opens its VS Code window", flush=True)
+    os.execvp(
+        "podman",
+        ["podman", "exec", "--interactive", "--tty", "--detach-keys=", "--user", USER]
+        + ["--workdir", "/workspace/odoo" if has_odoo else "/workspace"]
+        + ["--env", f"TERM={os.environ.get('TERM', 'xterm')}", container, "bash"],
+    )
+
+
 def main():
     bundle = sys.argv[1]
+    if sys.argv[2:] == ["--shell"]:
+        shell(bundle)
+        return
     agent = get_agent_folder(bundle)
     if not (agent / "task.md").is_file() or (agent / "run.lock").exists():
         keep_open(f"{bundle}: no task to start")
@@ -149,6 +179,7 @@ def main():
         (agent / "session").write_text(f"{session}\n")
         container = up(get_worktree_bundle_folder(bundle))
         copy_gitconfig(container)
+        (agent / "container").write_text(f"{container}\n")
         code = subprocess.run(
             ["podman", "exec", "--interactive", "--tty", "--detach-keys=", "--user", USER]
             + ["--workdir", "/workspace", "--env", f"TERM={os.environ.get('TERM', 'xterm')}"]
@@ -162,6 +193,7 @@ def main():
         (agent / "result.md").write_text(f"{ending}\n")
         (agent / "done").write_text("failed\n")
     finally:
+        (agent / "container").unlink(missing_ok=True)
         (agent / "terminal").unlink(missing_ok=True)
         taken_over = (agent / "handoff").exists() or (container and has_window(container))
         if container and not taken_over:

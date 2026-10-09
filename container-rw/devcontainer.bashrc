@@ -186,6 +186,7 @@ function bctl() {
 	python3 "${client}/bctl.py" "$@"
 }
 alias gbs="bctl branches"
+function ocode() { bctl open "${1:-${ODOO_PROXY_HOST}}"; }
 
 # --- model types (DiscussModelParser) ---
 # Regenerates the @types/models.d.ts files from the JS model definitions (community +

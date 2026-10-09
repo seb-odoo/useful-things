@@ -82,13 +82,28 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   wrapper writes it to `result.md` with `done` as `failed`: `bctl status` shows it to the bundle
   that queued the task, and the launch gives its slot back at the next check of the queue.
 
+With `AGENT_TERMINAL` set to `agent-terminator.py {bundle}`, the window is a terminator split in
+two: the agent on the left, and on the right `agent-terminal.py BUNDLE --shell`, a bash of the
+same container in `/workspace/odoo`. It waits for `.agent/container`, the id the agent writes once
+its container is up: the label of the folder is not enough, as two containers can carry it.
+
+- Terminator takes the commands of a split from a layout of its config only. So the launcher runs
+  it on a copy of `~/.config/terminator/config` with that layout added, in
+  `$XDG_RUNTIME_DIR/bundle-ctl/`: preferences saved from an agent window go to the copy.
+- The shell holds nothing: `exit` closes its pane alone, and it ends with the container, so when
+  claude quits.
+- `ocode` in that shell opens the VS Code window of the bundle (`bctl open` on the container's own
+  bundle, `container-rw/devcontainer.bashrc`). The first line of the pane carries the same link as
+  `gbs`.
+- The same command gives a shell next to an agent that runs in another terminal.
+
 A VS Code window opened on the bundle (the folder icon of `gbs`, `ocode`) attaches to the same
 container and takes the session over, before or after its verdict: claude-autoopen sees
 `.agent/terminal` and runs `client/agent-takeover.py`. It stops the terminal's claude at once when
 a tool call is in flight or the session is idle, else at the first of the two, and writes
-`handoff`. The terminal closes, and from there on the bundle has an agent window (below): the tab
-opens on the session and, for a stopped tool call, reruns the turn after one reload. The container
-then lives as long as that window.
+`handoff`. The terminal closes (in a split window the agent's pane, its shell stays), and from
+there on the bundle has an agent window (below): the tab opens on the session and, for a stopped
+tool call, reruns the turn after one reload. The container then lives as long as that window.
 
 `devcontainer/claude-config.py` marks the onboarding as done in the containers' Claude config: the
 interactive claude stops on its theme picker otherwise.
@@ -108,6 +123,7 @@ remote connection ("Cannot reconnect"). A run that ends without a tool call open
 | `task.md` | bundle-ctl | the prompt |
 | `queued` | bundle-ctl | when the task entered the queue (epoch seconds), kept when a task no window took is queued again |
 | `terminal` | `agent-terminal.py` | the agent runs in a terminal of the host; removed when it ends, or by `client/agent-takeover.py` when a window takes the session over |
+| `container` | `agent-terminal.py` | the id of the container the terminal's agent runs in, for its shell pane; removed when it ends |
 | `session` | `agent-terminal.py`, claude-autoopen | the session id, chosen before the run |
 | `run.lock` | `client/agent-run.sh` | the run started, its mtime is when; a relaunched terminal does not run it again |
 | `result.md` | `client/stream-format.py`, `client/agent-stop.py`, `agent-terminal.py` | the last answer of the run, or why no container could start |
