@@ -58,6 +58,7 @@ def handle_repo(runner: UtilsRunner, repo):
                 target_ref=target_ref,
             ),
         )
+        runner.set_push_remote(repo=repo, branch=bundle_name)
         if not args.no_push:
             runner.run(
                 ["git", "push", "-u", get_remote_dev_repo(repo), bundle_name],

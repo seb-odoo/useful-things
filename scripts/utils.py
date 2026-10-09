@@ -91,9 +91,8 @@ class UtilsRunner(Runner):
         repo_folder = get_repo_folder(repo)
         cmd = (
             ["git", "worktree", "add"]
-            + (["-B", bundle_name] if make_branch else [])
+            + (["-B", bundle_name, "--track" if track else "--no-track"] if make_branch else [])
             + [target_folder, target_ref]
-            + (["--track"] if track else [])
         )
         self.run(
             cmd,
@@ -406,8 +405,17 @@ class UtilsRunner(Runner):
         )
         return bool(res.stdout.strip())
 
+    def set_push_remote(self, *, repo, branch):
+        """Make a plain `git push` create `branch` on the dev remote and set the upstream there."""
+        cwd = get_repo_folder(repo)
+        self.run(
+            ["git", "config", f"branch.{branch}.pushRemote", get_remote_dev_repo(repo)],
+            cwd=cwd,
+        )
+        self.run(["git", "config", "push.autoSetupRemote", "true"], cwd=cwd)
+
     def switch_to_branch(self, *, repo, branch, target_ref: str = None):
         cwd = get_worktree_bundle_repo_folder(branch, repo)
         if not target_ref:
             target_ref = get_remote_dev_branch_name(branch, repo)
-        self.run(["git", "switch", "-C", branch, target_ref], cwd=cwd)
+        self.run(["git", "switch", "--no-track", "-C", branch, target_ref], cwd=cwd)

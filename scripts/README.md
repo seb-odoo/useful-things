@@ -26,6 +26,10 @@ than the PR target (or with none), its folder sits under the target, which is th
 
 Creates a new bundle locally for a given base branch across all configured repos.
 Fetches the base branch, creates worktrees, and (if run from inside a repo dir) pushes a local branch to the dev remote.
+The base is never the upstream of the new branch. With `--no-push` the branch has no upstream until
+a plain `git push`, which creates it on the dev remote and tracks it there
+(`branch.<name>.pushRemote`, and `push.autoSetupRemote` in the config of the repo;
+`test_upstream.py`).
 Links shared `node_modules`, runs web tooling setup, and opens the bundle in VS Code.
 The setup script (`enable.sh`) comes from the branch: with `HOST_BOX` in `config.env` it runs boxed,
 with no network, and a base with no `node_modules` yet takes the one of another bundle of that base.
@@ -47,7 +51,7 @@ Repositories
 │   └── [1.55-3.42] /home/seb/repo/enterprise ✅️ git worktree add /home/seb/src/odoo/master/master-test--seb/enterprise odoo/master
 ├── odoo
 │   ├── [0.02-3.61] /home/seb/repo/odoo ✅️ git fetch odoo master -p
-│   ├── [3.61-5.95] /home/seb/repo/odoo ✅️ git worktree add -B master-test--seb /home/seb/src/odoo/master/master-test--seb/odoo odoo/master
+│   ├── [3.61-5.95] /home/seb/repo/odoo ✅️ git worktree add -B master-test--seb --no-track /home/seb/src/odoo/master/master-test--seb/odoo odoo/master
 │   └── [5.96-12.05] /home/seb/src/odoo/master/master-test--seb/odoo ✅️ git push -u odoo-dev master-test--seb
 ├── upgrade-util
 │   ├── [0.02-1.36] /home/seb/repo/upgrade-util ✅️ git fetch odoo master -p
@@ -107,7 +111,7 @@ Fetching https://runbot.odoo.com/api/bundle?name=master-test--seb
 Commits
 ├── odoo
 │   ├── [0.17-2.51] /home/seb/repo/odoo ✅️ git fetch odoo-dev master-test--seb -p
-│   └── [2.52-5.26] /home/seb/repo/odoo ✅️ git worktree add -B master-test--seb /home/seb/src/odoo/master/master-test--seb/odoo odoo-dev/master-test--seb --track
+│   └── [2.52-5.26] /home/seb/repo/odoo ✅️ git worktree add -B master-test--seb --track /home/seb/src/odoo/master/master-test--seb/odoo odoo-dev/master-test--seb
 ├── enterprise
 │   ├── [0.18-1.73] /home/seb/repo/enterprise ✅️ git fetch odoo 2fef66a9a74e6a248ea356d87337e6e1635cac85 -p
 │   └── [1.73-3.54] /home/seb/repo/enterprise ✅️ git worktree add /home/seb/src/odoo/master/master-test--seb/enterprise 2fef66a9a74e6a248ea356d87337e6e1635cac85
