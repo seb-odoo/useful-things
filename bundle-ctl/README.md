@@ -149,8 +149,8 @@ The reload waits while a Claude session of the container is busy or waits for a 
 tab does not rerun the turn (a claude-code change), the session waits there with its prompt
 unanswered: "continue" resumes it. `client/agent-stop.py`, a Stop hook of the bundles' Claude
 settings (`/home/seb/src/odoo/.claude/settings.json`), writes `result.md` when a turn of the tab
-ends, and `done` when its first line is a verdict: `ready to push`, `needs Seb:`, `blocked:` or
-`nothing to do:`. A turn that ends on anything else (a background job still running) leaves
+ends, and `done` when its first line is a verdict: `pushed:`, `ready to push`, `needs Seb:`,
+`blocked:` or `nothing to do:`. A turn that ends on anything else (a background job still running) leaves
 `waiting`. Ctrl+C in the "agent" terminal before the first tool call stops the run, and the tab
 opens on its session. The "agent" terminal closes when the tab opens, unless `claude -p` failed: its
 log is then the only trace of the error. The tab opens in place of a pinned Claude tab of the window, unless a Claude

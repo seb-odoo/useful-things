@@ -12,7 +12,7 @@ import re
 import sys
 
 AGENT = pathlib.Path("/workspace/.agent")
-VERDICT = re.compile(r"(ready to push|needs seb:|blocked:|nothing to do:)", re.IGNORECASE)
+VERDICT = re.compile(r"(pushed:|ready to push|needs seb:|blocked:|nothing to do:)", re.IGNORECASE)
 
 
 def read(name):
