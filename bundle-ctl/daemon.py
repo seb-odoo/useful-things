@@ -532,6 +532,15 @@ def launch_queued():
         queue = []
         for item in state["queue"]:
             bundle = item["bundle"]
+            folder = get_agent_folder(bundle)
+            if not folder.parent.is_dir():
+                print(f"dropped the task of {bundle}: its folder is gone", flush=True)
+                continue
+            # A pass that dies after a launch saves no state, and the next one reads it queued.
+            if (folder / "session").exists() and (
+                read_text(folder / "queued") == str(item["queued"])
+            ):
+                continue
             is_running = get_worktree_bundle_folder(bundle) in open_windows
             container = is_running and get_bundle_container(bundle)
             has_room = count_agents(open_windows) + len(state["launches"]) < MAX_AGENTS

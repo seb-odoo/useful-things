@@ -179,6 +179,8 @@ is the only bound on a fan-out. A task given to a bundle whose window is open st
 seconds, even at the cap, as it takes no new container. A launched task nothing took (no
 `.agent/session` once the launch is 15 minutes old and no container is up) goes back at the head
 of the queue, 3 times at most: a terminal asked for while the desktop session ends never starts.
+A queued task whose bundle folder is gone is dropped, and so is one its agent already runs (a pass
+that dies after a launch saves no state): `python3 test_queue.py` runs a pass on each case.
 A new task moves the previous
 `.agent/` files of the bundle into `.agent/history/`, unless it is the same task relaunched before
 any run started. `bctl open BUNDLE --resume` leaves `session` in place: the terminal goes on with
