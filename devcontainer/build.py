@@ -204,7 +204,9 @@ def main():
     # target instead.
     if out_path.is_symlink():
         out_path.unlink()
-    out_path.write_text(text)
+    # Its mtime says which containers were made on an older config (`drop_stale_containers`).
+    if not out_path.exists() or out_path.read_text() != text:
+        out_path.write_text(text)
     print(f"wrote {out_path} ({', '.join(used) or 'base only, nothing to merge'})")
     return 0
 

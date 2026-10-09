@@ -35,7 +35,11 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
 from agents import get_agent_folder, has_window, read_text  # noqa: E402
-from commands import get_devcontainer_config, get_worktree_bundle_folder  # noqa: E402
+from commands import (  # noqa: E402
+    drop_stale_containers,
+    get_devcontainer_config,
+    get_worktree_bundle_folder,
+)
 
 CLI = "ms-vscode-remote.remote-containers-*/dist/spec-node/devContainersSpecCLI.js"
 CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
@@ -62,6 +66,7 @@ def get_cli():
 
 
 def up(folder):
+    drop_stale_containers(folder)
     config = get_devcontainer_config(folder)
     data = CONFIG_ROOT / "Code/User/globalStorage/ms-vscode-remote.remote-containers/data"
     res = subprocess.run(

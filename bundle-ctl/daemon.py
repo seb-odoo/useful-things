@@ -55,6 +55,7 @@ from branch_status import (  # noqa: E402
 )
 from commands import (  # noqa: E402
     MADE,
+    drop_stale_containers,
     get_base_from_bundle_name,
     get_bundle_name_from_base_and_name,
     get_remote_dev_ref,
@@ -319,6 +320,7 @@ def open_window(log, bundle):
     log.write(f"opening {bundle}\n")
     log.flush()
     folder = get_worktree_bundle_folder(bundle)
+    drop_stale_containers(folder, log)
     run_in_session(log, "code", "--folder-uri", UtilsRunner()._devcontainer_folder_uri(folder))
 
 

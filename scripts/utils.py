@@ -11,6 +11,7 @@ from command_runner import Runner, ignore_error
 from commands import (
     BUNDLE_SUFFIX,
     MADE,
+    drop_stale_containers,
     get_base_from_bundle_name,
     get_devcontainer_config,
     get_remote_dev_branch_name,
@@ -311,7 +312,7 @@ class UtilsRunner(Runner):
         runner.run(["touch", f"{bundle_folder}/{MADE}"])
         self._install_js_tooling(runner, bundle_name=bundle_name, base_folder=base_folder)
         if open_window:
-            runner.run(["code", "--folder-uri", self._devcontainer_folder_uri(bundle_folder)])
+            runner.open_devcontainer_folder(folder=bundle_folder)
 
     def git_fetch(
         self,
@@ -362,6 +363,7 @@ class UtilsRunner(Runner):
 
     def open_devcontainer_folder(self, *, folder):
         """Same, for any folder holding a .devcontainer, bundle or not."""
+        drop_stale_containers(folder)
         self.run(["code", "--folder-uri", self._devcontainer_folder_uri(folder)])
 
     def prepare_worktree_bundle_folder(self, *, bundle_name, base=None):

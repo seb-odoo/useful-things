@@ -2,6 +2,8 @@
 
 import glob
 import os
+import subprocess
+import sys
 
 import fire
 
@@ -129,6 +131,58 @@ def get_devcontainer_config(folder):
     if os.path.realpath(folder).startswith(f"{os.path.realpath(WORKTREE_CONTAINER)}/"):
         folder = WORKTREE_CONTAINER
     return f"{folder}/.devcontainer/devcontainer.json"
+
+
+def get_stale_containers(rows, config, changed):
+    """Split the containers a folder has on an older config: the stopped ones, the running ones.
+
+    `rows` holds one (id, state, creation time, config label) per container, `changed` is when the
+    config was last written.
+    """
+    stale = [
+        (container, state)
+        for container, state, created, label in rows
+        if label != config or created < changed
+    ]
+    return (
+        [container for container, state in stale if state != "running"],
+        [container for container, state in stale if state == "running"],
+    )
+
+
+def drop_stale_containers(folder, out=sys.stdout):
+    """Remove the stopped containers of a bundle folder that were made on an older config.
+
+    A container keeps the mounts and the environment it was made with, and a start takes the one
+    that carries the labels of the folder again, whatever the config says since. A bundle container
+    holds nothing of its own (the workspace, the databases and the filestore are mounts), so the
+    next start makes a new one. A running one is left alone and named in `out`.
+    """
+    config = get_devcontainer_config(folder)
+    if config != get_devcontainer_config(WORKTREE_CONTAINER) or not os.path.isfile(config):
+        return
+    row = '{{.ID}} {{.State}} {{.Created.Unix}} {{index .Labels "devcontainer.config_file"}}'
+    listed = subprocess.run(
+        ["podman", "ps", "--all", "--filter", f"label=devcontainer.local_folder={folder}"]
+        + ["--format", row],
+        capture_output=True,
+        check=False,
+        text=True,
+    ).stdout
+    rows = [
+        (container, state, int(created), label)
+        for container, state, created, label in (line.split(" ", 3) for line in listed.splitlines())
+    ]
+    stopped, running = get_stale_containers(rows, config, os.path.getmtime(config))
+    if stopped:
+        subprocess.run(["podman", "rm", *stopped], capture_output=True, check=False)
+    if running:
+        print(
+            f"{os.path.basename(folder)} runs in a container made on an older config:"
+            " close its window and open it again",
+            file=out,
+            flush=True,
+        )
 
 
 def clean_bundle_name(bundle_name):
