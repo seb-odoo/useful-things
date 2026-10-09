@@ -15,6 +15,12 @@ dev containers: one approval until the connection drops (reboot, suspend, networ
 Other hosts (pi5, test.upgrade, the `github-private` alias) are not concerned: one approval per
 command.
 
+The filtered agent is a unit of the host, `ssh-agent-github.service`: `ssh-agent-filter` in front
+of Bitwarden, with its socket at `$XDG_RUNTIME_DIR/ssh-agent-github/sock`. Only this connection
+and the `github.com` entry of `~/.ssh/config` name that path (`IdentityAgent`). It must never be
+the `SSH_AUTH_SOCK` of the session: VS Code relays the agent of its environment into every
+container it attaches to, where a signature goes around the connection and what filters it.
+
 ## Install on the host
 
 ```sh
