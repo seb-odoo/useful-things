@@ -5,7 +5,8 @@ A container sees only its own bundle folder and reaches neither podman nor the h
 new bundle, its worktrees, its container and its agent only come from the host: `daemon.py` makes
 them on its behalf, behind a few fixed verbs. The git work itself (fetch, rebase, cherry-pick) stays
 with the agent of each bundle: github.com goes through `ssh-github-mux`, and VS Code forwards the
-SSH agent into the containers it attaches to.
+SSH agent into the containers it attaches to. The daemon also queues the heavy commands of every
+container, test runs first, so that they never take the whole host together (see Runs).
 
 - The daemon listens on `~/.local/state/bundle-ctl/sock/ctl.sock`. Every bundle container mounts
   that folder read-only at `/run/bundle-ctl`: a folder and not the socket, so a daemon restart needs
@@ -33,6 +34,8 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window, or with a task its agent; refused when the bundle is here or a branch has unpushed commits |
 | `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`; refused on a half-made bundle |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
+| `POST /run` | a heavy command waits for cores: one JSON line each time its place changes, then the CPUs it got (see Runs) |
+| `GET /runs` | the runs that hold cores and the ones that wait, the pool and the memory available |
 
 A `create` or a `fetch` that fails leaves a half-made bundle: a folder with no `.devcontainer`,
 which the scripts link last, so no container can start in it. The same `create` or `fetch` sent
@@ -48,6 +51,62 @@ from a container or from the host: `bctl whoami`, `bctl status`. The containers 
 read-only at its host path. Without the client:
 
     curl --unix-socket ~/.local/state/bundle-ctl/sock/ctl.sock http://bundle-ctl/whoami
+
+## Runs
+
+Agents that each start a test run, an install or a server when they see fit take every core at
+once and push the host into swap. So the heavy commands of the containers go through one queue of
+the daemon, which gives each of them cores of its own.
+
+- The pool is every core of the machine but the first third, which stays to the desktop.
+  `BUNDLE_CTL_RUN_CPUS` (a CPU list such as `4-11`) names other ones. A core is given whole, with
+  all its threads.
+- `bctl run [--kind KIND] [--workers N] -- COMMAND` asks for a run, waits for its start, pins
+  itself to the CPUs it got (`sched_setaffinity`) and becomes COMMAND. Without COMMAND the run is
+  the shell that called it: `bctl run` pins that shell and returns, and what the shell starts
+  next inherits its CPUs.
+- A run holds its cores until its process ends, which the daemon checks every second. No run is
+  killed and none has a time limit: `bctl runs` shows since when each one runs. After an hour a
+  run lends its cores, so the next one starts on them too: a run nobody ends (a `twc` without
+  `--once`) must not stop the queue.
+
+| kind | what | cores | memory counted |
+| --- | --- | --- | --- |
+| `hoot` | test-warden | one per worker, 2 at most | 1 GB, plus 1.3 GB per worker |
+| `odoo` | an `odoo-bin` that tests or installs | 1 | 2 GB |
+| `other` | any other command | 1 | 1 GB |
+| `server`, `shell` | an `odoo-bin` that serves, `odoo-bin shell` | none of its own: the whole pool, at once | 0.6 GB |
+
+- Runs start in arrival order, and a run that waits holds back the ones behind it.
+- While another run holds cores, a run also waits when its start would leave less than
+  `BUNDLE_CTL_RUN_MIN_FREE_GB` (default 4) of available memory, the runs started in the last
+  minute counted at what the table says, or when the host stalls on memory (`full avg10` of
+  `/proc/pressure/memory` at 5 or more). The first run always starts.
+- A client that leaves the queue before its start (a call that timed out) finds its place again
+  when the same bundle asks for the same command within 15 minutes.
+- A command started by a run that holds cores gets the same ones, and no entry of its own.
+- The runs are kept in `runs.json` beside `state.json`: a daemon that restarts takes back the
+  ones whose process still lives, and a client that waited asks again by itself for a minute.
+- When the daemon does not answer, or is older than the client, the command says so and runs
+  without the queue.
+
+An agent does not call `bctl run`. `client/run-hook.py`, a PreToolUse hook of the shared bundle
+`.claude/settings.json`, writes it as a line in front of a Bash command that runs `odoo-bin` or
+test-warden (`engine-linux-*`, `test-warden.cjs`, and the helpers `twc`, `ott`, `otf`, `obet`),
+whether directly, behind `nice` or `timeout`, from a variable, in `bash -c` or in a script file.
+It reads the kind in the flags (`--stop-after-init`, `--test-tags`, `-i`, `shell`, `--workers N`).
+The agent writes its command as before, and reads on stderr where it waits:
+
+    bctl run: waits for 1 core, place 2 in the queue. Running: master-a--seb (hoot, 6 min).
+
+The wait counts in the timeout of the Bash call. Claude Code moves a foreground call that
+outlives it to the background and stops it 10 minutes later, so a long run is started in the
+background. A command typed in a terminal passes no hook: what Seb runs himself never waits.
+
+The journal has one line per start and per end, `run started BUNDLE KIND cpus=4-7 waited=12s` and
+`run done BUNDLE KIND ran=95s cpu=3.1`, where `cpu` is how many CPUs the container of the run kept
+busy on average: read it before changing the cores of a kind. `python3 test_runs.py` runs the
+hook on agent commands, the order of the queue, and real clients on a socket of their own.
 
 ## Wrong version
 

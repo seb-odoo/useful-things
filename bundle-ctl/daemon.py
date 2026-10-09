@@ -68,6 +68,8 @@ from commands import (  # noqa: E402
 from config import STICKY_BUNDLES  # noqa: E402
 from utils import UtilsRunner  # noqa: E402
 
+import runs  # noqa: E402
+
 
 def load_config():
     """devcontainer/config.py, under another name than the scripts' own config module."""
@@ -100,6 +102,15 @@ MAX_TASK = 32 * 1024
 MAX_WIDTH = 400
 MODELS = ("haiku", "opus", "sonnet")
 NAME = re.compile(r"[a-z0-9](?:[a-z0-9.]|-(?!-)){0,79}")
+RUN_CPUS = os.environ.get("BUNDLE_CTL_RUN_CPUS") or CONFIG.get("BUNDLE_CTL_RUN_CPUS")
+RUN_MIN_FREE = float(
+    os.environ.get("BUNDLE_CTL_RUN_MIN_FREE_GB") or CONFIG.get("BUNDLE_CTL_RUN_MIN_FREE_GB") or 4,
+)
+RUNS = runs.RunQueue(
+    runs.get_pool(runs.read_cores(), RUN_CPUS),
+    RUN_MIN_FREE,
+    STATE / "runs.json",
+)
 SESSION_VARIABLES = (
     "DBUS_SESSION_BUS_ADDRESS",
     "DISPLAY",
@@ -256,7 +267,12 @@ def status(caller, query, body):
             )
             for item in state["queue"]
         ],
+        "runs": RUNS.describe(),
     }
+
+
+def list_runs(caller, query, body):
+    return 200, RUNS.describe()
 
 
 def session_env():
@@ -774,6 +790,7 @@ def open_or_enqueue(log, caller, bundle, body):
 VERBS = {
     ("GET", "/branches"): branches,
     ("GET", "/job"): get_job,
+    ("GET", "/runs"): list_runs,
     ("GET", "/status"): status,
     ("GET", "/whoami"): whoami,
     ("POST", "/create"): create,
@@ -804,10 +821,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         if self.caller is None:
             code, answer = 403, {"error": "not a bundle container"}
-        elif verb is None:
-            code, answer = 404, {"error": f"no verb {method} {url.path}"}
         elif length > MAX_BODY:
             code, answer = 413, {"error": f"body over {MAX_BODY} bytes"}
+        elif (method, url.path) == ("POST", "/run"):
+            try:
+                body = json.loads(self.rfile.read(length)) if length else {}
+            except ValueError:
+                body = {}
+            body = body if type(body) is dict else {}
+            print(f"{self.caller} POST /run {body.get('kind', '')}".strip(), flush=True)
+            runs.serve(RUNS, self, self.caller, body)
+            return
+        elif verb is None:
+            code, answer = 404, {"error": f"no verb {method} {url.path}"}
         else:
             try:
                 body = json.loads(self.rfile.read(length)) if length else {}
@@ -842,6 +868,7 @@ def main():
         state["building"] = []
         write_state(state)
     print(f"listening on {SOCKET}", flush=True)
+    RUNS.watch()
     keep_launching()
     server.serve_forever()
 

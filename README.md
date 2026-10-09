@@ -7,7 +7,7 @@ The dev environment I work on Odoo with, and the odds and ends that come with it
 | [`devcontainer/`](devcontainer/) | the container every bundle opens, generated from a base and whatever this machine adds to it |
 | `Dockerfile`, `container-rw/`, `odools.toml` | what that container is built from, and what it sources |
 | [`scripts/`](scripts/) | the bundle tooling: fetch a runbot batch, make the worktrees, open the container |
-| [`bundle-ctl/`](bundle-ctl/) | a host daemon, so an agent in a container can create, fetch and open bundles |
+| [`bundle-ctl/`](bundle-ctl/) | a host daemon, so an agent in a container can create, fetch and open bundles, and one queue for the heavy runs of every container |
 | [`proxy/`](proxy/) | rootless nginx, so parallel containers are reachable by bundle name |
 | [`claude-autoopen/`](claude-autoopen/) | a small VS Code extension that opens a Claude tab and a terminal per repo |
 | `.bashrc`, `install.sh`, `terminator-config` | the host side of all of it |
