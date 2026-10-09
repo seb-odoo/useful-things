@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Start the task of an agent with Claude Code.
 #
-#   agent-run.sh --terminal SESSION   in a terminal (agent-terminal.py), no VS Code: interactive
+#   agent-run.sh --terminal SESSION [PROMPT]
+#                                     in a terminal (agent-terminal.py), no VS Code: interactive.
+#                                     A run that already started is not run again: its session
+#                                     opens as it was, on PROMPT when one is given.
 #   agent-run.sh SESSION              in an agent window, unattended, stopped at its first tool call:
 #                                     the claude-autoopen extension then opens the Claude tab on the
 #                                     session, which reruns that turn. A run that ends without a tool
@@ -18,10 +21,13 @@ agent=/workspace/.agent
 cd /workspace || exit 1
 
 # VS Code relaunches a persistent terminal's command after a container restart: never run twice.
+reopen=
 if ! mkdir "$agent/run.lock" 2>/dev/null; then
-	[ -e "$agent/done" ] || [ -e "$agent/handoff" ] || echo interrupted >"$agent/done"
-	[ -n "$terminal" ] && exit 1
-	exec bash -i
+	if [ -z "$terminal" ]; then
+		[ -e "$agent/done" ] || [ -e "$agent/handoff" ] || echo interrupted >"$agent/done"
+		exec bash -i
+	fi
+	reopen=1
 fi
 
 # Every container shares ~/.claude: starts at the same time fail each other's token refresh.
@@ -34,6 +40,11 @@ if [ -n "$terminal" ]; then
 	start=(--session-id "$session")
 	if [ -e "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/-workspace/$session.jsonl" ]; then
 		start=(--resume "$session")
+	fi
+	if [ -n "$reopen" ]; then
+		mode=$(cat "$agent/mode" 2>/dev/null)
+		exec claude "${start[@]}" -n "$ODOO_PROXY_HOST" --model default \
+			--permission-mode "${mode:-auto}" ${2:+-- "$2"}
 	fi
 	# The mode `claude -p` runs in: the Claude tab does not restore the bundles' default, dontAsk.
 	exec claude "${start[@]}" -n "$ODOO_PROXY_HOST" --model default \

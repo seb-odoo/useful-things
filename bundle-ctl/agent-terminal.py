@@ -13,6 +13,10 @@ The claude session stays open in the terminal after its verdict (.agent/done, wr
 client/agent-stop.py), for Seb to read and to type in. Quitting claude or closing the terminal
 stops the container. A VS Code window opened on the bundle takes the session over instead
 (client/agent-takeover.py): the terminal closes, and the container lives as long as that window.
+
+Started on a bundle whose run already began, it goes on with that session and does not run the
+task again. When another terminal holds the session, it takes it over as a window does, in the
+same container.
 """
 
 import json
@@ -35,9 +39,11 @@ from commands import get_devcontainer_config, get_worktree_bundle_folder  # noqa
 
 CLI = "ms-vscode-remote.remote-containers-*/dist/spec-node/devContainersSpecCLI.js"
 CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
+GO_ON = "Continue from where you left off."
 # Leave the alternate screen and the mouse modes a killed claude stays in, and show the cursor.
 RESET = "\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m"
 SHELL_WAIT = 60
+TAKEOVER_WAIT = 30
 TRANSCRIPTS = pathlib.Path.home() / ".claude" / "projects" / "-workspace"
 USER = "vscode"
 
@@ -159,31 +165,81 @@ def shell(bundle):
     )
 
 
+def take_over(agent, bundle):
+    """Free the session from the terminal that holds it.
+
+    Return the container of that terminal when it still runs, and whether a turn was cut.
+    """
+    holder = read_text(agent / "terminal")
+
+    def is_held():
+        try:
+            cmdline = pathlib.Path(f"/proc/{holder}/cmdline").read_bytes()
+        except OSError:
+            return False
+        return bundle.encode() in cmdline.split(b"\0")
+
+    if not is_held():
+        return None, False
+    container = read_text(agent / "container")
+    if not container:
+        raise Failure("its agent starts in another terminal")
+    print(f"{bundle}: taking the session over from its other terminal", flush=True)
+    subprocess.run(
+        ["podman", "exec", "--user", USER, container]
+        + ["python3", str(HERE / "client" / "agent-takeover.py")],
+        check=False,
+    )
+    deadline = time.monotonic() + TAKEOVER_WAIT
+    # That terminal removes the two markers at its end: write them after it.
+    while is_held():
+        if time.monotonic() > deadline:
+            raise Failure("its other terminal still holds the session")
+        time.sleep(0.2)
+    cut = not (agent / "restarted").exists()
+    state = subprocess.run(
+        ["podman", "inspect", "--format", "{{.State.Running}}", container],
+        capture_output=True,
+        check=False,
+        text=True,
+    ).stdout.strip()
+    return container if state == "true" else None, cut
+
+
 def main():
     bundle = sys.argv[1]
     if sys.argv[2:] == ["--shell"]:
         shell(bundle)
         return
     agent = get_agent_folder(bundle)
-    if not (agent / "task.md").is_file() or (agent / "run.lock").exists():
+    if not (agent / "task.md").is_file():
         keep_open(f"{bundle}: no task to start")
         return
     # Closing the terminal hangs up `podman exec` as well: go on to stop the container.
     signal.signal(signal.SIGHUP, lambda *args: None)
     signal.signal(signal.SIGTERM, lambda *args: sys.exit(1))
-    container = ending = session = None
+    try:
+        container, cut = take_over(agent, bundle)
+    except Failure as error:
+        keep_open(f"{bundle}: {error}")
+        return
+    # Drop the handoff to a tab: left in place, this terminal would not stop its container.
+    for name in ("handoff", "restarted"):
+        (agent / name).unlink(missing_ok=True)
+    ending = session = None
     taken_over = False
     (agent / "terminal").write_text(f"{os.getpid()}\n")
     try:
         session = read_text(agent / "session") or str(uuid.uuid4())
         (agent / "session").write_text(f"{session}\n")
-        container = up(get_worktree_bundle_folder(bundle))
+        container = container or up(get_worktree_bundle_folder(bundle))
         copy_gitconfig(container)
         (agent / "container").write_text(f"{container}\n")
         code = subprocess.run(
             ["podman", "exec", "--interactive", "--tty", "--detach-keys=", "--user", USER]
             + ["--workdir", "/workspace", "--env", f"TERM={os.environ.get('TERM', 'xterm')}"]
-            + [container, "bash", str(HERE / "client" / "agent-run.sh"), "--terminal", session],
+            + [container, "bash", str(HERE / "client" / "agent-run.sh"), "--terminal", session]
+            + ([GO_ON] if cut else []),
             check=False,
         ).returncode
         if code:

@@ -10,6 +10,9 @@ terminal (agent-terminal.py). It stops that `claude` where the tab can go on, th
 - the session is idle, as it is after its verdict: at once, with .agent/restarted, so that the
   window is not reloaded;
 - else at the first of the two.
+
+agent-terminal.py starts it the same way when another terminal opens on the bundle: that terminal
+then goes on with the session.
 """
 
 import json
@@ -20,6 +23,7 @@ import time
 
 AGENT = pathlib.Path("/workspace/.agent")
 CONFIG = pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or pathlib.Path.home() / ".claude")
+QUIET = 120
 START_WAIT = 90
 STOP_WAIT = 10
 TAIL = 1024 * 1024
@@ -41,7 +45,7 @@ def find_claude(session):
             continue
         if (
             os.path.basename(args[0]) == b"claude"
-            and b"--session-id" in args
+            and (b"--session-id" in args or b"--resume" in args)
             and session.encode() in args
         ):
             return int(path.parent.name)
@@ -82,8 +86,8 @@ def read_entries(transcript, tail=TAIL):
     return entries
 
 
-def is_in_tool_call(entries):
-    """Whether the transcript ends on a tool call with no result yet, thinking left aside."""
+def get_last_message(entries):
+    """The author and the block types of the last message of the transcript, thinking left aside."""
     for entry in reversed(entries):
         if entry.get("type") not in ("assistant", "user") or entry.get("isSidechain"):
             continue
@@ -91,8 +95,19 @@ def is_in_tool_call(entries):
         kinds = {block.get("type") for block in content} if isinstance(content, list) else set()
         if kinds == {"thinking"}:
             continue
-        return entry["type"] == "assistant" and "tool_use" in kinds
-    return False
+        return entry["type"], kinds
+    return None, set()
+
+
+def is_at_rest(transcript, author):
+    """Whether the last turn ended a while ago, for a session that has no record.
+
+    Two containers whose claude has the same pid write the same sessions/<pid>.json.
+    """
+    try:
+        return author == "assistant" and time.time() - transcript.stat().st_mtime > QUIET
+    except OSError:
+        return False
 
 
 def get_mode(transcript):
@@ -136,8 +151,11 @@ def main():
         transcript = CONFIG / "projects" / "-workspace" / f"{session}.jsonl"
         deadline = time.monotonic() + TURN_WAIT
         while True:
-            rerun = is_in_tool_call(read_entries(transcript))
-            if rerun or not is_alive(pid) or get_status(session, pid) == "idle":
+            author, kinds = get_last_message(read_entries(transcript))
+            rerun = author == "assistant" and "tool_use" in kinds
+            status = get_status(session, pid)
+            at_rest = status is None and not rerun and is_at_rest(transcript, author)
+            if rerun or not is_alive(pid) or status == "idle" or at_rest:
                 break
             if time.monotonic() > deadline:
                 rerun = True
@@ -145,10 +163,12 @@ def main():
             time.sleep(0.5)
         if mode := get_mode(transcript):
             (AGENT / "mode").write_text(mode)
-        stop(pid)
     if not rerun:
         (AGENT / "restarted").touch()
+    # The terminal reads `handoff` as soon as its claude ends: write it first.
     (AGENT / "handoff").touch()
+    if pid:
+        stop(pid)
     (AGENT / "terminal").unlink(missing_ok=True)
 
 

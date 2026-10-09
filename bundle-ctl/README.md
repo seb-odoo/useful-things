@@ -97,11 +97,21 @@ its container is up: the label of the folder is not enough, as two containers ca
   `gbs`.
 - The same command gives a shell next to an agent that runs in another terminal.
 
+`agent-terminal.py BUNDLE` started on a bundle whose run already began (`run.lock`) does not run
+the task again: it opens the session as it was, in its permission mode (`.agent/mode`) and with
+no prompt. When another terminal holds the session (the pid in `.agent/terminal` lives), it first
+takes the session over as a window does, with `client/agent-takeover.py` in the container that
+terminal recorded: that terminal closes, the container is kept, and a turn cut at a tool call
+goes on (`Continue from where you left off.`). It then removes `handoff` and `restarted`, which
+are for a tab. This is how an agent moves from one terminal to another without a new container
+or a new turn.
+
 A VS Code window opened on the bundle (the folder icon of `gbs`, `ocode`) attaches to the same
 container and takes the session over, before or after its verdict: claude-autoopen sees
 `.agent/terminal` and runs `client/agent-takeover.py`. It stops the terminal's claude at once when
 a tool call is in flight or the session is idle, else at the first of the two, and writes
-`handoff`. The terminal closes (in a split window the agent's pane, its shell stays), and from
+`handoff`. A session with no record counts as idle once its last turn ended 2 minutes ago: two
+containers whose claude has the same pid write the same `sessions/<pid>.json`. The terminal closes (in a split window the agent's pane, its shell stays), and from
 there on the bundle has an agent window (below): the tab opens on the session and, for a stopped
 tool call, reruns the turn after one reload. The container then lives as long as that window.
 
@@ -125,7 +135,7 @@ remote connection ("Cannot reconnect"). A run that ends without a tool call open
 | `terminal` | `agent-terminal.py` | the agent runs in a terminal of the host; removed when it ends, or by `client/agent-takeover.py` when a window takes the session over |
 | `container` | `agent-terminal.py` | the id of the container the terminal's agent runs in, for its shell pane; removed when it ends |
 | `session` | `agent-terminal.py`, claude-autoopen | the session id, chosen before the run |
-| `run.lock` | `client/agent-run.sh` | the run started, its mtime is when; a relaunched terminal does not run it again |
+| `run.lock` | `client/agent-run.sh` | the run started, its mtime is when; a terminal started again opens the session and does not run the task again |
 | `result.md` | `client/stream-format.py`, `client/agent-stop.py`, `agent-terminal.py` | the last answer of the run, or why no container could start |
 | `mode` | `client/stream-format.py`, `client/agent-takeover.py` | the permission mode of the run, which the tab resumes the session in |
 | `handoff` | `client/agent-run.sh`, `client/agent-takeover.py` | claude was stopped for the tab to go on: `claude -p` at its first tool call, or the claude of a terminal |
