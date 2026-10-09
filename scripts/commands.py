@@ -10,6 +10,7 @@ import fire
 from config import (
     BUNDLE_SUFFIX,
     FILESTORE_CONTAINER,
+    HOST_FOLDER,
     MASTER_ONLY_REPOS,
     STICKY_BUNDLES,
     folder_by_repo,
@@ -150,16 +151,27 @@ def get_stale_containers(rows, config, changed):
     )
 
 
+def is_replaceable(folder):
+    """Whether a container of a folder holds nothing of its own: a bundle, or the tools folder.
+
+    The workspace, the databases and the filestore of a bundle are mounts, and so is all that the
+    container of the folder `BUNDLE_CTL_HOST_FOLDER` names works on.
+    """
+    if get_devcontainer_config(folder) == get_devcontainer_config(WORKTREE_CONTAINER):
+        return True
+    return bool(HOST_FOLDER) and os.path.realpath(folder) == os.path.realpath(HOST_FOLDER)
+
+
 def drop_stale_containers(folder, out=sys.stdout):
-    """Remove the stopped containers of a bundle folder that were made on an older config.
+    """Remove the stopped containers of a folder that were made on an older config.
 
     A container keeps the mounts and the environment it was made with, and a start takes the one
-    that carries the labels of the folder again, whatever the config says since. A bundle container
-    holds nothing of its own (the workspace, the databases and the filestore are mounts), so the
-    next start makes a new one. A running one is left alone and named in `out`.
+    that carries the labels of the folder again, whatever the config says since. Only where a
+    container holds nothing of its own (`is_replaceable`), so that the next start makes a new
+    one. A running one is left alone and named in `out`.
     """
     config = get_devcontainer_config(folder)
-    if config != get_devcontainer_config(WORKTREE_CONTAINER) or not os.path.isfile(config):
+    if not is_replaceable(folder) or not os.path.isfile(config):
         return
     row = '{{.ID}} {{.State}} {{.Created.Unix}} {{index .Labels "devcontainer.config_file"}}'
     listed = subprocess.run(
