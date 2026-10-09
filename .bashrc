@@ -358,3 +358,11 @@ for file in ~/.config/odoo-dev/bashrc.d/*.sh; do
 	[ -r "$file" ] && source "$file"
 done
 unset file
+
+# Say that a shell of an agent window runs on the host, as the prompt only shows a path.
+if [[ $- == *i* && -n "${BUNDLE_CTL_AGENT_WINDOW:-}" ]]; then
+	printf 'On the host, outside the container of %s.\n' "${BUNDLE_CTL_AGENT_WINDOW}"
+	printf '\e]8;;odoo-bundle://%s\e\\ocode %s\e]8;;\e\\ opens its VS Code window.\n' \
+		"${BUNDLE_CTL_AGENT_WINDOW}" "${BUNDLE_CTL_AGENT_WINDOW}"
+	unset BUNDLE_CTL_AGENT_WINDOW
+fi

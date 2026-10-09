@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Open a terminator window split in two: the agent of a bundle, and a shell of its container.
+"""Open a terminator window split in two: the agent of a bundle, and a host shell in its folder.
 
     agent-terminator.py BUNDLE COMMAND...
 
@@ -8,6 +8,9 @@ For AGENT_TERMINAL of the bundle-ctl daemon, which appends COMMAND, the one that
 
 Terminator takes the commands of a split from a layout of its config only. So the window runs on a
 copy of the user's config with that layout added: preferences saved from it go to the copy.
+
+The title of each pane says where it runs. A pane split by hand has no title: the host .bashrc
+prints the same in any shell that holds BUNDLE_CTL_AGENT_WINDOW, the bundle name.
 """
 
 import os
@@ -35,12 +38,14 @@ PANES = """\
       parent = panes
       order = 0
       profile = default
+      title = "in the container: claude"
       command = "{agent}"
     [[[shell]]]
       type = Terminal
       parent = panes
       order = 1
       profile = default
+      title = "on the host: shell"
       command = "{shell}"
 """
 RUNTIME = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR") or pathlib.Path.home() / ".cache")
@@ -66,6 +71,7 @@ def main():
     path = RUNTIME / "bundle-ctl" / f"terminator-{bundle}.config"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(get_config(command))
+    os.environ["BUNDLE_CTL_AGENT_WINDOW"] = bundle
     os.execvp(
         "terminator",
         ["terminator", "--no-dbus", "--config", str(path), "--layout", LAYOUT, "--title", bundle],

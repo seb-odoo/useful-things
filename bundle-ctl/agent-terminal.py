@@ -2,7 +2,7 @@
 """Run the task of a bundle with Claude Code in this terminal, in the bundle's dev container.
 
     agent-terminal.py BUNDLE
-    agent-terminal.py BUNDLE --shell    a shell in that container, for a pane next to the agent
+    agent-terminal.py BUNDLE --shell    a host shell in the bundle, for a pane next to the agent
 
 The bundle-ctl daemon starts it in a terminal window for a queued task, so that an agent costs no
 VS Code window. The container is the one VS Code would make: `up` of the devcontainer CLI that the
@@ -46,7 +46,6 @@ CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.hom
 GO_ON = "Continue from where you left off."
 # Leave the alternate screen and the mouse modes a killed claude stays in, and show the cursor.
 RESET = "\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m"
-SHELL_WAIT = 60
 TAKEOVER_WAIT = 30
 TRANSCRIPTS = pathlib.Path.home() / ".claude" / "projects" / "-workspace"
 USER = "vscode"
@@ -147,27 +146,11 @@ def keep_open(ending, session=None):
 
 
 def shell(bundle):
-    """Run a shell in the container of the bundle's agent, once it is up."""
-    agent = get_agent_folder(bundle)
-    deadline = time.monotonic() + SHELL_WAIT
-    waiting = False
-    while not (container := read_text(agent / "container")):
-        # Both panes start together: the agent may not have written .agent/terminal yet.
-        if not (agent / "terminal").exists() and time.monotonic() > deadline:
-            return
-        if not waiting:
-            print(f"{bundle}: waiting for the container", flush=True)
-            waiting = True
-        time.sleep(1)
-    has_odoo = os.path.isdir(f"{get_worktree_bundle_folder(bundle)}/odoo")
-    link = f"\x1b]8;;odoo-bundle://{bundle}\x1b\\ocode\x1b]8;;\x1b\\"
-    print(f"{bundle}: {link} opens its VS Code window", flush=True)
-    os.execvp(
-        "podman",
-        ["podman", "exec", "--interactive", "--tty", "--detach-keys=", "--user", USER]
-        + ["--workdir", "/workspace/odoo" if has_odoo else "/workspace"]
-        + ["--env", f"TERM={os.environ.get('TERM', 'xterm')}", container, "bash"],
-    )
+    """Run a shell of the host in the folder of the bundle, for Seb to type in."""
+    folder = pathlib.Path(get_worktree_bundle_folder(bundle))
+    os.chdir(folder / "odoo" if (folder / "odoo").is_dir() else folder)
+    program = os.environ.get("SHELL") or "bash"
+    os.execvp(program, [program])
 
 
 def take_over(agent, bundle):

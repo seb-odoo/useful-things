@@ -86,19 +86,23 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   that queued the task, and the launch gives its slot back at the next check of the queue.
 
 With `AGENT_TERMINAL` set to `agent-terminator.py {bundle}`, the window is a terminator split in
-two: the agent on the left, and on the right `agent-terminal.py BUNDLE --shell`, a bash of the
-same container in `/workspace/odoo`. It waits for `.agent/container`, the id the agent writes once
-its container is up: the label of the folder is not enough, as two containers can carry it.
+two: the agent on the left, and on the right `agent-terminal.py BUNDLE --shell`, a shell of the
+host in the `odoo` folder of the bundle. That shell is for Seb to type in, so nothing of it runs
+in the container: the contained terminal is the one of the VS Code window.
 
+- A pane split by hand (Ctrl+Shift+O, Ctrl+Shift+E) and a new tab (Ctrl+Shift+T) are shells of
+  the host too, as in any terminator window.
 - Terminator takes the commands of a split from a layout of its config only. So the launcher runs
   it on a copy of `~/.config/terminator/config` with that layout added, in
   `$XDG_RUNTIME_DIR/bundle-ctl/`: preferences saved from an agent window go to the copy.
-- The shell holds nothing: `exit` closes its pane alone, and it ends with the container, so when
-  claude quits.
-- `ocode` in that shell opens the VS Code window of the bundle (`bctl open` on the container's own
-  bundle, `container-rw/devcontainer.bashrc`). The first line of the pane carries the same link as
-  `gbs`.
-- The same command gives a shell next to an agent that runs in another terminal.
+- The shell outlives the agent: when claude quits, the agent's pane closes, its container stops
+  and the window stays on the shell.
+- Each pane says where it runs. The two panes of the layout carry a title, `in the container:
+  claude` and `on the host: shell`. A shell of the window, one split by hand included, also
+  starts on `On the host, outside the container of BUNDLE.` and on `ocode BUNDLE opens its VS
+  Code window.`, which carries the same link as `gbs`: the launcher exports
+  `BUNDLE_CTL_AGENT_WINDOW`, and `.bashrc` prints the two lines in an interactive shell that
+  holds it.
 
 `agent-terminal.py BUNDLE` started on a bundle whose run already began (`run.lock`) does not run
 the task again: it opens the session as it was, in its permission mode (`.agent/mode`) and with
@@ -137,7 +141,7 @@ remote connection ("Cannot reconnect"). A run that ends without a tool call open
 | `model` | bundle-ctl | the model the task asked for, `haiku` or `sonnet`; no file for `opus` |
 | `queued` | bundle-ctl | when the task entered the queue (epoch seconds), kept when a task no window took is queued again |
 | `terminal` | `agent-terminal.py` | the agent runs in a terminal of the host; removed when it ends, or by `client/agent-takeover.py` when a window takes the session over |
-| `container` | `agent-terminal.py` | the id of the container the terminal's agent runs in, for its shell pane; removed when it ends |
+| `container` | `agent-terminal.py` | the id of the container the terminal's agent runs in, for the terminal that takes its session over; removed when it ends |
 | `session` | `agent-terminal.py`, claude-autoopen | the session id, chosen before the run |
 | `run.lock` | `client/agent-run.sh` | the run started, its mtime is when; a terminal started again opens the session and does not run the task again |
 | `result.md` | `client/stream-format.py`, `client/agent-stop.py`, `agent-terminal.py` | the last answer of the run, or why no container could start |
