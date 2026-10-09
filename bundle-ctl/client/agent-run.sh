@@ -43,11 +43,11 @@ if [ -n "$terminal" ]; then
 	fi
 	if [ -n "$reopen" ]; then
 		mode=$(cat "$agent/mode" 2>/dev/null)
-		exec claude "${start[@]}" -n "$ODOO_PROXY_HOST" --model default \
+		exec claude "${start[@]}" -n "$ODOO_PROXY_HOST" --model opus \
 			--permission-mode "${mode:-auto}" ${2:+-- "$2"}
 	fi
 	# The mode `claude -p` runs in: the Claude tab does not restore the bundles' default, dontAsk.
-	exec claude "${start[@]}" -n "$ODOO_PROXY_HOST" --model default \
+	exec claude "${start[@]}" -n "$ODOO_PROXY_HOST" --model opus \
 		--permission-mode auto -- "$(cat "$agent/task.md")"
 fi
 
@@ -59,7 +59,7 @@ while :; do
 	# Record the session as the extension does: the Claude tab hides the ones `claude -p` records.
 	exec {stream}< <(
 		CLAUDE_CODE_ENTRYPOINT=claude-vscode exec claude -p --session-id "$session" -n "$ODOO_PROXY_HOST" \
-			--model default --verbose --output-format stream-json <"$agent/task.md"
+			--model opus --verbose --output-format stream-json <"$agent/task.md"
 	)
 	claude=$!
 	python3 "${0%/*}/stream-format.py" --until-tool-use "$agent/result.md" <&"$stream"

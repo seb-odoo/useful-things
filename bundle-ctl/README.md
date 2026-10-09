@@ -70,6 +70,8 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   has no identity there otherwise.
 - It runs the interactive `claude` in the container (`client/agent-run.sh --terminal`), on the task
   as its prompt, in `auto` like the `claude -p` of an agent window. Seb can type in that terminal.
+  Both run on `--model opus`: `default` is the default of the account, which Anthropic sets and
+  which is not the `ANTHROPIC_MODEL` of the settings.
 - A turn that ends on a verdict writes `done` (`client/agent-stop.py`), a turn that ends on
   anything else `waiting`. Either way the claude session stays open in its terminal, for Seb to
   read what ran and to type in, and its container keeps its slot.
