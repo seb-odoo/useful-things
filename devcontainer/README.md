@@ -90,6 +90,9 @@ Claude reads the same files, so a hook a bundle could write would run on the hos
 What a tab has to write is a file of the bundle, made by [`claude-config.py`](claude-config.py)
 before every start:
 
+- `.claude.json`, the state of Claude, where an MCP server is kept: a copy of the host's with the
+  workspace trusted, as one file for every container would carry a server added in one into the
+  others. Written in place, since it is bound into the running container.
 - `settings.json`, a copy of the host's, where a model picked in a tab is kept. Claude saves it by
   rename, which fails on a mounted file, and then writes it in place. The copy has no `ask` rule:
   such a rule prompts even when a hook allowed the call, and in a container the hooks decide.

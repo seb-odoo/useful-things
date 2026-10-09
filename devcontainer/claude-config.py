@@ -8,10 +8,11 @@ Claude locks a token refresh and saves the new token in that folder, and any cop
 .credentials.json elsewhere gets revoked by the next refresh. session-env and shell-snapshots are
 mounted from a folder of the bundle, as the host's Claude sources its own. So is extension-storage,
 where the Claude tab keeps the permission mode of each session: in the container, a rebuild wipes
-it and the tab resumes in plan. The workspace (/workspace unless given) is marked trusted in the
-.claude.json of that folder, or `claude -p` ignores the permissions of the bundle's .claude. The
-onboarding is marked done there too, or the interactive claude of an agent terminal stops on its
-theme picker.
+it and the tab resumes in plan. So is .claude.json, the state of Claude, where an MCP server is
+kept: one file for every container would carry a server added in one into the others. It starts
+as a copy of the host's, with the workspace (/workspace unless given) marked trusted, or
+`claude -p` ignores the permissions of the bundle's .claude, and the onboarding marked done, or
+the interactive claude of an agent terminal stops on its theme picker.
 
 What a session takes as orders is mounted read-only in a bundle (see README.md), so what a tab has
 to write gets a file of the bundle: settings.json, a copy of the host's where a model picked in a
@@ -85,17 +86,19 @@ def main():
     write_settings(claude, own)
     link_project(pathlib.Path(values["SHARED_CLAUDE"]), own / "project")
 
-    state_path = claude / ".claude.json"
-    state = json.loads(state_path.read_text()) if state_path.is_file() else {}
+    state_path = own / ".claude.json"
+    seed = claude / ".claude.json"
+    state = {}
+    for path in (state_path, seed):
+        if path.is_file():
+            state = json.loads(path.read_text())
+            break
     folder = sys.argv[2] if len(sys.argv) > 2 else "/workspace"
     workspace = state.setdefault("projects", {}).setdefault(folder, {})
-    if workspace.get("hasTrustDialogAccepted") and state.get("hasCompletedOnboarding"):
-        return
     workspace["hasTrustDialogAccepted"] = True
     state["hasCompletedOnboarding"] = True
-    tmp = state_path.with_name(".claude.json.tmp")
-    tmp.write_text(json.dumps(state, indent=2) + "\n")
-    tmp.replace(state_path)
+    # In place: the file is bound into a running container, and a rename would leave it behind.
+    state_path.write_text(json.dumps(state, indent=2) + "\n")
 
 
 if __name__ == "__main__":

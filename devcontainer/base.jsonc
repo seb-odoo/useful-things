@@ -60,6 +60,9 @@
     "source=@HOME@/.claude/projects/@HOST_PROJECT@,target=/home/vscode/.claude/projects/@HOST_PROJECT@,type=bind,readonly,z",
     "source=@HOME@/.claude/skills,target=/home/vscode/.claude/skills,type=bind,readonly,z",
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/settings.json,target=/home/vscode/.claude/settings.json,type=bind,z",
+    // The state of Claude (.claude.json, where an MCP server is kept): a copy of the bundle, as a
+    // file shared by every container would carry one container's MCP server into the others.
+    "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/.claude.json,target=/home/vscode/.claude/.claude.json,type=bind,z",
     // Claude sources these before each Bash command: the containers get their own.
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/session-env,target=/home/vscode/.claude/session-env,type=bind,z",
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/shell-snapshots,target=/home/vscode/.claude/shell-snapshots,type=bind,z",
