@@ -84,8 +84,6 @@ def started(folder, files):
 
 
 def main():
-    daemon.get_agent = lambda bundle, alive=True: None
-    daemon.get_open_bundle_folders = list
     daemon.launch_queued = lambda: None
     daemon.write_state = lambda state: None
     failures = []

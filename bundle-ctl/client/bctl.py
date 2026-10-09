@@ -16,8 +16,9 @@ create, fetch and open run as a job on the host: bctl prints its log until it en
 minutes for a new bundle. With a task, no window opens: once the bundle fits under the cap of
 running bundles, Claude runs the task in a terminal of the host, in the bundle's container, and a
 VS Code window opened on the bundle later takes the session over in a Claude tab. A bundle whose
-window is already open runs the task in that window. The queue runs the highest priority first
-(-100 to 100, default 0), then in arrival order: bctl status lists it in that order.
+window is already open runs the task in that window. A task for a bundle whose agent has not ended
+is queued behind it. The queue runs the highest priority first (-100 to 100, default 0), then in
+arrival order: bctl status lists it in that order, with what each task waits for.
 
 open --resume gives the task to the last Claude session of the bundle as its next prompt, where a
 task alone starts a new session. Without a task, the session is told to go on.
@@ -138,6 +139,7 @@ def print_status(answer):
         asked = f", on {item['model']}" if item.get("model") else ""
         asked += f", effort {item['effort']}" if item.get("effort") else ""
         since = f", since {item['queued']}" if item.get("queued") else ""
+        since += f", waits for {item['waits_for']}" if item.get("waits_for") else ""
         print(
             f"queued {position}: {item['bundle']} (priority {item['priority']}{asked},"
             f" from {item['parent']}{since})",

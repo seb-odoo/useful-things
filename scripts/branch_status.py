@@ -439,13 +439,16 @@ def get_group(facts, status, push):
 
 
 def get_bundle_agent(bundle, state, is_open, now):
+    alive = is_open or now - state["launches"].get(bundle, 0) < LAUNCH_GRACE
+    agent = get_agent(bundle, alive=alive)
+    if agent and agent["state"] in ("running", "waiting"):
+        return agent
     queue = [item["bundle"] for item in state["queue"]]
     if bundle in queue:
         return {"queued": queue.index(bundle) + 1, "state": "queued"}
     if bundle in state.get("building", []):
         return {"state": "building"}
-    alive = is_open or now - state["launches"].get(bundle, 0) < LAUNCH_GRACE
-    return get_agent(bundle, alive=alive)
+    return agent
 
 
 def format_agent(agent, group):

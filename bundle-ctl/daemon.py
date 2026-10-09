@@ -264,6 +264,7 @@ def status(caller, query, body):
                 parent=item["parent"],
                 priority=item.get("priority", 0),
                 queued=item.get("queued") and format_time(item["queued"]),
+                waits_for=item.get("waits_for"),
             )
             for item in state["queue"]
         ],
@@ -440,13 +441,6 @@ def check_task(bundle, body):
         raise ValueError(f"model: one of {', '.join(MODELS)}")
     with state_lock:
         state = read_state()
-    alive = (
-        get_worktree_bundle_folder(bundle) in get_open_bundle_folders()
-        or time.time() - state["launches"].get(bundle, 0) < LAUNCH_GRACE
-    )
-    agent = get_agent(bundle, alive=alive)
-    if agent and agent["state"] not in ("done", "stopped"):
-        raise Refused(f"an agent already works in {bundle}")
     if any(item["bundle"] == bundle for item in state["queue"]):
         raise Refused(f"{bundle} is already queued")
     if body.get("resume"):
@@ -484,10 +478,24 @@ def enqueue(caller, bundle, body):
         write_state(state)
     launch_queued()
     with state_lock:
-        queue = [item["bundle"] for item in read_state()["queue"]]
-    if bundle in queue:
-        return {"bundle": bundle, "priority": priority, "queued": queue.index(bundle) + 1}
+        queue = read_state()["queue"]
+    for place, item in enumerate(queue, 1):
+        if item["bundle"] == bundle:
+            return {
+                "bundle": bundle,
+                "priority": priority,
+                "queued": place,
+                "waits_for": item.get("waits_for"),
+            }
     return {"bundle": bundle, "priority": priority, "started": True}
+
+
+def is_busy(bundle, alive):
+    """Whether an agent runs or waits in the bundle: a task with no verdict, in a container that
+    runs or was just launched.
+    """
+    folder = get_agent_folder(bundle)
+    return alive and (folder / "task.md").is_file() and not (folder / "done").exists()
 
 
 def write_task(item):
@@ -572,12 +580,18 @@ def launch_queued():
             is_running = get_worktree_bundle_folder(bundle) in open_windows
             container = is_running and get_bundle_container(bundle)
             has_room = count_agents(open_windows) + len(state["launches"]) < MAX_AGENTS
-            if container and has_window(container):
+            in_terminal = container and (folder / "terminal").exists()
+            if is_busy(bundle, is_running or bundle in state["launches"]):
+                item["waits_for"] = "its agent to end" + (
+                    ", then its terminal to close" if in_terminal else ""
+                )
+            elif container and has_window(container):
                 # The claude-autoopen extension of the window starts it.
                 write_task(item)
-            elif container and (get_agent_folder(bundle) / "terminal").exists():
+                continue
+            elif in_terminal:
                 # Wait for its last terminal to close: the `died` event comes back here.
-                queue.append(item)
+                item["waits_for"] = "its terminal to close"
             elif has_display and (is_running or has_room):
                 write_task(item)
                 if not is_running:
@@ -587,8 +601,10 @@ def launch_queued():
                     "spawn",
                     lambda log, bundle=bundle: open_terminal(log, bundle),
                 )
+                continue
             else:
-                queue.append(item)
+                item["waits_for"] = "a slot" if has_display else "a desktop session"
+            queue.append(item)
         state["queue"] = queue
         write_state(state)
 

@@ -29,7 +29,7 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | --- | --- |
 | `GET /whoami` | the caller's bundle, base and parent |
 | `GET /branches` | `gbs --json` run on the host; `?format=table&width=N`: its colored table |
-| `GET /status` | every local bundle branch: base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open, and its agent: state (`running`, `waiting`, `done`, or `stopped` when its terminal or its window closed before the verdict: nothing runs it any more, and a new task may replace it; a stopped agent carries its `task` text, to queue it again as it was), when it was queued, when its run started (none for a task no window took), when it ended, `stale` when a branch of the bundle got a commit, or its dev remote ref an update (the mtime of its reflog), after that end, retry, and the last write to a session titled with the bundle, its own or an earlier agent's tab Seb went on in (`active N min ago`, or `idle since HH:MM` after 15 minutes; a tab opened by hand has no title and does not count); the queue, each task with its priority, the bundle that queued it and when |
+| `GET /status` | every local bundle branch: base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open, and its agent: state (`running`, `waiting`, `done`, or `stopped` when its terminal or its window closed before the verdict: nothing runs it any more, and a new task may replace it; a stopped agent carries its `task` text, to queue it again as it was), when it was queued, when its run started (none for a task no window took), when it ended, `stale` when a branch of the bundle got a commit, or its dev remote ref an update (the mtime of its reflog), after that end, retry, and the last write to a session titled with the bundle, its own or an earlier agent's tab Seb went on in (`active N min ago`, or `idle since HH:MM` after 15 minutes; a tab opened by hand has no title and does not count); the queue, each task with its priority, the bundle that queued it, when, and what it waits for |
 | `POST /create` | `gnb` with `--no-push`, then a window, or with a task its agent; refused when the bundle exists or a branch has unpushed commits |
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window, or with a task its agent; refused when the bundle is here or a branch has unpushed commits |
 | `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`; refused on a half-made bundle |
@@ -236,16 +236,23 @@ the three models, and the `xhigh` of Seb's settings stays for his own sessions. 
 any other name, `max` included, and `client/agent-run.sh` runs on `opus` at `medium` when
 `.agent/model` or `.agent/effort` holds anything else. `python3 test_options.py` runs each case.
 `--priority N` (-100 to 100, default 0) puts the task ahead of the ones with a lower priority; equal
-priorities leave in arrival order. The answer is the task's place (`queued`), or `started` when a
-slot was free. `bctl status` lists the queue in that order with each priority, the bundle that
-queued it and since when, so a caller can pick where it goes.
+priorities leave in arrival order. The answer is the task's place (`queued`) and what it waits for
+(`waits_for`), or `started` when a slot was free. `bctl status` lists the queue in that order with
+each priority, the bundle that queued it, since when and what it waits for, so a caller can pick
+where it goes.
+A task for a bundle whose agent has not ended is queued behind it, so the caller has nothing to
+try again: it waits for `its agent to end`, the verdict of an agent in a window, and for an agent
+in a terminal `then its terminal to close`. A bundle holds one queued task: a second one is
+refused.
 The cap is read from `~/.config/odoo-dev/config.env` or the unit's environment. The queue is checked
 again on every podman container start and stop, and every minute; it lives in
 `~/.local/state/bundle-ctl/state.json`. Any session can queue, agent runs included: the cap
 is the only bound on a fan-out. A task given to a bundle whose window is open starts there within 5
-seconds, even at the cap, as it takes no new container. A launched task nothing took (no
+seconds, even at the cap, as it takes no new container; behind an agent of that window, within a
+minute of its verdict. A launched task nothing took (no
 `.agent/session` once the launch is 15 minutes old and no container is up) goes back at the head
 of the queue, 3 times at most: a terminal asked for while the desktop session ends never starts.
+A task queued behind it meanwhile replaces it, as it replaces a stopped agent.
 A queued task whose bundle folder is gone is dropped, and so is one its agent already runs (a pass
 that dies after a launch saves no state): `python3 test_queue.py` runs a pass on each case.
 A new task moves the previous
@@ -259,7 +266,8 @@ Closing the terminal or the window of an agent is Seb's call: nothing else stops
 container, and nothing deletes a bundle on its own. `done` only says the run reached its verdict,
 as Seb often goes on in the session: when the queue waits on the cap, `bctl status` names the
 agents that are done and idle, the ones he can close. A task for a bundle whose last session still
-has its terminal waits in the queue until that terminal closes.
+has its terminal waits in the queue until that terminal closes, whether that session reached its
+verdict or not.
 
 The agent runs of all the containers start at least 10 seconds apart (a lock in the shared
 `~/.claude`), as claude processes started together fail each other's OAuth token refresh. A
