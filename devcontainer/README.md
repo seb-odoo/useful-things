@@ -93,6 +93,12 @@ before every start:
 - `settings.json`, a copy of the host's, where a model picked in a tab is kept. Claude saves it by
   rename, which fails on a mounted file, and then writes it in place. The copy has no `ask` rule:
   such a rule prompts even when a hook allowed the call, and in a container the hooks decide.
+  The host binds its own `settings.json` on itself, once, with
+  `sudo devcontainer/settings-bind.sh`. Without that bind a write of the file on the host is a
+  rename, and the rename drops the copy of every running container: each then reads and writes
+  the host's file. A container that lost its copy can drop the bind of the host the same way, so
+  restart it. On the host, git cannot replace that file any more (`Device or resource busy`):
+  write it in place, `git show REV:settings.json > settings.json`.
 - the project `.claude`, a folder of the bundle where the files all bundles share (`CLAUDE.md`,
   `settings.json`) are links into a read-only mount, and `settings.local.json` is its own: an
   "always allow" holds for that bundle.
