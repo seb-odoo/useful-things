@@ -57,9 +57,15 @@ with pip inside. The rest follows from that choice.
 - **The shell helpers reach non-interactive shells** through `BASH_ENV`, which points at
   `container-rw/devcontainer.bashrc`: an agent runs `bash -c`, which does not read `~/.bashrc`.
 
-A change to `containerEnv` needs a rebuild: "Reopen in Container" reuses the container that exists.
-A container left half-made by a failed build blocks the next start with "container state
-improper": remove it.
+A container keeps the mounts and the environment it was made with: a start takes the one that
+exists again, whatever the config says since. So `ocode`, `bctl open` and the launch of an agent
+first remove the stopped containers of the bundle made before the shared config was last written,
+or from another config file (`drop_stale_containers` in `scripts/commands.py`, cases in
+`scripts/test_containers.py`): closing a window and opening the bundle again is enough to apply a
+config change. A running container is left alone, and the open says it runs on an older config;
+nothing in a container can replace it. `build.py` does not rewrite an unchanged config, as its
+date is what tells. A container left half-made by a failed build blocks the next start with
+"container state improper": remove it.
 
 `scripts/utils.py` opens a bundle straight in its container, with
 `code --folder-uri vscode-remote://dev-container+<hex>/workspace`, where `<hex>` is the hex of the
