@@ -34,9 +34,11 @@ sys.path.insert(0, str(SCRIPTS))
 
 from agents import (  # noqa: E402
     LAUNCH_GRACE,
+    SESSIONS,
     STATE,
     STATE_FILE,
     format_time,
+    get_activity,
     get_agent,
     get_agent_folder,
     get_bundle_container,
@@ -489,7 +491,68 @@ def get_open_windows():
 
 
 def count_agents(folders):
-    return sum(os.path.exists(f"{folder}/.agent/terminal") for folder in folders)
+    """The agents at work in a terminal: one that gave its verdict leaves its slot."""
+    return sum(
+        os.path.exists(f"{folder}/.agent/terminal") and not os.path.exists(f"{folder}/.agent/done")
+        for folder in folders
+    )
+
+
+def is_parked(agent):
+    """Whether a live terminal holds the session of this `.agent` folder, its container stopped."""
+    try:
+        cmdline = pathlib.Path(f"/proc/{read_text(agent / 'terminal')}/cmdline").read_bytes()
+    except OSError:
+        return False
+    return (agent / "parked").exists() and agent.parent.name.encode() in cmdline.split(b"\0")
+
+
+def is_turn_over(session, tail=1024 * 1024):
+    """Whether the last message of the session is an answer of claude, with no tool call."""
+    try:
+        with (SESSIONS / f"{session}.jsonl").open("rb") as file:
+            file.seek(max(0, file.seek(0, os.SEEK_END) - tail))
+            lines = file.read().split(b"\n")
+    except OSError:
+        return False
+    for line in reversed(lines):
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(entry, dict) or entry.get("type") not in ("assistant", "user"):
+            continue
+        if entry.get("isSidechain"):
+            continue
+        content = entry.get("message", {}).get("content")
+        kinds = {block.get("type") for block in content} if isinstance(content, list) else set()
+        if kinds != {"thinking"}:
+            return entry["type"] == "assistant" and "tool_use" not in kinds
+    return False
+
+
+def park_agents():
+    """Ask the terminal of each agent that gave its verdict and sat idle since to stop its
+    container, which holds memory for nothing: agent-terminal.py stops it and waits for Enter.
+    """
+    described = RUNS.describe()
+    testing = {run["bundle"] for run in described["running"] + described["queue"]}
+    for folder in get_open_windows():
+        agent = pathlib.Path(folder) / ".agent"
+        bundle = agent.parent.name
+        container, session = read_text(agent / "container"), read_text(agent / "session")
+        if (
+            container
+            and (agent / "done").exists()
+            and not (agent / "park").exists()
+            and not (agent / "parked").exists()
+            and bundle not in testing
+            and get_activity(bundle, session)[1]
+            and is_turn_over(session)
+            and not has_window(container)
+        ):
+            (agent / "park").touch()
+            print(f"park {bundle}: its agent is done and idle", flush=True)
 
 
 def check_task(bundle, body):
@@ -659,6 +722,7 @@ def launch_queued():
         env = session_env()
         has_display = env.get("DISPLAY") or env.get("WAYLAND_DISPLAY")
         starting = get_starting(state["launches"], open_windows, now)
+        short = describe_memory()["short"]
         paced = False
         queue = []
         for item in state["queue"]:
@@ -674,11 +738,10 @@ def launch_queued():
                 continue
             is_running = get_worktree_bundle_folder(bundle) in open_windows
             container = is_running and get_bundle_container(bundle)
-            has_room = item.get("forced") or (
-                count_agents(open_windows) + len(state["launches"]) < MAX_AGENTS
-            )
+            fits = count_agents(open_windows) + len(state["launches"]) < MAX_AGENTS
+            has_room = item.get("forced") or (fits and not short)
             can_start = has_display and (is_running or has_room)
-            in_terminal = container and (folder / "terminal").exists()
+            in_terminal = (folder / "terminal").exists() and (container or is_parked(folder))
             if is_busy(bundle, is_running or bundle in state["launches"]):
                 item["waits_for"] = "its agent to end" + (
                     ", then its terminal to close" if in_terminal else ""
@@ -704,8 +767,10 @@ def launch_queued():
                 )
                 starting = bundle
                 continue
+            elif not has_display:
+                item["waits_for"] = "a desktop session"
             else:
-                item["waits_for"] = "a slot" if has_display else "a desktop session"
+                item["waits_for"] = "memory on the host" if fits else "a slot"
             queue.append(item)
         state["queue"] = queue
         write_state(state)
@@ -768,6 +833,10 @@ def keep_launching():
 
     def on_timer():
         while True:
+            try:
+                park_agents()
+            except Exception:
+                traceback.print_exc()
             time.sleep(START_CHECK if launch_safely() else 60)
 
     threading.Thread(target=on_events, daemon=True).start()

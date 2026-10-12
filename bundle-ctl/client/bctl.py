@@ -119,14 +119,10 @@ def format_agent(agent):
                 started and f"started {started}",
                 agent.get("retry"),
                 agent.get("activity"),
+                agent.get("parked") and f"container stopped {agent['parked']}",
             ],
         ),
     )
-
-
-def is_idle(row):
-    agent = row["agent"]
-    return row["open"] and agent and agent["state"] == "done" and agent.get("idle")
 
 
 def print_status(answer):
@@ -141,12 +137,7 @@ def print_status(answer):
         if row["agent"]:
             repos += f"  [agent {format_agent(row['agent'])}]"
         print(f"{row['bundle']:60} {state:7} {repos}")
-    print(f"\n{answer['agents']}/{answer['max_agents']} agents in a terminal")
-    idle = [
-        f"{row['bundle']} ({row['agent']['activity']})" for row in answer["bundles"] if is_idle(row)
-    ]
-    if answer["queue"] and answer["agents"] >= answer["max_agents"] and idle:
-        print(f"the queue waits for a slot; agents done and idle, to close: {', '.join(idle)}")
+    print(f"\n{answer['agents']}/{answer['max_agents']} agents at work in a terminal")
     print_queued(answer["queue"])
     runs = answer.get("runs")
     if runs and (runs["running"] or runs["queue"]):
@@ -181,7 +172,7 @@ def print_queue(answer):
         print(f"{count} queued task{'s' * (count != 1)} may start over the cap, one at a time")
         for bundle in answer["started"]:
             print(f"started: {bundle}")
-    print(f"{answer['agents']}/{answer['max_agents']} agents in a terminal")
+    print(f"{answer['agents']}/{answer['max_agents']} agents at work in a terminal")
     if not answer["queue"]:
         print("no task is queued")
     print_queued(answer["queue"])
