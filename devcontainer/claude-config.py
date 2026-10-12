@@ -89,6 +89,8 @@ def make_files(claude, own):
     for name in COPIES:
         if not (claude / name).exists():
             (claude / name).touch()
+        if (own / name).is_symlink():
+            (own / name).unlink()
         if not (own / name).exists():
             (own / name).write_bytes((claude / name).read_bytes())
 
