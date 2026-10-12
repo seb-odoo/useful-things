@@ -32,10 +32,11 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `GET /status` | every local bundle branch: base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open, and its agent: state (`running`, `waiting`, `done`, or `stopped` when its terminal or its window closed before the verdict: nothing runs it any more, and a new task may replace it; a stopped agent carries its `task` text, to queue it again as it was), when it was queued, when its run started (none for a task no window took), when it ended, `stale` when a branch of the bundle got a commit, or its dev remote ref an update (the mtime of its reflog), after that end, retry, and the last write to a session titled with the bundle, its own or an earlier agent's tab Seb went on in (`active N min ago`, or `idle since HH:MM` after 15 minutes; a tab opened by hand has no title and does not count); the queue, each task with its priority, the bundle that queued it, when, and what it waits for |
 | `POST /create` | `gnb` with `--no-push`, then a window, or with a task its agent; refused when the bundle exists or a branch has unpushed commits |
 | `POST /delete` | the deletion of a bundle, held for Seb's yes in `hok` (see Deletion); a container asks for its own only |
+| `GET /held` | what became of a deletion this caller asked (`?id=bN`): it waits, or what Seb said in `hok`; `?wait=S` long-polls it, 50 s at most |
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window, or with a task its agent; refused when the bundle is here or a branch has unpushed commits |
 | `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`; refused on a half-made bundle |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
-| `GET /queue` | the queue of `GET /status` alone, at once: the agents that hold a terminal, the cap, each task with what it waits for, and the memory left on the host, `short` when a start would add to a host that already lacks it |
+| `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, and the memory left on the host, `short` when a start would add to a host that already lacks it |
 | `POST /force-queue` | the tasks queued now may start over the cap; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
 | `POST /run` | a heavy command waits for cores: one JSON line each time its place changes, then the CPUs it got (see Runs) |
 | `GET /runs` | the runs that hold cores and the ones that wait, the pool and the memory available |
@@ -131,6 +132,9 @@ the bundle has a commit no remote has, or is on the dev remote, where a PR may u
 - A yes checks the branches again, then runs `delete_bundle.py BUNDLE` as a job, at once when the
   container of the bundle stopped, else when it stops: `deletions` in `state.json` holds the
   bundles that wait for that. Closing the window or the terminal stays Seb's call.
+- `--wait S` waits that long for his answer and prints it, as `hctl --wait` does: exit 0 on his
+  yes, 126 when he refused, 75 when it still waits. The same delete asked again replaces the
+  request that waits, under the same `bN`, and waits for it.
 - `delete_bundle` still refuses uncommitted files: the job log in `jobs/` says so.
 - `python3 test_delete.py` runs each case on git repos of its own.
 
@@ -153,7 +157,15 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   `ANTHROPIC_MODEL` of the settings.
 - A turn that ends on a verdict writes `done` (`client/agent-stop.py`), a turn that ends on
   anything else `waiting`. Either way the claude session stays open in its terminal, for Seb to
-  read what ran and to type in, and its container keeps its slot.
+  read what ran and to type in. A `done` agent leaves its slot of the cap, a `waiting` one keeps
+  it.
+- Once `done` and idle 15 minutes (no write to its session, its last turn ended, no run of the
+  bundle in the run queue, no window on its container), the daemon writes `park`, and the wrapper
+  stops the container to free its memory. The pane then shows what the agent ran and `BUNDLE: its
+  container was stopped at HH:MM to free memory, ... Press Enter to start it again and go on in
+  this session.` Enter starts the container and the same session again in that pane. Opening its
+  VS Code window (`ocode`, the folder icon of `gbs`) goes on in the session too. `bctl status`
+  shows `container stopped HH:MM` on the agent.
 - Quitting claude or closing the terminal stops the container. Without a verdict the agent then
   reads `stopped`.
 - A claude that ends on an error leaves the terminal open on its exit code and on the tool calls
@@ -186,6 +198,14 @@ in the container: the contained terminal is the one of the VS Code window.
   last, so that a narrow task bar button still shows the bundle. `client/window-title.py BUNDLE`
   reads the kind from the name alone. claude-autoopen gives the same title to the VS Code window
   of the bundle.
+- In front of that icon, a mark says what Claude does in the window, so that the task bar shows
+  which agents work, which are done and which wait for Seb: `⏳ 📝 master-action-panel-aku
+  (review)`. It comes from the `status` Claude writes for each live session in
+  `~/.claude/sessions/<pid>.json`, and for an idle one from the first line of its last answer.
+  `client/window-title.py BUNDLE SESSION=STATUS...` picks it. With wmctrl, `agent-terminator.py`
+  follows the session of its claude every second until the window closes, and keeps the last
+  mark once that claude ended. claude-autoopen follows the sessions of its container.
+  `python3 test_window_title.py` runs each case.
 
 | icon | kind | bundle name |
 | --- | --- | --- |
@@ -195,6 +215,13 @@ in the container: the contained terminal is the one of the VS Code window.
 | 🎯 | task | an odoo.com task id (7 digits or more) before the suffix |
 | 🧠 | analysis | `-code-analysis` before the suffix |
 | ⭐ | mine | any other name with the suffix |
+
+| mark | the sessions of the window |
+| --- | --- |
+| ⏳ | one works: `busy`, or `shell` while a background command runs |
+| ✋ | one waits for a permission or an answer (`waiting`), or all are idle and one last answer is no `pushed:` nor `nothing to do:` (`ready to push`, `needs Seb:`, `blocked:`, a chat) |
+| ✅ | all are idle on `pushed:` or `nothing to do:` |
+| none | no live session |
 
 `agent-terminal.py BUNDLE` started on a bundle whose run already began (`run.lock`) does not run
 the task again: it opens the session as it was, in its permission mode (`.agent/mode`) and with
@@ -234,7 +261,7 @@ remote connection ("Cannot reconnect"). A run that ends without a tool call open
 | `effort` | bundle-ctl | the effort the task asked for, `low`, `high` or `xhigh`; no file for `medium` |
 | `queued` | bundle-ctl | when the task entered the queue (epoch seconds), kept when a task no window took is queued again |
 | `terminal` | `agent-terminal.py` | the agent runs in a terminal of the host; removed when it ends, or by `client/agent-takeover.py` when a window takes the session over |
-| `container` | `agent-terminal.py` | the id of the container the terminal's agent runs in, for the terminal that takes its session over; removed when it ends |
+| `container` | `agent-terminal.py` | the id of the container the terminal's agent runs in, for the terminal that takes its session over; removed when it ends or when its container is stopped (`parked`) |
 | `session` | `agent-terminal.py`, claude-autoopen | the session id, chosen before the run |
 | `run.lock` | `client/agent-run.sh` | the run started, its mtime is when; a terminal started again opens the session and does not run the task again |
 | `result.md` | `client/stream-format.py`, `client/agent-stop.py`, `agent-terminal.py` | the last answer of the run, or why no container could start |
@@ -243,6 +270,8 @@ remote connection ("Cannot reconnect"). A run that ends without a tool call open
 | `retry` | `client/agent-run.sh` | `auth failed, retry n/3`: the run failed to authenticate and starts again |
 | `waiting` | `client/agent-stop.py` | a turn of the terminal or of the tab ended without a verdict; its mtime is when |
 | `done` | `client/agent-run.sh`, `client/agent-stop.py`, `agent-terminal.py` | the exit code of `claude -p`, or `interrupted`; `0` when a turn of the terminal or of the tab ends on a verdict; `failed` when no container could start |
+| `park` | bundle-ctl | the agent is done and idle: its terminal is asked to stop its container |
+| `parked` | `agent-terminal.py` | the container is stopped and the terminal waits for Enter; its mtime is when |
 | `tab-opened` | claude-autoopen | the tab was opened on the session once |
 | `restarted` | claude-autoopen, `client/agent-takeover.py` | the window was reloaded once for the handoff, or needs no reload (the session was idle when taken over) |
 
@@ -258,9 +287,10 @@ log is then the only trace of the error. The tab opens in place of a pinned Clau
 session of the container is busy or waits for a permission.
 
 `bctl create|fetch|open ... --task-file FILE` queues the task, and the daemon starts agents from
-the queue while fewer than `BUNDLE_CTL_MAX_AGENTS` (default 8) agents hold a terminal, plus the
-ones launched in the last 15 minutes whose container is not up yet and that did not fail to start.
-A bundle open in a VS Code window does not count, a session a window took over included: the cap
+the queue while fewer than `BUNDLE_CTL_MAX_AGENTS` (default 8) agents are at work in a terminal
+(an agent that gave its verdict no longer counts), plus the ones launched in the last 15 minutes
+whose container is not up yet and that did not fail to start, and while the host is not short of
+memory (the task then waits for `memory on the host`). A bundle open in a VS Code window does not count, a session a window took over included: the cap
 bounds what the agents spend, and Seb's windows are his.
 `--model haiku|sonnet|opus` (default `opus`) is the model of the task's agent, for the one that
 queues to send a job that needs less to a model that costs less. `--effort low|medium|high|xhigh`
@@ -280,7 +310,8 @@ refused.
 One agent starts at a time, as several containers and claude sessions that start together take
 the memory of the host at once: the next task waits for `the agent of BUNDLE to start`, until the
 run of that agent began (its `.agent/run.lock`), its launch failed, or 15 minutes passed.
-`bctl force-queue` lets the tasks queued now start over the cap, still one at a time and each
+`bctl force-queue` lets the tasks queued now start over the cap and while the host is short of
+memory, still one at a time and each
 after what else it waits for; `bctl status` shows them `over the cap`, and a task queued later
 waits for a slot again. Only a process of the host may ask it: a container gets a 403, the one
 of `BUNDLE_CTL_HOST_FOLDER` too, so that going over the cap stays Seb's call. `bctl queue` lists
@@ -307,12 +338,12 @@ that session (`agent-run.sh` resumes a session that has a transcript), and the t
 prompt, `Continue from where you left off.` when none is given. This is how an agent cut before its
 verdict (`stopped`) starts again with what it knew. It is refused when the bundle has no session,
 or is open in a window, where the session goes on in its Claude tab.
-Closing the terminal or the window of an agent is Seb's call: nothing else stops a
-container, and nothing deletes a bundle without his yes. `done` only says the run reached its verdict,
-as Seb often goes on in the session: when the queue waits on the cap, `bctl status` names the
-agents that are done and idle, the ones he can close. A task for a bundle whose last session still
-has its terminal waits in the queue until that terminal closes, whether that session reached its
-verdict or not.
+Closing the terminal or the window of an agent is Seb's call, and nothing deletes a bundle
+without his yes. The only container stopped without him is the one of a terminal agent done and
+idle, and Enter in its pane starts it again. `done` only says the run reached its verdict, as Seb
+often goes on in the session. A task for a bundle whose last session still has its terminal, its
+container stopped or not, waits in the queue until that terminal closes, whether that session
+reached its verdict or not.
 
 The agent runs of all the containers start at least 10 seconds apart (a lock in the shared
 `~/.claude`), as claude processes started together fail each other's OAuth token refresh. A

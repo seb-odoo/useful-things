@@ -229,13 +229,24 @@ async function openClaudeTab(sessionId, viewColumn) {
   await new Promise((resolve) => setTimeout(resolve, 500));
 }
 
+let titleSessions;
+
 function setWindowTitle() {
   const client = process.env.BUNDLE_CTL_CLIENT;
   const bundle = process.env.ODOO_PROXY_HOST;
   if (!client || !bundle) {
     return;
   }
-  childProcess.execFile("python3", [`${client}/window-title.py`, bundle], (error, stdout) => {
+  const sessions = getLiveSessions()
+    .map((record) => `${record.sessionId}=${record.status ?? ""}`)
+    .sort();
+  const asked = sessions.join(" ");
+  if (asked === titleSessions) {
+    return;
+  }
+  titleSessions = asked;
+  const args = [`${client}/window-title.py`, bundle, ...sessions];
+  childProcess.execFile("python3", args, (error, stdout) => {
     let settings;
     try {
       settings = JSON.parse(fs.readFileSync(MACHINE_SETTINGS, "utf8"));
@@ -243,7 +254,7 @@ function setWindowTitle() {
       return;
     }
     const title = `${stdout.trim()}\${separator}\${dirty}\${activeEditorShort}`;
-    if (!error && settings["window.title"] !== title) {
+    if (!error && asked === titleSessions && settings["window.title"] !== title) {
       settings["window.title"] = title;
       fs.writeFileSync(MACHINE_SETTINGS, `${JSON.stringify(settings, null, "\t")}\n`);
     }
@@ -252,6 +263,8 @@ function setWindowTitle() {
 
 async function activate(context) {
   setWindowTitle();
+  const titleTimer = setInterval(setWindowTitle, 1000);
+  context.subscriptions.push({ dispose: () => clearInterval(titleTimer) });
   // Let restored editor/webview tabs settle before deciding whether a Claude tab already exists,
   // otherwise a restored tab might not be enumerated yet and we would open a duplicate. The same
   // wait also lets restored terminals enumerate before openRepoTerminals() decides which to open.

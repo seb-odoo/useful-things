@@ -11,15 +11,21 @@ copy of the user's config with that layout added: preferences saved from it go t
 
 The title of the window says what the work is about (client/window-title.py), the title of each
 pane where it runs. A pane split by hand has no title: the host .bashrc prints the same in any shell
-that holds BUNDLE_CTL_AGENT_WINDOW, the bundle name.
+that holds BUNDLE_CTL_AGENT_WINDOW, the bundle name. With wmctrl, the title of the window also
+follows the status of the agent's session until the window closes. Once its claude ends, the last
+mark stays.
 """
 
+import json
 import os
 import pathlib
 import shlex
+import shutil
 import subprocess
 import sys
+import time
 
+CHECK = 1
 CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
 HERE = pathlib.Path(__file__).resolve().parent
 LAYOUT = "bundle-ctl agent"
@@ -52,6 +58,8 @@ PANES = """\
       command = "{shell}"
 """
 RUNTIME = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR") or pathlib.Path.home() / ".cache")
+SESSIONS = pathlib.Path.home() / ".claude" / "sessions"
+WMCTRL = shutil.which("wmctrl")
 
 
 def get_config(command):
@@ -69,10 +77,46 @@ def get_config(command):
     return "".join(lines)
 
 
-def get_title(bundle):
-    command = [sys.executable, str(HERE / "client" / "window-title.py"), bundle]
+def get_title(bundle, *statuses):
+    command = [sys.executable, str(HERE / "client" / "window-title.py"), bundle, *statuses]
     title = subprocess.run(command, capture_output=True, check=False, text=True).stdout.strip()
     return title or bundle
+
+
+def get_record(bundle, since):
+    """The record of the newest claude of the window: client/agent-run.sh names it after the
+    bundle."""
+    records = []
+    for path in SESSIONS.glob("*.json"):
+        try:
+            data = path.read_bytes()
+            record = json.loads(data) if bundle.encode() in data else {}
+        except (OSError, ValueError):
+            continue
+        if record.get("name") == bundle and record.get("startedAt", 0) >= since:
+            records.append(record)
+    return max(records, key=lambda record: record["startedAt"], default=None)
+
+
+def follow(bundle, terminator, since):
+    shown = None
+    while True:
+        try:
+            return terminator.wait(CHECK)
+        except subprocess.TimeoutExpired:
+            pass
+        record = get_record(bundle, since)
+        status = record and f"{record['sessionId']}={record.get('status') or ''}"
+        if not status or status == shown:
+            continue
+        title = get_title(bundle, status)
+        out = subprocess.run([WMCTRL, "-l", "-p"], capture_output=True, check=False, text=True)
+        lines = [line.split() for line in out.stdout.splitlines()]
+        windows = [line[0] for line in lines if line[2:3] == [str(terminator.pid)]]
+        for window in windows:
+            subprocess.run([WMCTRL, "-u", "-i", "-r", window, "-N", title], check=False)
+        if windows:
+            shown = status
 
 
 def main():
@@ -80,12 +124,13 @@ def main():
     path = RUNTIME / "bundle-ctl" / f"terminator-{bundle}.config"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(get_config(command))
-    title = get_title(bundle)
+    terminator = ["terminator", "--no-dbus", "--config", str(path), "--layout", LAYOUT]
+    terminator += ["--title", get_title(bundle)]
     os.environ["BUNDLE_CTL_AGENT_WINDOW"] = bundle
-    os.execvp(
-        "terminator",
-        ["terminator", "--no-dbus", "--config", str(path), "--layout", LAYOUT, "--title", title],
-    )
+    if not WMCTRL:
+        os.execvp(terminator[0], terminator)
+    since = time.time() * 1000
+    sys.exit(follow(bundle, subprocess.Popen(terminator), since))
 
 
 if __name__ == "__main__":

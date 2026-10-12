@@ -24,7 +24,9 @@ At once, without the wait, it sets `window.title` to what the work of the bundle
 name, as the agent windows of bundle-ctl do (`bundle-ctl/client/window-title.py`). It writes the
 remote settings of the container (`~/.vscode-server/data/Machine/settings.json`), the only ones of
 this window alone: through the API the setting would land in the host's settings, which every
-window reads.
+window reads. Then every second it reads the status of the Claude sessions of its container, and
+writes the title again when one changed: its mark says whether Claude works, is done or waits for
+you (`bundle-ctl/README.md`, "Agents in a terminal").
 
 ## Agent mode
 
