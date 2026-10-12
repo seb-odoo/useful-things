@@ -319,8 +319,16 @@ A pushed branch without PR shows `create PR`, a link to the GitHub compare page 
 branch with no commit on its base and no PR shows `no commit` and does not count for the group of
 its bundle: it is the worktree's checkout of the base in a repo the bundle does not change.
 
+A bundle left with merged PRs and such checkouts only is deleted, worktrees and databases with it,
+and named under the table: `Deleted <bundle>, merged: odoo#N`. Merged is what mergebot says, or
+GitHub for a repo mergebot does not merge. The bundle stays, its PR in magenta, while its dev
+container runs, an agent works on it, a worktree holds uncommitted files, or its branch holds a
+commit the PR head does not. Its branch on the dev remote is left to mergebot, which deletes it
+within hours. `test_merged_bundles.py` runs each case on scratch repos.
+
 `--json` prints the same data for a script: per bundle its group, issue, open state and agent, per
-repo its head, push, behind, conflict and PR. A dev container cannot run it (no `scripts/`, no
+repo its head, push, behind, conflict and PR, and under `deleted` the PRs of each bundle it
+deleted. A dev container cannot run it (no `scripts/`, no
 podman): there `gbs` is `bctl branches`, and `bctl --json branches` gives the JSON, both run on
 the host.
 

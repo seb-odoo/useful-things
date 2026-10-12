@@ -52,7 +52,7 @@ def _bundle_name_completer(prefix, parsed_args, **kwargs):
     return [bundle for bundle in _existing_bundles() if bundle not in already_given]
 
 
-def _unsaved_work(runner: UtilsRunner, bundle_name: str):
+def get_unsaved_work(runner: UtilsRunner, bundle_name: str):
     """Map the repos of a bundle to the work its deletion would lose, by kind.
 
     A worktree is read the way `git worktree remove` reads it, so the tooling files and the
@@ -158,7 +158,7 @@ def delete_bundle(
     Nothing is touched either while the dev container of the bundle runs: VS Code stops it when
     its window closes, but only while the bundle folder is still there.
     """
-    if not force and (unsaved := _unsaved_work(runner, bundle_name)):
+    if not force and (unsaved := get_unsaved_work(runner, bundle_name)):
         return unsaved
     containers = runner.run(
         [

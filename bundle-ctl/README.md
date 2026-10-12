@@ -28,7 +28,7 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | verb | answer |
 | --- | --- |
 | `GET /whoami` | the caller's bundle, base and parent |
-| `GET /branches` | `gbs --json` run on the host; `?format=table&width=N`: its colored table |
+| `GET /branches` | `gbs --json` run on the host, which deletes the bundles left with merged PRs only; `?format=table&width=N`: its colored table |
 | `GET /status` | every local bundle branch: base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open, and its agent: state (`running`, `waiting`, `done`, or `stopped` when its terminal or its window closed before the verdict: nothing runs it any more, and a new task may replace it; a stopped agent carries its `task` text, to queue it again as it was), when it was queued, when its run started (none for a task no window took), when it ended, `stale` when a branch of the bundle got a commit, or its dev remote ref an update (the mtime of its reflog), after that end, retry, and the last write to a session titled with the bundle, its own or an earlier agent's tab Seb went on in (`active N min ago`, or `idle since HH:MM` after 15 minutes; a tab opened by hand has no title and does not count); the queue, each task with its priority, the bundle that queued it, when, and what it waits for |
 | `POST /add-repo` | `add_repo.py`: the worktree of a repo the bundle was made without (`design-themes`, `documentation`); a container asks for its own only |
 | `POST /create` | `gnb` with `--no-push`, then a window, or with a task its agent; refused when the bundle exists, a branch has unpushed commits or the disk is short (see Disk) |

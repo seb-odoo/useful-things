@@ -10,8 +10,10 @@ Examples:
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import redirect_stdout
 from datetime import datetime
 import functools
+import io
 import json
 import os
 import re
@@ -21,6 +23,7 @@ import urllib.error
 import urllib.request
 
 from rich.console import Console
+from rich.live import Live
 from rich.style import Style
 from rich.table import Table
 from rich.text import Text
@@ -39,6 +42,8 @@ from commands import (
     get_sticky_bundles,
     get_worktree_bundle_folder,
 )
+from delete_bundle import delete_bundles, get_unsaved_work
+from utils import UtilsRunner
 
 AGE_UNITS = (("d", 86400), ("h", 3600), ("m", 60))
 AGENT_TAGS = {
@@ -166,7 +171,7 @@ def read_prs(pairs):
             f'p{i}: repository(owner: "{owner}", name: "{name}") {{ pullRequests('
             f"headRefName: {json.dumps(branch)}, first: 1, "
             "orderBy: {field: CREATED_AT, direction: DESC}) "
-            "{ nodes { createdAt isDraft number reviewDecision state url "
+            "{ nodes { createdAt headRefOid isDraft number reviewDecision state url "
             "comments(last: 30) { nodes { author { login } body createdAt } } "
             "reviews(last: 30) { nodes { body } } "
             "timelineItems(last: 20, itemTypes: [REVIEW_REQUESTED_EVENT]) { nodes { "
@@ -366,6 +371,7 @@ def get_pr_facts(pr, repo, now):
             for c in contexts
             if c["state"] in ("ERROR", "FAILURE") and c["context"] not in stale
         ],
+        "head": pr["headRefOid"],
         "mergebot": pr["mergebot"],
         "number": pr["number"],
         "open": pr["state"] == "OPEN",
@@ -555,6 +561,62 @@ def get_bundles():
     return ordered, errors
 
 
+def is_merged_copy(repo, row):
+    """Whether the branch holds nothing its merged PR lacks: the PR head is or follows it."""
+    pr = row["pr"]
+    return (
+        pr["state"] == "merged"
+        and git(repo, "merge-base", "--is-ancestor", row["head"], pr["head"]) is not None
+    )
+
+
+def get_merged_bundles(bundles):
+    """The bundles left with merged PRs and checkouts of their base only, no window, no agent."""
+    return [
+        bundle
+        for bundle in bundles
+        if not bundle["open"]
+        and not (bundle["agent"] and bundle["agent"]["state"] in AGENT_WORKING)
+        and not all(row["empty"] for row in bundle["repos"].values())
+        and all(
+            row["empty"] or (row["pr"] and is_merged_copy(repo, row))
+            for repo, row in bundle["repos"].items()
+        )
+    ]
+
+
+def delete_merged(bundles):
+    """Delete the merged bundles with no uncommitted file: their PRs by name, and a failure."""
+    merged = get_merged_bundles(bundles)
+    if not merged:
+        return {}, None
+    runner = UtilsRunner(live=Live("", auto_refresh=False, console=Console(quiet=True)))
+    failure = None
+    with redirect_stdout(io.StringIO()):
+        try:
+            names = [
+                bundle["bundle"]
+                for bundle in merged
+                if not any(
+                    "uncommitted files" in found
+                    for found in get_unsaved_work(runner, bundle["bundle"]).values()
+                )
+            ]
+            delete_bundles(runner, bundle_names=names, force=True)
+        except subprocess.CalledProcessError as error:
+            failure = f"{' '.join(error.cmd)}: {(error.stderr or '').strip()}"
+    return {
+        bundle["bundle"]: [
+            f"{repo}#{row['pr']['number']}" for repo, row in bundle["repos"].items() if row["pr"]
+        ]
+        for bundle in merged
+        if all(
+            git(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{bundle['bundle']}") is None
+            for repo in bundle["repos"]
+        )
+    }, failure
+
+
 def get_rows(bundle, group, now):
     branch = bundle["bundle"]
     age = format_age(now - bundle["date"])
@@ -597,16 +659,28 @@ def main():
     args = parser.parse_args()
     if args.json:
         bundles, errors = get_bundles()
-        print(json.dumps({"bundles": bundles, "errors": errors}))
+        deleted, failure = delete_merged(bundles)
+        print(
+            json.dumps(
+                {
+                    "bundles": [bundle for bundle in bundles if bundle["bundle"] not in deleted],
+                    "deleted": deleted,
+                    "errors": errors + [failure] * bool(failure),
+                },
+            ),
+        )
         return
 
     console = Console()
     with console.status("Reading branches and PRs"):
         bundles, errors = get_bundles()
+        deleted, failure = delete_merged(bundles)
     now = time.time()
     groups = {group: [] for group in GROUPS}
     counts = dict.fromkeys(GROUPS, 0)
     for bundle in bundles:
+        if bundle["bundle"] in deleted:
+            continue
         group = "open" if bundle["open"] else bundle["group"]
         groups[group] += get_rows(bundle, group, now)
         counts[group] += 1
@@ -630,6 +704,10 @@ def main():
             for row in group_rows:
                 table.add_row(*row)
     console.print(table)
+    for bundle, prs in deleted.items():
+        console.print(f"[magenta]Deleted[/magenta] {bundle}, merged: {', '.join(prs)}")
+    if failure:
+        console.print(f"[red]Merged bundles not all deleted[/red], {failure}")
     for error in errors:
         console.print(f"[yellow]PR state incomplete[/yellow], {error}")
 
