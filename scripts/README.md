@@ -231,7 +231,7 @@ Syncs git remotes: fetches locally checked-out branches + sticky bundles; prunes
 - Fetches again when another fetch moved a ref meanwhile (`cannot lock ref ... but expected`):
   the bundle agents share the `.git` of each repo
 - Asks before deleting a gone bundle of mine (`--seb`); `--keep-gone` keeps them all without
-  asking, for a run with no keyboard (`hctl`)
+  asking, for a run with no keyboard (`hctl`) and for `gbs`
 
 ```bash
 $ python scripts/fetch_all.py
@@ -307,7 +307,8 @@ Done
 
 Lists the local branches of every repo like `git branch`, newest first: what is not pushed, how far
 behind their base they are, whether a rebase conflicts, and their PR with its mergebot, review and
-CI state. Reads local refs only, so run `gfa` first for fresh numbers.
+CI state. Reads local refs only, so the host alias `gbs` runs `gfa --keep-gone` first: a gone
+bundle stays, deleted next by gbs when its PRs are merged, listed when they are closed.
 
 Each branch name is an `odoo-bundle://` link, see `bundle_open.py`.
 

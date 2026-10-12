@@ -4,7 +4,7 @@ export GIT_PROMPT_FETCH_REMOTE_STATUS=0
 # Odoo-dev aliases/functions shared with the dev container (single source of truth)
 source ~/repo/useful-things/container-rw/devcontainer.bashrc
 
-alias gbs="python ~/repo/useful-things/scripts/branch_status.py"
+alias gbs="python ~/repo/useful-things/scripts/fetch_all.py --keep-gone; python ~/repo/useful-things/scripts/branch_status.py"
 alias gfa="python ~/repo/useful-things/scripts/fetch_all.py"
 alias gsign="~/repo/useful-things/git-sign/gsign"
 alias ducks='while read -r line;do du -sh "$line";done < <(ls -1A) | sort -rh | head -n11'
