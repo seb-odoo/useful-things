@@ -121,7 +121,6 @@ def format_agent(agent):
                 started and f"started {started}",
                 agent.get("retry"),
                 agent.get("activity"),
-                agent.get("parked") and f"container stopped {agent['parked']}",
             ],
         ),
     )

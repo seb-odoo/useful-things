@@ -171,17 +171,11 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
 - A turn that ends on a verdict writes `done` (`client/agent-stop.py`), a turn that ends on
   anything else `waiting`. Either way the claude session stays open in its terminal, for Seb to
   read what ran and to type in. A `done` agent leaves its slot of the cap, a `waiting` one keeps
-  it.
-- Once `done` and idle 15 minutes (no write to its session, its last turn ended, no run of the
-  bundle in the run queue, no window on its container), the daemon writes `park`, and the wrapper
-  stops the container to free its memory. The pane then shows what the agent ran and `BUNDLE: its
-  container was stopped at HH:MM to free memory, ... Press Enter to start it again and go on in
-  this session.` Enter starts the container and the same session again in that pane. Opening its
-  VS Code window (`ocode`, the folder icon of `gbs`) goes on in the session too. `bctl status`
-  shows `container stopped HH:MM` on the agent.
-- Quitting claude or closing the terminal stops the container. Without a verdict the agent then
-  reads `stopped`. So does a terminal that dies without closing (killed, or lost with the X
-  server): `podman exec` does not see that hangup, so the wrapper ends on the hangup and stops
+  it. Both keep their container, so a new task waits for `memory on the host` when the host is
+  short of it.
+- Quitting claude or closing the terminal stops the container, and nothing else does: Seb may
+  type in that session at any time. Without a verdict the agent then reads `stopped`. So does a
+  terminal that dies without closing (killed, or lost with the X server): `podman exec` does not see that hangup, so the wrapper ends on the hangup and stops
   the container itself.
 - A claude that ends on an error leaves the terminal open on its exit code and on the tool calls
   and answers of the session (`client/stream-format.py` on its transcript): claude draws on the
@@ -280,7 +274,7 @@ remote connection ("Cannot reconnect"). A run that ends without a tool call open
 | `effort` | bundle-ctl | the effort the task asked for, `low`, `high` or `xhigh`; no file for `medium` |
 | `queued` | bundle-ctl | when the task entered the queue (epoch seconds), kept when a task no window took is queued again |
 | `terminal` | `agent-terminal.py` | the agent runs in a terminal of the host; removed when it ends, or by `client/agent-takeover.py` when a window takes the session over |
-| `container` | `agent-terminal.py` | the id of the container the terminal's agent runs in, for the terminal that takes its session over; removed when it ends or when its container is stopped (`parked`) |
+| `container` | `agent-terminal.py` | the id of the container the terminal's agent runs in, for the terminal that takes its session over; removed when it ends |
 | `session` | `agent-terminal.py`, claude-autoopen | the session id, chosen before the run |
 | `run.lock` | `client/agent-run.sh` | the run started, its mtime is when; a terminal started again opens the session and does not run the task again |
 | `result.md` | `client/stream-format.py`, `client/agent-stop.py`, `agent-terminal.py` | the last answer of the run, or why no container could start |
@@ -289,8 +283,6 @@ remote connection ("Cannot reconnect"). A run that ends without a tool call open
 | `retry` | `client/agent-run.sh` | `auth failed, retry n/3`: the run failed to authenticate and starts again |
 | `waiting` | `client/agent-stop.py` | a turn of the terminal or of the tab ended without a verdict; its mtime is when |
 | `done` | `client/agent-run.sh`, `client/agent-stop.py`, `agent-terminal.py` | the exit code of `claude -p`, or `interrupted`; `0` when a turn of the terminal or of the tab ends on a verdict; `failed` when no container could start |
-| `park` | bundle-ctl | the agent is done and idle: its terminal is asked to stop its container |
-| `parked` | `agent-terminal.py` | the container is stopped and the terminal waits for Enter; its mtime is when |
 | `tab-opened` | claude-autoopen | the tab was opened on the session once |
 | `restarted` | claude-autoopen, `client/agent-takeover.py` | the window was reloaded once for the handoff, or needs no reload (the session was idle when taken over) |
 
@@ -358,10 +350,9 @@ prompt, `Continue from where you left off.` when none is given. This is how an a
 verdict (`stopped`) starts again with what it knew. It is refused when the bundle has no session,
 or is open in a window, where the session goes on in its Claude tab.
 Closing the terminal or the window of an agent is Seb's call, and nothing deletes a bundle
-without his yes. The only container stopped without him is the one of a terminal agent done and
-idle, and Enter in its pane starts it again. `done` only says the run reached its verdict, as Seb
-often goes on in the session. A task for a bundle whose last session still has its terminal, its
-container stopped or not, waits in the queue until that terminal closes, whether that session
+without his yes, nor stops the container of a session he can still type in. `done` only says the
+run reached its verdict, as Seb often goes on in the session. A task for a bundle whose last
+session still has its terminal waits in the queue until that terminal closes, whether that session
 reached its verdict or not.
 
 The agent runs of all the containers start at least 10 seconds apart (a lock in the shared

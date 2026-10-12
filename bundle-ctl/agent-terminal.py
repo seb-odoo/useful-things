@@ -10,10 +10,8 @@ Dev Containers extension ships, with the arguments of that extension, on the bun
 devcontainer.json. So the sandbox has one definition, and a window opened later attaches to it.
 
 The claude session stays open in the terminal after its verdict (.agent/done, written by
-client/agent-stop.py), for Seb to read and to type in. Once that session is idle, bundle-ctl asks
-for the container to stop (.agent/park): the terminal then shows what the agent ran and starts
-the container and the session again on Enter. Quitting claude or closing the terminal stops the
-container. A VS Code window opened on the bundle takes the session over instead
+client/agent-stop.py), for Seb to read and to type in. Quitting claude or closing the terminal
+stops the container. A VS Code window opened on the bundle takes the session over instead
 (client/agent-takeover.py): the terminal closes, and the container lives as long as that window.
 
 Started on a bundle whose run already began, it goes on with that session and does not run the
@@ -25,28 +23,18 @@ import json
 import os
 import pathlib
 import re
-import select
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import uuid
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
-from agents import (  # noqa: E402
-    IDLE_AFTER,
-    format_time,
-    get_agent_folder,
-    get_bundle_container,
-    get_mtime,
-    has_window,
-    read_text,
-)
+from agents import get_agent_folder, get_bundle_container, has_window, read_text  # noqa: E402
 from commands import (  # noqa: E402
     drop_stale_containers,
     get_devcontainer_config,
@@ -56,7 +44,6 @@ from commands import (  # noqa: E402
 CLI = "ms-vscode-remote.remote-containers-*/dist/spec-node/devContainersSpecCLI.js"
 CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
 GO_ON = "Continue from where you left off."
-PARK_CHECK = 2
 # Leave the alternate screen and the mouse modes a killed claude stays in, and show the cursor.
 RESET = "\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m"
 TAKEOVER_WAIT = 30
@@ -135,80 +122,27 @@ def copy_gitconfig(container):
         )
 
 
-def show_transcript(session):
-    """Print what the agent ran: the claude of a terminal draws on the alternate screen, which
-    empties when claude ends.
+def keep_open(ending, session=None):
+    """Show why no claude runs here, with what the agent ran, and wait for Enter in a shell.
+
+    The claude of a terminal draws on the alternate screen, which empties when claude ends.
     """
     transcript = TRANSCRIPTS / f"{session}.jsonl"
-    sys.stdout.write(RESET)
-    sys.stdout.flush()
-    subprocess.run(["stty", "sane"], check=False)
-    if session and transcript.is_file():
-        with transcript.open() as file, tempfile.TemporaryDirectory() as folder:
-            subprocess.run(
-                [sys.executable, str(HERE / "client" / "stream-format.py"), f"{folder}/result"],
-                check=False,
-                stdin=file,
-            )
-
-
-def keep_open(ending, session=None):
-    """Show why no claude runs here, with what the agent ran, and wait for Enter in a shell."""
     try:
-        show_transcript(session)
+        sys.stdout.write(RESET)
+        sys.stdout.flush()
+        subprocess.run(["stty", "sane"], check=False)
+        if session and transcript.is_file():
+            with transcript.open() as file, tempfile.TemporaryDirectory() as folder:
+                subprocess.run(
+                    [sys.executable, str(HERE / "client" / "stream-format.py"), f"{folder}/result"],
+                    check=False,
+                    stdin=file,
+                )
     except OSError:
         return
     wait = 'printf "\\033]0;%s\\007\\n%s\\nPress Enter to close.\\n" "$0" "$0"; read -r _'
     os.execvp("sh", ["sh", "-c", wait, ending])
-
-
-def watch_park(agent, container, ended):
-    """Stop the container when bundle-ctl asks for it (.agent/park), until claude ends."""
-    while not ended.wait(PARK_CHECK):
-        try:
-            (agent / "park").rename(agent / "parked")
-        except OSError:
-            continue
-        subprocess.run(["podman", "stop", container], check=False, capture_output=True)
-        return
-
-
-def run_claude(agent, container, session, cut):
-    ended = threading.Event()
-    threading.Thread(target=watch_park, args=(agent, container, ended), daemon=True).start()
-    try:
-        return subprocess.run(
-            ["podman", "exec", "--interactive", "--tty", "--detach-keys=", "--user", USER]
-            + ["--workdir", "/workspace", "--env", f"TERM={os.environ.get('TERM', 'xterm')}"]
-            + [container, "bash", str(HERE / "client" / "agent-run.sh"), "--terminal", session]
-            + ([GO_ON] if cut else []),
-            check=False,
-        ).returncode
-    finally:
-        ended.set()
-
-
-def wait_for_enter(agent, bundle, session):
-    """Show what the agent ran and wait for Enter to start its container again.
-
-    Return False when the terminal closed, or when a window or another terminal took the session.
-    """
-    show_transcript(session)
-    stopped = format_time(get_mtime(agent / "parked") or time.time())
-    print(
-        f"\n{bundle}: its container was stopped at {stopped} to free memory, as the agent gave its"
-        f" verdict and its session was idle {IDLE_AFTER // 60} minutes.\nPress Enter to start it"
-        " again and go on in this session.",
-        flush=True,
-    )
-    pid = str(os.getpid())
-    try:
-        while read_text(agent / "terminal") == pid and not (agent / "handoff").exists():
-            if select.select([sys.stdin], [], [], PARK_CHECK)[0]:
-                return bool(sys.stdin.readline())
-    except KeyboardInterrupt:
-        pass
-    return False
 
 
 def shell(bundle):
@@ -244,26 +178,20 @@ def take_over(agent, bundle):
     if not is_held():
         return None, False
     container = read_text(agent / "container")
-    parked = (agent / "parked").exists()
-    if not container and not parked:
+    if not container:
         raise Failure("its agent starts in another terminal")
     print(f"{bundle}: taking the session over from its other terminal", flush=True)
-    if parked:
-        os.kill(int(holder), signal.SIGTERM)
-    else:
-        subprocess.run(
-            ["podman", "exec", "--user", USER, container]
-            + ["python3", str(HERE / "client" / "agent-takeover.py")],
-            check=False,
-        )
+    subprocess.run(
+        ["podman", "exec", "--user", USER, container]
+        + ["python3", str(HERE / "client" / "agent-takeover.py")],
+        check=False,
+    )
     deadline = time.monotonic() + TAKEOVER_WAIT
     # That terminal removes the two markers at its end: write them after it.
     while is_held():
         if time.monotonic() > deadline:
             raise Failure("its other terminal still holds the session")
         time.sleep(0.2)
-    if parked:
-        return None, False
     cut = not (agent / "restarted").exists()
     state = subprocess.run(
         ["podman", "inspect", "--format", "{{.State.Running}}", container],
@@ -291,7 +219,7 @@ def main():
         keep_open(f"{bundle}: {error}")
         return
     # Drop the handoff to a tab: left in place, this terminal would not stop its container.
-    for name in ("handoff", "park", "parked", "restarted"):
+    for name in ("handoff", "restarted"):
         (agent / name).unlink(missing_ok=True)
     ending = session = None
     taken_over = False
@@ -299,18 +227,16 @@ def main():
     try:
         session = read_text(agent / "session") or str(uuid.uuid4())
         (agent / "session").write_text(f"{session}\n")
-        while True:
-            container = container or up(get_worktree_bundle_folder(bundle))
-            copy_gitconfig(container)
-            (agent / "container").write_text(f"{container}\n")
-            code = run_claude(agent, container, session, cut)
-            if not (agent / "parked").exists():
-                break
-            (agent / "container").unlink()
-            container, cut = None, False
-            if not wait_for_enter(agent, bundle, session):
-                return
-            (agent / "parked").unlink()
+        container = container or up(get_worktree_bundle_folder(bundle))
+        copy_gitconfig(container)
+        (agent / "container").write_text(f"{container}\n")
+        code = subprocess.run(
+            ["podman", "exec", "--interactive", "--tty", "--detach-keys=", "--user", USER]
+            + ["--workdir", "/workspace", "--env", f"TERM={os.environ.get('TERM', 'xterm')}"]
+            + [container, "bash", str(HERE / "client" / "agent-run.sh"), "--terminal", session]
+            + ([GO_ON] if cut else []),
+            check=False,
+        ).returncode
         if code:
             ending = f"claude ended with code {code}"
     except Failure as error:
@@ -318,8 +244,8 @@ def main():
         (agent / "result.md").write_text(f"{ending}\n")
         (agent / "done").write_text("failed\n")
     finally:
-        for name in ("container", "park", "parked", "terminal"):
-            (agent / name).unlink(missing_ok=True)
+        (agent / "container").unlink(missing_ok=True)
+        (agent / "terminal").unlink(missing_ok=True)
         container = container or get_bundle_container(bundle)
         taken_over = (agent / "handoff").exists() or (container and has_window(container))
         if container and not taken_over:
