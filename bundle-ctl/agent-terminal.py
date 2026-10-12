@@ -42,6 +42,7 @@ from agents import (  # noqa: E402
     IDLE_AFTER,
     format_time,
     get_agent_folder,
+    get_bundle_container,
     get_mtime,
     has_window,
     read_text,
@@ -218,6 +219,14 @@ def shell(bundle):
     os.execvp(program, [program])
 
 
+def stop(*args):
+    """End on a closed window or a kill: the finally of main stops the container, and a second
+    signal must not cut that stop."""
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    sys.exit(1)
+
+
 def take_over(agent, bundle):
     """Free the session from the terminal that holds it.
 
@@ -274,9 +283,8 @@ def main():
     if not (agent / "task.md").is_file():
         keep_open(f"{bundle}: no task to start")
         return
-    # Closing the terminal hangs up `podman exec` as well: go on to stop the container.
-    signal.signal(signal.SIGHUP, lambda *args: None)
-    signal.signal(signal.SIGTERM, lambda *args: sys.exit(1))
+    signal.signal(signal.SIGHUP, stop)
+    signal.signal(signal.SIGTERM, stop)
     try:
         container, cut = take_over(agent, bundle)
     except Failure as error:
@@ -312,6 +320,7 @@ def main():
     finally:
         for name in ("container", "park", "parked", "terminal"):
             (agent / name).unlink(missing_ok=True)
+        container = container or get_bundle_container(bundle)
         taken_over = (agent / "handoff").exists() or (container and has_window(container))
         if container and not taken_over:
             subprocess.run(["podman", "stop", container], check=False, capture_output=True)

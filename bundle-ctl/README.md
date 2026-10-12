@@ -180,7 +180,9 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   VS Code window (`ocode`, the folder icon of `gbs`) goes on in the session too. `bctl status`
   shows `container stopped HH:MM` on the agent.
 - Quitting claude or closing the terminal stops the container. Without a verdict the agent then
-  reads `stopped`.
+  reads `stopped`. So does a terminal that dies without closing (killed, or lost with the X
+  server): `podman exec` does not see that hangup, so the wrapper ends on the hangup and stops
+  the container itself.
 - A claude that ends on an error leaves the terminal open on its exit code and on the tool calls
   and answers of the session (`client/stream-format.py` on its transcript): claude draws on the
   alternate screen, which empties when claude ends.
