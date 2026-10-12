@@ -11,9 +11,11 @@ and env it needs, per target. Nothing cloned means nothing merged: the container
 base, and it still builds and runs. That is the point of generating the file rather than committing
 one.
 
-Arrays append in repo-name order. A containerEnv key ending in `+` appends to the comma-separated
-value already there, so two fragments can add to one variable. A fragment naming others under
-"replaces" is merged in their place. @KEY@ placeholders come from config.py.
+Arrays append in repo-name order, and an array key ending in `-` takes its items out of the array,
+so a fragment can put its own argument in the place of one of the base. A containerEnv key ending
+in `+` appends to the comma-separated value already there, so two fragments can add to one
+variable. A fragment naming others under "replaces" is merged in their place. @KEY@ placeholders
+come from config.py.
 """
 
 import argparse
@@ -113,7 +115,9 @@ def fragments(repo_root, target):
 
 def merge(into, piece, source):
     for key, value in piece.items():
-        if isinstance(value, list):
+        if isinstance(value, list) and key.endswith("-"):
+            into[key[:-1]] = [item for item in into.get(key[:-1], []) if item not in value]
+        elif isinstance(value, list):
             into.setdefault(key, []).extend(value)
         elif isinstance(value, dict):
             target = into.setdefault(key, {})

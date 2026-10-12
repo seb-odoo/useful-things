@@ -6,7 +6,9 @@ Run several Odoo dev containers in parallel and reach each from the host browser
 - `http://<anything>.<bundle>.localhost` — arbitrary subdomains (website/domain testing)
 
 A single rootless nginx container sits on the `podman` network, listens on `127.0.0.1:80`, and
-routes by `Host` header to each dev container's bridge IP on port 8069. The config is generated
+routes by `Host` header to each dev container's IP on port 8069, on a network the two share: when
+the dev containers live on another network, the proxy joins it by a quadlet drop-in
+(`odoo-proxy.container.d/`). The config is generated
 from the live container list by [`../scripts/proxy.py`](../scripts/proxy.py): each dev container
 is labelled `devcontainer.local_folder=<bundle path>`, so the subdomain is the bundle folder
 basename. A `podman events` watcher regenerates the config whenever a container starts or stops,

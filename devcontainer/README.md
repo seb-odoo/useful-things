@@ -12,9 +12,10 @@ python3 config.py                             # what the placeholders expand to 
 
 - [`base.jsonc`](base.jsonc) is the container itself, minus whatever is optional. Edit this one.
 - A repo cloned under `REPO_ROOT` contributes a `devcontainer.fragment.json`, naming per target the
-  mounts, runArgs and env it needs. Arrays append in repo-name order; a `containerEnv` key ending
-  in `+` appends to the comma-separated value already there, so two fragments can add to one
-  variable.
+  mounts, runArgs and env it needs. Arrays append in repo-name order, and an array key ending in
+  `-` (`"runArgs-"`) takes its items out of the array, so a fragment can put its own argument in
+  the place of one of the base. A `containerEnv` key ending in `+` appends to the comma-separated
+  value already there, so two fragments can add to one variable.
 - Nothing cloned means nothing merged: the container is the plain base, and it still runs.
 - `@KEY@` placeholders come from [`config.py`](config.py), reading the `config.env` described in
   [`config.env.example`](config.env.example). No absolute path belongs in a committed file.
@@ -135,6 +136,11 @@ claude-autoopen is added the same way after a change of its `.vsix`.
 (`get_devcontainer_config` in `scripts/commands.py`), never through the bundle folder: its
 `initializeCommand` and its mounts apply on the host at the next start, and a container writes its
 bundle folder. Open a bundle with `ocode`, a gbs link or `bctl`, which all carry that path.
+
+**The network.** The base gives a container the default bridge (`--net=bridge`): the whole
+internet, and every network the host routes, a VPN included. What the container reads can then be
+sent anywhere. A fragment closes it by putting the container on an internal network of its own in
+the place of the bridge (`"runArgs-": ["--net=bridge"]`), with a proxy as the one way out.
 
 **GitHub.** A container has no key. Its git goes through the connection the host keeps open, by
 the mounts of the [`ssh-github-mux`](../ssh-github-mux/README.md) fragment at the root of this

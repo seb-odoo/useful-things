@@ -21,6 +21,16 @@ HTTP_PORT = 8069
 CONF_PATH = Path.home() / ".config" / "odoo-proxy" / "odoo-dev.conf"
 
 
+def _proxy_networks():
+    """The networks the proxy is on: it reaches a dev container on one they share."""
+    res = subprocess.run(
+        ["podman", "inspect", "--format", "{{json .NetworkSettings.Networks}}", CONTAINER_NAME],
+        capture_output=True,
+        text=True,
+    )
+    return set(json.loads(res.stdout or "{}") or {}) if res.returncode == 0 else set()
+
+
 def _running_dev_containers():
     """Yield (subdomain, ip) for every running dev container, newest last."""
     ids = subprocess.run(
@@ -39,16 +49,18 @@ def _running_dev_containers():
             check=True,
         ).stdout,
     )
+    shared = _proxy_networks()
     for container in info:
         labels = container.get("Config", {}).get("Labels") or {}
         folder = labels.get(DEVCONTAINER_LABEL)
         if not folder:
             continue
         networks = container.get("NetworkSettings", {}).get("Networks") or {}
-        ip = (networks.get("podman") or {}).get("IPAddress") or container.get(
-            "NetworkSettings",
-            {},
-        ).get("IPAddress")
+        addresses = [
+            network.get("IPAddress")
+            for name, network in sorted(networks.items(), key=lambda pair: pair[0] not in shared)
+        ]
+        ip = next(filter(None, addresses), None)
         if not ip:
             continue
         yield os.path.basename(folder.rstrip("/")), ip
