@@ -6,7 +6,9 @@
 The container's CLAUDE_CONFIG_DIR is the host's ~/.claude itself, so it shares the host's login:
 Claude locks a token refresh and saves the new token in that folder, and any copy or link of
 .credentials.json elsewhere gets revoked by the next refresh. session-env and shell-snapshots are
-mounted from a folder of the bundle, as the host's Claude sources its own. So is extension-storage,
+mounted from a folder of the bundle, as the host's Claude sources its own. So is sessions, where
+Claude names the record of a live session after its pid: the claude of every container has the
+same few pids, so in a shared folder the records overwrite each other. So is extension-storage,
 where the Claude tab keeps the permission mode of each session: in the container, a rebuild wipes
 it and the tab resumes in plan. So is .claude.json, the state of Claude, where an MCP server is
 kept: one file for every container would carry a server added in one into the others. It starts
@@ -43,7 +45,7 @@ ORDERS = (
     "skills",
     "workflows",
 )
-OWN = ("extension-storage", "project", "session-env", "shell-snapshots")
+OWN = ("extension-storage", "project", "session-env", "sessions", "shell-snapshots")
 # Files Claude writes in its config folder: a copy per container, as the host's Claude reads them.
 COPIES = (
     "daemon.json",

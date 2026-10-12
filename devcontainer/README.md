@@ -123,6 +123,10 @@ before every start:
   "always allow" holds for that bundle.
 - `session-env`, `shell-snapshots`, and the storage of the Claude extension (the permission mode
   of each session, kept over a rebuild).
+- `sessions`, where Claude keeps the record of each live session, named after its pid: the claude
+  of every container has the same few pids (21 or 22 for an agent in a terminal), so in the
+  shared folder the records overwrite each other, and a claude that ends deletes the record of
+  another container's.
 
 A bundle agent that has a fix for one of the read-only files hands it over instead of writing it.
 

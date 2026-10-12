@@ -214,7 +214,8 @@ in the container: the contained terminal is the one of the VS Code window.
 - In front of that icon, a mark says what Claude does in the window, so that the task bar shows
   which agents work, which are done and which wait for Seb: `⏳ 📝 master-action-panel-aku
   (review)`. It comes from the `status` Claude writes for each live session in
-  `~/.claude/sessions/<pid>.json`, and for an idle one from the first line of its last answer.
+  `~/.claude/sessions/<pid>.json`, a folder of each container (`devcontainer/README.md`), and for
+  an idle one from the first line of its last answer.
   `client/window-title.py BUNDLE SESSION=STATUS...` picks it. With wmctrl, `agent-terminator.py`
   follows the session of its claude every second until the window closes, and keeps the last
   mark once that claude ended. claude-autoopen follows the sessions of its container.

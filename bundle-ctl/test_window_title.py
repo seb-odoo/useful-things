@@ -74,8 +74,8 @@ def get_followed(home):
     spec = importlib.util.spec_from_file_location("terminator", HERE / "agent-terminator.py")
     terminator = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(terminator)
-    sessions = home / ".claude" / "sessions"
-    sessions.mkdir()
+    sessions = home / BUNDLE / "sessions"
+    sessions.mkdir(parents=True)
     wmctrl = home / "wmctrl"
     wmctrl.write_text(
         "#!/bin/sh\n"
@@ -83,7 +83,7 @@ def get_followed(home):
     )
     wmctrl.chmod(0o755)
     terminator.CHECK = 0.1
-    terminator.SESSIONS = sessions
+    terminator.CLAUDE_CONFIG = home
     terminator.WMCTRL = str(wmctrl)
 
     def write(file, **record):

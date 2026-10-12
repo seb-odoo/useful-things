@@ -79,6 +79,8 @@
     "source=@HOME@/.claude/settings.local.json,target=/home/vscode/.claude/settings.local.json,type=bind,readonly,z",
     // Claude sources these before each Bash command: the containers get their own.
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/session-env,target=/home/vscode/.claude/session-env,type=bind,z",
+    // Claude names a live session's record after its pid, the same few pids in every container.
+    "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/sessions,target=/home/vscode/.claude/sessions,type=bind,z",
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/shell-snapshots,target=/home/vscode/.claude/shell-snapshots,type=bind,z",
     // Where the Claude tab stores the permission mode of each session: kept over a rebuild.
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/extension-storage,target=/home/vscode/.vscode-server/data/User/globalStorage/anthropic.claude-code,type=bind,z",

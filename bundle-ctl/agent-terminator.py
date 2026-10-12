@@ -12,8 +12,8 @@ copy of the user's config with that layout added: preferences saved from it go t
 The title of the window says what the work is about (client/window-title.py), the title of each
 pane where it runs. A pane split by hand has no title: the host .bashrc prints the same in any shell
 that holds BUNDLE_CTL_AGENT_WINDOW, the bundle name. With wmctrl, the title of the window also
-follows the status of the agent's session until the window closes. Once its claude ends, the last
-mark stays.
+follows the status of the agent's session, in the sessions folder of the bundle's container, until
+the window closes. Once its claude ends, the last mark stays.
 """
 
 import json
@@ -25,9 +25,14 @@ import subprocess
 import sys
 import time
 
-CHECK = 1
-CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
 HERE = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent / "scripts"))
+
+from config import CLAUDE_CONFIG_CONTAINER  # noqa: E402
+
+CHECK = 1
+CLAUDE_CONFIG = pathlib.Path(CLAUDE_CONFIG_CONTAINER)
+CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
 LAYOUT = "bundle-ctl agent"
 LAYOUTS = "[layouts]"
 PANES = """\
@@ -58,7 +63,6 @@ PANES = """\
       command = "{shell}"
 """
 RUNTIME = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR") or pathlib.Path.home() / ".cache")
-SESSIONS = pathlib.Path.home() / ".claude" / "sessions"
 WMCTRL = shutil.which("wmctrl")
 
 
@@ -87,7 +91,7 @@ def get_record(bundle, since):
     """The record of the newest claude of the window: client/agent-run.sh names it after the
     bundle."""
     records = []
-    for path in SESSIONS.glob("*.json"):
+    for path in (CLAUDE_CONFIG / bundle / "sessions").glob("*.json"):
         try:
             data = path.read_bytes()
             record = json.loads(data) if bundle.encode() in data else {}
