@@ -9,6 +9,7 @@
     bctl create BASE NAME [--branch-repo REPO]... [--no-open] [TASK]
     bctl fetch BUNDLE|PR_LINK|OWNER:BRANCH [--no-open] [TASK]
     bctl open BUNDLE [TASK] [--resume]
+    bctl delete [BUNDLE] --reason TEXT
     bctl run [--kind KIND] [--workers N] [-- COMMAND...]
     bctl runs [--json]
 
@@ -31,6 +32,10 @@ open --resume gives the task to the last Claude session of the bundle as its nex
 task alone starts a new session. Without a task, the session is told to go on.
 
 branches is gbs run on the host: the table, or with --json the data agents read.
+
+delete asks Seb in hok to delete a bundle, the bundle of this container when none is named (a
+container asks for its own only). It is refused when a branch of the bundle has a commit no
+remote has, or is pushed. His yes runs delete_bundle once the container of the bundle stopped.
 
 run waits in the run queue of the host until cores and memory are free for a heavy command, then
 runs COMMAND pinned to the cores it got, which it holds until COMMAND ends. Without COMMAND the
@@ -181,6 +186,13 @@ def print_queue(answer):
         print("no task is queued")
     print_queued(answer["queue"])
     print(format_memory(answer["memory"]))
+
+
+def print_deletion(answer):
+    print(
+        f"waits for Seb: hok {answer['held']}. His yes deletes {answer['bundle']} once its"
+        " container stopped.",
+    )
 
 
 def print_table(answer):
@@ -380,6 +392,9 @@ def main():
         action="store_true",
         help="go on with the bundle's last Claude session: the task is its next prompt",
     )
+    delete = commands.add_parser("delete", help="ask Seb in hok to delete a bundle")
+    delete.add_argument("bundle", nargs="?", help="default: the bundle of this container")
+    delete.add_argument("--reason", required=True, help="the line Seb reads before his yes")
     run_ = commands.add_parser("run", help="a heavy command, once the host has cores for it")
     run_.add_argument(
         "--kind",
@@ -410,6 +425,9 @@ def main():
     elif args.command == "force-queue":
         answer = request("POST", "/force-queue", {})
         printer = print_queue
+    elif args.command == "delete":
+        answer = request("POST", "/delete", {"bundle": args.bundle, "reason": args.reason})
+        printer = print_deletion
     elif args.command == "branches" and args.json:
         answer = request("GET", "/branches", timeout=150)
     elif args.command == "branches":

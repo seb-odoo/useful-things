@@ -31,6 +31,7 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `GET /branches` | `gbs --json` run on the host; `?format=table&width=N`: its colored table |
 | `GET /status` | every local bundle branch: base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open, and its agent: state (`running`, `waiting`, `done`, or `stopped` when its terminal or its window closed before the verdict: nothing runs it any more, and a new task may replace it; a stopped agent carries its `task` text, to queue it again as it was), when it was queued, when its run started (none for a task no window took), when it ended, `stale` when a branch of the bundle got a commit, or its dev remote ref an update (the mtime of its reflog), after that end, retry, and the last write to a session titled with the bundle, its own or an earlier agent's tab Seb went on in (`active N min ago`, or `idle since HH:MM` after 15 minutes; a tab opened by hand has no title and does not count); the queue, each task with its priority, the bundle that queued it, when, and what it waits for |
 | `POST /create` | `gnb` with `--no-push`, then a window, or with a task its agent; refused when the bundle exists or a branch has unpushed commits |
+| `POST /delete` | the deletion of a bundle, held for Seb's yes in `hok` (see Deletion); a container asks for its own only |
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window, or with a task its agent; refused when the bundle is here or a branch has unpushed commits |
 | `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`; refused on a half-made bundle |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
@@ -116,6 +117,22 @@ hook on agent commands, the order of the queue, and real clients on a socket of 
 the open PR of the bundle targets another base, it tells the session to `bctl create` a bundle on
 that base with a task to cherry-pick the commits. The agent of the new window does the
 cherry-pick, as all the bundles share the base repos' `.git`.
+
+## Deletion
+
+`bctl delete [BUNDLE] --reason TEXT` lets an agent whose work moved to another bundle ask for its
+own to go, where it would hand Seb a `delete_bundle` line to type. It is refused when a branch of
+the bundle has a commit no remote has, or is on the dev remote, where a PR may use it.
+
+- The daemon holds the request in `held/` beside `state.json`, in the format of
+  `gateway-core/held.py`, and `hok` lists it as `bN` (the `config.py` of host-ctl names the
+  folder). No container mounts that folder: who asks cannot answer. Without gateway-core beside
+  useful-things, the verb is refused.
+- A yes checks the branches again, then runs `delete_bundle.py BUNDLE` as a job, at once when the
+  container of the bundle stopped, else when it stops: `deletions` in `state.json` holds the
+  bundles that wait for that. Closing the window or the terminal stays Seb's call.
+- `delete_bundle` still refuses uncommitted files: the job log in `jobs/` says so.
+- `python3 test_delete.py` runs each case on git repos of its own.
 
 ## Agents in a terminal
 
@@ -289,7 +306,7 @@ prompt, `Continue from where you left off.` when none is given. This is how an a
 verdict (`stopped`) starts again with what it knew. It is refused when the bundle has no session,
 or is open in a window, where the session goes on in its Claude tab.
 Closing the terminal or the window of an agent is Seb's call: nothing else stops a
-container, and nothing deletes a bundle on its own. `done` only says the run reached its verdict,
+container, and nothing deletes a bundle without his yes. `done` only says the run reached its verdict,
 as Seb often goes on in the session: when the queue waits on the cap, `bctl status` names the
 agents that are done and idle, the ones he can close. A task for a bundle whose last session still
 has its terminal waits in the queue until that terminal closes, whether that session reached its

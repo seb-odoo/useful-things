@@ -80,6 +80,17 @@ def load_config():
     return module.load()
 
 
+def load_held():
+    """gateway-core/held.py, the requests hok lists for Seb's yes; None without gateway-core."""
+    path = pathlib.Path(CONFIG["REPO_ROOT"]) / "gateway-core" / "held.py"
+    if not path.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location("held", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 CONFIG = load_config()
 AGENT_TERMINAL = CONFIG.get("AGENT_TERMINAL") or "gnome-terminal --window --title {bundle} --"
 BRANCHES_TIMEOUT = 120
@@ -87,8 +98,12 @@ BUNDLE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 CONTAINER_ID = re.compile(r"/libpod-(?:payload-)?([0-9a-f]{64})")
 DEFAULT_EFFORT = "medium"
 DEFAULT_MODEL = "opus"
+DELETE_WAIT = 100
 EFFORTS = ("low", "medium", "high", "xhigh")
 GITHUB_OWNER = re.compile(r"[A-Za-z0-9-]{1,39}")
+HELD = load_held()
+HELD_DIR = STATE / "held"
+HELD_LETTER = "b"
 HOST = "host"
 HOST_FOLDER = CONFIG.get("BUNDLE_CTL_HOST_FOLDER")
 HOST_ONLY = {("POST", "/force-queue")}
@@ -723,6 +738,7 @@ def keep_launching():
         ).stdout.split()
         if running:
             log_addresses(*running)
+        delete_safely()
         while True:
             proc = subprocess.Popen(
                 [
@@ -745,6 +761,8 @@ def keep_launching():
                 if status == "start":
                     log_addresses(container)
                 launch_safely()
+                if status == "died":
+                    delete_safely()
             proc.wait()
             time.sleep(5)
 
@@ -762,6 +780,13 @@ def launch_safely():
     except Exception:
         traceback.print_exc()
         return False
+
+
+def delete_safely():
+    try:
+        delete_stopped()
+    except Exception:
+        traceback.print_exc()
 
 
 def local_branches(bundle):
@@ -794,6 +819,116 @@ def check_unpushed(bundle, script):
         ).stdout.strip()
         if unpushed:
             raise Refused(f"{bundle} has unpushed commits in {repo}, {script} would reset them")
+
+
+def check_deletion(bundle):
+    """The repos where the bundle has its branch, refused when one holds work: a commit no remote
+    has, or a push to the dev remote, which a PR may use.
+    """
+    repos = local_branches(bundle)
+    for repo in repos:
+        pushed = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", get_remote_dev_ref(bundle, repo)],
+            capture_output=True,
+            check=False,
+            cwd=get_repo_folder(repo),
+        )
+        if pushed.returncode == 0:
+            raise Refused(f"{bundle} is pushed in {repo}, a PR may use it")
+        unpushed = subprocess.run(
+            ["git", "log", "--oneline", f"refs/heads/{bundle}", "--not", "--remotes"],
+            capture_output=True,
+            check=False,
+            cwd=get_repo_folder(repo),
+            text=True,
+        )
+        if unpushed.stdout.strip():
+            raise Refused(f"{bundle} has commits in {repo} that no remote has")
+    return repos
+
+
+def delete(caller, query, body):
+    """Hold the deletion of a bundle for Seb's yes in hok. A container asks for its own only."""
+    bundle = body.get("bundle") or ("" if caller == HOST else caller)
+    if caller != HOST and bundle != caller:
+        raise Refused("a bundle asks for its own deletion only")
+    if not BUNDLE_NAME.fullmatch(bundle) or bundle in STICKY_BUNDLES:
+        raise ValueError(f"not a bundle name: {bundle}")
+    if HELD is None:
+        raise Refused("no gateway-core beside useful-things: hok cannot list the deletion")
+    folder = get_worktree_bundle_folder(bundle)
+    repos = check_deletion(bundle)
+    if not repos and not os.path.isdir(folder):
+        raise ValueError(f"no bundle {bundle}")
+    item = {
+        "client": caller,
+        "key": f"delete {bundle}",
+        "lines": [
+            f"the folder {folder}",
+            f"the branch in {', '.join(repos)}: no commit of its own, never pushed"
+            if repos
+            else "no branch",
+            "its container, and the databases named after it",
+        ],
+        "reason": str(body.get("reason") or ""),
+        "send": {"bundle": bundle},
+        "title": f"delete the bundle {bundle}",
+        "yes": "delete_bundle deletes it, once its container stopped",
+    }
+    return 200, {"bundle": bundle, "held": f"{HELD_LETTER}{HELD.add(HELD_DIR, item)}"}
+
+
+def delete_stopped():
+    """Start the deletions Seb said yes to whose container stopped: their jobs, by bundle."""
+    with state_lock:
+        state = read_state()
+        if not state.get("deletions"):
+            return {}
+        running = get_open_windows()
+        stopped = [
+            bundle
+            for bundle in state["deletions"]
+            if get_worktree_bundle_folder(bundle) not in running
+        ]
+        state["deletions"] = [bundle for bundle in state["deletions"] if bundle not in stopped]
+        write_state(state)
+    started = {}
+    for bundle in stopped:
+        _code, answer = start_job(
+            HOST,
+            f"delete {bundle}",
+            lambda log, bundle=bundle: run_script(log, "delete_bundle.py", bundle),
+        )
+        started[bundle] = jobs[answer["job"]]
+    return started
+
+
+def send_deletion(item):
+    """Seb's yes to a deletion: it runs now when the container of the bundle stopped, else at its
+    stop. The answer is what hok shows him.
+    """
+    bundle = item["send"]["bundle"]
+    try:
+        check_deletion(bundle)
+    except Refused as error:
+        raise ValueError(str(error)) from None
+    with state_lock:
+        state = read_state()
+        deletions = state.setdefault("deletions", [])
+        if bundle not in deletions:
+            deletions.append(bundle)
+        write_state(state)
+    job = delete_stopped().get(bundle)
+    if job is None:
+        return f"{bundle} is deleted once its container stops: close its window or its terminal"
+    deadline = time.monotonic() + DELETE_WAIT
+    while job["state"] in ("waiting", "running") and time.monotonic() < deadline:
+        time.sleep(0.5)
+    if job["state"] == "failed":
+        raise ValueError(f"{job['result']['error']}, see {job['log']}")
+    if job["state"] == "done":
+        return f"{bundle} deleted"
+    return f"{bundle} is being deleted, see {job['log']}"
 
 
 def create(caller, query, body):
@@ -899,6 +1034,7 @@ VERBS = {
     ("GET", "/status"): status,
     ("GET", "/whoami"): whoami,
     ("POST", "/create"): create,
+    ("POST", "/delete"): delete,
     ("POST", "/fetch"): fetch,
     ("POST", "/force-queue"): force_queue,
     ("POST", "/open"): open_bundle,
@@ -977,6 +1113,8 @@ def main():
         write_state(state)
     print(f"listening on {SOCKET}", flush=True)
     RUNS.watch()
+    if HELD:
+        threading.Thread(target=HELD.serve, args=(HELD_DIR, send_deletion), daemon=True).start()
     keep_launching()
     server.serve_forever()
 
