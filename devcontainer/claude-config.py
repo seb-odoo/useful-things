@@ -114,6 +114,8 @@ def main():
     claude = pathlib.Path(values["HOME"]) / ".claude"
     own = pathlib.Path(values["CACHE_ROOT"]) / "devcontainer" / "claude-config" / sys.argv[1]
     for name in OWN:
+        if (own / name).is_symlink():
+            (own / name).unlink()
         (own / name).mkdir(parents=True, exist_ok=True)
     for name in (*ORDERS, f"projects/{values['HOST_PROJECT']}"):
         (claude / name).mkdir(parents=True, exist_ok=True)
