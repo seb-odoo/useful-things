@@ -188,11 +188,11 @@ in the container: the contained terminal is the one of the VS Code window.
 | title | bundle name |
 | --- | --- |
 | `⏩ fw` | ends with `-fw`, a fw-bot hop |
-| `👀 review` | does not end with `BUNDLE_SUFFIX`: the branch of someone else |
+| `📝 review` | does not end with `BUNDLE_SUFFIX`: the branch of someone else |
 | `🤖 runbot` | `-runbot-N` or `-flake` before the suffix |
-| `📋 task` | an odoo.com task id (7 digits or more) before the suffix |
-| `🔬 analysis` | `-code-analysis` before the suffix |
-| `🔨 mine` | any other name with the suffix |
+| `🎯 task` | an odoo.com task id (7 digits or more) before the suffix |
+| `🧠 analysis` | `-code-analysis` before the suffix |
+| `⭐ mine` | any other name with the suffix |
 
 `agent-terminal.py BUNDLE` started on a bundle whose run already began (`run.lock`) does not run
 the task again: it opens the session as it was, in its permission mode (`.agent/mode`) and with
