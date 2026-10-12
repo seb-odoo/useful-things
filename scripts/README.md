@@ -24,7 +24,9 @@ than the PR target (or with none), its folder sits under the target, which is th
 
 ### create_bundle.py
 
-Creates a new bundle locally for a given base branch across all configured repos.
+Creates a new bundle locally for a given base branch across all configured repos, but
+`design-themes` and `documentation` (`OPTIONAL_REPOS` in `config.py`) only when they get the branch
+(`--branch-repo`): 0.7 GB less per bundle. `add_repo.py` adds one later.
 Fetches the base branch, creates worktrees, and (if run from inside a repo dir) pushes a local branch to the dev remote.
 The base is never the upstream of the new branch. With `--no-push` the branch has no upstream until
 a plain `git push`, which creates it on the dev remote and tracks it there
@@ -40,12 +42,6 @@ $ python scripts/create_bundle.py master test
 [0.01-0.01] current folder ✅️ ln -sfn /home/seb/repo/useful-things/odools.toml /home/seb/src/odoo/master/master-test--seb/odools.toml
 [0.01-0.01] current folder ✅️ ln -sfn /home/seb/src/odoo/.vscode /home/seb/src/odoo/master/master-test--seb/.vscode
 Repositories
-├── design-themes
-│   ├── [0.01-1.33] /home/seb/repo/design-themes ✅️ git fetch odoo master -p
-│   └── [1.33-1.49] /home/seb/repo/design-themes ✅️ git worktree add /home/seb/src/odoo/master/master-test--seb/design-themes odoo/master
-├── documentation
-│   ├── [0.01-1.69] /home/seb/repo/documentation ✅️ git fetch odoo master -p
-│   └── [1.70-3.32] /home/seb/repo/documentation ✅️ git worktree add /home/seb/src/odoo/master/master-test--seb/documentation odoo/master
 ├── enterprise
 │   ├── [0.01-1.55] /home/seb/repo/enterprise ✅️ git fetch odoo master -p
 │   └── [1.55-3.42] /home/seb/repo/enterprise ✅️ git worktree add /home/seb/src/odoo/master/master-test--seb/enterprise odoo/master
@@ -74,7 +70,7 @@ Done
 
 Fetches bundle metadata from runbot and creates/updates local worktrees.
 
-Queries the runbot API, checks out each repo at the matching commit, links shared `node_modules`, runs web tooling setup, and opens the bundle in VS Code.
+Queries the runbot API, checks out each repo at the matching commit, links shared `node_modules`, runs web tooling setup, and opens the bundle in VS Code. `design-themes` and `documentation` get a worktree only when the bundle has a branch there.
 
 Also takes a PR link (`fetch_bundle.py https://github.com/odoo/odoo/pull/292267`), or the `owner:branch` label runbot shows for a fork PR: the bundle is the PR head. When the head is on a fork, the fork is added as a remote named after its owner and the branch tracks it, so pull and push go to the PR. Deleting the last bundle tracking that remote removes it.
 
@@ -137,6 +133,30 @@ y
 [8.29-8.48] /home/seb/src/odoo/master/master-test--seb ✅️ code .
 Done
 ```
+
+### add_repo.py
+
+Adds to a bundle the worktree of a repo it was made without, `design-themes` or `documentation`: on
+the bundle branch when the repo has one, here or on the dev remote, else on the base branch. The
+folder shows at once in the container of the bundle, which mounts the bundle folder; the terminal
+of the repo comes at the next window reload. From a container: `bctl add-repo documentation`.
+`test_optional_repos.py` runs it, and `create_bundle.py`, on scratch repos.
+
+```bash
+$ python scripts/add_repo.py master-test--seb documentation
+```
+
+### repack_repos.py
+
+Writes the objects of each base repo in one pack, once a month through
+[`repos-repack.timer`](repos-repack.timer) (install steps in
+[`repos-repack.service`](repos-repack.service)). git maintenance merges only the small packs, so
+an object fetched twice stays in two big ones: on 2026-10-12 the 30 GB of packs of the odoo repo
+held 15.5 million objects, 10.3 million of them distinct, and one repack brought them to 12.9 GB
+in 28 minutes. `git repack -a -d -k` keeps every
+object, reachable or not, and prunes no worktree. A repo is skipped when the disk has less free
+than its packs plus 10 GB, as the new pack is written before the old ones go.
+`test_repack_repos.py` runs it on a scratch repo.
 
 ### delete_bundle.py
 

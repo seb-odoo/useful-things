@@ -18,6 +18,7 @@ import pathlib
 import re
 import secrets
 import shlex
+import shutil
 import socket
 import socketserver
 import struct
@@ -65,6 +66,7 @@ from commands import (  # noqa: E402
     get_repos,
     get_sticky_bundles,
     get_worktree_bundle_folder,
+    get_worktree_bundle_repo_folder,
     get_worktree_container_folder,
 )
 from config import STICKY_BUNDLES  # noqa: E402
@@ -101,6 +103,12 @@ CONTAINER_ID = re.compile(r"/libpod-(?:payload-)?([0-9a-f]{64})")
 DEFAULT_EFFORT = "medium"
 DEFAULT_MODEL = "opus"
 DELETE_WAIT = 100
+DISK_STOP = float(
+    os.environ.get("BUNDLE_CTL_DISK_STOP_GB") or CONFIG.get("BUNDLE_CTL_DISK_STOP_GB") or 30,
+)
+DISK_WARN = float(
+    os.environ.get("BUNDLE_CTL_DISK_WARN_GB") or CONFIG.get("BUNDLE_CTL_DISK_WARN_GB") or 60,
+)
 EFFORTS = ("low", "medium", "high", "xhigh")
 GITHUB_OWNER = re.compile(r"[A-Za-z0-9-]{1,39}")
 HELD = load_held()
@@ -139,6 +147,7 @@ SESSION_VARIABLES = (
 SOCKET = STATE / "sock" / "ctl.sock"
 START_CHECK = 10
 
+disk_warning = {}
 folder_by_container = {}
 jobs = {}
 state_lock = threading.Lock()
@@ -320,6 +329,59 @@ def describe_memory():
         "stall": stall,
         "swap": round(runs.read_swap(), 1),
     }
+
+
+def read_disk_free():
+    """The GB left on the disk of the bundles."""
+    return shutil.disk_usage(get_worktree_container_folder()).free / 2**30
+
+
+def check_disk():
+    free = read_disk_free()
+    if free < DISK_STOP:
+        raise Refused(
+            f"{free:.0f} GB left on the disk, under {DISK_STOP:.0f}: no new bundle until Seb frees"
+            " space, his desktop says so",
+        )
+
+
+def notify(summary, body):
+    subprocess.run(
+        ["notify-send", "--urgency=critical", "--app-name=bundle-ctl", "--", summary, body],
+        capture_output=True,
+        check=False,
+        env=session_env(),
+        stdin=subprocess.DEVNULL,
+        timeout=10,
+    )
+
+
+def warn_disk():
+    """Tell Seb on his desktop when the disk goes under DISK_WARN, then at each 10 GB less, until
+    it is 10 GB over DISK_WARN again.
+    """
+    try:
+        free = read_disk_free()
+        if free >= DISK_WARN + 10:
+            disk_warning.pop("level", None)
+            return
+        level = int(free // 10)
+        if free >= DISK_WARN or level >= disk_warning.get("level", level + 1):
+            return
+        disk_warning["level"] = level
+        print(f"disk {free:.0f} GB left", flush=True)
+        held = (
+            f"New bundles and agent starts wait until {DISK_STOP:.0f} GB are free."
+            if free < DISK_STOP
+            else f"Under {DISK_STOP:.0f} GB, new bundles and agent starts will wait."
+        )
+        notify(
+            f"{free:.0f} GB left on the disk",
+            f"{held} gbs lists the bundles whose PR is merged or closed: each one deleted frees"
+            " about 3 GB.",
+        )
+    except (OSError, subprocess.SubprocessError):
+        traceback.print_exc()
 
 
 def get_queue(caller, query, body):
@@ -722,6 +784,7 @@ def launch_queued():
         env = session_env()
         has_display = env.get("DISPLAY") or env.get("WAYLAND_DISPLAY")
         starting = get_starting(state["launches"], open_windows, now)
+        free = read_disk_free()
         short = describe_memory()["short"]
         paced = False
         queue = []
@@ -746,6 +809,8 @@ def launch_queued():
                 item["waits_for"] = "its agent to end" + (
                     ", then its terminal to close" if in_terminal else ""
                 )
+            elif free < DISK_STOP:
+                item["waits_for"] = f"disk space ({free:.0f} GB left, {DISK_STOP:.0f} needed)"
             elif container and has_window(container):
                 # The claude-autoopen extension of the window starts it.
                 write_task(item)
@@ -833,6 +898,7 @@ def keep_launching():
 
     def on_timer():
         while True:
+            warn_disk()
             try:
                 park_agents()
             except Exception:
@@ -914,6 +980,26 @@ def check_deletion(bundle):
         if unpushed.stdout.strip():
             raise Refused(f"{bundle} has commits in {repo} that no remote has")
     return repos
+
+
+def add_repo(caller, query, body):
+    """Add the worktree of a repo a bundle was made without. A container asks for its own only."""
+    bundle = body.get("bundle") or ("" if caller == HOST else caller)
+    if caller != HOST and bundle != caller:
+        raise Refused("a bundle adds a repo to itself only")
+    repo = body.get("repo") or ""
+    if repo not in get_repos():
+        raise ValueError(f"repo must be one of {', '.join(sorted(get_repos()))}")
+    if not BUNDLE_NAME.fullmatch(bundle) or not is_made(get_worktree_bundle_folder(bundle)):
+        raise ValueError(f"no bundle {bundle}")
+    if os.path.exists(get_worktree_bundle_repo_folder(bundle, repo)):
+        raise Refused(f"{repo} is already in {bundle}")
+
+    def work(log):
+        run_script(log, "add_repo.py", bundle, repo)
+        return {"bundle": bundle, "repo": repo}
+
+    return start_job(caller, "add-repo", work)
 
 
 def delete(caller, query, body):
@@ -1029,6 +1115,7 @@ def create(caller, query, body):
     branch_repos = body.get("branch_repos") or ["odoo"]
     if unknown := set(branch_repos) - set(get_repos()):
         raise ValueError(f"unknown repos: {', '.join(sorted(unknown))}")
+    check_disk()
     folder = get_worktree_bundle_folder(bundle)
     if is_made(folder) or (not os.path.exists(folder) and local_branches(bundle)):
         raise Refused(f"{bundle} already exists")
@@ -1057,6 +1144,7 @@ def fetch(caller, query, body):
         base = get_base_from_bundle_name(bundle)
     if not BUNDLE_NAME.fullmatch(bundle) or base not in STICKY_BUNDLES:
         raise ValueError(f"not a bundle name: {bundle}")
+    check_disk()
     if is_made(get_worktree_bundle_folder(bundle)):
         raise Refused(f"{bundle} is already here, open it instead")
     check_unpushed(bundle, "pfb")
@@ -1113,6 +1201,7 @@ def open_or_enqueue(log, caller, bundle, body):
 
 
 VERBS = {
+    ("POST", "/add-repo"): add_repo,
     ("GET", "/branches"): branches,
     ("GET", "/held"): get_held,
     ("GET", "/job"): get_job,

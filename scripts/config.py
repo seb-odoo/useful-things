@@ -50,6 +50,7 @@ CLAUDE_CONFIG_CONTAINER = f"{_CONFIG['CACHE_ROOT']}/devcontainer/claude-config"
 EXTENSIONS_CONTAINER = f"{_CONFIG['CACHE_ROOT']}/devcontainer/vscode-extensions"
 FILESTORE_CONTAINER = f"{_CONFIG['SHARE_ROOT']}/Odoo/filestore"
 MASTER_ONLY_REPOS = ("owl", "sfu", "upgrade", "upgrade-util")
+OPTIONAL_REPOS = ("design-themes", "documentation")
 STATE_ROOT = _CONFIG["STATE_ROOT"]
 WORKTREE_CONTAINER = _CONFIG["WORKTREE_ROOT"]
 STICKY_BUNDLES = [

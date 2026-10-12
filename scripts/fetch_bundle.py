@@ -23,6 +23,7 @@ from commands import (
     get_sticky_bundles,
     get_worktree_bundle_repo_folder,
 )
+from config import OPTIONAL_REPOS
 from rich import print
 from rich.tree import Tree
 from utils import UtilsRunner
@@ -164,6 +165,8 @@ def handle_commit(runner: UtilsRunner, commit):
                 cwd=wt_repo_folder,
             ),
         )
+    elif repo in OPTIONAL_REPOS:
+        return
     else:
         if (commit_hash := commit.get("name")) and not cross_base:
             fetch_ref = target_ref = commit_hash

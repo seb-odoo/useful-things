@@ -16,7 +16,7 @@ from commands import (
     get_repos,
     get_worktree_bundle_repo_folder,
 )
-from config import STICKY_BUNDLES
+from config import OPTIONAL_REPOS, STICKY_BUNDLES
 from rich import print
 from rich.tree import Tree
 from utils import UtilsRunner
@@ -39,14 +39,17 @@ parser.add_argument("--no-open", action="store_true", help="Do not open the bund
 parser.add_argument("--no-push", action="store_true", help="Do not push the new branches")
 args = parser.parse_args()
 bundle_name = get_bundle_name_from_base_and_name(args.base, args.name)
+branch_repos = args.branch_repo or [os.environ.get("PWD").split("/")[-1]]
 
 
 def handle_repo(runner: UtilsRunner, repo):
+    if repo in OPTIONAL_REPOS and repo not in branch_repos:
+        return
     base = get_base_for_repo(args.base, repo)
     runner.git_fetch(repo=repo, dev=False, ref=base)
     target_ref = get_remote_branch_name(base, repo)
     worktree_bundle_repo_folder = get_worktree_bundle_repo_folder(bundle_name, repo)
-    if repo in (args.branch_repo or [os.environ.get("PWD").split("/")[-1]]):
+    if repo in branch_repos:
         runner.add_worktree(
             repo=repo,
             bundle_name=bundle_name,

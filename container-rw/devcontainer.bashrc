@@ -118,7 +118,7 @@ function odoo-bin-params() {
 	if [[ "${edition}" == *"e"* ]]; then
 		addons_path="${addons_path},./../enterprise/"
 	fi
-	if [[ "${edition}" == *"t"* ]]; then
+	if [[ "${edition}" == *"t"* && -d ./../design-themes ]]; then
 		addons_path="${addons_path},./../design-themes/"
 	fi
 	if [[ "${edition}" == *"d"* ]]; then

@@ -84,6 +84,27 @@ CASES = [
     ({"parked": PARKED_ANOTHER, "fresh": FRESH}, ["fresh"], ["parked: its terminal to close"], 1),
     ({"fresh": FRESH}, [], ["fresh: memory on the host"], 8, False, True),
     ({"fresh": FRESH}, ["fresh"], [], 8, True, True),
+    (
+        {"busy": RUNS_ANOTHER, "fresh": FRESH},
+        [],
+        [
+            "busy: its agent to end, then its terminal to close",
+            "fresh: disk space (20 GB left, 30 needed)",
+        ],
+        8,
+        False,
+        False,
+        20.4,
+    ),
+    (
+        {"fresh": FRESH},
+        [],
+        ["fresh: disk space (20 GB left, 30 needed), over the cap"],
+        8,
+        True,
+        False,
+        20.4,
+    ),
 ]
 
 ANSWER = {"message": {"content": [{"text": "pushed: x", "type": "text"}]}, "type": "assistant"}
@@ -100,7 +121,7 @@ PARKING = {
 }
 
 
-def prepare(root, bundles, cap, short=False):
+def prepare(root, bundles, cap, short=False, disk=100):
     """A daemon whose queue holds these bundles, each given as its `.agent` files, None when its
     folder is gone: its state, and the list its launches go to. `launching`, `old` and `window`
     are no file of an agent: the bundle was just launched and has no container yet, its files
@@ -131,6 +152,7 @@ def prepare(root, bundles, cap, short=False):
         ],
     }
     launched = []
+    daemon.DISK_STOP = 30
     daemon.MAX_AGENTS = cap
     daemon.describe_memory = lambda: {"available": 9.0, "short": short, "stall": 0, "swap": 0}
     daemon.get_agent_folder = lambda bundle: pathlib.Path(folders[bundle]) / ".agent"
@@ -145,6 +167,7 @@ def prepare(root, bundles, cap, short=False):
     daemon.has_window = lambda container: "window" in bundles[container]
     daemon.is_parked = lambda agent: (agent / "parked").exists()
     daemon.open_terminal = lambda log, bundle: launched.append(bundle)
+    daemon.read_disk_free = lambda: disk
     daemon.read_state = lambda: state
     daemon.session_env = lambda: {"DISPLAY": ":0"}
     daemon.start_job = lambda caller, verb, work: work(None)
@@ -152,11 +175,11 @@ def prepare(root, bundles, cap, short=False):
     return state, launched
 
 
-def run_pass(root, bundles, cap=8, force=False, short=False):
+def run_pass(root, bundles, cap=8, force=False, short=False, disk=100):
     """One pass on a queue of these bundles, after a force-queue when `force`: the bundles it
     launches, and the ones it leaves in the queue with what each waits for.
     """
-    state, launched = prepare(root, bundles, cap, short)
+    state, launched = prepare(root, bundles, cap, short, disk)
     if force:
         daemon.force_queue(daemon.HOST, {}, {})
     else:
@@ -252,6 +275,48 @@ def check_clients(root):
     return [f"clients: {name}: {lines}" for name, passed in checks if not passed], len(checks)
 
 
+def check_disk(_root):
+    """Under the floor a new bundle is refused, and the desktop hears of each 10 GB less."""
+    checks = []
+    daemon.DISK_STOP, daemon.DISK_WARN = 30, 60
+    daemon.read_disk_free = lambda: 20.4
+    refused = (
+        "20 GB left on the disk, under 30: no new bundle until Seb frees space, his desktop says so"
+    )
+    for verb, body in (
+        (daemon.create, {"base": "master", "name": "x"}),
+        (daemon.fetch, {"name": "master-x--seb"}),
+    ):
+        try:
+            verb(daemon.HOST, {}, body)
+            error = None
+        except daemon.Refused as refusal:
+            error = str(refusal)
+        checks.append((f"{verb.__name__} is refused under the floor", error == refused))
+    shown = []
+    daemon.notify = lambda summary, body: shown.append((summary, body.split(".")[0]))
+    daemon.disk_warning.clear()
+    for free in (75, 58, 52, 44, 25, 26, 49, 66, 71, 50):
+        daemon.read_disk_free = lambda free=free: free
+        daemon.warn_disk()
+    checks.append(
+        (
+            "a warning at each 10 GB less, again once 10 GB over the line",
+            shown
+            == [
+                ("58 GB left on the disk", "Under 30 GB, new bundles and agent starts will wait"),
+                ("44 GB left on the disk", "Under 30 GB, new bundles and agent starts will wait"),
+                (
+                    "25 GB left on the disk",
+                    "New bundles and agent starts wait until 30 GB are free",
+                ),
+                ("50 GB left on the disk", "Under 30 GB, new bundles and agent starts will wait"),
+            ],
+        ),
+    )
+    return [f"disk: {name}" for name, passed in checks if not passed], len(checks)
+
+
 def check_parking(root):
     """The agents a pass asks to stop their container: of PARKING, each given as its `.agent`
     files, whether its session is idle and its last message, only the one done, idle, at rest,
@@ -288,7 +353,7 @@ def main():
         if found != (launched, queue):
             failures.append(f"{list(bundles)}: {found}, expected {(launched, queue)}")
     total = len(CASES)
-    for check in (check_clients, check_parking):
+    for check in (check_clients, check_disk, check_parking):
         with tempfile.TemporaryDirectory() as root:
             failed, count = check(pathlib.Path(root))
         failures += failed

@@ -1,0 +1,14 @@
+# Writes each base repo's objects in one pack, see README.md (repack_repos.py).
+# Install as a systemd-user unit, with its timer:
+#   ln -sfn ~/repo/useful-things/scripts/repos-repack.service ~/.config/systemd/user/
+#   ln -sfn ~/repo/useful-things/scripts/repos-repack.timer ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now repos-repack.timer
+
+[Unit]
+Description=One pack per base repo of the bundles
+
+[Service]
+Type=oneshot
+ExecStart=%h/virtualenvs/odoo20/bin/python %h/repo/useful-things/scripts/repack_repos.py
+IOSchedulingClass=idle
+Nice=19

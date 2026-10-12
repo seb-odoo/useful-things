@@ -396,6 +396,12 @@ def main():
         action="store_true",
         help="go on with the bundle's last Claude session: the task is its next prompt",
     )
+    add_repo = commands.add_parser(
+        "add-repo",
+        help="the worktree of a repo the bundle was made without (design-themes, documentation)",
+    )
+    add_repo.add_argument("repo")
+    add_repo.add_argument("bundle", nargs="?", help="default: the bundle of this container")
     delete = commands.add_parser("delete", help="ask Seb in hok to delete a bundle")
     delete.add_argument("bundle", nargs="?", help="default: the bundle of this container")
     delete.add_argument("--reason", required=True, help="the line Seb reads before his yes")
@@ -430,6 +436,9 @@ def main():
     elif args.command == "force-queue":
         answer = request("POST", "/force-queue", {})
         printer = print_queue
+    elif args.command == "add-repo":
+        answer = request("POST", "/add-repo", {"bundle": args.bundle, "repo": args.repo})
+        answer = follow(answer["job"])
     elif args.command == "delete":
         answer = request("POST", "/delete", {"bundle": args.bundle, "reason": args.reason})
         printer = print_deletion
