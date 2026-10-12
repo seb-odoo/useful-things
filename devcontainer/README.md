@@ -164,6 +164,14 @@ container it attaches to, as `/tmp/vscode-ssh-auth-*.sock`, and has no setting a
 agent of the session holds no key: each host of `~/.ssh/config` names its own with
 `IdentityAgent`. `ssh-add -l` in a container window must list nothing.
 
+It also opens a link a container asks for (`$BROWSER`, `code --openExternal`) in the browser of the
+host, and for a localhost address it first forwards the port into the container, with no prompt:
+a page the container serves then runs its scripts in the host browser, outside the network of the
+container. `remote.forwardOnOpen` does not cover that path. So VS Code opens links with
+[`host-browser.py`](host-browser.py) (`workbench.externalBrowser`), which refuses a localhost
+address on any port but plain http on 80, where the Odoo proxy listens, and hands the rest to the
+default browser.
+
 **Postgres** cannot tell a container from the host (same uid on the same socket), so the role must
 not be a superuser, or `COPY ... TO PROGRAM` runs commands on the host:
 
