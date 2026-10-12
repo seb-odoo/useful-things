@@ -181,18 +181,20 @@ in the container: the contained terminal is the one of the VS Code window.
   Code window.`, which carries the same link as `gbs`: the launcher exports
   `BUNDLE_CTL_AGENT_WINDOW`, and `.bashrc` prints the two lines in an interactive shell that
   holds it.
-- The window title says what the work is about, then the bundle, so that the task bar tells the
-  windows apart: `client/window-title.py BUNDLE` reads it from the name alone. claude-autoopen
-  gives the same title to the VS Code window of the bundle.
+- The window title tells the windows apart in the task bar: an icon of what the work is about,
+  the bundle, then that kind in words, as `📝 master-action-panel-aku (review)`. The word comes
+  last, so that a narrow task bar button still shows the bundle. `client/window-title.py BUNDLE`
+  reads the kind from the name alone. claude-autoopen gives the same title to the VS Code window
+  of the bundle.
 
-| title | bundle name |
-| --- | --- |
-| `⏩ fw` | ends with `-fw`, a fw-bot hop |
-| `📝 review` | does not end with `BUNDLE_SUFFIX`: the branch of someone else |
-| `🤖 runbot` | `-runbot-N` or `-flake` before the suffix |
-| `🎯 task` | an odoo.com task id (7 digits or more) before the suffix |
-| `🧠 analysis` | `-code-analysis` before the suffix |
-| `⭐ mine` | any other name with the suffix |
+| icon | kind | bundle name |
+| --- | --- | --- |
+| ⏩ | fw | ends with `-fw`, a fw-bot hop |
+| 📝 | review | does not end with `BUNDLE_SUFFIX`: the branch of someone else |
+| 🤖 | runbot | `-runbot-N` or `-flake` before the suffix |
+| 🎯 | task | an odoo.com task id (7 digits or more) before the suffix |
+| 🧠 | analysis | `-code-analysis` before the suffix |
+| ⭐ | mine | any other name with the suffix |
 
 `agent-terminal.py BUNDLE` started on a bundle whose run already began (`run.lock`) does not run
 the task again: it opens the session as it was, in its permission mode (`.agent/mode`) and with
