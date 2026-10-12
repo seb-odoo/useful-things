@@ -16,8 +16,9 @@ the interactive claude of an agent terminal stops on its theme picker.
 
 What a session takes as orders is mounted read-only in a bundle (see README.md), so what a tab has
 to write gets a file of the bundle: settings.json, a copy of the host's where a model picked in a
-tab stays, and the project folder, where the shared files are links and settings.local.json is the
-bundle's own.
+tab stays, the other files Claude writes there (COPIES), and the project folder, where the shared
+files are links and settings.local.json is the bundle's own. What Claude reads in ~/.claude as the
+project folder of the home (HOME_PROJECT) is made on the host when missing, for a read-only mount.
 """
 
 import json
@@ -43,6 +44,20 @@ ORDERS = (
     "workflows",
 )
 OWN = ("extension-storage", "project", "session-env", "shell-snapshots")
+# Files Claude writes in its config folder: a copy per container, as the host's Claude reads them.
+COPIES = (
+    "daemon.json",
+    "policy-limits.json",
+    "remote-settings-helper-consent",
+    "remote-settings.json",
+)
+# What Claude reads in ~/.claude as the project folder of the home: read-only in a container.
+HOME_PROJECT = {
+    "launch.json": "{}\n",
+    "loop.md": "",
+    "scheduled_tasks.json": '{"tasks": []}\n',
+    "settings.local.json": "{}\n",
+}
 # Where base.jsonc mounts the shared project folder, read-only.
 SHARED_INSIDE = pathlib.Path("/home/vscode/.claude-project")
 
@@ -63,6 +78,19 @@ def write_settings(claude, own):
     # An ask rule prompts even when a hook allowed the call, and in a container the hooks decide.
     settings.get("permissions", {}).pop("ask", None)
     path.write_text(json.dumps(settings, indent=2) + "\n")
+
+
+def make_files(claude, own):
+    """The files a container mounts over the host's: a mount needs a source, and a file the host
+    has not got yet is made here rather than left empty by podman."""
+    for name, text in HOME_PROJECT.items():
+        if not (claude / name).exists():
+            (claude / name).write_text(text)
+    for name in COPIES:
+        if not (claude / name).exists():
+            (claude / name).touch()
+        if not (own / name).exists():
+            (own / name).write_bytes((claude / name).read_bytes())
 
 
 def link_project(shared, project):
@@ -87,6 +115,7 @@ def main():
         (claude / name).mkdir(parents=True, exist_ok=True)
     (claude / "CLAUDE.md").touch()
     write_settings(claude, own)
+    make_files(claude, own)
     link_project(pathlib.Path(values["SHARED_CLAUDE"]), own / "project")
 
     state_path = own / ".claude.json"

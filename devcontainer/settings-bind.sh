@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Binds ~/.claude/settings.json and ~/.claude/CLAUDE.md on themselves, each with a systemd mount
-# unit, see README.md ("Claude").
+# Binds the files of ~/.claude a dev container mounts over on themselves, each with a systemd mount
+# unit, see README.md ("Claude"). A file must exist: claude-config.py makes the missing ones.
 #   sudo devcontainer/settings-bind.sh            install and start, can run again
 #   sudo devcontainer/settings-bind.sh remove
 set -euo pipefail
@@ -12,7 +12,9 @@ if [[ -z "${user}" || "${EUID}" != 0 ]]; then
 fi
 home="$(getent passwd "${user}" | cut -d: -f6)"
 
-for name in CLAUDE.md settings.json; do
+for name in .claude.json CLAUDE.md daemon.json launch.json loop.md policy-limits.json \
+	remote-settings-helper-consent remote-settings.json scheduled_tasks.json settings.json \
+	settings.local.json; do
 	file="$(realpath -m "${home}/.claude/${name}")"
 	unit="$(systemd-escape --path --suffix=mount "${file}")"
 
