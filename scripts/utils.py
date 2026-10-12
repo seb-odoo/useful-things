@@ -331,6 +331,11 @@ class UtilsRunner(Runner):
 
         def handle_fetch_exception(runner: Runner, e):
             print(e.stderr)
+            if re.search(r"cannot lock ref '[^']+': is at \w+ but expected", e.stderr):
+                runner.git_fetch(
+                    repo=repo, dev=dev, ref=ref, remote=remote, remote_ref_manager=remote_ref_manager
+                )
+                return "ref moved by another fetch"
             match = re.search(r"fatal: couldn't find remote ref\s+([^\s]+)", e.stderr)
             if match:
                 gone_ref = match.group(1)

@@ -208,6 +208,8 @@ Syncs git remotes: fetches locally checked-out branches + sticky bundles; prunes
 - Dev remote: fetches all locally checked-out branches, except those tracking a fork, fetched from that fork
 - Standard remote: fetches only sticky bundles (`STICKY_BUNDLES` in `config.py`)
 - Deletes the handled remote's own refs outside those two sets
+- Fetches again when another fetch moved a ref meanwhile (`cannot lock ref ... but expected`):
+  the bundle agents share the `.git` of each repo
 
 ```bash
 $ python scripts/fetch_all.py
