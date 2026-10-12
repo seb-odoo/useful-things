@@ -59,7 +59,8 @@ function gcb() { git checkout "${1}-${2}${BUNDLE_SUFFIX:---$USER}"; }
 
 function branchdb() {
     edition=${1}
-    branch=`git branch | grep \*`
+    # command: Claude Code shadows grep with a ugrep that rejects \*.
+    branch=`git branch | command grep \*`
     branch=${branch/\(HEAD detached at odoo-dev\/}
     branch=${branch/\(HEAD detached at }
     branch=${branch/\(HEAD detached from odoo-dev\/}

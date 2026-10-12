@@ -189,6 +189,9 @@
     "PGHOST": "@PG_HOST@",
     "PGUSER": "@PG_USER@",
     "REPO_ROOT": "@REPO_ROOT@",
+    // Without it, Claude Code runs its Bash tool in zsh, which reads neither BASH_ENV nor the
+    // helpers. A container made before keeps its environment: agent-run.sh sets it too.
+    "SHELL": "/bin/bash",
     "VENV_ROOT": "@VENV_ROOT@",
     "VIRTUAL_ENV": "@VENV@"
   }

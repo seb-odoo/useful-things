@@ -19,6 +19,8 @@ fi
 session="$1"
 agent=/workspace/.agent
 cd /workspace || exit 1
+# To remove once every container has the SHELL of base.jsonc: Claude Code picks zsh without it.
+export SHELL=/bin/bash
 
 # Run on opus at medium effort unless the task asked otherwise: the bundle can write the files.
 case $(cat "$agent/model" 2>/dev/null) in
