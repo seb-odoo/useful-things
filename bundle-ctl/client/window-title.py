@@ -14,11 +14,11 @@ import sys
 
 KINDS = (
     ("⏩ fw", lambda name, own: name.endswith("-fw")),
-    ("👀 review", lambda name, own: not own),
+    ("📝 review", lambda name, own: not own),
     ("🤖 runbot", lambda name, own: re.search(r"-runbot-\d+$|-flake$", name)),
-    ("📋 task", lambda name, own: re.search(r"-\d{7,}$", name)),
-    ("🔬 analysis", lambda name, own: name.endswith("-code-analysis")),
-    ("🔨 mine", lambda name, own: True),
+    ("🎯 task", lambda name, own: re.search(r"-\d{7,}$", name)),
+    ("🧠 analysis", lambda name, own: name.endswith("-code-analysis")),
+    ("⭐ mine", lambda name, own: True),
 )
 
 
