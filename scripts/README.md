@@ -210,6 +210,8 @@ Syncs git remotes: fetches locally checked-out branches + sticky bundles; prunes
 - Deletes the handled remote's own refs outside those two sets
 - Fetches again when another fetch moved a ref meanwhile (`cannot lock ref ... but expected`):
   the bundle agents share the `.git` of each repo
+- Asks before deleting a gone bundle of mine (`--seb`); `--keep-gone` keeps them all without
+  asking, for a run with no keyboard (`hctl`)
 
 ```bash
 $ python scripts/fetch_all.py

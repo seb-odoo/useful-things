@@ -11,8 +11,10 @@ while the bundle has an agent at work or a running dev container.
 
 Examples:
  $ python ~/repo/useful-things/scripts/fetch_all.py
+ $ python ~/repo/useful-things/scripts/fetch_all.py --keep-gone
 """
 
+import argparse
 import json
 import os
 import re
@@ -51,6 +53,14 @@ from delete_bundle import delete_bundle
 FW_BOT = "fw-bot"
 FW_TIP_MESSAGE = "is the last of the forward-port chain"
 R_PLUS = re.compile(r"@robodoo\b.*\br\+")
+
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--keep-gone",
+    action="store_true",
+    help="keep the gone bundles of mine instead of asking whether to delete them",
+)
+args = parser.parse_args()
 
 runner = UtilsRunner()
 
@@ -221,6 +231,8 @@ for ref in remote_ref_manager.safe_to_delete_refs:
 for repo, ref in remote_ref_manager.repo_ref_to_clean:
     runner.delete_branch_and_remote_ref(repo=repo, bundle_name=ref)
 for ref in remote_ref_manager.refs_to_prompt_for_deletion:
-    if input(f"Gone ref: {ref}. Delete it? (Y/n)").lower() in ["", "y"]:
+    if args.keep_gone:
+        print(f"Gone ref: {ref}. Kept.")
+    elif input(f"Gone ref: {ref}. Delete it? (Y/n)").lower() in ["", "y"]:
         delete_bundle(runner=runner, bundle_name=ref, force=True, also_remote=False)
 drop_unpushed_branches(runner)
