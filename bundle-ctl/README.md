@@ -164,6 +164,18 @@ in the container: the contained terminal is the one of the VS Code window.
   Code window.`, which carries the same link as `gbs`: the launcher exports
   `BUNDLE_CTL_AGENT_WINDOW`, and `.bashrc` prints the two lines in an interactive shell that
   holds it.
+- The window title says what the work is about, then the bundle, so that the task bar tells the
+  windows apart: `client/window-title.py BUNDLE` reads it from the name alone. claude-autoopen
+  gives the same title to the VS Code window of the bundle.
+
+| title | bundle name |
+| --- | --- |
+| `⏩ fw` | ends with `-fw`, a fw-bot hop |
+| `👀 review` | does not end with `BUNDLE_SUFFIX`: the branch of someone else |
+| `🤖 runbot` | `-runbot-N` or `-flake` before the suffix |
+| `📋 task` | an odoo.com task id (7 digits or more) before the suffix |
+| `🔬 analysis` | `-code-analysis` before the suffix |
+| `🔨 mine` | any other name with the suffix |
 
 `agent-terminal.py BUNDLE` started on a bundle whose run already began (`run.lock`) does not run
 the task again: it opens the session as it was, in its permission mode (`.agent/mode`) and with

@@ -14,6 +14,8 @@ const OPEN_COMMAND = "claude-vscode.editor.open";
 // bundle-ctl writes the task of an agent window there (bundle-ctl/README.md).
 const AGENT_FOLDER = ".agent";
 const AGENT_TERMINAL = "agent";
+// window.title through the API lands in the host's settings, which every window reads.
+const MACHINE_SETTINGS = path.join(os.homedir(), ".vscode-server/data/Machine/settings.json");
 
 // Every /workspace bundle is created with these repo worktrees (useful-things/scripts/config.py
 // folder_by_repo). One terminal each, cd'd into the worktree.
@@ -227,7 +229,29 @@ async function openClaudeTab(sessionId, viewColumn) {
   await new Promise((resolve) => setTimeout(resolve, 500));
 }
 
+function setWindowTitle() {
+  const client = process.env.BUNDLE_CTL_CLIENT;
+  const bundle = process.env.ODOO_PROXY_HOST;
+  if (!client || !bundle) {
+    return;
+  }
+  childProcess.execFile("python3", [`${client}/window-title.py`, bundle], (error, stdout) => {
+    let settings;
+    try {
+      settings = JSON.parse(fs.readFileSync(MACHINE_SETTINGS, "utf8"));
+    } catch {
+      return;
+    }
+    const title = `${stdout.trim()}\${separator}\${dirty}\${activeEditorShort}`;
+    if (!error && settings["window.title"] !== title) {
+      settings["window.title"] = title;
+      fs.writeFileSync(MACHINE_SETTINGS, `${JSON.stringify(settings, null, "\t")}\n`);
+    }
+  });
+}
+
 async function activate(context) {
+  setWindowTitle();
   // Let restored editor/webview tabs settle before deciding whether a Claude tab already exists,
   // otherwise a restored tab might not be enumerated yet and we would open a duplicate. The same
   // wait also lets restored terminals enumerate before openRepoTerminals() decides which to open.

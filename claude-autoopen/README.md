@@ -20,6 +20,12 @@ terminals, then:
 4. closes the "Configuring..." terminal the Dev Containers extension leaves behind. A start that
    fails before the extension runs keeps it, so its error stays visible.
 
+At once, without the wait, it sets `window.title` to what the work of the bundle is about, then its
+name, as the agent windows of bundle-ctl do (`bundle-ctl/client/window-title.py`). It writes the
+remote settings of the container (`~/.vscode-server/data/Machine/settings.json`), the only ones of
+this window alone: through the API the setting would land in the host's settings, which every
+window reads.
+
 ## Agent mode
 
 When bundle-ctl opened the window for a task (`/workspace/.agent/task.md` exists), the extension
@@ -38,7 +44,7 @@ container built for the first time needs one window reload before the extension 
 Rebuild the VSIX after editing `extension.js`:
 
 ```
-cd useful-things/claude-autoopen && npx --yes @vscode/vsce package --allow-missing-repository --out claude-autoopen-0.0.1.vsix
+cd useful-things/claude-autoopen && npx --yes @vscode/vsce package --allow-missing-repository --no-rewrite-relative-links --out claude-autoopen-0.0.1.vsix
 ```
 
 ## Why an extension

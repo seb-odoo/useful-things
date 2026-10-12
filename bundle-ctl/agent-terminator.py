@@ -9,16 +9,19 @@ For AGENT_TERMINAL of the bundle-ctl daemon, which appends COMMAND, the one that
 Terminator takes the commands of a split from a layout of its config only. So the window runs on a
 copy of the user's config with that layout added: preferences saved from it go to the copy.
 
-The title of each pane says where it runs. A pane split by hand has no title: the host .bashrc
-prints the same in any shell that holds BUNDLE_CTL_AGENT_WINDOW, the bundle name.
+The title of the window says what the work is about (client/window-title.py), the title of each
+pane where it runs. A pane split by hand has no title: the host .bashrc prints the same in any shell
+that holds BUNDLE_CTL_AGENT_WINDOW, the bundle name.
 """
 
 import os
 import pathlib
 import shlex
+import subprocess
 import sys
 
 CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
+HERE = pathlib.Path(__file__).resolve().parent
 LAYOUT = "bundle-ctl agent"
 LAYOUTS = "[layouts]"
 PANES = """\
@@ -66,15 +69,22 @@ def get_config(command):
     return "".join(lines)
 
 
+def get_title(bundle):
+    command = [sys.executable, str(HERE / "client" / "window-title.py"), bundle]
+    title = subprocess.run(command, capture_output=True, check=False, text=True).stdout.strip()
+    return title or bundle
+
+
 def main():
     bundle, *command = sys.argv[1:]
     path = RUNTIME / "bundle-ctl" / f"terminator-{bundle}.config"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(get_config(command))
+    title = get_title(bundle)
     os.environ["BUNDLE_CTL_AGENT_WINDOW"] = bundle
     os.execvp(
         "terminator",
-        ["terminator", "--no-dbus", "--config", str(path), "--layout", LAYOUT, "--title", bundle],
+        ["terminator", "--no-dbus", "--config", str(path), "--layout", LAYOUT, "--title", title],
     )
 
 
