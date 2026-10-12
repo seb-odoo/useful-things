@@ -36,16 +36,17 @@ closing a tab stops its turn. The rest is in [`bundle-ctl/`](../bundle-ctl/).
 
 ## Install
 
-`install-claude-autoopen.sh` installs the VSIX through the remote CLI of the running VS Code
-server, and only when its `extension.js` differs from the installed one. The extension runs the
-script itself when it activates, so an edit reaches a container at its next window open. A
-container built for the first time needs one window reload before the extension is active.
-
-Rebuild the VSIX after editing `extension.js`:
+A container takes its extensions from a template of the host, read-only (`devcontainer/README.md`).
+So after an edit of `extension.js`, rebuild the VSIX, then add it to the template on the host:
 
 ```
 cd useful-things/claude-autoopen && npx --yes @vscode/vsce package --allow-missing-repository --no-rewrite-relative-links --out claude-autoopen-0.0.1.vsix
+python3 ../devcontainer/extensions.py --add claude-autoopen-0.0.1.vsix
 ```
+
+A bundle gets it at the next start of its container: an open window keeps the old one until it is
+closed and opened again. A container built for the first time needs one window reload before the
+extension is active.
 
 ## Why an extension
 
