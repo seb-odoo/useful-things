@@ -380,6 +380,8 @@ the PR queries worked.
 
 Opens an `odoo-bundle://<bundle>` link: in its dev container when the worktree exists, like
 `ocode`, otherwise through `pfb` in a terminal, which opens the dev container at the end.
+`odoo-bundle://ops` opens the ops container, like `orepo`: `hok` puts these links on the name of
+the caller of a request.
 
 One-time setup, so that a click on a `gbs` branch name reaches it:
 
