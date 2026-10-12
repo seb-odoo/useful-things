@@ -9,7 +9,7 @@
     bctl create BASE NAME [--branch-repo REPO]... [--no-open] [TASK]
     bctl fetch BUNDLE|PR_LINK|OWNER:BRANCH [--no-open] [TASK]
     bctl open BUNDLE [TASK] [--resume]
-    bctl delete [BUNDLE] --reason TEXT
+    bctl delete [BUNDLE] --reason TEXT [--wait SECONDS]
     bctl run [--kind KIND] [--workers N] [-- COMMAND...]
     bctl runs [--json]
 
@@ -36,6 +36,8 @@ branches is gbs run on the host: the table, or with --json the data agents read.
 delete asks Seb in hok to delete a bundle, the bundle of this container when none is named (a
 container asks for its own only). It is refused when a branch of the bundle has a commit no
 remote has, or is pushed. His yes runs delete_bundle once the container of the bundle stopped.
+With --wait, bctl waits that long for his answer and prints it: exit 0 on his yes, 126 when he
+refused, 75 when it still waits. The same delete asked again takes back the request that waits.
 
 run waits in the run queue of the host until cores and memory are free for a heavy command, then
 runs COMMAND pinned to the cores it got, which it holds until COMMAND ends. Without COMMAND the
@@ -335,6 +337,17 @@ def read_task(args):
     return args.task
 
 
+def wait_held(held, seconds):
+    deadline = time.monotonic() + seconds
+    while True:
+        wait = max(0, min(50, round(deadline - time.monotonic())))
+        answer = request("GET", f"/held?id={held}&wait={wait}", timeout=70)
+        if answer["state"] != "waits" or not wait:
+            break
+    print(answer["text"])
+    sys.exit({"refused": 126, "sent": 0, "waits": 75}.get(answer["state"], 1))
+
+
 def follow(job_id):
     offset = 0
     while True:
@@ -386,6 +399,7 @@ def main():
     delete = commands.add_parser("delete", help="ask Seb in hok to delete a bundle")
     delete.add_argument("bundle", nargs="?", help="default: the bundle of this container")
     delete.add_argument("--reason", required=True, help="the line Seb reads before his yes")
+    delete.add_argument("--wait", default=0, type=int, help="seconds to wait for his answer")
     run_ = commands.add_parser("run", help="a heavy command, once the host has cores for it")
     run_.add_argument(
         "--kind",
@@ -419,6 +433,10 @@ def main():
     elif args.command == "delete":
         answer = request("POST", "/delete", {"bundle": args.bundle, "reason": args.reason})
         printer = print_deletion
+        if args.wait:
+            print_deletion(answer)
+            sys.stdout.flush()
+            wait_held(answer["held"], args.wait)
     elif args.command == "branches" and args.json:
         answer = request("GET", "/branches", timeout=150)
     elif args.command == "branches":

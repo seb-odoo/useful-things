@@ -947,6 +947,23 @@ def delete(caller, query, body):
     return 200, {"bundle": bundle, "held": f"{HELD_LETTER}{HELD.add(HELD_DIR, item)}"}
 
 
+def get_held(caller, query, body):
+    """What became of a request this caller held for Seb: it waits, or what hok said."""
+    if HELD is None:
+        raise Refused("no gateway-core beside useful-things")
+    number = query.get("id", [""])[0].removeprefix(HELD_LETTER)
+    if not number.isdigit():
+        raise ValueError(f"not a request: {number}")
+    deadline = time.monotonic() + min(int(query.get("wait", ["0"])[0]), JOB_WAIT)
+    while True:
+        answer = HELD.get_answer(HELD_DIR, number, caller)
+        if answer is None:
+            raise ValueError(f"no request {HELD_LETTER}{number} of yours")
+        if answer["state"] != "waits" or time.monotonic() >= deadline:
+            return 200, answer
+        time.sleep(1)
+
+
 def delete_stopped():
     """Start the deletions Seb said yes to whose container stopped: their jobs, by bundle."""
     with state_lock:
@@ -1097,6 +1114,7 @@ def open_or_enqueue(log, caller, bundle, body):
 
 VERBS = {
     ("GET", "/branches"): branches,
+    ("GET", "/held"): get_held,
     ("GET", "/job"): get_job,
     ("GET", "/queue"): get_queue,
     ("GET", "/runs"): list_runs,

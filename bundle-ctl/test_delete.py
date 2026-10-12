@@ -19,6 +19,7 @@ from test_queue import run_client  # noqa: E402
 CLEAN = "master-clean--seb"
 COMMITTED = "master-committed--seb"
 PUSHED = "master-pushed--seb"
+REFUSED = "master-refused--seb"
 STOPPED = "master-stopped--seb"
 
 
@@ -37,7 +38,7 @@ def prepare(root):
     for name in ("odoo", "odoo-dev"):
         git(repo, "remote", "add", name, str(remote))
     git(repo, "push", "--quiet", "odoo", "master")
-    for bundle in (CLEAN, COMMITTED, PUSHED, STOPPED):
+    for bundle in (CLEAN, COMMITTED, PUSHED, REFUSED, STOPPED):
         git(repo, "branch", bundle)
         (root / "master" / bundle).mkdir(parents=True)
     git(repo, "push", "--quiet", "odoo-dev", PUSHED)
@@ -67,6 +68,24 @@ def answer_yes(number):
     answer.write_text(f"yes {item['digest']}\n")
     daemon.HELD.take(answer, daemon.send_deletion)
     return daemon.HELD.read_json(path.with_suffix(".result"))
+
+
+def answer_later(bundle, words):
+    """What hok does once the request for `bundle` is listed, while a client waits for it."""
+
+    def answer():
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            for path in daemon.HELD_DIR.glob("*.json"):
+                item = daemon.HELD.read_json(path)
+                if item and item["send"] == {"bundle": bundle}:
+                    reply = path.with_suffix(".answer")
+                    reply.write_text(f"yes {item['digest']}\n" if words == "yes" else f"{words}\n")
+                    daemon.HELD.take(reply, daemon.send_deletion)
+                    return
+            time.sleep(0.1)
+
+    threading.Thread(target=answer, daemon=True).start()
 
 
 def wait_jobs():
@@ -105,6 +124,13 @@ def check(root):
                 "moved to 19.0",
                 {"bundle": CLEAN},
             ),
+        ),
+    )
+    code, lines = run_client(path, "delete", "--reason", "moved to 19.0", "--wait", "1")
+    checks.append(
+        (
+            "--wait takes back the request that waits, and exits 75 while it waits",
+            (code, lines[1:]) == (75, ["it still waits for Seb's yes"]) and "hok b1." in lines[0],
         ),
     )
     code, lines = run_client(path, "delete", STOPPED, "--reason", "r")
@@ -156,13 +182,22 @@ def check(root):
             == ([("delete_bundle.py", CLEAN)], []),
         ),
     )
-    code, lines = run_client(path, "delete", STOPPED, "--reason", "r")
-    result = answer_yes(int(lines[0].partition("hok b")[2].partition(".")[0]))
+    answer_later(REFUSED, "no it still runs")
+    code, lines = run_client(path, "delete", REFUSED, "--reason", "r", "--wait", "10")
     checks.append(
         (
-            "a yes on a stopped container deletes it at once",
-            (result, world["calls"][1:])
-            == ({"code": 0, "text": f"{STOPPED} deleted"}, [("delete_bundle.py", STOPPED)]),
+            "--wait prints his refusal and exits 126",
+            (code, lines[1:], len(world["calls"]))
+            == (126, ["Seb refused it, and said: it still runs. Nothing was sent."], 1),
+        ),
+    )
+    answer_later(STOPPED, "yes")
+    code, lines = run_client(path, "delete", STOPPED, "--reason", "r", "--wait", "10")
+    checks.append(
+        (
+            "a yes on a stopped container deletes it at once, and --wait prints it",
+            (code, lines[1:], world["calls"][1:])
+            == (0, [f"{STOPPED} deleted"], [("delete_bundle.py", STOPPED)]),
         ),
     )
     code, lines = run_client(path, "delete", CLEAN, "--reason", "r")
