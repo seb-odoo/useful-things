@@ -217,8 +217,9 @@ in the container: the contained terminal is the one of the VS Code window.
   `~/.claude/sessions/<pid>.json`, a folder of each container (`devcontainer/README.md`), and for
   an idle one from the first line of its last answer.
   `client/window-title.py BUNDLE SESSION=STATUS...` picks it. With wmctrl, `agent-terminator.py`
-  follows the session of its claude every second until the window closes, and keeps the last
-  mark once that claude ended. claude-autoopen follows the sessions of its container.
+  opens the window on 🚀 and follows the session of its claude every second until the window
+  closes, and keeps the last mark once that claude ended. claude-autoopen follows the sessions of
+  its container.
   `python3 test_window_title.py` runs each case.
 
 | icon | kind | bundle name |
@@ -232,9 +233,11 @@ in the container: the contained terminal is the one of the VS Code window.
 
 | mark | the sessions of the window |
 | --- | --- |
+| 🚀 | an agent window whose claude did not start yet: its container starts |
 | ⏳ | one works: `busy`, or `shell` while a background command runs |
 | ✋ | one waits for a permission or an answer (`waiting`), or all are idle and one last answer is no `pushed:` nor `nothing to do:` (`ready to push`, `needs Seb:`, `blocked:`, a chat) |
 | ✅ | all are idle on `pushed:` or `nothing to do:` |
+| ❌ | the run of an agent window ended before its claude started (`.agent/done` is `failed`) |
 | none | no live session |
 
 `agent-terminal.py BUNDLE` started on a bundle whose run already began (`run.lock`) does not run

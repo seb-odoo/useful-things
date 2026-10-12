@@ -13,7 +13,9 @@ The title of the window says what the work is about (client/window-title.py), th
 pane where it runs. A pane split by hand has no title: the host .bashrc prints the same in any shell
 that holds BUNDLE_CTL_AGENT_WINDOW, the bundle name. With wmctrl, the title of the window also
 follows the status of the agent's session, in the sessions folder of the bundle's container, until
-the window closes. Once its claude ends, the last mark stays.
+the window closes: it says the agent starts until its claude does, and that it failed when the
+run ends before (.agent/done written since the window opened). Once its claude ends, the last mark
+stays.
 """
 
 import json
@@ -28,6 +30,7 @@ import time
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
+from agents import get_agent_folder, get_mtime  # noqa: E402
 from config import CLAUDE_CONFIG_CONTAINER  # noqa: E402
 
 CHECK = 1
@@ -103,6 +106,7 @@ def get_record(bundle, since):
 
 
 def follow(bundle, terminator, since):
+    done = get_agent_folder(bundle) / "done"
     shown = None
     while True:
         try:
@@ -111,6 +115,8 @@ def follow(bundle, terminator, since):
             pass
         record = get_record(bundle, since)
         status = record and f"{record['sessionId']}={record.get('status') or ''}"
+        if not status and not shown and (get_mtime(done) or 0) * 1000 >= since:
+            status = "--failed"
         if not status or status == shown:
             continue
         title = get_title(bundle, status)
@@ -129,10 +135,10 @@ def main():
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(get_config(command))
     terminator = ["terminator", "--no-dbus", "--config", str(path), "--layout", LAYOUT]
-    terminator += ["--title", get_title(bundle)]
     os.environ["BUNDLE_CTL_AGENT_WINDOW"] = bundle
     if not WMCTRL:
-        os.execvp(terminator[0], terminator)
+        os.execvp(terminator[0], [*terminator, "--title", get_title(bundle)])
+    terminator += ["--title", get_title(bundle, "--starting")]
     since = time.time() * 1000
     sys.exit(follow(bundle, subprocess.Popen(terminator), since))
 

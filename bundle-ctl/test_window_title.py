@@ -25,6 +25,8 @@ ANSWERS = {
 }
 MARKS = [
     ([], TITLE),
+    (["--failed"], f"❌ {TITLE}"),
+    (["--starting"], f"🚀 {TITLE}"),
     (["a=busy"], f"⏳ {TITLE}"),
     (["a=shell"], f"⏳ {TITLE}"),
     (["a=waiting", "b=busy"], f"✋ {TITLE}"),
@@ -36,7 +38,7 @@ MARKS = [
     (["pushed=idle", "seb=idle"], f"✋ {TITLE}"),
     (["missing="], f"✋ {TITLE}"),
 ]
-FOLLOWED = [f"⏳ {TITLE}", f"✅ {TITLE}"]
+FOLLOWED = [[f"⏳ {TITLE}", f"✅ {TITLE}"], [f"❌ {TITLE}"]]
 
 
 def write_transcripts(home):
@@ -70,7 +72,8 @@ def get_marks():
 
 def get_followed(home):
     """The titles agent-terminator.py gives its window while the session of its claude works,
-    then ends on a verdict. A claude of the bundle started before the window does not count."""
+    then ends on a verdict, and when the run fails before its claude starts. A claude of the
+    bundle started before the window does not count."""
     spec = importlib.util.spec_from_file_location("terminator", HERE / "agent-terminator.py")
     terminator = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(terminator)
@@ -82,9 +85,12 @@ def get_followed(home):
         f'[ "$1" = -l ] && echo "0x0a 0 $(cat {home}/pid) box {TITLE}" || echo "$6" >> {home}/log\n'
     )
     wmctrl.chmod(0o755)
+    agent = home / BUNDLE / ".agent"
+    agent.mkdir()
     terminator.CHECK = 0.1
     terminator.CLAUDE_CONFIG = home
     terminator.WMCTRL = str(wmctrl)
+    terminator.get_agent_folder = lambda bundle: agent
 
     def write(file, **record):
         (sessions / file).write_text(json.dumps({"name": BUNDLE, **record}))
@@ -98,11 +104,21 @@ def get_followed(home):
         time.sleep(0.5)
         write("14.json", sessionId="pushed", startedAt=now, status="idle")
 
-    window = subprocess.Popen(["sleep", "2"])
-    (home / "pid").write_text(str(window.pid))
-    threading.Thread(target=run_claude, daemon=True).start()
-    terminator.follow(BUNDLE, window, time.time() * 1000 - 1000)
-    return (home / "log").read_text().splitlines()
+    def fail_to_start():
+        time.sleep(0.5)
+        (agent / "done").write_text("failed\n")
+
+    titles = []
+    for run in (run_claude, fail_to_start):
+        window = subprocess.Popen(["sleep", "2"])
+        (home / "pid").write_text(str(window.pid))
+        (home / "log").write_text("")
+        threading.Thread(target=run, daemon=True).start()
+        terminator.follow(BUNDLE, window, time.time() * 1000 - 1000)
+        titles.append((home / "log").read_text().splitlines())
+        for path in sessions.iterdir():
+            path.unlink()
+    return titles
 
 
 def main():
@@ -113,12 +129,12 @@ def main():
         os.environ.update(HOME=root, USER="seb")
         write_transcripts(home)
         failures += get_marks()
-        found = get_followed(home)
-        if found != FOLLOWED:
-            failures.append(f"agent-terminator.py: titled {found}, expected {FOLLOWED}")
+        for found, expected in zip(get_followed(home), FOLLOWED, strict=True):
+            if found != expected:
+                failures.append(f"agent-terminator.py: titled {found}, expected {expected}")
     for line in failures:
         print(line)
-    cases = len(MARKS) + 1
+    cases = len(MARKS) + len(FOLLOWED)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

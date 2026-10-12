@@ -3,10 +3,11 @@
 about, its name, then that kind in words, last so that a narrow task bar button still shows the
 name.
 
-    window-title.py BUNDLE [SESSION=STATUS...]
+    window-title.py BUNDLE [--failed | --starting | SESSION=STATUS...]
 
 STATUS is the `status` Claude writes in `~/.claude/sessions/<pid>.json` for a live session. No
-session, no mark.
+session, no mark. --starting marks a window whose claude did not start yet, --failed one whose run
+ended before its claude started.
 
 agent-terminator.py names its window with it on the host, and claude-autoopen its VS Code window in
 the container. The kind comes from the name alone, so a window opened by hand gets it too. The own
@@ -20,6 +21,7 @@ import re
 import sys
 
 FINISHED = re.compile(r"(pushed:|nothing to do:)", re.IGNORECASE)
+FLAGS = {"--failed": "❌", "--starting": "🚀"}
 KINDS = (
     ("⏩", "fw", lambda name, own: name.endswith("-fw")),
     ("📝", "review", lambda name, own: not own),
@@ -73,14 +75,18 @@ def get_mark(status_by_session):
     return "✅" if all(map(is_finished, status_by_session)) else "✋"
 
 
-def get_title(bundle, status_by_session=None):
+def get_title(bundle, status_by_session=None, flag=None):
     suffix = os.environ.get("BUNDLE_SUFFIX") or f"--{os.environ.get('USER', 'odoo')}"
     own = bundle.endswith(suffix)
     name = bundle.removesuffix(suffix)
     icon, kind = next((icon, kind) for icon, kind, matches in KINDS if matches(name, own))
-    return f"{get_mark(status_by_session or {})} {icon} {bundle} ({kind})".lstrip()
+    mark = FLAGS[flag] if flag else get_mark(status_by_session or {})
+    return f"{mark} {icon} {bundle} ({kind})".lstrip()
 
 
 if __name__ == "__main__":
-    bundle, *pairs = sys.argv[1:]
-    print(get_title(bundle, dict(pair.split("=", 1) for pair in pairs)))
+    bundle, *args = sys.argv[1:]
+    if args and args[0] in FLAGS:
+        print(get_title(bundle, flag=args[0]))
+    else:
+        print(get_title(bundle, dict(pair.split("=", 1) for pair in args)))
