@@ -35,7 +35,7 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `POST /delete` | the deletion of a bundle, held for Seb's yes in `hok` (see Deletion); a container asks for its own only |
 | `GET /held` | what became of a deletion this caller asked (`?id=bN`): it waits, or what Seb said in `hok`; `?wait=S` long-polls it, 50 s at most |
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window, or with a task its agent; refused when the bundle is here, a branch has unpushed commits or the disk is short |
-| `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`; refused on a half-made bundle |
+| `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt; refused on a half-made bundle |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
 | `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, and the memory left on the host, `short` when a start would add to a host that already lacks it |
 | `POST /force-queue` | the tasks queued now may start over the cap; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
@@ -177,6 +177,9 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   type in that session at any time. Without a verdict the agent then reads `stopped`. So does a
   terminal that dies without closing (killed, or lost with the X server): `podman exec` does not see that hangup, so the wrapper ends on the hangup and stops
   the container itself.
+- `bctl open BUNDLE --terminal` opens that terminal again, on the bundle's last session and with
+  no prompt: the way back once the X server took the windows away. It is refused while a terminal
+  or a VS Code window holds the session: a new terminal would take it over and cut its turn.
 - A claude that ends on an error leaves the terminal open on its exit code and on the tool calls
   and answers of the session (`client/stream-format.py` on its transcript): claude draws on the
   alternate screen, which empties when claude ends.

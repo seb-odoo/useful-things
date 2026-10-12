@@ -8,7 +8,7 @@
     bctl branches [--json]
     bctl create BASE NAME [--branch-repo REPO]... [--no-open] [TASK]
     bctl fetch BUNDLE|PR_LINK|OWNER:BRANCH [--no-open] [TASK]
-    bctl open BUNDLE [TASK] [--resume]
+    bctl open BUNDLE [TASK] [--resume | --terminal]
     bctl delete [BUNDLE] --reason TEXT [--wait SECONDS]
     bctl run [--kind KIND] [--workers N] [-- COMMAND...]
     bctl runs [--json]
@@ -30,6 +30,10 @@ Only the host may ask it: a container gets a 403.
 
 open --resume gives the task to the last Claude session of the bundle as its next prompt, where a
 task alone starts a new session. Without a task, the session is told to go on.
+
+open --terminal opens the agent terminal of the bundle again, on its last Claude session, with
+no prompt: after the X server took the windows away, for one. It is refused while a terminal or
+a VS Code window holds that session.
 
 branches is gbs run on the host: the table, or with --json the data agents read.
 
@@ -395,6 +399,11 @@ def main():
         action="store_true",
         help="go on with the bundle's last Claude session: the task is its next prompt",
     )
+    open_.add_argument(
+        "--terminal",
+        action="store_true",
+        help="the agent terminal on the bundle's last Claude session, with no prompt",
+    )
     add_repo = commands.add_parser(
         "add-repo",
         help="the worktree of a repo the bundle was made without (design-themes, documentation)",
@@ -461,6 +470,8 @@ def main():
         else:
             body = {"bundle": args.bundle}
         task = read_task(args)
+        if getattr(args, "terminal", False):
+            body["terminal"] = True
         if getattr(args, "resume", False):
             body["resume"] = True
             task = task or GO_ON

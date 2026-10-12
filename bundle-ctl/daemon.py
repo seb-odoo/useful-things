@@ -567,6 +567,20 @@ def is_held(agent):
     return agent.parent.name.encode() in cmdline.split(b"\0")
 
 
+def check_terminal(bundle, body):
+    """Why the agent terminal of a bundle cannot open on its last session, with no prompt."""
+    if "task" in body or body.get("resume"):
+        raise ValueError("terminal: only without a task")
+    agent = get_agent_folder(bundle)
+    if not (agent / "task.md").is_file() or not (agent / "session").exists():
+        raise Refused(f"{bundle} has no agent session to open in a terminal")
+    if is_held(agent):
+        raise Refused(f"{bundle}: a terminal holds its session, a new one would cut its turn")
+    container = get_bundle_container(bundle)
+    if container and has_window(container):
+        raise Refused(f"{bundle} is open in a window: its session goes on in its Claude tab")
+
+
 def check_task(bundle, body):
     if "task" not in body:
         if "effort" in body:
@@ -1108,6 +1122,14 @@ def open_bundle(caller, query, body):
         raise ValueError(f"no bundle folder for {bundle}")
     if not is_made(get_worktree_bundle_folder(bundle)):
         raise Refused(f"{bundle} is half-made (its create or fetch failed): do it again")
+    if body.get("terminal"):
+        check_terminal(bundle, body)
+
+        def work(log):
+            open_terminal(log, bundle)
+            return {"bundle": bundle}
+
+        return start_job(caller, "open", work)
     check_task(bundle, body)
     if "task" in body:
         return 202, enqueue(caller, bundle, body)
