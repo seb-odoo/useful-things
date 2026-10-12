@@ -238,7 +238,7 @@ remote connection ("Cannot reconnect"). A run that ends without a tool call open
 | `session` | `agent-terminal.py`, claude-autoopen | the session id, chosen before the run |
 | `run.lock` | `client/agent-run.sh` | the run started, its mtime is when; a terminal started again opens the session and does not run the task again |
 | `result.md` | `client/stream-format.py`, `client/agent-stop.py`, `agent-terminal.py` | the last answer of the run, or why no container could start |
-| `mode` | `client/stream-format.py`, `client/agent-takeover.py` | the permission mode of the run, which the tab resumes the session in |
+| `mode` | `client/agent-run.sh`, `client/stream-format.py`, `client/agent-takeover.py` | the permission mode of the run, which the tab resumes the session in; `auto` from the start of a terminal, so the tab does not fall back to plan after its claude ended |
 | `handoff` | `client/agent-run.sh`, `client/agent-takeover.py` | claude was stopped for the tab to go on: `claude -p` at its first tool call, or the claude of a terminal |
 | `retry` | `client/agent-run.sh` | `auth failed, retry n/3`: the run failed to authenticate and starts again |
 | `waiting` | `client/agent-stop.py` | a turn of the terminal or of the tab ended without a verdict; its mtime is when |

@@ -56,10 +56,11 @@ if [ -n "$terminal" ]; then
 	if [ -e "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/-workspace/$session.jsonl" ]; then
 		start=(--resume "$session")
 	fi
+	# Record the mode for the Claude tab: without .agent/mode, the tab resumes the session in plan.
+	[ -s "$agent/mode" ] || echo auto >"$agent/mode"
 	if [ -n "$reopen" ]; then
-		mode=$(cat "$agent/mode" 2>/dev/null)
 		exec claude "${start[@]}" -n "$ODOO_PROXY_HOST" --model "$model" --effort "$effort" \
-			--permission-mode "${mode:-auto}" ${2:+-- "$2"}
+			--permission-mode "$(cat "$agent/mode")" ${2:+-- "$2"}
 	fi
 	# The mode `claude -p` runs in: the Claude tab does not restore the bundles' default, dontAsk.
 	exec claude "${start[@]}" -n "$ODOO_PROXY_HOST" --model "$model" --effort "$effort" \
