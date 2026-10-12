@@ -37,7 +37,10 @@ ORDERS = (
     "hooks",
     "output-styles",
     "plugins",
+    "routines",
+    "rules",
     "skills",
+    "workflows",
 )
 OWN = ("extension-storage", "project", "session-env", "shell-snapshots")
 # Where base.jsonc mounts the shared project folder, read-only.

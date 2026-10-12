@@ -86,7 +86,9 @@ it shares the host's login: a token refresh is locked and saved in that folder. 
 container a copy or a link of `.credentials.json`: a refresh replaces the link with a copy and
 revokes every other one. The root of the folder stays writable for that, and what a session takes
 as orders or runs comes back read-only over it: `CLAUDE.md`, `hooks`, `skills`, `bin`, `agents`,
-`commands`, `output-styles`, `plugins`, `external`, and the memory of the host sessions. The host's
+`commands`, `output-styles`, `plugins`, `external`, `rules` (read as the user's own instructions),
+`routines`, `workflows`, and the memory of the host sessions. A name Claude Code adds there later
+is writable until it joins this list: `host-ctl/test_escape.py` names the ones it checks. The host's
 Claude reads the same files, so a hook a bundle could write would run on the host.
 What a tab has to write is a file of the bundle, made by [`claude-config.py`](claude-config.py)
 before every start:

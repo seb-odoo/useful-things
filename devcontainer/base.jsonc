@@ -58,7 +58,10 @@
     "source=@HOME@/.claude/output-styles,target=/home/vscode/.claude/output-styles,type=bind,readonly,z",
     "source=@HOME@/.claude/plugins,target=/home/vscode/.claude/plugins,type=bind,readonly,z",
     "source=@HOME@/.claude/projects/@HOST_PROJECT@,target=/home/vscode/.claude/projects/@HOST_PROJECT@,type=bind,readonly,z",
+    "source=@HOME@/.claude/routines,target=/home/vscode/.claude/routines,type=bind,readonly,z",
+    "source=@HOME@/.claude/rules,target=/home/vscode/.claude/rules,type=bind,readonly,z",
     "source=@HOME@/.claude/skills,target=/home/vscode/.claude/skills,type=bind,readonly,z",
+    "source=@HOME@/.claude/workflows,target=/home/vscode/.claude/workflows,type=bind,readonly,z",
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/settings.json,target=/home/vscode/.claude/settings.json,type=bind,z",
     // The state of Claude (.claude.json, where an MCP server is kept): a copy of the bundle, as a
     // file shared by every container would carry one container's MCP server into the others.
