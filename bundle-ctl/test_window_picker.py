@@ -35,6 +35,7 @@ SHOWN = [
     f"[windows:{HERE / 'window-picker.py'}]",
     "[-show]",
     "[windows]",
+    "[-hover-select]",
     "[-me-select-entry]",
     "[]",
     "[-me-accept-entry]",
