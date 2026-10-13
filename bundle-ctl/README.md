@@ -247,9 +247,10 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
 25 agent windows left the task bar no room to show a title. To reach them:
 
 - `window-picker.py`, a rofi script, lists the bundles first by mark (✅, ✋, ❌, ⏳, 🚀), one row
-  each, then the other windows. The search also takes the mark in words (`finished`, `waiting`,
-  `failed`, `running`, `starting`), the kind is already in the title, and the line above the rows
-  counts the bundles of each mark. `window-picker.py --show` opens it in rofi, where the row under
+  each, then the other windows. A bundle open in VS Code has no row (Seb, 2026-10-13): he works
+  there, and its window is in the task bar. The search also takes the mark in words (`finished`,
+  `waiting`, `failed`, `running`, `starting`), the kind is already in the title, and the line above
+  the rows counts the bundles of each mark. `window-picker.py --show` opens it in rofi, where the row under
   the mouse is selected: a click on a bundle brings its VS Code window up, or opens it through its
   `odoo-bundle://` link, and a right click or Shift+Enter brings its terminal up. A Cinnamon
   shortcut runs it.

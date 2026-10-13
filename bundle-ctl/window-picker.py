@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""List the bundles and the other windows for rofi, the bundles first by the mark of their title,
-and bring the one picked to the front.
+"""List the bundles not open in VS Code and the other windows for rofi, the bundles first by the
+mark of their title, and bring the one picked to the front.
 
     window-picker.py --show
     window-picker.py --counts
@@ -10,12 +10,11 @@ brings its VS Code window up, or opens it through the `odoo-bundle://` link of g
 or Shift+Enter brings its terminal up, when it has one. A click on another window brings it up.
 
 A rofi script: it prints the rows when called with no argument, and rofi calls it again on a pick,
-with the bundle or the window id in ROFI_INFO. A bundle has one row, though its terminal and its VS
-Code window both carry its title (client/window-title.py): the VS Code one wins, as the window
-holds the session once open. Each mark gets a word that the search matches but the row does not
-show, as the emoji are hard to type; the kind is already in words. The line above the rows counts
-the bundles of each mark. --counts prints the bundles that wait for Seb, then that line, for
-window-applet/.
+with the bundle or the window id in ROFI_INFO. A bundle has one row, from the title of its terminal
+(client/window-title.py), and none once its VS Code window is open: Seb then works there. Each mark
+gets a word that the search matches but the row does not show, as the emoji are hard to type; the
+kind is already in words. The line above the rows counts the bundles of each mark. --counts prints
+the bundles that wait for Seb, then that line, for window-applet/.
 """
 
 import importlib.util
@@ -97,6 +96,7 @@ def main():
             pick(info, terminal=retv == "10")
         return
     bundles, others = get_windows()
+    bundles = {name: bundle for name, bundle in bundles.items() if "code" not in bundle}
     rows = sorted(
         [(get_rank(bundle["title"]), bundle["title"], name) for name, bundle in bundles.items()]
         + [(len(MARKS), title, window) for title, window in others]

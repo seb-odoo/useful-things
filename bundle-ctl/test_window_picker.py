@@ -20,13 +20,12 @@ WINDOWS = """\
 0x08 0 code.Code box ✋ ⭐ master-a--seb (mine) - models.js
 0x09 0 terminator.Terminator box ⭐ master-e--seb (mine)
 """
-COUNTS = "✅ finished 1   ✋ waiting 2   ❌ failed 0   ⏳ running 1   🚀 starting 0"
+COUNTS = "✅ finished 1   ✋ waiting 1   ❌ failed 0   ⏳ running 1   🚀 starting 0"
 ROWS = [
     f"\0message\x1f{COUNTS}   |   click: VS Code   right click: terminal",
     "\0no-custom\x1ftrue",
     "\0use-hot-keys\x1ftrue",
     "✅ 🤖 master-d-runbot-12--seb (runbot)\0info\x1fmaster-d-runbot-12--seb\x1fmeta\x1ffinished",
-    "✋ ⭐ master-a--seb (mine)\0info\x1fmaster-a--seb\x1fmeta\x1fwaiting",
     "✋ 📝 master-c-aku (review)\0info\x1fmaster-c-aku\x1fmeta\x1fwaiting",
     "⏳ ⭐ master-b--seb (mine)\0info\x1fmaster-b--seb\x1fmeta\x1frunning",
     "Inbox - Mozilla Firefox\0info\x1f0x03\x1fmeta\x1f",
@@ -85,8 +84,8 @@ def main():
         if rows != ROWS:
             failures.append(f"rows {rows!r}, expected {ROWS!r}")
         counts = run(folder, "--counts").splitlines()
-        if counts != ["✋ 2", COUNTS]:
-            failures.append(f"counts {counts!r}, expected {['✋ 2', COUNTS]!r}")
+        if counts != ["✋ 1", COUNTS]:
+            failures.append(f"counts {counts!r}, expected {['✋ 1', COUNTS]!r}")
         for retv, info, expected in PICKS:
             log.write_text("")
             found = run(folder, ROFI_RETV=retv, ROFI_INFO=info)
