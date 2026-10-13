@@ -10,13 +10,16 @@ sys.path.insert(0, str(HERE))
 
 import daemon
 
-# The files of the .agent folder, whether its container has a window, and the refusal.
+# The files of the .agent folder, whether its container has a window, the caller and the refusal.
 CASES = [
-    ({}, False, "bundle has no agent session to open in a terminal"),
-    ({"task.md"}, False, "bundle has no agent session to open in a terminal"),
-    ({"task.md", "session", "held"}, False, "a terminal holds its session"),
-    ({"task.md", "session"}, True, "bundle is open in a window"),
-    ({"task.md", "session"}, False, None),
+    ({}, False, "other", "bundle has no agent session to open in a terminal"),
+    ({"task.md"}, False, "other", "bundle has no agent session to open in a terminal"),
+    ({"task.md", "session", "held"}, False, "other", "a terminal holds its session"),
+    ({"task.md", "session", "held"}, True, "bundle", "a terminal holds its session"),
+    ({"task.md", "session"}, True, "other", "bundle is open in a window"),
+    ({"task.md", "session"}, True, "bundle", None),
+    ({"task.md", "session"}, True, daemon.HOST, None),
+    ({"task.md", "session"}, False, "other", None),
 ]
 BODIES = [
     ({"terminal": True, "task": "do"}, "terminal: only without a task"),
@@ -24,9 +27,9 @@ BODIES = [
 ]
 
 
-def refusal(body):
+def refusal(body, caller="other"):
     try:
-        daemon.check_terminal("bundle", body)
+        daemon.check_terminal(caller, "bundle", body)
     except (ValueError, daemon.Refused) as error:
         return str(error)
     return None
@@ -40,16 +43,17 @@ def main():
         daemon.get_agent_folder = lambda bundle: agent
         daemon.is_held = lambda folder: (folder / "held").exists()
         daemon.get_bundle_container = lambda bundle: "c1"
-        for files, window, expected in CASES:
+        for files, window, caller, expected in CASES:
             for path in agent.iterdir():
                 path.unlink()
             for name in files:
                 (agent / name).write_text("x\n")
             daemon.has_window = lambda container, window=window: window
-            found = refusal({"terminal": True})
+            found = refusal({"terminal": True}, caller)
             if (found and expected and expected in found) or found == expected:
                 continue
-            failures.append(f"{sorted(files)} window={window}: {found!r}, expected {expected!r}")
+            case = f"{sorted(files)} window={window} caller={caller}"
+            failures.append(f"{case}: {found!r}, expected {expected!r}")
         for body, expected in BODIES:
             found = refusal(body)
             if found != expected:

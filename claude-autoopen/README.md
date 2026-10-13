@@ -36,6 +36,11 @@ terminal, and opens the tab on the session of that agent once the run is done or
 pinned Claude tab that is already there is reused, unless a session of the window is busy:
 closing a tab stops its turn. The rest is in [`bundle-ctl/`](../bundle-ctl/).
 
+The terminal icon of the Claude tab ("Move the agent to a terminal", also in the command palette)
+sends that agent back to a terminal of the host: the extension asks `bctl open BUNDLE --terminal`,
+then closes the window when the terminal writes `.agent/close-window`. It shows only in a window
+whose bundle has an agent session, and refuses while another Claude session of the window works.
+
 ## Install
 
 A container takes its extensions from a template of the host, read-only (`devcontainer/README.md`).

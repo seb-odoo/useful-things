@@ -14,6 +14,10 @@ const OPEN_COMMAND = "claude-vscode.editor.open";
 // bundle-ctl writes the task of an agent window there (bundle-ctl/README.md).
 const AGENT_FOLDER = ".agent";
 const AGENT_TERMINAL = "agent";
+const AGENT_WINDOW_KEY = "claudeAutoOpen.agentWindow";
+// agent-terminal.py waits that long for the window to close (bundle-ctl/README.md).
+const CLOSE_WAIT = 120000;
+const MOVE_COMMAND = "claudeAutoOpen.moveToTerminal";
 // window.title through the API lands in the host's settings, which every window reads.
 const MACHINE_SETTINGS = path.join(os.homedir(), ".vscode-server/data/Machine/settings.json");
 
@@ -133,6 +137,31 @@ async function readAgentFile(root, name) {
 async function writeAgentFile(root, name, text) {
   const uri = vscode.Uri.joinPath(root, AGENT_FOLDER, name);
   await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(text));
+}
+
+// bundle-ctl starts the agent terminal, which writes .agent/close-window for this window to close.
+async function moveToTerminal(root) {
+  const client = process.env.BUNDLE_CTL_CLIENT;
+  const bundle = process.env.ODOO_PROXY_HOST;
+  const session = root && (await readAgentFile(root, "session"));
+  if (!client || !bundle || !session) {
+    vscode.window.showWarningMessage("This window has no agent session to move to a terminal.");
+    return;
+  }
+  const others = getLiveSessions().filter((record) => record.sessionId !== session);
+  if (others.some((record) => record.status !== "idle")) {
+    vscode.window.showWarningMessage(
+      "Another Claude session of this window works: closing the window would cut it.",
+    );
+    return;
+  }
+  vscode.window.setStatusBarMessage("Moving the agent to a terminal...", 30000);
+  const args = [`${client}/bctl.py`, "open", bundle, "--terminal"];
+  childProcess.execFile("python3", args, (error, stdout, stderr) => {
+    if (error) {
+      vscode.window.showErrorMessage((stderr || stdout).trim() || error.message);
+    }
+  });
 }
 
 async function runAgent(root) {
@@ -262,6 +291,10 @@ function setWindowTitle() {
 }
 
 async function activate(context) {
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+  context.subscriptions.push(
+    vscode.commands.registerCommand(MOVE_COMMAND, () => moveToTerminal(root)),
+  );
   setWindowTitle();
   const titleTimer = setInterval(setWindowTitle, 1000);
   context.subscriptions.push({ dispose: () => clearInterval(titleTimer) });
@@ -275,7 +308,6 @@ async function activate(context) {
   // Update from the mounted vsix after watchOwnCode, which then offers the reload.
   childProcess.execFile("bash", [path.join(os.homedir(), ".install-claude-autoopen.sh")], () => {});
   await openRepoTerminals();
-  const root = vscode.workspace.workspaceFolders?.[0]?.uri;
   // Two runAgent at once each write a session and dispose the other's terminal.
   let polling = true;
   if (root) {
@@ -298,7 +330,19 @@ async function activate(context) {
 }
 
 async function pollAgent(context, root) {
-  if ((await readAgentFile(root, "session")) === undefined) {
+  const close = vscode.Uri.joinPath(root, AGENT_FOLDER, "close-window");
+  const asked = await vscode.workspace.fs.stat(close).then((stat) => stat.mtime, () => undefined);
+  if (asked !== undefined) {
+    await vscode.workspace.fs.delete(close);
+    if (Date.now() - asked < CLOSE_WAIT) {
+      await vscode.commands.executeCommand("workbench.action.closeWindow");
+      return;
+    }
+  }
+  const hasTask = (await readAgentFile(root, "task.md")) !== undefined;
+  const hasSession = (await readAgentFile(root, "session")) !== undefined;
+  await vscode.commands.executeCommand("setContext", AGENT_WINDOW_KEY, hasTask && hasSession);
+  if (!hasSession) {
     await runAgent(root);
   } else if ((await readAgentFile(root, "tab-opened")) === undefined) {
     if (

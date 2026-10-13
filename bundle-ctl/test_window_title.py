@@ -94,7 +94,8 @@ def get_followed(home):
     """The titles agent-terminator.py gives its window while the session of its claude works,
     then ends on a verdict, and when the run fails before its claude starts. A claude of the
     bundle started before the window does not count. Then how its terminator ends on SIGUSR1,
-    which agent-terminal.py sends after a takeover."""
+    which agent-terminal.py sends after a takeover, and the windows it minimizes when it takes
+    the session from VS Code."""
     spec = importlib.util.spec_from_file_location("terminator", HERE / "agent-terminator.py")
     terminator = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(terminator)
@@ -135,14 +136,19 @@ def get_followed(home):
         (home / "pid").write_text(str(window.pid))
         (home / "log").write_text("")
         threading.Thread(target=run, daemon=True).start()
-        terminator.follow(BUNDLE, window, time.time() * 1000 - 1000)
+        terminator.follow(BUNDLE, window, time.time() * 1000 - 1000, False)
         titles.append((home / "log").read_text().splitlines())
         for path in sessions.iterdir():
             path.unlink()
     window = subprocess.Popen(["sleep", "30"])
     threading.Timer(0.3, os.kill, (os.getpid(), signal.SIGUSR1)).start()
-    closed = terminator.follow(BUNDLE, window, time.time() * 1000)
-    return titles, closed
+    closed = terminator.follow(BUNDLE, window, time.time() * 1000, False)
+    minimized = []
+    terminator.minimize = minimized.append
+    window = subprocess.Popen(["sleep", "0.5"])
+    (home / "pid").write_text(str(window.pid))
+    terminator.follow(BUNDLE, window, time.time() * 1000, True)
+    return titles, closed, minimized
 
 
 def main():
@@ -154,15 +160,17 @@ def main():
         write_transcripts(home)
         failures += get_marks()
         failures += get_loaded()
-        titles, closed = get_followed(home)
+        titles, closed, minimized = get_followed(home)
         for found, expected in zip(titles, FOLLOWED, strict=True):
             if found != expected:
                 failures.append(f"agent-terminator.py: titled {found}, expected {expected}")
         if closed != -signal.SIGTERM:
             failures.append(f"agent-terminator.py: SIGUSR1 left its terminator on {closed}")
+        if minimized != ["0x0a"]:
+            failures.append(f"agent-terminator.py: minimized {minimized}, expected ['0x0a']")
     for line in failures:
         print(line)
-    cases = len(MARKS) + len(FOLLOWED) + 2
+    cases = len(MARKS) + len(FOLLOWED) + 3
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

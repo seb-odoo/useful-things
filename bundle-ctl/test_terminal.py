@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""What agent-terminal.py does when its claude or its terminal ends, with a fake podman and the
-wrapper in a pty: python3 test_terminal.py
+"""What agent-terminal.py does when its claude or its terminal ends, and when a VS Code window
+holds its session, with a fake podman and the wrapper in a pty: python3 test_terminal.py
 """
 
 import importlib.util
@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 
+GO_ON = "Continue from where you left off."
 HERE = pathlib.Path(__file__).resolve().parent
 MARKERS = ("terminal", "container")
 PODMAN = """#!/bin/bash
@@ -27,8 +28,16 @@ case "$1 $*" in
 "exec "*agent-takeover.py*) touch "$AGENT/handoff" ;;
 "exec "*) cat >/dev/null ;;
 "inspect "*) echo true ;;
+"ps "*) [ -e "$STATE/window" ] && echo c1 ;;
 esac
 """
+# The transcript of a session cut at a tool call, and of one that ended its turn.
+CUT = [
+    '{"type": "user", "permissionMode": "acceptEdits", "message": {"content": "task"}}',
+    '{"type": "assistant", "message": {"content": [{"type": "tool_use"}]}}',
+]
+ENDED = [*CUT, '{"type": "user", "message": {"content": [{"type": "tool_result"}]}}']
+ENDED.append('{"type": "assistant", "message": {"content": [{"type": "text"}]}}')
 
 
 def run_wrapper(root, bundle):
@@ -46,8 +55,11 @@ def run_wrapper(root, bundle):
     module.copy_gitconfig = lambda container: None
     module.get_agent_folder = lambda name: root / name / ".agent"
     module.get_worktree_bundle_folder = lambda name: str(root / name)
-    module.has_window = lambda container: bool(os.environ.get("WINDOW"))
+    module.has_window = lambda container: bool(os.environ.get("WINDOW")) or (
+        pathlib.Path(os.environ["STATE"]) / "window"
+    ).exists()
     module.TRANSCRIPTS = root
+    module.WINDOW_WAIT = float(os.environ.get("WINDOW_WAIT") or module.WINDOW_WAIT)
     sys.argv = ["agent-terminal.py", bundle]
     module.main()
 
@@ -89,7 +101,7 @@ class Terminal:
 
 
 class Case:
-    def __init__(self, folder, name, window=False):
+    def __init__(self, folder, name, window=False, tab=None, wait=None):
         self.name = name
         self.root = pathlib.Path(folder)
         self.agent = self.root / "b1" / ".agent"
@@ -98,6 +110,10 @@ class Case:
         (self.agent / "session").write_text("s1\n")
         self.state = self.root / "state"
         self.state.mkdir()
+        if tab:
+            (self.state / "window").touch()
+            (self.agent / "tab-opened").touch()
+            (self.root / "s1.jsonl").write_text("\n".join(tab) + "\n")
         self.terminator = subprocess.Popen(["sleep", "60"])
         (self.root / "bin").mkdir()
         (self.root / "bin" / "podman").write_text(PODMAN)
@@ -109,6 +125,7 @@ class Case:
             "PATH": f"{self.root / 'bin'}:{os.environ['PATH']}",
             "STATE": str(self.state),
             "WINDOW": "1" if window else "",
+            "WINDOW_WAIT": str(wait or ""),
         }
         self.failures = []
         self.count = 0
@@ -181,11 +198,63 @@ def check_close_window(case):
     case.check("closing the terminal keeps the container", "stop c1" not in case.log())
 
 
+def check_window_closes(case, go_on):
+    asked = wait(lambda: (case.agent / "close-window").exists())
+    case.check("it asks the window to close", asked)
+    case.check("it keeps the terminal marker while it waits", (case.agent / "terminal").exists())
+    case.check("it runs no claude while the window is open", not case.runs())
+    (case.state / "window").unlink()
+    case.start()
+    case.check(f"it passes the go-on prompt: {go_on}", go_on == case.runs()[0].endswith(GO_ON))
+    mode = case.agent / "mode"
+    case.check("it keeps the mode of the tab", mode.exists() and mode.read_text() == "acceptEdits")
+    for name in ("close-window", "tab-opened"):
+        case.check(f"it removes {name}", not (case.agent / name).exists())
+    (case.state / "quit").touch()
+    case.check_stopped("quitting claude")
+
+
+def check_from_window(case):
+    check_window_closes(case, go_on=True)
+
+
+def check_from_idle_window(case):
+    check_window_closes(case, go_on=False)
+
+
+def check_window_stays(case):
+    stayed = wait(lambda: "window stayed open" in case.terminal.read())
+    case.check("it gives up on the window", stayed)
+    case.check("it runs no claude", not case.runs())
+    case.check("it keeps the container", "stop c1" not in case.log())
+    case.check("it removes close-window", not (case.agent / "close-window").exists())
+
+
+def check_close_while_waiting(case):
+    close = case.agent / "close-window"
+    wait(close.exists)
+    os.close(case.terminal.fd)
+    case.check("closing the terminal ends it", wait(case.terminal.has_ended))
+    takeover = any("agent-takeover.py" in line for line in case.log())
+    case.check("closing the terminal leaves the claude of the tab", not takeover)
+    case.check("closing the terminal keeps the container", "stop c1" not in case.log())
+    case.check("closing the terminal removes close-window", not close.exists())
+
+
 def main():
     failures, total = [], 0
-    for check in (check_quit, check_sigterm, check_close, check_close_window, check_handoff):
+    tabs = {
+        check_from_window: CUT,
+        check_from_idle_window: ENDED,
+        check_window_stays: CUT,
+        check_close_while_waiting: CUT,
+    }
+    checks = (check_quit, check_sigterm, check_close, check_close_window, check_handoff, *tabs)
+    for check in checks:
         with tempfile.TemporaryDirectory() as folder:
-            case = Case(folder, check.__name__[6:], window=check is check_close_window)
+            wait_time = 1 if check is check_window_stays else None
+            window = check is check_close_window
+            case = Case(folder, check.__name__[6:], window, tabs.get(check), wait_time)
             try:
                 check(case)
                 case.check("its markers are gone", wait(case.is_clean))

@@ -14,5 +14,29 @@
   "activationEvents": [
     "onStartupFinished"
   ],
-  "main": "./extension.js"
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "claudeAutoOpen.moveToTerminal",
+        "icon": "$(terminal)",
+        "title": "Move the agent to a terminal"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "claudeAutoOpen.moveToTerminal",
+          "when": "claudeAutoOpen.agentWindow"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "claudeAutoOpen.moveToTerminal",
+          "group": "navigation",
+          "when": "activeWebviewPanelId == 'claudeVSCodePanel' && claudeAutoOpen.agentWindow"
+        }
+      ]
+    }
+  }
 }

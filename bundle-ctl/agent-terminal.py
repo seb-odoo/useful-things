@@ -18,10 +18,12 @@ A terminal closed while such a window is attached hands its session to that wind
 
 Started on a bundle whose run already began, it goes on with that session and does not run the
 task again. When another terminal holds the session, it takes it over as a window does, in the
-same container.
+same container. When a VS Code window holds it, it has that window close (.agent/close-window),
+waits for the container to stop, and starts it again.
 """
 
 import contextlib
+import importlib.util
 import json
 import os
 import pathlib
@@ -52,6 +54,7 @@ RESET = "\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[
 TAKEOVER_WAIT = 30
 TRANSCRIPTS = pathlib.Path.home() / ".claude" / "projects" / "-workspace"
 USER = "vscode"
+WINDOW_WAIT = 120
 
 
 class Failure(Exception):
@@ -214,6 +217,38 @@ def take_over(agent, bundle):
     return container if state == "true" else None, cut
 
 
+def leave_window(agent, bundle):
+    """Have the VS Code window that holds the session close, and wait for its container to stop.
+
+    Return the container when it still runs with no window, and whether a turn was cut.
+    """
+    container = get_bundle_container(bundle)
+    if not container or not has_window(container):
+        return None, False
+    print(f"{bundle}: waiting for its VS Code window to close", flush=True)
+    (agent / "close-window").touch()
+    deadline = time.monotonic() + WINDOW_WAIT
+    try:
+        while container := get_bundle_container(bundle):
+            if time.monotonic() > deadline:
+                if has_window(container):
+                    raise Failure("its VS Code window stayed open, the session goes on there")
+                break
+            time.sleep(1)
+    finally:
+        (agent / "close-window").unlink(missing_ok=True)
+    # A window opened later opens its tab on the session again.
+    (agent / "tab-opened").unlink(missing_ok=True)
+    spec = importlib.util.spec_from_file_location("takeover", HERE / "client" / "agent-takeover.py")
+    takeover = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(takeover)
+    transcript = TRANSCRIPTS / f"{read_text(agent / 'session')}.jsonl"
+    if mode := takeover.get_mode(transcript):
+        (agent / "mode").write_text(mode)
+    author, kinds = takeover.get_last_message(takeover.read_entries(transcript))
+    return container, author == "user" or "tool_use" in kinds
+
+
 def main():
     bundle = sys.argv[1]
     if sys.argv[2:] == ["--shell"]:
@@ -236,6 +271,17 @@ def main():
     ending = session = None
     handed = hung_up = taken_over = False
     (agent / "terminal").write_text(f"{os.getpid()}\n")
+    try:
+        if not container:
+            container, window_cut = leave_window(agent, bundle)
+            cut = cut or window_cut
+    except HangUp:
+        (agent / "terminal").unlink(missing_ok=True)
+        raise
+    except Failure as error:
+        (agent / "terminal").unlink(missing_ok=True)
+        keep_open(f"{bundle}: {error}")
+        return
     try:
         session = read_text(agent / "session") or str(uuid.uuid4())
         (agent / "session").write_text(f"{session}\n")

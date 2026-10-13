@@ -35,7 +35,7 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `POST /delete` | the deletion of a bundle, held for Seb's yes in `hok` (see Deletion); a container asks for its own only |
 | `GET /held` | what became of a deletion this caller asked (`?id=bN`): it waits, or what Seb said in `hok`; `?wait=S` long-polls it, 50 s at most |
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window, or with a task its agent; refused when the bundle is here, a branch has unpushed commits or the disk is short |
-| `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt; refused on a half-made bundle |
+| `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
 | `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, and the memory left on the host, `short` when a start would add to a host that already lacks it |
 | `POST /force-queue` | the tasks queued now may start over the cap; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
@@ -181,7 +181,8 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   else its claude runs on with no terminal, and the tab finds the session open in another process.
 - `bctl open BUNDLE --terminal` opens that terminal again, on the bundle's last session and with
   no prompt: the way back once the X server took the windows away. It is refused while a terminal
-  or a VS Code window holds the session: a new terminal would take it over and cut its turn.
+  holds the session: a new terminal would take it over and cut its turn. A VS Code window that
+  holds it gives it back (below).
 - A claude that ends on an error leaves the terminal open on its exit code and on the tool calls
   and answers of the session (`client/stream-format.py` on its transcript): claude draws on the
   alternate screen, which empties when claude ends.
@@ -284,6 +285,24 @@ containers whose claude has the same pid write the same `sessions/<pid>.json`. T
 there on the bundle has an agent window (below): the tab opens on the session and, for a stopped
 tool call, reruns the turn after one reload. The container then lives as long as that window.
 
+The way back is the terminal icon of the Claude tab ("Move the agent to a terminal", shown in a
+window whose bundle has an agent session), at once, mid-turn too. The claude of the tab cannot
+move to another process, so the window closes and the terminal starts the container again:
+
+- claude-autoopen refuses while another Claude session of the window works, which the closing
+  would cut, and else runs `bctl open BUNDLE --terminal`. The daemon takes that from the bundle
+  itself or the host only, as it closes a window.
+- `agent-terminal.py` writes `.agent/terminal`, then `.agent/close-window`, on which the window
+  closes at its next poll, and waits for the Dev Containers shutdown monitor to stop the container
+  (10 s). A window still open after 2 minutes (a save prompt answered "Cancel") keeps its session,
+  and the terminal says so.
+- It then starts the container, and resumes the session in the mode of the tab (the last
+  `permissionMode` of the transcript), with `Continue from where you left off.` when the turn was
+  cut: a tool call in flight, a test run say, runs again. About 20 s in all.
+- `agent-terminator.py` opens that window minimized, as it starts while the bundle's container
+  has a window: the agent goes back to the window list. The minimize is the `XIconifyWindow` of
+  libX11, as wmctrl has none.
+
 `devcontainer/claude-config.py` marks the onboarding as done in the containers' Claude config: the
 interactive claude stops on its theme picker otherwise.
 
@@ -313,7 +332,8 @@ remote connection ("Cannot reconnect"). A run that ends without a tool call open
 | `retry` | `client/agent-run.sh` | `auth failed, retry n/3`: the run failed to authenticate and starts again |
 | `waiting` | `client/agent-stop.py` | a turn of the terminal or of the tab ended without a verdict; its mtime is when |
 | `done` | `client/agent-run.sh`, `client/agent-stop.py`, `agent-terminal.py` | the exit code of `claude -p`, or `interrupted`; `0` when a turn of the terminal or of the tab ends on a verdict; `failed` when no container could start |
-| `tab-opened` | claude-autoopen | the tab was opened on the session once |
+| `tab-opened` | claude-autoopen | the tab was opened on the session once; removed by `agent-terminal.py` when it takes the session from the window, so that a later window opens its tab again |
+| `close-window` | `agent-terminal.py` | the terminal takes the session from the window: the window closes; removed when the wait ends, and ignored after 2 minutes |
 | `restarted` | claude-autoopen, `client/agent-takeover.py` | the window was reloaded once for the handoff, or needs no reload (the session was idle when taken over) |
 
 The reload waits while a Claude session of the container is busy or waits for a permission. If the

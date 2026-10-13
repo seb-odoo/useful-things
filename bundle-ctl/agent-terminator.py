@@ -16,9 +16,13 @@ follows the status of the agent's session, in the sessions folder of the bundle'
 the window closes: it says the agent starts until its claude does, and that it failed when the
 run ends before (.agent/done written since the window opened). Once its claude ends, the last mark
 stays. When a VS Code window or another terminal takes the session over, agent-terminal.py closes
-the window, its shell too: SIGUSR1 to BUNDLE_CTL_WINDOW_PID, this process.
+the window, its shell too: SIGUSR1 to BUNDLE_CTL_WINDOW_PID, this process. Started on a bundle open
+in VS Code, whose session it takes from that window, the window is minimized: the agent goes back
+to the window list (window-picker.py).
 """
 
+import ctypes
+import ctypes.util
 import json
 import os
 import pathlib
@@ -32,7 +36,7 @@ import time
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
-from agents import get_agent_folder, get_mtime  # noqa: E402
+from agents import get_agent_folder, get_bundle_container, get_mtime, has_window  # noqa: E402
 from config import CLAUDE_CONFIG_CONTAINER  # noqa: E402
 
 CHECK = 1
@@ -107,7 +111,26 @@ def get_record(bundle, since):
     return max(records, key=lambda record: record["startedAt"], default=None)
 
 
-def follow(bundle, terminator, since):
+def get_windows(pid):
+    out = subprocess.run([WMCTRL, "-l", "-p"], capture_output=True, check=False, text=True)
+    lines = [line.split() for line in out.stdout.splitlines()]
+    return [line[0] for line in lines if line[2:3] == [str(pid)]]
+
+
+def minimize(window):
+    """Iconify a window as `xdotool windowminimize` does, which wmctrl cannot."""
+    x11 = ctypes.CDLL(ctypes.util.find_library("X11"))
+    x11.XOpenDisplay.restype = ctypes.c_void_p
+    x11.XDefaultScreen.argtypes = [ctypes.c_void_p]
+    x11.XIconifyWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int]
+    x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+    display = x11.XOpenDisplay(None)
+    if display:
+        x11.XIconifyWindow(display, int(window, 16), x11.XDefaultScreen(display))
+        x11.XCloseDisplay(display)
+
+
+def follow(bundle, terminator, since, hide):
     signal.signal(signal.SIGUSR1, lambda *args: terminator.terminate())
     done = get_agent_folder(bundle) / "done"
     shown = None
@@ -116,6 +139,10 @@ def follow(bundle, terminator, since):
             return terminator.wait(CHECK)
         except subprocess.TimeoutExpired:
             pass
+        if hide and (windows := get_windows(terminator.pid)):
+            for window in windows:
+                minimize(window)
+            hide = False
         record = get_record(bundle, since)
         status = record and f"{record['sessionId']}={record.get('status') or ''}"
         if not status and not shown and (get_mtime(done) or 0) * 1000 >= since:
@@ -123,9 +150,7 @@ def follow(bundle, terminator, since):
         if not status or status == shown:
             continue
         title = get_title(bundle, status)
-        out = subprocess.run([WMCTRL, "-l", "-p"], capture_output=True, check=False, text=True)
-        lines = [line.split() for line in out.stdout.splitlines()]
-        windows = [line[0] for line in lines if line[2:3] == [str(terminator.pid)]]
+        windows = get_windows(terminator.pid)
         for window in windows:
             subprocess.run([WMCTRL, "-u", "-i", "-r", window, "-N", title], check=False)
         if windows:
@@ -143,8 +168,10 @@ def main():
     if not WMCTRL:
         os.execvp(terminator[0], [*terminator, "--title", get_title(bundle)])
     terminator += ["--title", get_title(bundle, "--starting")]
+    container = get_bundle_container(bundle)
+    hide = bool(container) and has_window(container)
     since = time.time() * 1000
-    sys.exit(follow(bundle, subprocess.Popen(terminator), since))
+    sys.exit(follow(bundle, subprocess.Popen(terminator), since, hide))
 
 
 if __name__ == "__main__":

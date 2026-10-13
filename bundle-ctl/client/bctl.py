@@ -32,8 +32,9 @@ open --resume gives the task to the last Claude session of the bundle as its nex
 task alone starts a new session. Without a task, the session is told to go on.
 
 open --terminal opens the agent terminal of the bundle again, on its last Claude session, with
-no prompt: after the X server took the windows away, for one. It is refused while a terminal or
-a VS Code window holds that session.
+no prompt: after the X server took the windows away, for one. It is refused while a terminal holds
+that session. When a VS Code window holds it, the window closes and the terminal goes on with the
+session, minimized: only the bundle itself or the host may ask it.
 
 branches is gbs run on the host: the table, or with --json the data agents read.
 
