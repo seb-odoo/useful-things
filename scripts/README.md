@@ -319,8 +319,11 @@ verdict shows `agent stopped`: nothing runs it any more.
 Opening a bundle in VS Code (its branch link, `ocode`) is handling it: from that click, a bundle
 that would be in Waits on me goes to the group its PRs give without what waits on me (CI, drafts,
 reviewer; drafts with no PR), and stays there once the window is closed, until the task of a new
-agent is written. The click touches `.agent/handled`, and the bundle is handled while that file is
-newer than `.agent/task.md`. `test_handled.py` runs each case.
+agent is written or something new waits on me. The click touches `.agent/handled` and keeps in
+`.agent/handled.json` what waits on me then: each review thread to answer, each failing check of
+a head, a conflict of a head, changes requested, a staging error of a head, a delegation. An item
+missing from that list is something new, and puts the bundle back in Waits on me; an item that
+goes away (a thread I answered) is not. `test_handled.py` runs each case.
 
 A pushed branch without PR shows `create PR`, a link to the GitHub compare page that opens one. A
 branch with no commit on its base and no PR shows `no commit` and does not count for the group of
@@ -333,7 +336,7 @@ container runs, an agent works on it, a worktree holds uncommitted files, or its
 commit the PR head does not. Its branch on the dev remote is left to mergebot, which deletes it
 within hours. `test_merged_bundles.py` runs each case on scratch repos.
 
-`--json` prints the same data for a script: per bundle its group, issue, open state and agent, per
+`--json` prints the same data for a script: per bundle its group, issue, handled, open state and agent, per
 repo its head, push, behind, conflict and PR, and under `deleted` the PRs of each bundle it
 deleted. A dev container cannot run it (no `scripts/`, no
 podman): there `gbs` is `bctl branches`, and `bctl --json branches` gives the JSON, both run on

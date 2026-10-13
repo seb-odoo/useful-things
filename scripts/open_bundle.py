@@ -9,6 +9,7 @@ from rich import print
 import argparse
 import os
 
+from branch_status import get_bundles
 from commands import clean_bundle_name, get_worktree_bundle_folder
 from utils import UtilsRunner
 
@@ -24,3 +25,4 @@ if not os.path.isdir(get_worktree_bundle_folder(bundle_name)):
     exit(1)
 
 runner.open_devcontainer(bundle_name=bundle_name)
+get_bundles()

@@ -4,6 +4,7 @@ Read by the bundle-ctl daemon and by branch_status.py.
 """
 
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -33,10 +34,26 @@ def get_agent_folder(bundle):
     return pathlib.Path(get_worktree_bundle_folder(bundle)) / ".agent"
 
 
-def is_handled(bundle):
-    """Whether Seb opened the bundle in VS Code since the task of its last agent was written."""
+def is_handled(bundle, news):
+    """Whether Seb opened the bundle in VS Code since its last agent task, and nothing came since.
+
+    The first call after his click keeps `news`, what waits on him then: a later one with an item
+    it lacks is something new.
+    """
     folder = get_agent_folder(bundle)
-    return (get_mtime(folder / "handled") or 0) > (get_mtime(folder / "task.md") or 0)
+    opened = get_mtime(folder / "handled") or 0
+    if opened <= (get_mtime(folder / "task.md") or 0):
+        return False
+    seen = folder / "handled.json"
+    if (get_mtime(seen) or 0) < opened:
+        written = folder / f"handled.json.{os.getpid()}"
+        written.write_text(json.dumps(news))
+        written.replace(seen)
+        return True
+    try:
+        return not set(news) - set(json.loads(seen.read_text()))
+    except (OSError, ValueError):
+        return False
 
 
 def mark_handled(bundle):

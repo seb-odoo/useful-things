@@ -364,6 +364,7 @@ def get_pr_facts(pr, repo, now):
         if (t["comments"]["nodes"][0]["author"] or {}).get("login") != pr["viewer"]
     ]
     return {
+        "answers": sorted(t["comments"]["nodes"][0]["createdAt"] for t in to_answer),
         "ask": dict(zip(("style", "label", "date"), get_ask(pr, now))),
         "delegated": any(DELEGATE.search(body) for body in bodies),
         "failing": [
@@ -438,6 +439,26 @@ def get_group(facts, status, push):
     ):
         return "me", "review"
     return get_waiting_group(facts), None
+
+
+def get_news(repos):
+    """What waits on me in a bundle, one item each, to tell what I saw from something new."""
+    news = []
+    for repo, row in repos.items():
+        if not (facts := row["pr"]):
+            continue
+        head = facts["head"]
+        news += [f"{repo} thread {date}" for date in facts["answers"]]
+        news += [f"{repo} failing {check['context']} {head}" for check in facts["failing"]]
+        if row["conflict"]:
+            news.append(f"{repo} conflict {head}")
+        if facts["delegated"]:
+            news.append(f"{repo} delegated")
+        if facts["review"] == "CHANGES_REQUESTED":
+            news.append(f"{repo} changes requested")
+        if facts["mergebot"] == "error":
+            news.append(f"{repo} staging error {head}")
+    return sorted(news)
 
 
 def get_waiting_group(facts):
@@ -541,9 +562,10 @@ def get_bundles():
         issue = max(issues - {None}, key=list(ISSUE_RANKS).index, default=None)
         is_open = get_worktree_bundle_folder(branch) in open_folders
         agent = get_bundle_agent(branch, agent_state, is_open, now)
+        handled = is_handled(branch, get_news(repos_of_bundle))
         if group == "me" and agent and agent["state"] in AGENT_WORKING:
             group, issue = "agents", None
-        elif group == "me" and is_handled(branch):
+        elif group == "me" and handled:
             groups_of_repos = [
                 get_waiting_group(row["pr"]) if row["group"] == "me" else row["group"]
                 for row in rows
@@ -555,6 +577,7 @@ def get_bundles():
             "date": max(dates.values()),
             "delegated": delegated,
             "group": group,
+            "handled": handled,
             "issue": issue,
             "open": is_open,
             "repos": repos_of_bundle,

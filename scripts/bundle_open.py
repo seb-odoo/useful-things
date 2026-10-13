@@ -14,6 +14,7 @@ import shlex
 import subprocess
 import sys
 
+from branch_status import get_bundles
 from commands import clean_bundle_name, get_worktree_bundle_folder
 from config import HOST_FOLDER
 from utils import UtilsRunner
@@ -29,6 +30,7 @@ if bundle_name == "ops" and HOST_FOLDER:
     UtilsRunner().open_devcontainer_folder(folder=HOST_FOLDER)
 elif os.path.isdir(get_worktree_bundle_folder(bundle_name)):
     UtilsRunner().open_devcontainer(bundle_name=bundle_name)
+    get_bundles()
 else:
     fetch_bundle = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fetch_bundle.py")
     pfb = shlex.join([sys.executable, fetch_bundle, bundle_name])
