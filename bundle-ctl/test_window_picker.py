@@ -101,13 +101,17 @@ def main():
         old.parent.mkdir(parents=True, exist_ok=True)
         old.touch()
         os.utime(old, (time.time() - 600,) * 2)
+        opened = old.with_name("master-a--seb")
+        opened.touch()
         rows = run(folder).splitlines()
         opening = [f"🔄 {row}" if row.startswith("✋ 📝 master-c-aku") else row for row in ROWS]
         if rows != opening:
             failures.append(f"rows while VS Code opens {rows!r}, expected {opening!r}")
+        if opened.exists():
+            failures.append("the mark of a bundle open in VS Code stays")
     for line in failures:
         print(line)
-    cases = 4 + len(PICKS)
+    cases = 5 + len(PICKS)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

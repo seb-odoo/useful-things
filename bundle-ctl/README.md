@@ -254,7 +254,7 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   the mouse is selected: a click on a bundle brings its VS Code window up, or opens it through its
   `odoo-bundle://` link, and a right click or Shift+Enter brings its terminal up. Until that VS
   Code window is up, the row of the bundle shows 🔄 (a file per bundle in
-  `$XDG_RUNTIME_DIR/bundle-ctl/opening`, 5 minutes at most). A Cinnamon
+  `$XDG_RUNTIME_DIR/bundle-ctl/opening`, 5 minutes at most, dropped once the window is up). A Cinnamon
   shortcut runs it.
 - `window-applet/`, a Cinnamon applet, shows `✋ N`, the bundles that wait for Seb, with the counts
   of each mark in its tooltip, and opens the same list on a click. It also sets `skip_taskbar` on

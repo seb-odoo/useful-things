@@ -9,7 +9,7 @@ mark of their title, and bring the one picked to the front.
 brings its VS Code window up, or opens it through the `odoo-bundle://` link of gbs; a right click
 or Shift+Enter brings its terminal up, when it has one. A click on another window brings it up. A
 bundle whose VS Code window is opening shows 🔄 for up to 5 minutes, until that window takes its
-row away.
+row away: closed later, the window gives the row back without 🔄.
 
 A rofi script: it prints the rows when called with no argument, and rofi calls it again on a pick,
 with the bundle or the window id in ROFI_INFO. A bundle has one row, from the title of its terminal
@@ -112,7 +112,9 @@ def main():
             pick(info, terminal=retv == "10")
         return
     bundles, others = get_windows()
-    bundles = {name: bundle for name, bundle in bundles.items() if "code" not in bundle}
+    for name in [name for name, bundle in bundles.items() if "code" in bundle]:
+        (OPENING / name).unlink(missing_ok=True)
+        del bundles[name]
     rows = sorted(
         [
             (get_rank(bundle["title"]), get_loading(name) + bundle["title"], name)
