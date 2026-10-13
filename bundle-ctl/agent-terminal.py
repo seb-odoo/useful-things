@@ -13,6 +13,7 @@ The claude session stays open in the terminal after its verdict (.agent/done, wr
 client/agent-stop.py), for Seb to read and to type in. Quitting claude or closing the terminal
 stops the container. A VS Code window opened on the bundle takes the session over instead
 (client/agent-takeover.py): the terminal closes, and the container lives as long as that window.
+A terminal closed while such a window is attached hands its session to that window the same way.
 
 Started on a bundle whose run already began, it goes on with that session and does not run the
 task again. When another terminal holds the session, it takes it over as a window does, in the
@@ -52,6 +53,10 @@ USER = "vscode"
 
 
 class Failure(Exception):
+    pass
+
+
+class HangUp(SystemExit):
     pass
 
 
@@ -154,11 +159,20 @@ def shell(bundle):
 
 
 def stop(*args):
-    """End on a closed window or a kill: the finally of main stops the container, and a second
-    signal must not cut that stop."""
+    """End on a closed window or a kill: the finally of main stops the container or hands the
+    session over, and a second signal must not cut that."""
     signal.signal(signal.SIGHUP, signal.SIG_IGN)
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    sys.exit(1)
+    raise HangUp(1)
+
+
+def hand_over(container):
+    """Stop the claude of the session in the container, where the tab of a window can go on."""
+    subprocess.run(
+        ["podman", "exec", "--user", USER, container]
+        + ["python3", str(HERE / "client" / "agent-takeover.py")],
+        check=False,
+    )
 
 
 def take_over(agent, bundle):
@@ -181,11 +195,7 @@ def take_over(agent, bundle):
     if not container:
         raise Failure("its agent starts in another terminal")
     print(f"{bundle}: taking the session over from its other terminal", flush=True)
-    subprocess.run(
-        ["podman", "exec", "--user", USER, container]
-        + ["python3", str(HERE / "client" / "agent-takeover.py")],
-        check=False,
-    )
+    hand_over(container)
     deadline = time.monotonic() + TAKEOVER_WAIT
     # That terminal removes the two markers at its end: write them after it.
     while is_held():
@@ -222,7 +232,7 @@ def main():
     for name in ("handoff", "restarted"):
         (agent / name).unlink(missing_ok=True)
     ending = session = None
-    taken_over = False
+    hung_up = taken_over = False
     (agent / "terminal").write_text(f"{os.getpid()}\n")
     try:
         session = read_text(agent / "session") or str(uuid.uuid4())
@@ -239,15 +249,22 @@ def main():
         ).returncode
         if code:
             ending = f"claude ended with code {code}"
+    except HangUp:
+        hung_up = True
+        raise
     except Failure as error:
         ending = str(error)
         (agent / "result.md").write_text(f"{ending}\n")
         (agent / "done").write_text("failed\n")
     finally:
+        container = container or get_bundle_container(bundle)
+        window = bool(container) and has_window(container)
+        # podman exec does not pass the hang-up on: the claude of the container still runs.
+        if hung_up and window and not (agent / "handoff").exists():
+            hand_over(container)
         (agent / "container").unlink(missing_ok=True)
         (agent / "terminal").unlink(missing_ok=True)
-        container = container or get_bundle_container(bundle)
-        taken_over = (agent / "handoff").exists() or (container and has_window(container))
+        taken_over = (agent / "handoff").exists() or window
         if container and not taken_over:
             subprocess.run(["podman", "stop", container], check=False, capture_output=True)
     if ending and not taken_over:

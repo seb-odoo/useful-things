@@ -176,7 +176,9 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
 - Quitting claude or closing the terminal stops the container, and nothing else does: Seb may
   type in that session at any time. Without a verdict the agent then reads `stopped`. So does a
   terminal that dies without closing (killed, or lost with the X server): `podman exec` does not see that hangup, so the wrapper ends on the hangup and stops
-  the container itself.
+  the container itself. With a VS Code window attached, it keeps the container and hands the
+  session to that window instead (`client/agent-takeover.py`, as the window does when it opens):
+  else its claude runs on with no terminal, and the tab finds the session open in another process.
 - `bctl open BUNDLE --terminal` opens that terminal again, on the bundle's last session and with
   no prompt: the way back once the X server took the windows away. It is refused while a terminal
   or a VS Code window holds the session: a new terminal would take it over and cut its turn.

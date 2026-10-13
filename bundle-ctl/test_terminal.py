@@ -23,6 +23,7 @@ case "$1 $*" in
 \t\t[ -e "$STATE/quit" ] && { rm -f "$STATE/quit"; exit 0; }
 \t\tsleep 0.1
 \tdone ;;
+"exec "*agent-takeover.py*) touch "$AGENT/handoff" ;;
 "exec "*) cat >/dev/null ;;
 "inspect "*) echo true ;;
 esac
@@ -44,7 +45,7 @@ def run_wrapper(root, bundle):
     module.copy_gitconfig = lambda container: None
     module.get_agent_folder = lambda name: root / name / ".agent"
     module.get_worktree_bundle_folder = lambda name: str(root / name)
-    module.has_window = lambda container: False
+    module.has_window = lambda container: bool(os.environ.get("WINDOW"))
     module.TRANSCRIPTS = root
     sys.argv = ["agent-terminal.py", bundle]
     module.main()
@@ -87,7 +88,7 @@ class Terminal:
 
 
 class Case:
-    def __init__(self, folder, name):
+    def __init__(self, folder, name, window=False):
         self.name = name
         self.root = pathlib.Path(folder)
         self.agent = self.root / "b1" / ".agent"
@@ -100,9 +101,11 @@ class Case:
         (self.root / "bin" / "podman").write_text(PODMAN)
         (self.root / "bin" / "podman").chmod(0o755)
         self.env = {
+            "AGENT": str(self.agent),
             "LOG": str(self.root / "log"),
             "PATH": f"{self.root / 'bin'}:{os.environ['PATH']}",
             "STATE": str(self.state),
+            "WINDOW": "1" if window else "",
         }
         self.failures = []
         self.count = 0
@@ -155,11 +158,20 @@ def check_close(case):
     case.check_stopped("closing the terminal")
 
 
+def check_close_window(case):
+    case.start()
+    os.close(case.terminal.fd)
+    case.check("closing the terminal ends it", wait(case.terminal.has_ended))
+    handed = wait(lambda: any("agent-takeover.py" in line for line in case.log()))
+    case.check("closing the terminal hands the session to the window", handed)
+    case.check("closing the terminal keeps the container", "stop c1" not in case.log())
+
+
 def main():
     failures, total = [], 0
-    for check in (check_quit, check_sigterm, check_close):
+    for check in (check_quit, check_sigterm, check_close, check_close_window):
         with tempfile.TemporaryDirectory() as folder:
-            case = Case(folder, check.__name__[6:])
+            case = Case(folder, check.__name__[6:], window=check is check_close_window)
             try:
                 check(case)
                 case.check("its markers are gone", wait(case.is_clean))
