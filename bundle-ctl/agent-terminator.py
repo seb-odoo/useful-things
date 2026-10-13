@@ -7,7 +7,9 @@ For AGENT_TERMINAL of the bundle-ctl daemon, which appends COMMAND, the one that
 (agent-terminal.py BUNDLE). The same command with --shell runs the shell.
 
 Terminator takes the commands of a split from a layout of its config only. So the window runs on a
-copy of the user's config with that layout added: preferences saved from it go to the copy.
+copy of the user's config with that layout added: preferences saved from it go to the copy. The
+copy also keeps the window out of the task bar and of Alt+Tab, where the agent windows left no room
+for the others: window-picker.py lists them.
 
 The title of the window says what the work is about (client/window-title.py), the title of each
 pane where it runs. A pane split by hand has no title: the host .bashrc prints the same in any shell
@@ -36,6 +38,7 @@ from config import CLAUDE_CONFIG_CONTAINER  # noqa: E402
 CHECK = 1
 CLAUDE_CONFIG = pathlib.Path(CLAUDE_CONFIG_CONTAINER)
 CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
+GLOBAL = "[global_config]"
 LAYOUT = "bundle-ctl agent"
 LAYOUTS = "[layouts]"
 PANES = """\
@@ -77,6 +80,10 @@ def get_config(command):
         lines = (CONFIG_ROOT / "terminator" / "config").read_text().splitlines(keepends=True)
     except OSError:
         lines = []
+    lines = [line for line in lines if not line.strip().startswith("hide_from_taskbar")]
+    if GLOBAL not in [line.strip() for line in lines]:
+        lines.insert(0, f"{GLOBAL}\n")
+    lines.insert([line.strip() for line in lines].index(GLOBAL) + 1, "  hide_from_taskbar = True\n")
     if LAYOUTS not in [line.strip() for line in lines]:
         lines.append(f"\n{LAYOUTS}\n")
     at = [line.strip() for line in lines].index(LAYOUTS) + 1

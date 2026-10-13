@@ -1,0 +1,6 @@
+{
+  "description": "The bundles that wait for you, from the marks of their window titles; a click opens window-picker.py in rofi",
+  "max-instances": 1,
+  "name": "Bundle windows",
+  "uuid": "bundle-windows@useful-things"
+}
