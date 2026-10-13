@@ -7,6 +7,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = pathlib.Path(__file__).resolve().parent
 WINDOWS = """\
@@ -56,7 +57,7 @@ PICKS = [
 
 
 def run(folder, *args, **env):
-    env = {**os.environ, "PATH": f"{folder}:{os.environ['PATH']}", **env}
+    env = {**os.environ, "PATH": f"{folder}:{os.environ['PATH']}", "XDG_RUNTIME_DIR": str(folder), **env}
     command = [sys.executable, str(HERE / "window-picker.py"), *args]
     return subprocess.run(command, capture_output=True, check=True, env=env, text=True).stdout
 
@@ -96,9 +97,17 @@ def main():
             ran = log.read_text().splitlines()
             if found or ran != [expected]:
                 failures.append(f"pick {retv} {info}: printed {found!r}, ran {ran!r}")
+        old = folder / "bundle-ctl" / "opening" / "master-b--seb"
+        old.parent.mkdir(parents=True, exist_ok=True)
+        old.touch()
+        os.utime(old, (time.time() - 600,) * 2)
+        rows = run(folder).splitlines()
+        opening = [f"🔄 {row}" if row.startswith("✋ 📝 master-c-aku") else row for row in ROWS]
+        if rows != opening:
+            failures.append(f"rows while VS Code opens {rows!r}, expected {opening!r}")
     for line in failures:
         print(line)
-    cases = 3 + len(PICKS)
+    cases = 4 + len(PICKS)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

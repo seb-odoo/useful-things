@@ -252,7 +252,9 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   `waiting`, `failed`, `running`, `starting`), the kind is already in the title, and the line above
   the rows counts the bundles of each mark. `window-picker.py --show` opens it in rofi, where the row under
   the mouse is selected: a click on a bundle brings its VS Code window up, or opens it through its
-  `odoo-bundle://` link, and a right click or Shift+Enter brings its terminal up. A Cinnamon
+  `odoo-bundle://` link, and a right click or Shift+Enter brings its terminal up. Until that VS
+  Code window is up, the row of the bundle shows 🔄 (a file per bundle in
+  `$XDG_RUNTIME_DIR/bundle-ctl/opening`, 5 minutes at most). A Cinnamon
   shortcut runs it.
 - `window-applet/`, a Cinnamon applet, shows `✋ N`, the bundles that wait for Seb, with the counts
   of each mark in its tooltip, and opens the same list on a click. It also sets `skip_taskbar` on

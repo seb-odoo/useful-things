@@ -7,7 +7,9 @@ mark of their title, and bring the one picked to the front.
 
 --show opens rofi on this script, where the row under the mouse is selected. A click on a bundle
 brings its VS Code window up, or opens it through the `odoo-bundle://` link of gbs; a right click
-or Shift+Enter brings its terminal up, when it has one. A click on another window brings it up.
+or Shift+Enter brings its terminal up, when it has one. A click on another window brings it up. A
+bundle whose VS Code window is opening shows 🔄 for up to 5 minutes, until that window takes its
+row away.
 
 A rofi script: it prints the rows when called with no argument, and rofi calls it again on a pick,
 with the bundle or the window id in ROFI_INFO. A bundle has one row, from the title of its terminal
@@ -23,8 +25,10 @@ import pathlib
 import re
 import subprocess
 import sys
+import time
 
 HERE = pathlib.Path(__file__).resolve().parent
+LOADING = "🔄"
 MARKS = (
     ("✅", "finished"),
     ("✋", "waiting"),
@@ -32,6 +36,8 @@ MARKS = (
     ("⏳", "running"),
     ("🚀", "starting"),
 )
+OPENING = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "bundle-ctl" / "opening"
+OPENING_TIME = 300
 SKIPPED = ("nemo-desktop.",)
 
 
@@ -48,6 +54,14 @@ def get_title_pattern():
 def get_rank(title):
     ranks = (rank for rank, (mark, _) in enumerate(MARKS) if title.startswith(mark))
     return next(ranks, len(MARKS))
+
+
+def get_loading(name):
+    try:
+        opening = time.time() - (OPENING / name).stat().st_mtime < OPENING_TIME
+    except OSError:
+        opening = False
+    return f"{LOADING} " if opening else ""
 
 
 def get_windows():
@@ -77,6 +91,8 @@ def pick(name, terminal):
     if window:
         subprocess.run(["wmctrl", "-i", "-a", window], check=False)
     else:
+        OPENING.mkdir(parents=True, exist_ok=True)
+        (OPENING / name).touch()
         quiet = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
         subprocess.Popen(["xdg-open", f"odoo-bundle://{name}"], start_new_session=True, **quiet)
 
@@ -98,7 +114,10 @@ def main():
     bundles, others = get_windows()
     bundles = {name: bundle for name, bundle in bundles.items() if "code" not in bundle}
     rows = sorted(
-        [(get_rank(bundle["title"]), bundle["title"], name) for name, bundle in bundles.items()]
+        [
+            (get_rank(bundle["title"]), get_loading(name) + bundle["title"], name)
+            for name, bundle in bundles.items()
+        ]
         + [(len(MARKS), title, window) for title, window in others]
     )
     ranks = [get_rank(bundle["title"]) for bundle in bundles.values()]
