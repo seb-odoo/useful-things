@@ -2,11 +2,12 @@
 """List every window for rofi, the bundle windows first by the mark of their title, and bring the
 one picked to the front.
 
-    rofi -modi windows:FULL_PATH_OF/window-picker.py -show windows
+    window-picker.py --show
     window-picker.py --counts
 
-A rofi script: it prints the rows when called with no argument, and rofi calls it again on a pick,
-with the id of that window in ROFI_INFO. Each mark gets a word that the search matches but the row
+--show opens rofi on this script, where a single click picks. A rofi script: it prints the rows
+when called with no argument, and rofi calls it again on a pick, with the id of that window in
+ROFI_INFO. Each mark gets a word that the search matches but the row
 does not show, as the emoji are hard to type; the kind of a bundle is already in words in its
 title (client/window-title.py). The line above the rows counts the bundles of each mark: the VS
 Code window of a bundle carries the same title as its terminal. --counts prints the bundles that
@@ -14,6 +15,7 @@ wait for Seb, then that line, for window-applet/.
 """
 
 import os
+import pathlib
 import subprocess
 import sys
 
@@ -46,6 +48,10 @@ def get_counts(rows):
 
 
 def main():
+    if sys.argv[1:] == ["--show"]:
+        mode = f"windows:{pathlib.Path(__file__).resolve()}"
+        click = ["-me-select-entry", "", "-me-accept-entry", "MousePrimary"]
+        os.execvp("rofi", ["rofi", "-modi", mode, "-show", "windows", *click])
     if os.environ.get("ROFI_RETV") == "1":
         subprocess.run(["wmctrl", "-i", "-a", os.environ["ROFI_INFO"]], check=False)
         return

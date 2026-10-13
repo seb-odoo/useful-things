@@ -245,8 +245,8 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
 - `window-picker.py`, a rofi script, lists every window: the bundles first by mark (✅, ✋, ❌,
   ⏳, 🚀), then the others. The search also takes the mark in words (`finished`, `waiting`,
   `failed`, `running`, `starting`), the kind is already in the title, and the line above the rows
-  counts the bundles of each mark. A Cinnamon shortcut opens it:
-  `rofi -modi windows:PATH/window-picker.py -show windows`.
+  counts the bundles of each mark. `window-picker.py --show` opens it in rofi, where a single click
+  picks; a Cinnamon shortcut runs it.
 - `window-applet/`, a Cinnamon applet, shows `✋ N`, the bundles that wait for Seb, with the counts
   of each mark in its tooltip, and opens the same list on a click. It also sets `skip_taskbar` on
   an agent window (its terminator runs on a `bundle-ctl/terminator-` config) while it is

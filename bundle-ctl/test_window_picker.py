@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""The rows window-picker.py gives rofi, its counts, the window it brings up on a pick, with a fake
-wmctrl: python3 test_window_picker.py"""
+"""How window-picker.py opens rofi, the rows it gives it, its counts, the window it brings up on a
+pick, with a fake rofi and wmctrl: python3 test_window_picker.py"""
 
 import os
 import pathlib
@@ -30,6 +30,16 @@ ROWS = [
     "⏳ ⭐ master-b--seb (mine)\0info\x1f0x02\x1fmeta\x1frunning",
     "Inbox - Mozilla Firefox\0info\x1f0x03\x1fmeta\x1f",
 ]
+SHOWN = [
+    "[-modi]",
+    f"[windows:{HERE / 'window-picker.py'}]",
+    "[-show]",
+    "[windows]",
+    "[-me-select-entry]",
+    "[]",
+    "[-me-accept-entry]",
+    "[MousePrimary]",
+]
 
 
 def pick(folder, *args, **env):
@@ -49,6 +59,13 @@ def main():
             f'[ "$1" = -l ] && cat {folder}/windows || echo "$@" >> {folder}/log\n'
         )
         wmctrl.chmod(0o755)
+        rofi = folder / "rofi"
+        rofi.write_text(f'#!/bin/sh\nfor arg in "$@"; do echo "[$arg]"; done > {folder}/rofi.log\n')
+        rofi.chmod(0o755)
+        pick(folder, "--show")
+        found = (folder / "rofi.log").read_text().split()
+        if found != SHOWN:
+            failures.append(f"--show ran rofi {found!r}, expected {SHOWN!r}")
         rows = pick(folder).splitlines()
         if rows != ROWS:
             failures.append(f"rows {rows!r}, expected {ROWS!r}")
@@ -61,7 +78,7 @@ def main():
             failures.append(f"a pick printed {found!r} and ran wmctrl {log!r}, expected -i -a 0x04")
     for line in failures:
         print(line)
-    cases = 3
+    cases = 4
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

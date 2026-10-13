@@ -59,7 +59,7 @@ class BundleWindows extends Applet.TextApplet {
     }
 
     on_applet_clicked() {
-        Util.spawn(["rofi", "-modi", `windows:${this.picker}`, "-show", "windows"]);
+        Util.spawn([this.picker, "--show"]);
     }
 
     on_applet_removed_from_panel() {
