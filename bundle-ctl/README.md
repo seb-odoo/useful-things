@@ -200,7 +200,9 @@ in the container: the contained terminal is the one of the VS Code window.
   it on a copy of `~/.config/terminator/config` with that layout added, in
   `$XDG_RUNTIME_DIR/bundle-ctl/`: preferences saved from an agent window go to the copy.
 - The shell outlives the agent: when claude quits, the agent's pane closes, its container stops
-  and the window stays on the shell.
+  and the window stays on the shell. A takeover by a VS Code window or another terminal closes the
+  whole window instead (Seb, 2026-10-13): the wrapper sends SIGUSR1 to `agent-terminator.py`
+  (`BUNDLE_CTL_WINDOW_PID`), which ends its terminator.
 - Each pane says where it runs. The two panes of the layout carry a title, `in the container:
   claude` and `on the host: shell`. A shell of the window, one split by hand included, also
   starts on `On the host, outside the container of BUNDLE.` and on `ocode BUNDLE opens its VS
@@ -274,7 +276,7 @@ container and takes the session over, before or after its verdict: claude-autoop
 `.agent/terminal` and runs `client/agent-takeover.py`. It stops the terminal's claude at once when
 a tool call is in flight or the session is idle, else at the first of the two, and writes
 `handoff`. A session with no record counts as idle once its last turn ended 2 minutes ago: two
-containers whose claude has the same pid write the same `sessions/<pid>.json`. The terminal closes (in a split window the agent's pane, its shell stays), and from
+containers whose claude has the same pid write the same `sessions/<pid>.json`. The terminal window closes, its shell too, and from
 there on the bundle has an agent window (below): the tab opens on the session and, for a stopped
 tool call, reruns the turn after one reload. The container then lives as long as that window.
 

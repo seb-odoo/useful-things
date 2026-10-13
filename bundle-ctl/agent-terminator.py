@@ -15,7 +15,8 @@ that holds BUNDLE_CTL_AGENT_WINDOW, the bundle name. With wmctrl, the title of t
 follows the status of the agent's session, in the sessions folder of the bundle's container, until
 the window closes: it says the agent starts until its claude does, and that it failed when the
 run ends before (.agent/done written since the window opened). Once its claude ends, the last mark
-stays.
+stays. When a VS Code window or another terminal takes the session over, agent-terminal.py closes
+the window, its shell too: SIGUSR1 to BUNDLE_CTL_WINDOW_PID, this process.
 """
 
 import json
@@ -23,6 +24,7 @@ import os
 import pathlib
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -106,6 +108,7 @@ def get_record(bundle, since):
 
 
 def follow(bundle, terminator, since):
+    signal.signal(signal.SIGUSR1, lambda *args: terminator.terminate())
     done = get_agent_folder(bundle) / "done"
     shown = None
     while True:
@@ -136,6 +139,7 @@ def main():
     path.write_text(get_config(command))
     terminator = ["terminator", "--no-dbus", "--config", str(path), "--layout", LAYOUT]
     os.environ["BUNDLE_CTL_AGENT_WINDOW"] = bundle
+    os.environ["BUNDLE_CTL_WINDOW_PID"] = str(os.getpid())
     if not WMCTRL:
         os.execvp(terminator[0], [*terminator, "--title", get_title(bundle)])
     terminator += ["--title", get_title(bundle, "--starting")]

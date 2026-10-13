@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import signal
 import subprocess
 import sys
 import tempfile
@@ -92,7 +93,8 @@ def get_loaded():
 def get_followed(home):
     """The titles agent-terminator.py gives its window while the session of its claude works,
     then ends on a verdict, and when the run fails before its claude starts. A claude of the
-    bundle started before the window does not count."""
+    bundle started before the window does not count. Then how its terminator ends on SIGUSR1,
+    which agent-terminal.py sends after a takeover."""
     spec = importlib.util.spec_from_file_location("terminator", HERE / "agent-terminator.py")
     terminator = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(terminator)
@@ -137,7 +139,10 @@ def get_followed(home):
         titles.append((home / "log").read_text().splitlines())
         for path in sessions.iterdir():
             path.unlink()
-    return titles
+    window = subprocess.Popen(["sleep", "30"])
+    threading.Timer(0.3, os.kill, (os.getpid(), signal.SIGUSR1)).start()
+    closed = terminator.follow(BUNDLE, window, time.time() * 1000)
+    return titles, closed
 
 
 def main():
@@ -149,12 +154,15 @@ def main():
         write_transcripts(home)
         failures += get_marks()
         failures += get_loaded()
-        for found, expected in zip(get_followed(home), FOLLOWED, strict=True):
+        titles, closed = get_followed(home)
+        for found, expected in zip(titles, FOLLOWED, strict=True):
             if found != expected:
                 failures.append(f"agent-terminator.py: titled {found}, expected {expected}")
+        if closed != -signal.SIGTERM:
+            failures.append(f"agent-terminator.py: SIGUSR1 left its terminator on {closed}")
     for line in failures:
         print(line)
-    cases = len(MARKS) + len(FOLLOWED) + 1
+    cases = len(MARKS) + len(FOLLOWED) + 2
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

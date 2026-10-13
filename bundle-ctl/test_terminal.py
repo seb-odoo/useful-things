@@ -9,6 +9,7 @@ import pathlib
 import pty
 import select
 import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -97,11 +98,13 @@ class Case:
         (self.agent / "session").write_text("s1\n")
         self.state = self.root / "state"
         self.state.mkdir()
+        self.terminator = subprocess.Popen(["sleep", "60"])
         (self.root / "bin").mkdir()
         (self.root / "bin" / "podman").write_text(PODMAN)
         (self.root / "bin" / "podman").chmod(0o755)
         self.env = {
             "AGENT": str(self.agent),
+            "BUNDLE_CTL_WINDOW_PID": str(self.terminator.pid),
             "LOG": str(self.root / "log"),
             "PATH": f"{self.root / 'bin'}:{os.environ['PATH']}",
             "STATE": str(self.state),
@@ -144,6 +147,17 @@ def check_quit(case):
     case.start()
     (case.state / "quit").touch()
     case.check_stopped("quitting claude")
+    case.check("quitting claude keeps its window", case.terminator.poll() is None)
+
+
+def check_handoff(case):
+    case.start()
+    (case.agent / "handoff").touch()
+    (case.state / "quit").touch()
+    case.check("a takeover ends it", wait(case.terminal.has_ended))
+    closed = wait(lambda: case.terminator.poll() == -signal.SIGUSR1)
+    case.check("a takeover closes its window", closed)
+    case.check("a takeover keeps the container", "stop c1" not in case.log())
 
 
 def check_sigterm(case):
@@ -169,7 +183,7 @@ def check_close_window(case):
 
 def main():
     failures, total = [], 0
-    for check in (check_quit, check_sigterm, check_close, check_close_window):
+    for check in (check_quit, check_sigterm, check_close, check_close_window, check_handoff):
         with tempfile.TemporaryDirectory() as folder:
             case = Case(folder, check.__name__[6:], window=check is check_close_window)
             try:
@@ -179,6 +193,7 @@ def main():
                 for terminal in case.terminals:
                     if not terminal.has_ended():
                         os.kill(terminal.pid, signal.SIGKILL)
+                case.terminator.kill()
         failures += case.failures
         total += case.count
     for line in failures:

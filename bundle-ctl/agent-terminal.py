@@ -12,7 +12,8 @@ devcontainer.json. So the sandbox has one definition, and a window opened later 
 The claude session stays open in the terminal after its verdict (.agent/done, written by
 client/agent-stop.py), for Seb to read and to type in. Quitting claude or closing the terminal
 stops the container. A VS Code window opened on the bundle takes the session over instead
-(client/agent-takeover.py): the terminal closes, and the container lives as long as that window.
+(client/agent-takeover.py): the terminal window closes, its shell too, and the container lives
+as long as that window.
 A terminal closed while such a window is attached hands its session to that window the same way.
 
 Started on a bundle whose run already began, it goes on with that session and does not run the
@@ -20,6 +21,7 @@ task again. When another terminal holds the session, it takes it over as a windo
 same container.
 """
 
+import contextlib
 import json
 import os
 import pathlib
@@ -232,7 +234,7 @@ def main():
     for name in ("handoff", "restarted"):
         (agent / name).unlink(missing_ok=True)
     ending = session = None
-    hung_up = taken_over = False
+    handed = hung_up = taken_over = False
     (agent / "terminal").write_text(f"{os.getpid()}\n")
     try:
         session = read_text(agent / "session") or str(uuid.uuid4())
@@ -264,11 +266,15 @@ def main():
             hand_over(container)
         (agent / "container").unlink(missing_ok=True)
         (agent / "terminal").unlink(missing_ok=True)
-        taken_over = (agent / "handoff").exists() or window
+        handed = (agent / "handoff").exists()
+        taken_over = handed or window
         if container and not taken_over:
             subprocess.run(["podman", "stop", container], check=False, capture_output=True)
     if ending and not taken_over:
         keep_open(f"{bundle}: {ending}", session)
+    if handed and os.environ.get("BUNDLE_CTL_WINDOW_PID"):
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(int(os.environ["BUNDLE_CTL_WINDOW_PID"]), signal.SIGUSR1)
 
 
 if __name__ == "__main__":
