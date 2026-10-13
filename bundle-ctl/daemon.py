@@ -67,7 +67,7 @@ from commands import (  # noqa: E402
     get_worktree_bundle_repo_folder,
     get_worktree_container_folder,
 )
-from config import STICKY_BUNDLES  # noqa: E402
+from config import BUNDLE_SUFFIX, CLAUDE_CONFIG_CONTAINER, STICKY_BUNDLES  # noqa: E402
 from utils import UtilsRunner  # noqa: E402
 
 import runs  # noqa: E402
@@ -126,6 +126,10 @@ MAX_TASK = 32 * 1024
 MAX_WIDTH = 400
 MODELS = ("haiku", "opus", "sonnet")
 NAME = re.compile(r"[a-z0-9](?:[a-z0-9.]|-(?!-)){0,79}")
+REVIEW_CHECK = 3600
+REVIEW_IDLE = 86400 * float(
+    os.environ.get("BUNDLE_CTL_REVIEW_IDLE_DAYS") or CONFIG.get("BUNDLE_CTL_REVIEW_IDLE_DAYS") or 2,
+)
 RUN_CPUS = os.environ.get("BUNDLE_CTL_RUN_CPUS") or CONFIG.get("BUNDLE_CTL_RUN_CPUS")
 RUN_MIN_FREE = float(
     os.environ.get("BUNDLE_CTL_RUN_MIN_FREE_GB") or CONFIG.get("BUNDLE_CTL_RUN_MIN_FREE_GB") or 4,
@@ -148,6 +152,7 @@ START_CHECK = 10
 disk_warning = {}
 folder_by_container = {}
 jobs = {}
+kept_reviews = {}
 state_lock = threading.Lock()
 work_lock = threading.Lock()
 
@@ -864,8 +869,12 @@ def keep_launching():
             time.sleep(5)
 
     def on_timer():
+        checked = float("-inf")
         while True:
             warn_disk()
+            if time.monotonic() - checked > REVIEW_CHECK:
+                checked = time.monotonic()
+                drop_reviews_safely()
             time.sleep(START_CHECK if launch_safely() else 60)
 
     threading.Thread(target=on_events, daemon=True).start()
@@ -883,6 +892,13 @@ def launch_safely():
 def delete_safely():
     try:
         delete_stopped()
+    except Exception:
+        traceback.print_exc()
+
+
+def drop_reviews_safely():
+    try:
+        drop_idle_reviews()
     except Exception:
         traceback.print_exc()
 
@@ -1034,6 +1050,57 @@ def delete_stopped():
             f"delete {bundle}",
             lambda log, bundle=bundle: run_script(log, "delete_bundle.py", bundle),
         )
+        started[bundle] = jobs[answer["job"]]
+    return started
+
+
+def get_last_use(bundle):
+    """When the bundle was last made, given a task, opened in a window, or committed to."""
+    folder = pathlib.Path(get_worktree_bundle_folder(bundle))
+    paths = [
+        folder / MADE,
+        *(folder / ".agent").glob("*"),
+        *pathlib.Path(CLAUDE_CONFIG_CONTAINER, bundle).glob("*"),
+    ]
+    for repo in get_repos():
+        gitdir = read_text(folder / repo / ".git")
+        if gitdir:
+            paths.append(pathlib.Path(gitdir.removeprefix("gitdir: ")) / "logs" / "HEAD")
+    return max(filter(None, map(get_mtime, paths)), default=0)
+
+
+def drop_idle_reviews():
+    """Delete the bundles of the PRs of others that nobody used for REVIEW_IDLE: `bctl fetch`
+    brings one back. One that holds work is kept until it is used again.
+    """
+    open_windows = get_open_windows()
+    queued = {item["bundle"] for item in read_state().get("queue", [])}
+    started = {}
+    for folder in sorted(pathlib.Path(get_worktree_container_folder()).glob("*/*")):
+        bundle = folder.name
+        if (
+            BUNDLE_SUFFIX in bundle
+            or bundle in STICKY_BUNDLES
+            or bundle in queued
+            or not BUNDLE_NAME.fullmatch(bundle)
+            or not is_made(folder)
+            or str(folder) in open_windows
+            or get_worktree_bundle_folder(bundle) != str(folder)
+        ):
+            continue
+        last_use = get_last_use(bundle)
+        if time.time() - last_use < REVIEW_IDLE or kept_reviews.get(bundle) == last_use:
+            continue
+
+        def work(log, bundle=bundle, last_use=last_use):
+            try:
+                run_script(log, "delete_bundle.py", bundle)
+            except Refused:
+                kept_reviews[bundle] = last_use
+                raise
+
+        print(f"delete {bundle}: unused since {format_time(last_use)}", flush=True)
+        _code, answer = start_job(HOST, f"delete {bundle}", work)
         started[bundle] = jobs[answer["job"]]
     return started
 

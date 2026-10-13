@@ -125,6 +125,14 @@ daemon reads what is left on the disk of the bundles:
   again at each 10 GB less, and again once the disk went 10 GB over that line in between.
 - `python3 test_queue.py` has the cases.
 
+A bundle of someone else's PR (no `BUNDLE_SUFFIX` in its name) goes by itself once nobody used it
+for `BUNDLE_CTL_REVIEW_IDLE_DAYS` (default 2, Seb's choice on 2026-10-13): no window open, no task
+queued, and no file newer than that among its `.made`, its `.agent/` files, its Claude config
+(written at each window open and Claude start) and the reflog of its worktrees. The daemon looks
+once an hour and runs `delete_bundle.py`, which keeps a bundle with uncommitted files or a commit no
+remote has; that one is tried again only after a new use. `bctl fetch` brings a bundle back.
+`python3 test_delete.py` has the cases.
+
 ## Wrong version
 
 `client/check-base.sh` is a SessionStart hook of the shared bundle `.claude/settings.json`: when

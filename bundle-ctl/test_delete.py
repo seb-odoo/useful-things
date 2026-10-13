@@ -3,7 +3,9 @@
 own and without podman: python3 test_delete.py
 """
 
+import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -215,9 +217,84 @@ def check(root):
     return [name for name, passed in checks if not passed], len(checks)
 
 
+def check_reviews(root):
+    """Which bundles drop_idle_reviews deletes, from the dates of the files it reads."""
+    old, recent = time.time() - 3 * 86400, time.time() - 86400
+    calls, world = [], {"open": set(), "queue": []}
+    bundles = (
+        "master-commit-aku",
+        "master-kept-aku",
+        "master-mine--seb",
+        "master-old-aku",
+        "master-open-aku",
+        "master-queued-aku",
+        "master-recent-aku",
+        "master-tab-aku",
+    )
+    for bundle in bundles:
+        folder = root / "master" / bundle
+        (folder / "odoo").mkdir(parents=True)
+        (folder / "odoo" / ".git").write_text(f"gitdir: {root / 'wt' / bundle}\n")
+        (root / "wt" / bundle / "logs").mkdir(parents=True)
+        (root / "claude-config" / bundle).mkdir(parents=True)
+        for path in (
+            folder / daemon.MADE,
+            root / "wt" / bundle / "logs" / "HEAD",
+            root / "claude-config" / bundle / ".claude.json",
+        ):
+            path.touch()
+            os.utime(path, (old, old))
+    os.utime(root / "master" / "master-recent-aku" / daemon.MADE, (recent, recent))
+    os.utime(root / "wt" / "master-commit-aku" / "logs" / "HEAD", (recent, recent))
+    os.utime(root / "claude-config" / "master-tab-aku" / ".claude.json", (recent, recent))
+    world["open"].add(str(root / "master" / "master-open-aku"))
+    world["queue"].append({"bundle": "master-queued-aku"})
+
+    def run_script(log, script, *args):
+        calls.append(args[0])
+        if args[0] == "master-kept-aku":
+            raise daemon.Refused("delete_bundle.py exited with 1")
+        shutil.rmtree(root / "master" / args[0])
+
+    daemon.CLAUDE_CONFIG_CONTAINER = str(root / "claude-config")
+    daemon.STATE = root
+    daemon.get_open_windows = lambda: set(world["open"])
+    daemon.get_repos = lambda: ["odoo"]
+    daemon.get_worktree_bundle_folder = lambda bundle: str(root / "master" / bundle)
+    daemon.get_worktree_container_folder = lambda: str(root)
+    daemon.read_state = lambda: {"queue": world["queue"]}
+    daemon.run_script = run_script
+    checks = []
+    daemon.drop_idle_reviews()
+    wait_jobs()
+    checks.append(
+        (
+            "a bundle of others unused for 2 days goes, not one of Seb, open, queued or used since",
+            calls == ["master-kept-aku", "master-old-aku"],
+        ),
+    )
+    calls.clear()
+    daemon.drop_idle_reviews()
+    wait_jobs()
+    checks.append(("one delete_bundle kept is not tried again", calls == []))
+    (root / "master" / "master-kept-aku" / ".agent").mkdir()
+    (root / "master" / "master-kept-aku" / ".agent" / "task.md").touch()
+    daemon.drop_idle_reviews()
+    os.utime(root / "master" / "master-kept-aku" / ".agent" / "task.md", (old + 1, old + 1))
+    daemon.drop_idle_reviews()
+    wait_jobs()
+    checks.append(
+        ("it is tried again once used, and unused for 2 days", calls == ["master-kept-aku"]),
+    )
+    return [name for name, passed in checks if not passed], len(checks)
+
+
 def main():
     with tempfile.TemporaryDirectory() as root:
         failures, total = check(pathlib.Path(root))
+    with tempfile.TemporaryDirectory() as root:
+        more, count = check_reviews(pathlib.Path(root))
+        failures, total = failures + more, total + count
     for name in failures:
         print(f"failed: {name}")
     print(f"{total - len(failures)}/{total} cases as expected")
