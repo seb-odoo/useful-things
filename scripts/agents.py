@@ -33,6 +33,18 @@ def get_agent_folder(bundle):
     return pathlib.Path(get_worktree_bundle_folder(bundle)) / ".agent"
 
 
+def is_handled(bundle):
+    """Whether Seb opened the bundle in VS Code since the task of its last agent was written."""
+    folder = get_agent_folder(bundle)
+    return (get_mtime(folder / "handled") or 0) > (get_mtime(folder / "task.md") or 0)
+
+
+def mark_handled(bundle):
+    folder = get_agent_folder(bundle)
+    folder.mkdir(exist_ok=True)
+    (folder / "handled").touch()
+
+
 def get_bundle_container(bundle):
     """The id of the bundle's running container, None when it has none."""
     folder = get_worktree_bundle_folder(bundle)

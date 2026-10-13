@@ -316,6 +316,12 @@ A bundle that would be in Waits on me goes to Waits on agents while a bundle-ctl
 or its task is queued, until the agent ends on a verdict. An agent whose window closed before its
 verdict shows `agent stopped`: nothing runs it any more.
 
+Opening a bundle in VS Code (its branch link, `ocode`) is handling it: from that click, a bundle
+that would be in Waits on me goes to the group its PRs give without what waits on me (CI, drafts,
+reviewer; drafts with no PR), and stays there once the window is closed, until the task of a new
+agent is written. The click touches `.agent/handled`, and the bundle is handled while that file is
+newer than `.agent/task.md`. `test_handled.py` runs each case.
+
 A pushed branch without PR shows `create PR`, a link to the GitHub compare page that opens one. A
 branch with no commit on its base and no PR shows `no commit` and does not count for the group of
 its bundle: it is the worktree's checkout of the base in a repo the bundle does not change.

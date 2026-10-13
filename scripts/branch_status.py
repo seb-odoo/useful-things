@@ -28,7 +28,7 @@ from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 
-from agents import LAUNCH_GRACE, get_agent, read_state
+from agents import LAUNCH_GRACE, get_agent, is_handled, read_state
 from commands import (
     BUNDLE_SUFFIX,
     get_base_for_repo,
@@ -437,11 +437,18 @@ def get_group(facts, status, push):
         or (facts["delegated"] and facts["mergebot"] not in R_PLUS_STATES)
     ):
         return "me", "review"
+    return get_waiting_group(facts), None
+
+
+def get_waiting_group(facts):
+    """The group of a repo once what waits on me is set aside: a handled bundle goes there."""
+    if not facts:
+        return "drafts"
     if facts["pending"] or facts["mergebot"] == "approved":
-        return "ci", None
+        return "ci"
     if facts["state"] == "draft":
-        return "drafts", None
-    return "reviewer", None
+        return "drafts"
+    return "reviewer"
 
 
 def get_bundle_agent(bundle, state, is_open, now):
@@ -536,6 +543,12 @@ def get_bundles():
         agent = get_bundle_agent(branch, agent_state, is_open, now)
         if group == "me" and agent and agent["state"] in AGENT_WORKING:
             group, issue = "agents", None
+        elif group == "me" and is_handled(branch):
+            groups_of_repos = [
+                get_waiting_group(row["pr"]) if row["group"] == "me" else row["group"]
+                for row in rows
+            ]
+            group, issue = min(groups_of_repos, key=GROUP_PRECEDENCE.index), None
         bundle = {
             "agent": agent,
             "bundle": branch,

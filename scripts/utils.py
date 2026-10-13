@@ -7,6 +7,7 @@ import json
 import os
 import re
 
+from agents import mark_handled
 from command_runner import Runner, ignore_error
 from commands import (
     BUNDLE_SUFFIX,
@@ -363,6 +364,7 @@ class UtilsRunner(Runner):
 
     def open_devcontainer(self, *, bundle_name):
         """Open VS Code attached to an existing bundle's dev container (no worktree/npm setup)."""
+        mark_handled(bundle_name)
         self.open_devcontainer_folder(folder=get_worktree_bundle_folder(bundle_name))
 
     def open_devcontainer_folder(self, *, folder):
