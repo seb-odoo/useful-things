@@ -242,11 +242,13 @@ in the container: the contained terminal is the one of the VS Code window.
 A minimized agent window leaves the task bar and Alt+Tab, and comes back when it is restored:
 25 agent windows left the task bar no room to show a title. To reach them:
 
-- `window-picker.py`, a rofi script, lists every window: the bundles first by mark (✅, ✋, ❌,
-  ⏳, 🚀), then the others. The search also takes the mark in words (`finished`, `waiting`,
+- `window-picker.py`, a rofi script, lists the bundles first by mark (✅, ✋, ❌, ⏳, 🚀), one row
+  each, then the other windows. The search also takes the mark in words (`finished`, `waiting`,
   `failed`, `running`, `starting`), the kind is already in the title, and the line above the rows
-  counts the bundles of each mark. `window-picker.py --show` opens it in rofi, where a single click
-  picks; a Cinnamon shortcut runs it.
+  counts the bundles of each mark. `window-picker.py --show` opens it in rofi, where the row under
+  the mouse is selected: a click on a bundle brings its VS Code window up, or opens it through its
+  `odoo-bundle://` link, and a right click or Shift+Enter brings its terminal up. A Cinnamon
+  shortcut runs it.
 - `window-applet/`, a Cinnamon applet, shows `✋ N`, the bundles that wait for Seb, with the counts
   of each mark in its tooltip, and opens the same list on a click. It also sets `skip_taskbar` on
   an agent window (its terminator runs on a `bundle-ctl/terminator-` config) while it is
