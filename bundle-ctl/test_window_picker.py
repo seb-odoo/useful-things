@@ -126,11 +126,18 @@ def main():
         rows = run(folder).splitlines()
         if rows != ENDED:
             failures.append(f"rows once a claude ended {rows!r}, expected {ENDED!r}")
+        counts = run(folder, "--counts").splitlines()
+        if counts != ["⏳ 1", COUNTS.replace("✋ waiting 1", "✋ waiting 0")]:
+            failures.append(f"counts once no bundle waits {counts!r}, expected ⏳ 1")
         for agent in agents.values():
             agent.kill()
+            agent.wait()
+        counts = run(folder, "--counts").splitlines()
+        if counts[:1] != ["🪟"]:
+            failures.append(f"counts once no claude runs {counts!r}, expected 🪟")
     for line in failures:
         print(line)
-    cases = 6 + len(PICKS)
+    cases = 8 + len(PICKS)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

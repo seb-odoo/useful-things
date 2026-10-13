@@ -12,7 +12,7 @@ class BundleWindows extends Applet.TextApplet {
         const linked = GLib.file_test(metadata.path, GLib.FileTest.IS_SYMLINK);
         const folder = linked ? GLib.file_read_link(metadata.path) : metadata.path;
         this.picker = GLib.build_filenamev([GLib.path_get_dirname(folder), "window-picker.py"]);
-        this.set_applet_label("✋");
+        this.set_applet_label("🪟");
         this.minimized = global.window_manager.connect("minimize", (wm, actor) =>
             this.place(actor.get_meta_window())
         );

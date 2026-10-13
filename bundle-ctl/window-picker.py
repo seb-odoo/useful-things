@@ -17,7 +17,8 @@ with the bundle or the window id in ROFI_INFO. A bundle has one row, from the ti
 terminal keeps its last mark once its claude ends, so a ✅, ✋ or ⏳ shows only while that claude
 runs. Each mark gets a word that the search matches but the row does not show, as the emoji are
 hard to type; the kind is already in words. The line above the rows counts the bundles of each
-mark. --counts prints the bundles that wait for Seb, then that line, for window-applet/.
+mark. --counts prints the mark that needs Seb most with its count (PRIORITY), or 🪟 when no bundle
+has a mark, then that line, for window-applet/.
 """
 
 import importlib.util
@@ -38,8 +39,10 @@ MARKS = (
     ("⏳", "running"),
     ("🚀", "starting"),
 )
+NO_MARK = "🪟"
 OPENING = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "bundle-ctl" / "opening"
 OPENING_TIME = 300
+PRIORITY = ("✋", "❌", "⏳", "🚀", "✅")
 SKIPPED = ("nemo-desktop.",)
 
 
@@ -145,7 +148,9 @@ def main():
     ranks = [get_rank(bundle["title"]) for bundle in bundles.values()]
     counts = [f"{mark} {word} {ranks.count(rank)}" for rank, (mark, word) in enumerate(MARKS)]
     if sys.argv[1:] == ["--counts"]:
-        print(f"{MARKS[1][0]} {ranks.count(1)}\n{'   '.join(counts)}")
+        found = {mark: ranks.count(rank) for rank, (mark, _) in enumerate(MARKS)}
+        label = next((f"{mark} {found[mark]}" for mark in PRIORITY if found[mark]), NO_MARK)
+        print(f"{label}\n{'   '.join(counts)}")
         return
     hint = "click: VS Code   right click: terminal"
     sys.stdout.write(f"\0message\x1f{'   '.join(counts)}   |   {hint}\n")
