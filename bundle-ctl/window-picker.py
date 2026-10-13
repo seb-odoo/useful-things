@@ -78,7 +78,8 @@ def pick(name, terminal):
     if window:
         subprocess.run(["wmctrl", "-i", "-a", window], check=False)
     else:
-        subprocess.Popen(["xdg-open", f"odoo-bundle://{name}"], start_new_session=True)
+        quiet = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+        subprocess.Popen(["xdg-open", f"odoo-bundle://{name}"], start_new_session=True, **quiet)
 
 
 def main():

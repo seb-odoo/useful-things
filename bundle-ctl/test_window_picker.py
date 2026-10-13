@@ -75,7 +75,7 @@ def main():
         log = folder / "log"
         (folder / "windows").write_text(WINDOWS)
         write_fake(folder, "wmctrl", f'[ "$1" = -l ] && cat {folder}/windows || echo wmctrl "$@" >> {log}')
-        write_fake(folder, "xdg-open", f'echo xdg-open "$@" >> {log}')
+        write_fake(folder, "xdg-open", f'echo xdg-open "$@" >> {log}; echo code --folder-uri x')
         write_fake(folder, "rofi", f'for arg in "$@"; do echo "[$arg]"; done > {folder}/rofi.log')
         run(folder, "--show")
         found = (folder / "rofi.log").read_text().split()
