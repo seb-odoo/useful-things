@@ -13,10 +13,11 @@ row away: closed later, the window gives the row back without 🔄.
 
 A rofi script: it prints the rows when called with no argument, and rofi calls it again on a pick,
 with the bundle or the window id in ROFI_INFO. A bundle has one row, from the title of its terminal
-(client/window-title.py), and none once its VS Code window is open: Seb then works there. Each mark
-gets a word that the search matches but the row does not show, as the emoji are hard to type; the
-kind is already in words. The line above the rows counts the bundles of each mark. --counts prints
-the bundles that wait for Seb, then that line, for window-applet/.
+(client/window-title.py), and none once its VS Code window is open: Seb then works there. The
+terminal keeps its last mark once its claude ends, so a ✅, ✋ or ⏳ shows only while that claude
+runs. Each mark gets a word that the search matches but the row does not show, as the emoji are
+hard to type; the kind is already in words. The line above the rows counts the bundles of each
+mark. --counts prints the bundles that wait for Seb, then that line, for window-applet/.
 """
 
 import importlib.util
@@ -28,6 +29,7 @@ import sys
 import time
 
 HERE = pathlib.Path(__file__).resolve().parent
+LIVE = ("✅", "✋", "⏳")
 LOADING = "🔄"
 MARKS = (
     ("✅", "finished"),
@@ -54,6 +56,20 @@ def get_title_pattern():
 def get_rank(title):
     ranks = (rank for rank, (mark, _) in enumerate(MARKS) if title.startswith(mark))
     return next(ranks, len(MARKS))
+
+
+def get_agent_bundles():
+    """The bundles whose claude runs in a terminal: agent-terminal.py BUNDLE ends with it."""
+    bundles = set()
+    for path in pathlib.Path("/proc").glob("[0-9]*/cmdline"):
+        try:
+            args = path.read_text(errors="replace").split("\0")
+        except OSError:
+            continue
+        scripts = [at for at, arg in enumerate(args) if arg.endswith("agent-terminal.py")]
+        if scripts:
+            bundles.add(args[scripts[0] + 1])
+    return bundles
 
 
 def get_loading(name):
@@ -115,6 +131,10 @@ def main():
     for name in [name for name, bundle in bundles.items() if "code" in bundle]:
         (OPENING / name).unlink(missing_ok=True)
         del bundles[name]
+    agents = get_agent_bundles()
+    for name, bundle in bundles.items():
+        if bundle["title"].startswith(LIVE) and name not in agents:
+            bundle["title"] = bundle["title"].split(" ", 1)[1]
     rows = sorted(
         [
             (get_rank(bundle["title"]), get_loading(name) + bundle["title"], name)

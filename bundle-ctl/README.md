@@ -248,14 +248,15 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
 
 - `window-picker.py`, a rofi script, lists the bundles first by mark (✅, ✋, ❌, ⏳, 🚀), one row
   each, then the other windows. A bundle open in VS Code has no row (Seb, 2026-10-13): he works
-  there, and its window is in the task bar. The search also takes the mark in words (`finished`,
-  `waiting`, `failed`, `running`, `starting`), the kind is already in the title, and the line above
-  the rows counts the bundles of each mark. `window-picker.py --show` opens it in rofi, where the row under
-  the mouse is selected: a click on a bundle brings its VS Code window up, or opens it through its
-  `odoo-bundle://` link, and a right click or Shift+Enter brings its terminal up. Until that VS
-  Code window is up, the row of the bundle shows 🔄 (a file per bundle in
-  `$XDG_RUNTIME_DIR/bundle-ctl/opening`, 5 minutes at most, dropped once the window is up). A Cinnamon
-  shortcut runs it.
+  there, and its window is in the task bar. A terminal keeps its last mark once its claude ends,
+  so a ✅, ✋ or ⏳ shows only while an `agent-terminal.py BUNDLE` process runs. The search also
+  takes the mark in words (`finished`, `waiting`, `failed`, `running`, `starting`), the kind is
+  already in the title, and the line above the rows counts the bundles of each mark.
+  `window-picker.py --show` opens it in rofi, where the row under the mouse is selected: a click on
+  a bundle brings its VS Code window up, or opens it through its `odoo-bundle://` link, and a right
+  click or Shift+Enter brings its terminal up. Until that VS Code window is up, the row of the
+  bundle shows 🔄 (a file per bundle in `$XDG_RUNTIME_DIR/bundle-ctl/opening`, 5 minutes at most,
+  dropped once the window is up). A Cinnamon shortcut runs it.
 - `window-applet/`, a Cinnamon applet, shows `✋ N`, the bundles that wait for Seb, with the counts
   of each mark in its tooltip, and opens the same list on a click. It also sets `skip_taskbar` on
   an agent window (its terminator runs on a `bundle-ctl/terminator-` config) while it is

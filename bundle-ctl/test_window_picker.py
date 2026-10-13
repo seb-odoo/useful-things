@@ -32,6 +32,13 @@ ROWS = [
     "Inbox - Mozilla Firefox\0info\x1f0x03\x1fmeta\x1f",
     "⭐ master-e--seb (mine)\0info\x1fmaster-e--seb\x1fmeta\x1f",
 ]
+AGENTS = ("master-b--seb", "master-c-aku", "master-d-runbot-12--seb")
+ENDED = [
+    ROWS[0].replace("✋ waiting 1", "✋ waiting 0"),
+    *ROWS[1:4],
+    *ROWS[5:],
+    "🔄 📝 master-c-aku (review)\0info\x1fmaster-c-aku\x1fmeta\x1f",
+]
 SHOWN = [
     "[-modi]",
     f"[windows:{HERE / 'window-picker.py'}]",
@@ -62,6 +69,11 @@ def run(folder, *args, **env):
     return subprocess.run(command, capture_output=True, check=True, env=env, text=True).stdout
 
 
+def start_agent(name):
+    code = "import time; time.sleep(60)"
+    return subprocess.Popen([sys.executable, "-c", code, str(HERE / "agent-terminal.py"), name])
+
+
 def write_fake(folder, name, script):
     path = folder / name
     path.write_text(f"#!/bin/sh\n{script}\n")
@@ -77,6 +89,7 @@ def main():
         write_fake(folder, "wmctrl", f'[ "$1" = -l ] && cat {folder}/windows || echo wmctrl "$@" >> {log}')
         write_fake(folder, "xdg-open", f'echo xdg-open "$@" >> {log}; echo code --folder-uri x')
         write_fake(folder, "rofi", f'for arg in "$@"; do echo "[$arg]"; done > {folder}/rofi.log')
+        agents = {name: start_agent(name) for name in AGENTS}
         run(folder, "--show")
         found = (folder / "rofi.log").read_text().split()
         if found != SHOWN:
@@ -109,9 +122,15 @@ def main():
             failures.append(f"rows while VS Code opens {rows!r}, expected {opening!r}")
         if opened.exists():
             failures.append("the mark of a bundle open in VS Code stays")
+        agents.pop("master-c-aku").kill()
+        rows = run(folder).splitlines()
+        if rows != ENDED:
+            failures.append(f"rows once a claude ended {rows!r}, expected {ENDED!r}")
+        for agent in agents.values():
+            agent.kill()
     for line in failures:
         print(line)
-    cases = 5 + len(PICKS)
+    cases = 6 + len(PICKS)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 
