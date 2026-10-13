@@ -5,8 +5,6 @@ import os
 import subprocess
 import sys
 
-import fire
-
 from config import (
     BUNDLE_SUFFIX,
     FILESTORE_CONTAINER,
@@ -207,4 +205,7 @@ def clean_bundle_name(bundle_name):
 
 
 if __name__ == "__main__":
+    # The system python3 of the host scripts that import this module has no fire.
+    import fire
+
     fire.Fire()

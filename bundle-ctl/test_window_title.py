@@ -70,6 +70,25 @@ def get_marks():
     return failures
 
 
+def get_loaded():
+    """agent-terminator.py loads with the standard library alone, as its python3 is the system one."""
+    path = HERE / "agent-terminator.py"
+    load = (
+        "import importlib.util as util;"
+        f"spec = util.spec_from_file_location('terminator', {str(path)!r});"
+        "spec.loader.exec_module(util.module_from_spec(spec))"
+    )
+    found = subprocess.run(
+        [sys.executable, "-S", "-c", load],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if found.returncode:
+        return [f"agent-terminator.py: {found.stderr.strip().splitlines()[-1]}"]
+    return []
+
+
 def get_followed(home):
     """The titles agent-terminator.py gives its window while the session of its claude works,
     then ends on a verdict, and when the run fails before its claude starts. A claude of the
@@ -129,12 +148,13 @@ def main():
         os.environ.update(HOME=root, USER="seb")
         write_transcripts(home)
         failures += get_marks()
+        failures += get_loaded()
         for found, expected in zip(get_followed(home), FOLLOWED, strict=True):
             if found != expected:
                 failures.append(f"agent-terminator.py: titled {found}, expected {expected}")
     for line in failures:
         print(line)
-    cases = len(MARKS) + len(FOLLOWED)
+    cases = len(MARKS) + len(FOLLOWED) + 1
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 
