@@ -239,8 +239,8 @@ in the container: the contained terminal is the one of the VS Code window.
 | ❌ | the run of an agent window ended before its claude started (`.agent/done` is `failed`) |
 | none | no live session |
 
-The agent windows stay out of the task bar and of Alt+Tab (`hide_from_taskbar` in the copy of the
-terminator config): 25 of them left the task bar no room to show a title. To reach them:
+A minimized agent window leaves the task bar and Alt+Tab, and comes back when it is restored:
+25 agent windows left the task bar no room to show a title. To reach them:
 
 - `window-picker.py`, a rofi script, lists every window: the bundles first by mark (✅, ✋, ❌,
   ⏳, 🚀), then the others. The search also takes the mark in words (`finished`, `waiting`,
@@ -248,7 +248,9 @@ terminator config): 25 of them left the task bar no room to show a title. To rea
   counts the bundles of each mark. A Cinnamon shortcut opens it:
   `rofi -modi windows:PATH/window-picker.py -show windows`.
 - `window-applet/`, a Cinnamon applet, shows `✋ N`, the bundles that wait for Seb, with the counts
-  of each mark in its tooltip, and opens the same list on a click. It is a link to that folder,
+  of each mark in its tooltip, and opens the same list on a click. It also sets `skip_taskbar` on
+  an agent window (its terminator runs on a `bundle-ctl/terminator-` config) while it is
+  minimized. It is a link to that folder,
   `~/.local/share/cinnamon/applets/bundle-windows@useful-things`, added to a panel in the
   `enabled-applets` key of `org.cinnamon`.
 

@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """The rows window-picker.py gives rofi, its counts, the window it brings up on a pick, with a fake
-wmctrl, and the agent windows kept out of the task bar: python3 test_window_picker.py"""
+wmctrl: python3 test_window_picker.py"""
 
-import importlib.util
 import os
 import pathlib
 import subprocess
@@ -31,33 +30,12 @@ ROWS = [
     "⏳ ⭐ master-b--seb (mine)\0info\x1f0x02\x1fmeta\x1frunning",
     "Inbox - Mozilla Firefox\0info\x1f0x03\x1fmeta\x1f",
 ]
-CONFIGS = {
-    "": "[global_config]\n  hide_from_taskbar = True\n",
-    "[global_config]\n  hide_from_taskbar = False\n  sticky = True\n[layouts]\n": (
-        "[global_config]\n  hide_from_taskbar = True\n  sticky = True\n[layouts]\n"
-    ),
-}
 
 
 def pick(folder, *args, **env):
     env = {**os.environ, "PATH": f"{folder}:{os.environ['PATH']}", **env}
     command = [sys.executable, str(HERE / "window-picker.py"), *args]
     return subprocess.run(command, capture_output=True, check=True, env=env, text=True).stdout
-
-
-def get_configs(folder):
-    spec = importlib.util.spec_from_file_location("terminator", HERE / "agent-terminator.py")
-    terminator = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(terminator)
-    terminator.CONFIG_ROOT = folder
-    (folder / "terminator").mkdir()
-    failures = []
-    for config, expected in CONFIGS.items():
-        (folder / "terminator" / "config").write_text(config)
-        found = terminator.get_config(["agent"]).split(terminator.LAYOUTS)[0].strip()
-        if found != expected.split(terminator.LAYOUTS)[0].strip():
-            failures.append(f"agent-terminator.py: config {found!r} from {config!r}")
-    return failures
 
 
 def main():
@@ -81,10 +59,9 @@ def main():
         log = (folder / "log").read_text().splitlines()
         if found or log != ["-i -a 0x04"]:
             failures.append(f"a pick printed {found!r} and ran wmctrl {log!r}, expected -i -a 0x04")
-        failures += get_configs(folder)
     for line in failures:
         print(line)
-    cases = 3 + len(CONFIGS)
+    cases = 3
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 
