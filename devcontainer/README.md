@@ -57,6 +57,9 @@ with pip inside. The rest follows from that choice.
   config file, and the host keeps signing.
 - **The shell helpers reach non-interactive shells** through `BASH_ENV`, which points at
   `container-rw/devcontainer.bashrc`: an agent runs `bash -c`, which does not read `~/.bashrc`.
+- **Claude runs from the extension.** At its first interactive start, the CLI copies itself into
+  `~/.local/share/claude` (250 MB in the layer of each container, 12 GB for 45 of them on
+  2026-10-13), and nothing runs that copy. `DISABLE_AUTOUPDATER` stops it.
 
 A container keeps the mounts and the environment it was made with: a start takes the one that
 exists again, whatever the config says since. So `ocode`, `bctl open` and the launch of an agent
