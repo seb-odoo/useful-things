@@ -18,5 +18,8 @@ ExecStart=/usr/bin/ssh -F none -N \
     -o ServerAliveCountMax=3 \
     -o ServerAliveInterval=10 \
     git@github.com
+ExecStartPost=/bin/sh -c 'until [ -S %h/.local/state/ssh-github-mux/sock/github ]; do \
+    kill -0 $$MAINPID 2>/dev/null || exit 1; sleep 0.5; done'
+SuccessExitStatus=255
 ExecStopPost=/usr/bin/rm -f %h/.local/state/ssh-github-mux/sock/github
 ExecStopPost=/usr/bin/touch %h/.local/state/ssh-github-mux/sock/stopped

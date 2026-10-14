@@ -11,6 +11,10 @@ dev containers: one approval until the connection drops (reboot, suspend, networ
 - Containers (`devcontainer/base.jsonc`) get this folder as `/etc/ssh/ssh_config.d` and as
   `~/.local/share/ssh-github-mux`, `sock/` read-only and `request/` read-write: a container uses
   the connection but cannot put a socket the host would trust.
+- ssh exits 255 both when GitHub closes the connection and when the key is refused (Bitwarden
+  said no, no agent). The service is started once the socket is there (`ExecStartPost`): an
+  exit before is a failed start, and the unit shows as failed. An exit after, the normal end of
+  the connection, leaves it inactive (`SuccessExitStatus=255`), as `systemctl stop` does.
 
 Other hosts (pi5, test.upgrade, the `github-private` alias) are not concerned: one approval per
 command.
