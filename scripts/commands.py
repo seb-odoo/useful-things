@@ -187,9 +187,11 @@ def drop_stale_containers(folder, out=sys.stdout):
     if stopped:
         subprocess.run(["podman", "rm", *stopped], capture_output=True, check=False)
     if running:
+        again = "close its window and open it again"
+        if config != get_devcontainer_config(WORKTREE_CONTAINER):
+            again = f"podman rm -f {' '.join(running)} ends its sessions, the next open makes one"
         print(
-            f"{os.path.basename(folder)} runs in a container made on an older config:"
-            " close its window and open it again",
+            f"{os.path.basename(folder)} runs in a container made on an older config: {again}",
             file=out,
             flush=True,
         )

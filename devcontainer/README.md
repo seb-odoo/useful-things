@@ -67,9 +67,10 @@ first remove the stopped containers of the bundle made before the shared config 
 or from another config file (`drop_stale_containers` in `scripts/commands.py`, cases in
 `scripts/test_containers.py`): closing a window and opening the bundle again is enough to apply a
 config change. A running container is left alone, and the open says it runs on an older config;
-nothing in a container can replace it. `build.py` does not rewrite an unchanged config, as its
-date is what tells. A container left half-made by a failed build blocks the next start with
-"container state improper": remove it.
+nothing in a container can replace it. The ops container stays up when its window closes, as the
+ops agent windows run in it: the open gives the `podman rm -f` that replaces it. `build.py` does
+not rewrite an unchanged config, as its date is what tells. A container left half-made by a
+failed build blocks the next start with "container state improper": remove it.
 
 `scripts/utils.py` opens a bundle straight in its container, with
 `code --folder-uri vscode-remote://dev-container+<hex>/workspace`, where `<hex>` is the hex of the
