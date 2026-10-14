@@ -164,6 +164,10 @@ def main():
             failures.append(f"counts once no bundle waits {counts!r}, expected ✋ 1 for ops")
         (folder / "windows").write_text(WINDOWS.replace("✋ 🔧", "🔧"))
         counts = run(folder, "--counts").splitlines()
+        if counts[:1] != ["✅ 1"]:
+            failures.append(f"counts once nothing waits {counts!r}, expected ✅ 1 before ⏳")
+        (folder / "windows").write_text(WINDOWS.replace("✋ 🔧", "🔧").replace("✅ ", ""))
+        counts = run(folder, "--counts").splitlines()
         if counts[:1] != ["⏳ 1"]:
             failures.append(f"counts once nothing waits {counts!r}, expected ⏳ 1")
         for agent in [*agents.values(), *windows]:
@@ -177,7 +181,7 @@ def main():
         failures.append(f"pick 1 new-ops: started {started!r}, expected {[new_ops]!r}")
     for line in failures:
         print(line)
-    cases = 10 + len(PICKS)
+    cases = 11 + len(PICKS)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 
