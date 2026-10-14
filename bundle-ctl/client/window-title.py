@@ -45,7 +45,6 @@ PROJECTS = (
 )
 TAIL = 256 * 1024
 TITLES = {"ai-title": "aiTitle", "custom-title": "customTitle"}
-WORKING = {"busy", "shell"}
 
 
 def read_tail(session):
@@ -101,7 +100,7 @@ def get_mark(status_by_session, finished=is_finished):
         return ""
     if "waiting" in statuses:
         return "✋"
-    if statuses & WORKING:
+    if "busy" in statuses:
         return "⏳"
     return "✅" if all(map(finished, status_by_session)) else "✋"
 

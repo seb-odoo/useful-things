@@ -245,8 +245,10 @@ focus (Seb, 2026-10-14), so that a first prompt goes to claude: the layout names
   which agents work, which are done and which wait for Seb: `⏳ 📝 master-action-panel-aku
   (review)`. It comes from the `status` Claude writes for each live session in
   `~/.claude/sessions/<pid>.json`, a folder of each container (`devcontainer/README.md`), and for
-  an idle one from the first line of its last answer.
-  `client/window-title.py BUNDLE SESSION=STATUS...` picks it. With wmctrl, `agent-terminator.py`
+  an idle one from the first line of its last answer. A session whose turn ended while a
+  background command runs is `shell`, and counts as idle: a review agent ends on `needs Seb:` and
+  leaves `thread-watch.py` waiting for his review (Seb, 2026-10-14: they showed ⏳ while they
+  waited for him). `client/window-title.py BUNDLE SESSION=STATUS...` picks it. With wmctrl, `agent-terminator.py`
   opens the window on 🚀 and follows the session of its claude every second until the window
   closes, and keeps the last mark once that claude ended. claude-autoopen follows the sessions of
   its container.
@@ -264,9 +266,9 @@ focus (Seb, 2026-10-14), so that a first prompt goes to claude: the layout names
 | mark | the sessions of the window |
 | --- | --- |
 | 🚀 | an agent window whose claude did not start yet: its container starts |
-| ⏳ | one works: `busy`, or `shell` while a background command runs |
-| ✋ | one waits for a permission or an answer (`waiting`), or all are idle and one last answer is no `pushed:` nor `nothing to do:` (`ready to push`, `needs Seb:`, `blocked:`, a chat) |
-| ✅ | all are idle on `pushed:` or `nothing to do:` |
+| ⏳ | one works: `busy` |
+| ✋ | one waits for a permission or an answer (`waiting`), or none works and one last answer is no `pushed:` nor `nothing to do:` (`ready to push`, `needs Seb:`, `blocked:`, a chat) |
+| ✅ | none works and all last answers are `pushed:` or `nothing to do:` |
 | ❌ | the run of an agent window ended before its claude started (`.agent/done` is `failed`) |
 | none | no live session |
 
