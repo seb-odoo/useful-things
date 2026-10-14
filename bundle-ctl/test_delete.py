@@ -314,19 +314,27 @@ def check(root):
 
 
 def check_reviews(root):
-    """Which bundles drop_idle_reviews deletes, from the dates of the files it reads."""
-    old, recent = time.time() - 3 * 86400, time.time() - 86400
-    calls, world = [], {"open": set(), "queue": []}
+    """Which bundles drop_idle_reviews deletes, from the dates of the files it reads and of the
+    stop of their container.
+    """
+    now = time.time()
+    old, recent, closed, shut = now - 3 * 86400, now - 86400, now - 20 * 60, now - 5 * 60
+    calls, world = [], {"building": [], "closed": {}, "open": set(), "queue": []}
     bundles = (
+        "master-building-aku",
+        "master-closed-aku",
         "master-commit-aku",
         "master-fixed-aku",
         "master-kept-aku",
+        "master-later-aku",
         "master-mine--seb",
         "master-old-aku",
         "master-open-aku",
         "master-queued-aku",
         "master-rebased-aku",
         "master-recent-aku",
+        "master-reopened-aku",
+        "master-shut-aku",
         "master-tab-aku",
     )
     repo = root / "odoo"
@@ -356,6 +364,17 @@ def check_reviews(root):
     os.utime(root / "master" / "master-recent-aku" / daemon.MADE, (recent, recent))
     os.utime(root / "wt" / "master-commit-aku" / "logs" / "HEAD", (recent, recent))
     os.utime(root / "claude-config" / "master-tab-aku" / ".claude.json", (recent, recent))
+    for bundle, stop in (
+        ("master-building-aku", closed),
+        ("master-closed-aku", closed),
+        ("master-reopened-aku", closed),
+        ("master-shut-aku", shut),
+    ):
+        os.utime(root / "master" / bundle / daemon.MADE, (recent, recent))
+        world["closed"][str(root / "master" / bundle)] = stop
+    os.utime(root / "master" / "master-later-aku" / daemon.MADE, (recent, recent))
+    os.utime(root / "claude-config" / "master-reopened-aku" / ".claude.json", (now - 120, now - 120))
+    world["building"].append("master-building-aku")
     world["open"].add(str(root / "master" / "master-open-aku"))
     world["queue"].append({"bundle": "master-queued-aku"})
 
@@ -367,6 +386,7 @@ def check_reviews(root):
 
     daemon.CLAUDE_CONFIG_CONTAINER = str(root / "claude-config")
     daemon.STATE = root
+    daemon.get_closed_windows = lambda: dict(world["closed"])
     daemon.get_open_windows = lambda: set(world["open"])
     daemon.get_repo_folder = lambda repo_name: str(repo)
     daemon.get_repos = lambda: ["odoo"]
@@ -375,7 +395,7 @@ def check_reviews(root):
         root / "master" / bundle / repo_name,
     )
     daemon.get_worktree_container_folder = lambda: str(root)
-    daemon.read_state = lambda: {"queue": world["queue"]}
+    daemon.read_state = lambda: {"building": world["building"], "queue": world["queue"]}
     daemon.run_script = run_script
     checks = []
     daemon.drop_idle_reviews()
@@ -383,13 +403,19 @@ def check_reviews(root):
     checks.append(
         (
             "a bundle of others unused for 2 days goes, not one of Seb, open, queued or used since",
-            calls[:2] == [("master-kept-aku",), ("master-old-aku",)],
+            {("master-kept-aku",), ("master-old-aku",)} <= set(calls),
         ),
     )
     checks.append(
         (
             "the older head of a rebased PR goes with --force, a commit of Seb keeps the bundle",
-            calls[2:] == [("--force", "master-rebased-aku")],
+            ("--force", "master-rebased-aku") in calls,
+        ),
+    )
+    checks.append(
+        (
+            "a bundle of others goes 10 minutes after its container stopped, not one being built",
+            ("master-closed-aku",) in calls and len(calls) == 4,
         ),
     )
     calls.clear()
@@ -405,6 +431,17 @@ def check_reviews(root):
     checks.append(
         ("it is tried again once used, and unused for 2 days", calls == [("master-kept-aku",)]),
     )
+    calls.clear()
+    later = "master-later-aku"
+    world["closed"][str(root / "master" / later)] = closed
+    with daemon.work_lock:
+        daemon.drop_idle_reviews()
+        daemon.drop_idle_reviews()
+        deletions = [job for job in daemon.jobs.values() if job["verb"] == f"delete {later}"]
+        checks.append(("a second check starts no second deletion", len(deletions) == 1))
+        (root / "claude-config" / later / ".claude.json").touch()
+    wait_jobs()
+    checks.append(("a bundle used while its deletion waited stays", calls == []))
     return [name for name, passed in checks if not passed], len(checks)
 
 

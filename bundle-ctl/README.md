@@ -126,11 +126,14 @@ daemon reads what is left on the disk of the bundles:
 - `python3 test_queue.py` has the cases.
 
 A bundle of someone else's PR (no `BUNDLE_SUFFIX` in its name) goes by itself once nobody used it
-for `BUNDLE_CTL_REVIEW_IDLE_DAYS` (default 2, Seb's choice on 2026-10-13): no window open, no task
-queued, and no file newer than that among its `.made`, its `.agent/` files, its Claude config
-(written at each window open and Claude start) and the reflog of its worktrees. The daemon looks
-once an hour and runs `delete_bundle.py`, which keeps a bundle with uncommitted files or a commit no
-remote has; that one is tried again only after a new use. Commits of others no remote has (the older
+for `BUNDLE_CTL_REVIEW_CLOSED_MINUTES` since its container stopped (default 10, Seb's choice on
+2026-10-14: out of the way once its window or terminal closed), or for
+`BUNDLE_CTL_REVIEW_IDLE_DAYS` when no container ever ran for it (default 2, Seb's choice on
+2026-10-13): no window open, no task queued or being built, and no file newer than that among its
+`.made`, its `.agent/` files, its Claude config (written at each window open and Claude start) and
+the reflog of its worktrees. The daemon looks each minute and runs `delete_bundle.py`, unless the
+bundle was used while the job waited for another one. `delete_bundle.py` keeps a bundle with
+uncommitted files or a commit no remote has; that one is tried again only after a new use. Commits of others no remote has (the older
 head of a PR its author rebased since) and commits whose change the base has go with `--force`,
 unless a file is not committed. `bctl fetch` brings a bundle back.
 `python3 test_delete.py` has the cases.

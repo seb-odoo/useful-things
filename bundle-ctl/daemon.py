@@ -139,7 +139,12 @@ MAX_WIDTH = 400
 MODELS = ("haiku", "opus", "sonnet")
 NAME = re.compile(r"[a-z0-9](?:[a-z0-9.]|-(?!-)){0,79}")
 OPS_OPEN = "ops-window-open"
-REVIEW_CHECK = 3600
+REVIEW_CHECK = 60
+REVIEW_CLOSED = 60 * float(
+    os.environ.get("BUNDLE_CTL_REVIEW_CLOSED_MINUTES")
+    or CONFIG.get("BUNDLE_CTL_REVIEW_CLOSED_MINUTES")
+    or 10,
+)
 REVIEW_IDLE = 86400 * float(
     os.environ.get("BUNDLE_CTL_REVIEW_IDLE_DAYS") or CONFIG.get("BUNDLE_CTL_REVIEW_IDLE_DAYS") or 2,
 )
@@ -1168,41 +1173,87 @@ def get_last_use(bundle):
     return max(filter(None, map(get_mtime, paths)), default=0)
 
 
+def get_closed_windows():
+    """When the container of each bundle folder stopped, for the folders where none runs."""
+    out = subprocess.run(
+        [
+            "podman",
+            "ps",
+            "--all",
+            "--filter",
+            "label=devcontainer.local_folder",
+            "--format",
+            '{{.State}} {{.ExitedAt}} {{index .Labels "devcontainer.local_folder"}}',
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+    ).stdout
+    closed, alive = {}, set()
+    for line in out.splitlines():
+        state, exited, folder = line.split(" ", 2)
+        if state in ("exited", "stopped") and int(exited) > 0:
+            closed[folder] = max(closed.get(folder, 0), int(exited))
+        else:
+            alive.add(folder)
+    return {folder: exited for folder, exited in closed.items() if folder not in alive}
+
+
+def get_unused_since(bundle, closed):
+    """Since when nobody uses the bundle: its last use, or the stop of its container after it."""
+    return max(get_last_use(bundle), closed.get(get_worktree_bundle_folder(bundle), 0))
+
+
 def drop_idle_reviews():
-    """Delete the bundles of the PRs of others that nobody used for REVIEW_IDLE: `bctl fetch`
-    brings one back. One that holds work is kept until it is used again, but not one that only
-    holds the older head of a PR its author rebased since.
+    """Delete the bundles of the PRs of others that nobody used for REVIEW_CLOSED since their
+    container stopped, or for REVIEW_IDLE when none ever ran: `bctl fetch` brings one back. One
+    that holds work is kept until it is used again, but not one that only holds the older head of
+    a PR its author rebased since.
     """
+    closed = get_closed_windows()
     open_windows = get_open_windows()
-    queued = {item["bundle"] for item in read_state().get("queue", [])}
+    state = read_state()
+    busy = {item["bundle"] for item in state.get("queue", [])} | set(state.get("building", []))
+    busy |= {
+        job["verb"].removeprefix("delete ")
+        for job in jobs.values()
+        if job["verb"].startswith("delete ") and job["state"] in ("waiting", "running")
+    }
     started = {}
     for folder in sorted(pathlib.Path(get_worktree_container_folder()).glob("*/*")):
         bundle = folder.name
         if (
             BUNDLE_SUFFIX in bundle
             or bundle in STICKY_BUNDLES
-            or bundle in queued
+            or bundle in busy
             or not BUNDLE_NAME.fullmatch(bundle)
             or not is_made(folder)
             or str(folder) in open_windows
             or get_worktree_bundle_folder(bundle) != str(folder)
         ):
             continue
-        last_use = get_last_use(bundle)
-        if time.time() - last_use < REVIEW_IDLE or kept_reviews.get(bundle) == last_use:
+        since = get_unused_since(bundle, closed)
+        idle = REVIEW_CLOSED if str(folder) in closed else REVIEW_IDLE
+        if time.time() - since < idle or kept_reviews.get(bundle) == since:
             continue
 
-        def work(log, bundle=bundle, last_use=last_use):
+        def work(log, bundle=bundle, since=since):
+            if (
+                get_worktree_bundle_folder(bundle) in get_open_windows()
+                or get_unused_since(bundle, get_closed_windows()) != since
+            ):
+                log.write(f"{bundle} was used since {format_time(since)}\n")
+                return {}
             try:
                 force = any([get_others_commits(bundle, repo) for repo in local_branches(bundle)])
                 if force:
                     check_uncommitted(bundle)
                 run_script(log, "delete_bundle.py", *(["--force"] if force else []), bundle)
             except Refused:
-                kept_reviews[bundle] = last_use
+                kept_reviews[bundle] = since
                 raise
 
-        print(f"delete {bundle}: unused since {format_time(last_use)}", flush=True)
+        print(f"delete {bundle}: unused since {format_time(since)}", flush=True)
         _code, answer = start_job(HOST, f"delete {bundle}", work)
         started[bundle] = jobs[answer["job"]]
     return started
