@@ -16,9 +16,9 @@ follows the status of the agent's session, in the sessions folder of the bundle'
 the window closes: it says the agent starts until its claude does, and that it failed when the
 run ends before (.agent/done written since the window opened). Once its claude ends, the last mark
 stays. When a VS Code window or another terminal takes the session over, agent-terminal.py closes
-the window, its shell too: SIGUSR1 to BUNDLE_CTL_WINDOW_PID, this process. Started on a bundle open
-in VS Code, whose session it takes from that window, the window is minimized: the agent goes back
-to the window list (window-picker.py).
+the window, its shell too: SIGUSR1 to BUNDLE_CTL_WINDOW_PID, this process. The window opens
+minimized, so that a new agent does not take the screen: it waits in the window list
+(window-picker.py).
 """
 
 import ctypes
@@ -36,12 +36,13 @@ import time
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
-from agents import get_agent_folder, get_bundle_container, get_mtime, has_window  # noqa: E402
+from agents import get_agent_folder, get_mtime  # noqa: E402
 from config import CLAUDE_CONFIG_CONTAINER  # noqa: E402
 
 CHECK = 1
 CLAUDE_CONFIG = pathlib.Path(CLAUDE_CONFIG_CONTAINER)
 CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
+HIDE_CHECK = 0.1
 LAYOUT = "bundle-ctl agent"
 LAYOUTS = "[layouts]"
 PANES = """\
@@ -130,13 +131,14 @@ def minimize(window):
         x11.XCloseDisplay(display)
 
 
-def follow(bundle, terminator, since, hide):
+def follow(bundle, terminator, since):
     signal.signal(signal.SIGUSR1, lambda *args: terminator.terminate())
     done = get_agent_folder(bundle) / "done"
+    hide = True
     shown = None
     while True:
         try:
-            return terminator.wait(CHECK)
+            return terminator.wait(HIDE_CHECK if hide else CHECK)
         except subprocess.TimeoutExpired:
             pass
         if hide and (windows := get_windows(terminator.pid)):
@@ -168,10 +170,8 @@ def main():
     if not WMCTRL:
         os.execvp(terminator[0], [*terminator, "--title", get_title(bundle)])
     terminator += ["--title", get_title(bundle, "--starting")]
-    container = get_bundle_container(bundle)
-    hide = bool(container) and has_window(container)
     since = time.time() * 1000
-    sys.exit(follow(bundle, subprocess.Popen(terminator), since, hide))
+    sys.exit(follow(bundle, subprocess.Popen(terminator), since))
 
 
 if __name__ == "__main__":

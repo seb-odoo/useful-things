@@ -212,6 +212,9 @@ in the container: the contained terminal is the one of the VS Code window.
   and the window stays on the shell. A takeover by a VS Code window or another terminal closes the
   whole window instead (Seb, 2026-10-13): the wrapper sends SIGUSR1 to `agent-terminator.py`
   (`BUNDLE_CTL_WINDOW_PID`), which ends its terminator.
+- With wmctrl, the window opens minimized (Seb, 2026-10-14), so that a new agent does not take
+  the screen: it waits in the window list (below). The minimize is the `XIconifyWindow` of libX11,
+  as wmctrl has none, sent within 0.1 s of the window showing.
 - Each pane says where it runs. The two panes of the layout carry a title, `in the container:
   claude` and `on the host: shell`. A shell of the window, one split by hand included, also
   starts on `On the host, outside the container of BUNDLE.` and on `ocode BUNDLE opens its VS
@@ -309,9 +312,8 @@ move to another process, so the window closes and the terminal starts the contai
 - It then starts the container, and resumes the session in the mode of the tab (the last
   `permissionMode` of the transcript), with `Continue from where you left off.` when the turn was
   cut: a tool call in flight, a test run say, runs again. About 20 s in all.
-- `agent-terminator.py` opens that window minimized, as it starts while the bundle's container
-  has a window: the agent goes back to the window list. The minimize is the `XIconifyWindow` of
-  libX11, as wmctrl has none.
+- The terminal window opens minimized, as any agent window: the agent goes back to the window
+  list.
 
 `devcontainer/claude-config.py` marks the onboarding as done in the containers' Claude config: the
 interactive claude stops on its theme picker otherwise.
