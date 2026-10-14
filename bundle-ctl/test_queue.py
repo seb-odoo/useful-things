@@ -40,6 +40,7 @@ CASES = [
         ["busy: its agent to end, then its terminal to close"],
     ),
     ({"ended": ENDED_ANOTHER}, [], ["ended: its terminal to close"]),
+    ({"ended": {**ENDED_ANOTHER, "window": ""}}, [], ["ended: its terminal to close"]),
     ({"launching": LAUNCHES_ANOTHER}, [], ["launching: its agent to end"]),
     ({"stranded": NEVER_RAN_ANOTHER}, ["stranded"], []),
     ({"window": RUNS_ANOTHER_IN_WINDOW}, [], ["window: its agent to end"]),

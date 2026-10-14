@@ -449,8 +449,9 @@ each priority, the bundle that queued it, since when and what it waits for, so a
 where it goes.
 A task for a bundle whose agent has not ended is queued behind it, so the caller has nothing to
 try again: it waits for `its agent to end`, the verdict of an agent in a window, and for an agent
-in a terminal `then its terminal to close`. A bundle holds one queued task: a second one is
-refused.
+in a terminal `then its terminal to close`. A VS Code window opened on the bundle meanwhile first
+takes that terminal's session over, and the task starts in the window at the next pass. A bundle
+holds one queued task: a second one is refused.
 One agent starts at a time, as several containers and claude sessions that start together take
 the memory of the host at once: the next task waits for `the agent of BUNDLE to start`, until the
 run of that agent began (its `.agent/run.lock`), its launch failed, or 15 minutes passed.

@@ -802,13 +802,13 @@ def launch_queued():
                 )
             elif free < DISK_STOP:
                 item["waits_for"] = f"disk space ({free:.0f} GB left, {DISK_STOP:.0f} needed)"
+            elif in_terminal:
+                # Wait for its last terminal to close: the `died` event comes back here.
+                item["waits_for"] = "its terminal to close"
             elif container and has_window(container):
                 # The claude-autoopen extension of the window starts it.
                 write_task(item)
                 continue
-            elif in_terminal:
-                # Wait for its last terminal to close: the `died` event comes back here.
-                item["waits_for"] = "its terminal to close"
             elif can_start and starting:
                 item["waits_for"] = f"the agent of {starting} to start"
                 paced = True
