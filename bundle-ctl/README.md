@@ -205,7 +205,9 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
 With `AGENT_TERMINAL` set to `agent-terminator.py {bundle}`, the window is a terminator split in
 two: the agent on the left, and on the right `agent-terminal.py BUNDLE --shell`, a shell of the
 host in the `odoo` folder of the bundle. That shell is for Seb to type in, so nothing of it runs
-in the container: the contained terminal is the one of the VS Code window.
+in the container: the contained terminal is the one of the VS Code window. The agent pane has the
+focus (Seb, 2026-10-14), so that a first prompt goes to claude: the layout names its `uuid` as the
+`last_active_term` of the window.
 
 - A pane split by hand (Ctrl+Shift+O, Ctrl+Shift+E) and a new tab (Ctrl+Shift+T) are shells of
   the host too, as in any terminator window.

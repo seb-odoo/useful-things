@@ -10,7 +10,7 @@ Terminator takes the commands of a split from a layout of its config only. So th
 copy of the user's config with that layout added: preferences saved from it go to the copy.
 
 The title of the window says what the work is about (client/window-title.py), the title of each
-pane where it runs. A pane split by hand has no title: the host .bashrc prints the same in any shell
+pane where it runs. The agent pane has the focus: the window's last_active_term names its uuid. A pane split by hand has no title: the host .bashrc prints the same in any shell
 that holds BUNDLE_CTL_AGENT_WINDOW, the bundle name. With wmctrl, the title of the window also
 follows the status of the agent's session, in the sessions folder of the bundle's container, until
 the window closes: it says the agent starts until its claude does, and that it failed when the
@@ -58,6 +58,7 @@ PANES = """\
       parent = ""
       order = 0
       maximised = True
+      last_active_term = a2d4c27d-3437-4895-8cd3-f9c632104a4e
     [[[panes]]]
       type = HPaned
       parent = window
@@ -70,6 +71,7 @@ PANES = """\
       profile = default
       title = "in the container: claude"
       command = "{agent}"
+      uuid = a2d4c27d-3437-4895-8cd3-f9c632104a4e
     [[[shell]]]
       type = Terminal
       parent = panes
