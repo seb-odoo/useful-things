@@ -343,9 +343,9 @@ where `hctl` is.
 - The title shows the title of the conversation in place of a name, with 🔧 and `(ops)`:
   `⏳ 🔧 Ops list layout (ops)`. The marks are those of a bundle, but for an idle session: ✅ when
   the last answer has a Done part and neither a Decide nor a Your action part, the parts of Seb's
-  reports, ✋ otherwise (Seb, 2026-10-14). The ops records go to the host's `~/.claude/sessions`,
-  which the ops container mounts: `agent-terminator.py` looks there by session id. It reads the
-  title again every 10 seconds, and drops the mark once its claude ended.
+  reports, ✋ otherwise (Seb, 2026-10-14). The ops container has a sessions folder of its own, as
+  a bundle container has: `agent-terminator.py` looks there by session id. It reads the title
+  again every 10 seconds, and drops the mark once its claude ended.
 - `window-picker.py` lists the ops windows with the bundles, by mark, and a click brings one up.
   Its first row, `➕ new ops agent` (Seb, 2026-10-14), runs `bctl open ops --terminal`. The applet
   counts them with the bundles, and hides them from the task bar when minimized.

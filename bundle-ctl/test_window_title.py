@@ -170,16 +170,16 @@ def get_followed(home):
         titles.append((home / "log").read_text().splitlines())
         for path in sessions.iterdir():
             path.unlink()
-    host_sessions = home / "host-sessions"
-    host_sessions.mkdir()
+    ops_sessions = home / "host-ctl" / "sessions"
+    ops_sessions.mkdir(parents=True)
     running = [True]
-    terminator.HOST_SESSIONS = host_sessions
+    terminator.HOST_FOLDER = "/repo/host-ctl"
     terminator.REFRESH = 0.4
     terminator.is_running = lambda bundle: running[0]
 
     def run_ops():
         record = {"name": "repo-ab", "sessionId": "report", "startedAt": time.time() * 1000}
-        (host_sessions / "15.json").write_text(json.dumps({**record, "status": "busy"}))
+        (ops_sessions / "15.json").write_text(json.dumps({**record, "status": "busy"}))
         time.sleep(0.2)
         topic = {"type": "ai-title", "aiTitle": "Ops agent windows", "sessionId": "report"}
         with (home / ".claude" / "projects" / "-workspace" / "report.jsonl").open("a") as file:

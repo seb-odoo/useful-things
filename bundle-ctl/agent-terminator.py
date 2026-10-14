@@ -20,9 +20,8 @@ the window, its shell too: SIGUSR1 to BUNDLE_CTL_WINDOW_PID, this process. The w
 minimized, so that a new agent does not take the screen: it waits in the window list
 (window-picker.py).
 
-An ops agent window (ops-SESSION) follows the record of that session in the host's sessions
-folder, where the ops container writes, and the title of its conversation, which changes with no
-change of status. Its mark goes once its claude ended, as the window list cannot tell which ops
+An ops agent window (ops-SESSION) follows the record of that session in the sessions folder of
+the ops container, and the title of its conversation, which changes with no change of status. Its mark goes once its claude ended, as the window list cannot tell which ops
 window has an agent left. Opened with no task, it waits for Seb's first prompt: it shows in front.
 """
 
@@ -42,13 +41,12 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
 from agents import OPS, get_agent_folder, get_mtime  # noqa: E402
-from config import CLAUDE_CONFIG_CONTAINER  # noqa: E402
+from config import CLAUDE_CONFIG_CONTAINER, HOST_FOLDER  # noqa: E402
 
 CHECK = 1
 CLAUDE_CONFIG = pathlib.Path(CLAUDE_CONFIG_CONTAINER)
 CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
 HIDE_CHECK = 0.1
-HOST_SESSIONS = pathlib.Path.home() / ".claude" / "sessions"
 LAYOUT = "bundle-ctl agent"
 LAYOUTS = "[layouts]"
 PANES = """\
@@ -105,13 +103,14 @@ def get_title(bundle, *statuses):
 
 
 def get_record(bundle, since):
-    """The record of the newest claude of the window: client/agent-run.sh names it after the
-    bundle, and the claude of an ops window has the session of its name."""
+    """The record of the newest claude of the window, in the sessions folder of its container:
+    client/agent-run.sh names it after the bundle, and the claude of an ops window has the session
+    of its name."""
     session = bundle.removeprefix(OPS) if bundle.startswith(OPS) else None
-    folder = HOST_SESSIONS if session else CLAUDE_CONFIG / bundle / "sessions"
+    container = os.path.basename(HOST_FOLDER or "") if session else bundle
     key, value = ("sessionId", session) if session else ("name", bundle)
     records = []
-    for path in folder.glob("*.json"):
+    for path in (CLAUDE_CONFIG / container / "sessions").glob("*.json"):
         try:
             data = path.read_bytes()
             record = json.loads(data) if value.encode() in data else {}
