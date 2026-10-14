@@ -1,10 +1,10 @@
 # See repos-repack.service.
 
 [Unit]
-Description=Repack the base repos of the bundles once a month
+Description=Repack the base repos of the bundles once a week
 
 [Timer]
-OnCalendar=*-*-01 13:00
+OnCalendar=Mon 13:00
 Persistent=true
 
 [Install]

@@ -148,12 +148,12 @@ $ python scripts/add_repo.py master-test--seb documentation
 
 ### repack_repos.py
 
-Writes the objects of each base repo in one pack, once a month through
+Writes the objects of each base repo in one pack, once a week through
 [`repos-repack.timer`](repos-repack.timer) (install steps in
 [`repos-repack.service`](repos-repack.service)). git maintenance merges only the small packs, so
 an object fetched twice stays in two big ones: on 2026-10-12 the 30 GB of packs of the odoo repo
 held 15.5 million objects, 10.3 million of them distinct, and one repack brought them to 12.9 GB
-in 28 minutes. `git repack -a -d -k` keeps every
+in 28 minutes. A day later, its packs held 18.3 GB again. `git repack -a -d -k` keeps every
 object, reachable or not, and prunes no worktree. A repo is skipped when the disk has less free
 than its packs plus 10 GB, as the new pack is written before the old ones go.
 `test_repack_repos.py` runs it on a scratch repo.
