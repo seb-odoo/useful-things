@@ -66,9 +66,11 @@ from branch_status import (  # noqa: E402
 from commands import (  # noqa: E402
     MADE,
     drop_stale_containers,
+    get_base_for_repo,
     get_base_from_bundle_name,
     get_bundle_name_from_base_and_name,
     get_remote_dev_ref,
+    get_remote_ref,
     get_repo_folder,
     get_repos,
     get_sticky_bundles,
@@ -962,16 +964,36 @@ def get_branch_prs(repo, branch):
     return {f"{github_repo}#{pr['number']}": pr["state"].lower() for pr in json.loads(res.stdout)}
 
 
-def get_others_commits(bundle, repo):
-    """The committers of the commits of the branch no remote has, refused when one is Seb."""
-    folder = get_repo_folder(repo)
-    committers = subprocess.run(
-        ["git", "log", "--format=%ce", f"refs/heads/{bundle}", "--not", "--remotes"],
+def get_cherry(bundle, repo):
+    """The commits of the branch over its base, each with whether the base has its change under
+    another sha (same patch-id). Empty when the base is not fetched.
+    """
+    base = get_remote_ref(get_base_for_repo(get_base_from_bundle_name(bundle), repo), repo)
+    lines = subprocess.run(
+        ["git", "cherry", base, f"refs/heads/{bundle}"],
         capture_output=True,
         check=False,
-        cwd=folder,
+        cwd=get_repo_folder(repo),
         text=True,
-    ).stdout.split()
+    ).stdout.splitlines()
+    return {line[2:]: line.startswith("-") for line in lines}
+
+
+def get_others_commits(bundle, repo):
+    """The committers of the commits of the branch no remote has, refused when one is Seb and its
+    base does not have its change.
+    """
+    folder = get_repo_folder(repo)
+    commits = [
+        line.split()
+        for line in subprocess.run(
+            ["git", "log", "--format=%H %ce", f"refs/heads/{bundle}", "--not", "--remotes"],
+            capture_output=True,
+            check=False,
+            cwd=folder,
+            text=True,
+        ).stdout.splitlines()
+    ]
     me = subprocess.run(
         ["git", "config", "user.email"],
         capture_output=True,
@@ -979,9 +1001,11 @@ def get_others_commits(bundle, repo):
         cwd=folder,
         text=True,
     ).stdout.strip()
-    if committers and (not me or me in committers):
+    cherry = get_cherry(bundle, repo) if commits else {}
+    work = [committer for sha, committer in commits if not cherry.get(sha)]
+    if work and (not me or me in work):
         raise Refused(f"{bundle} has commits in {repo} that no remote has")
-    return committers
+    return [committer for _sha, committer in commits]
 
 
 def check_uncommitted(bundle):
@@ -1000,8 +1024,8 @@ def check_uncommitted(bundle):
 
 def check_deletion(bundle):
     """What the deletion drops, a line by repo where the bundle has its branch, and whether
-    delete_bundle needs --force. Refused while a repo holds work: a commit of Seb no remote has, a
-    push no PR uses yet, or an open PR.
+    delete_bundle needs --force. Refused while a repo holds work: a commit of Seb no remote has
+    whose change its base does not have, a push no PR uses yet, or an open PR.
     """
     lines, force = {}, False
     for repo in local_branches(bundle):
@@ -1016,7 +1040,8 @@ def check_deletion(bundle):
             lines[repo] = "no commit of its own, never pushed"
             continue
         prs = get_branch_prs(repo, bundle)
-        if not prs:
+        cherry = get_cherry(bundle, repo) if pushed.returncode and not prs else {}
+        if not prs and not (cherry and all(cherry.values())):
             raise Refused(
                 f"{bundle} has commits in {repo} that no remote has"
                 if pushed.returncode
@@ -1024,7 +1049,10 @@ def check_deletion(bundle):
             )
         if opened := [pr for pr, state in prs.items() if state == "open"]:
             raise Refused(f"{bundle} has an open PR in {repo}: {', '.join(opened)}")
-        lines[repo] = ", ".join(f"{pr} {state}" for pr, state in prs.items())
+        base = get_base_for_repo(get_base_from_bundle_name(bundle), repo)
+        lines[repo] = (
+            ", ".join(f"{pr} {state}" for pr, state in prs.items()) or f"its commits are in {base}"
+        )
         if committers:
             force = True
             lines[repo] += f", commits of {', '.join(sorted(set(committers)))} that no remote has"

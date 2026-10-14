@@ -131,7 +131,8 @@ queued, and no file newer than that among its `.made`, its `.agent/` files, its 
 (written at each window open and Claude start) and the reflog of its worktrees. The daemon looks
 once an hour and runs `delete_bundle.py`, which keeps a bundle with uncommitted files or a commit no
 remote has; that one is tried again only after a new use. Commits of others no remote has (the older
-head of a PR its author rebased since) go with `--force`, unless a file is not committed. `bctl fetch` brings a bundle back.
+head of a PR its author rebased since) and commits whose change the base has go with `--force`,
+unless a file is not committed. `bctl fetch` brings a bundle back.
 `python3 test_delete.py` has the cases.
 
 ## Wrong version
@@ -147,7 +148,10 @@ cherry-pick, as all the bundles share the base repos' `.git`.
 own to go, where it would hand Seb a `delete_bundle` line to type. It is refused while a branch of
 the bundle holds work: a commit of Seb no remote has, a branch on the dev remote that no PR uses
 yet, or an open PR. A branch whose PRs are all closed or merged goes, even with commits of others
-no remote has: in a review bundle, the older head of a PR its author rebased since.
+no remote has: in a review bundle, the older head of a PR its author rebased since. A commit whose
+change the base of the bundle already has under another sha (`git cherry`, same patch-id) is no
+work: a branch never pushed whose commits are all in its base goes too, with no PR, as the copy
+of a fix that reached master by a forward-port.
 
 - The daemon holds the request in `held/` beside `state.json`, in the format of
   `gateway-core/held.py`, and `hok` lists it as `bN` (the `config.py` of host-ctl names the

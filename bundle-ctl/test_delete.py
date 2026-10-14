@@ -22,6 +22,7 @@ CLEAN = "master-clean--seb"
 CLOSED = "master-closed-aku"
 COMMITTED = "master-committed--seb"
 DIRTY = "master-dirty-aku"
+MERGED = "master-merged--seb"
 MINE = "master-mine--seb"
 OPENED = "master-opened-aku"
 PUSHED = "master-pushed--seb"
@@ -50,7 +51,8 @@ def prepare(root):
         git(repo, "remote", "add", name, str(remote))
     git(repo, "push", "--quiet", "odoo", "master")
     git(repo, "config", "user.email", "t@t")
-    for bundle in (CLEAN, CLOSED, COMMITTED, DIRTY, MINE, OPENED, PUSHED, REBASED, REFUSED, STOPPED):
+    bundles = (CLEAN, CLOSED, COMMITTED, DIRTY, MERGED, MINE, OPENED, PUSHED, REBASED, REFUSED, STOPPED)
+    for bundle in bundles:
         git(repo, "branch", bundle)
         (root / "master" / bundle).mkdir(parents=True)
     git(repo, "push", "--quiet", "odoo-dev", CLOSED, MINE, OPENED, PUSHED)
@@ -62,6 +64,12 @@ def prepare(root):
         commit_as_aku(repo, "before the rebase")
     git(repo, "checkout", "--quiet", MINE)
     git(repo, "-c", "user.name=t", "commit", "--allow-empty", "-qm", "after the PR")
+    for branch, message in ((MERGED, "fix"), ("master", "fix, as merged")):
+        git(repo, "checkout", "--quiet", branch)
+        (repo / "fix.txt").write_text("fix\n")
+        git(repo, "add", "fix.txt")
+        git(repo, "-c", "user.name=t", "commit", "-qm", message)
+    git(repo, "push", "--quiet", "odoo", "master")
     git(repo, "fetch", "--quiet", "--all")
     git(repo, "checkout", "--quiet", COMMITTED)
     git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-qm", "own")
@@ -281,6 +289,12 @@ def check(root):
             REBASED,
             "odoo/odoo#2 closed, commits of aku@t that no remote has",
             ("delete_bundle.py", "--force", REBASED),
+        ),
+        (
+            "a commit of Seb whose change master has under another sha goes, with --force",
+            MERGED,
+            "its commits are in master, commits of t@t that no remote has",
+            ("delete_bundle.py", "--force", MERGED),
         ),
     ):
         code, lines = run_client(path, "delete", bundle, "--reason", "r")
