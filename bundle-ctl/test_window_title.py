@@ -58,6 +58,13 @@ TOPICS = {
     ],
     "seb": [("custom-title", "customTitle", "Pick a base"), ("ai-title", "aiTitle", "Base")],
 }
+CONFIGS = [
+    (
+        "[keybindings]\n  hide_window = <Control>h\n  copy = <Control>c\n[layouts]\n",
+        "[keybindings]\n  hide_window = None\n  copy = <Control>c\n[layouts]\n",
+    ),
+    ("[layouts]\n", "[layouts]\n\n[keybindings]\n  hide_window = None\n"),
+]
 FOLLOWED = [
     [f"⏳ {TITLE}", f"✅ {TITLE}"],
     [f"❌ {TITLE}"],
@@ -121,9 +128,8 @@ def get_followed(home):
     """The titles agent-terminator.py gives its window while the session of its claude works,
     then ends on a verdict, and when the run fails before its claude starts. A claude of the
     bundle started before the window does not count. Then how its terminator ends on SIGUSR1,
-    which agent-terminal.py sends after a takeover, and the windows it minimizes: each one once,
-    as it shows. Last, an ops window opened with no task, which is not minimized: its title follows
-    the title of the conversation, and loses its mark once its claude ended."""
+    which agent-terminal.py sends after a takeover. Last, an ops window opened with no task: its
+    title follows the title of the conversation, and loses its mark once its claude ended."""
     spec = importlib.util.spec_from_file_location("terminator", HERE / "agent-terminator.py")
     terminator = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(terminator)
@@ -141,8 +147,6 @@ def get_followed(home):
     terminator.CLAUDE_CONFIG = home
     terminator.WMCTRL = str(wmctrl)
     terminator.get_agent_folder = lambda bundle: agent
-    minimized = []
-    terminator.minimize = minimized.append
 
     def write(file, **record):
         (sessions / file).write_text(json.dumps({"name": BUNDLE, **record}))
@@ -191,12 +195,33 @@ def get_followed(home):
     (home / "pid").write_text(str(window.pid))
     (home / "log").write_text("")
     threading.Thread(target=run_ops, daemon=True).start()
-    terminator.follow("ops-report", window, time.time() * 1000 - 1000, hide=False)
+    terminator.follow("ops-report", window, time.time() * 1000 - 1000)
     titles.append((home / "log").read_text().splitlines())
     window = subprocess.Popen(["sleep", "30"])
     threading.Timer(0.3, os.kill, (os.getpid(), signal.SIGUSR1)).start()
     closed = terminator.follow(BUNDLE, window, time.time() * 1000)
-    return titles, closed, minimized
+    return titles, closed
+
+
+def get_configs(home):
+    """The copy of the terminator config of an agent window: the user's, its hide_window key
+    unbound, as terminator maps a --hidden window minimized only then, and the layout added."""
+    spec = importlib.util.spec_from_file_location("terminator", HERE / "agent-terminator.py")
+    terminator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(terminator)
+    terminator.CONFIG_ROOT = home / "config"
+    (home / "config" / "terminator").mkdir(parents=True)
+    command = ["agent-terminal.py", BUNDLE]
+    panes = terminator.PANES.format(
+        layout=terminator.LAYOUT, agent=" ".join(command), shell=" ".join([*command, "--shell"])
+    )
+    failures = []
+    for config, expected in CONFIGS:
+        (home / "config" / "terminator" / "config").write_text(config)
+        found = terminator.get_config(command)
+        if found.count(panes) != 1 or found.replace(panes, "") != expected:
+            failures.append(f"agent-terminator.py: config {found!r}, expected {expected!r}")
+    return failures
 
 
 def get_running():
@@ -238,18 +263,17 @@ def main():
         write_transcripts(home)
         failures += get_marks()
         failures += get_loaded()
+        failures += get_configs(home)
         failures += get_running()
-        titles, closed, minimized = get_followed(home)
+        titles, closed = get_followed(home)
         for found, expected in zip(titles, FOLLOWED, strict=True):
             if found != expected:
                 failures.append(f"agent-terminator.py: titled {found}, expected {expected}")
         if closed != -signal.SIGTERM:
             failures.append(f"agent-terminator.py: SIGUSR1 left its terminator on {closed}")
-        if minimized != ["0x0a", "0x0a"]:
-            failures.append(f"agent-terminator.py: minimized {minimized}, expected 0x0a twice")
     for line in failures:
         print(line)
-    cases = len(MARKS) + len(OPS_MARKS) + len(FOLLOWED) + 6
+    cases = len(MARKS) + len(OPS_MARKS) + len(CONFIGS) + len(FOLLOWED) + 5
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

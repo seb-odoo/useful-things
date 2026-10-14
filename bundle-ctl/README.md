@@ -217,8 +217,10 @@ in the container: the contained terminal is the one of the VS Code window.
   whole window instead (Seb, 2026-10-13): the wrapper sends SIGUSR1 to `agent-terminator.py`
   (`BUNDLE_CTL_WINDOW_PID`), which ends its terminator.
 - With wmctrl, the window opens minimized (Seb, 2026-10-14), so that a new agent does not take
-  the screen: it waits in the window list (below). The minimize is the `XIconifyWindow` of libX11,
-  as wmctrl has none, sent within 0.1 s of the window showing.
+  the screen: it waits in the window list (below). Terminator maps it minimized with `--hidden`,
+  so that it never shows first. It does so only while its `hide_window` key is not bound (with the
+  key bound, `--hidden` keeps the window unmapped until that key): the copy of the config sets
+  `hide_window = None`.
 - Each pane says where it runs. The two panes of the layout carry a title, `in the container:
   claude` and `on the host: shell`. A shell of the window, one split by hand included, also
   starts on `On the host, outside the container of BUNDLE.` and on `ocode BUNDLE opens its VS
@@ -279,9 +281,9 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   tooltip has the counts of each mark, and a click opens the same list.
   The label comes from `window-picker.py --counts` every 2 seconds. It also sets `skip_taskbar` on
   an agent window (its terminator runs on a `bundle-ctl/terminator-` config) while it is
-  minimized. It is a link to that folder,
-  `~/.local/share/cinnamon/applets/bundle-windows@useful-things`, added to a panel in the
-  `enabled-applets` key of `org.cinnamon`.
+  minimized: as it is minimized, and as it is created, since it opens minimized. It is a link to
+  that folder, `~/.local/share/cinnamon/applets/bundle-windows@useful-things`, added to a panel in
+  the `enabled-applets` key of `org.cinnamon`.
 
 `python3 test_window_picker.py` runs each case.
 

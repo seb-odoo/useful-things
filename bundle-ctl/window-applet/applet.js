@@ -13,6 +13,9 @@ class BundleWindows extends Applet.TextApplet {
         const folder = linked ? GLib.file_read_link(metadata.path) : metadata.path;
         this.picker = GLib.build_filenamev([GLib.path_get_dirname(folder), "window-picker.py"]);
         this.set_applet_label("🪟");
+        this.created = global.display.connect("window-created", (display, window) =>
+            this.place(window)
+        );
         this.minimized = global.window_manager.connect("minimize", (wm, actor) =>
             this.place(actor.get_meta_window())
         );
@@ -64,6 +67,7 @@ class BundleWindows extends Applet.TextApplet {
 
     on_applet_removed_from_panel() {
         GLib.source_remove(this.timer);
+        global.display.disconnect(this.created);
         global.window_manager.disconnect(this.minimized);
     }
 }

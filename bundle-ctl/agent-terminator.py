@@ -18,7 +18,8 @@ run ends before (.agent/done written since the window opened). Once its claude e
 stays. When a VS Code window or another terminal takes the session over, agent-terminal.py closes
 the window, its shell too: SIGUSR1 to BUNDLE_CTL_WINDOW_PID, this process. The window opens
 minimized, so that a new agent does not take the screen: it waits in the window list
-(window-picker.py).
+(window-picker.py). Terminator maps it minimized with --hidden, only when its hide_window key is
+not bound: the copy of the config unbinds it.
 
 An ops agent window (ops-SESSION) follows the record of that session in the sessions folder of
 the ops container, and the title of its conversation, which changes with no change of status. Its mark goes once its claude ended, as the window list cannot tell which ops
@@ -26,8 +27,6 @@ window has an agent left. Opened on a new session with no task, it waits for Seb
 it shows in front.
 """
 
-import ctypes
-import ctypes.util
 import json
 import os
 import pathlib
@@ -47,7 +46,8 @@ from config import CLAUDE_CONFIG_CONTAINER, HOST_FOLDER  # noqa: E402
 CHECK = 1
 CLAUDE_CONFIG = pathlib.Path(CLAUDE_CONFIG_CONTAINER)
 CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
-HIDE_CHECK = 0.1
+HIDE_KEY = "hide_window"
+KEYBINDINGS = "[keybindings]"
 LAYOUT = "bundle-ctl agent"
 LAYOUTS = "[layouts]"
 PANES = """\
@@ -90,11 +90,16 @@ def get_config(command):
         lines = (CONFIG_ROOT / "terminator" / "config").read_text().splitlines(keepends=True)
     except OSError:
         lines = []
-    if LAYOUTS not in [line.strip() for line in lines]:
-        lines.append(f"\n{LAYOUTS}\n")
-    at = [line.strip() for line in lines].index(LAYOUTS) + 1
-    lines.insert(at, PANES.format(layout=LAYOUT, agent=agent, shell=shell))
+    lines = [line for line in lines if line.split("=")[0].strip() != HIDE_KEY]
+    insert(lines, KEYBINDINGS, f"  {HIDE_KEY} = None\n")
+    insert(lines, LAYOUTS, PANES.format(layout=LAYOUT, agent=agent, shell=shell))
     return "".join(lines)
+
+
+def insert(lines, section, text):
+    if section not in [line.strip() for line in lines]:
+        lines.append(f"\n{section}\n")
+    lines.insert([line.strip() for line in lines].index(section) + 1, text)
 
 
 def get_title(bundle, *statuses):
@@ -128,20 +133,7 @@ def get_windows(pid):
     return [line[0] for line in lines if line[2:3] == [str(pid)]]
 
 
-def minimize(window):
-    """Iconify a window as `xdotool windowminimize` does, which wmctrl cannot."""
-    x11 = ctypes.CDLL(ctypes.util.find_library("X11"))
-    x11.XOpenDisplay.restype = ctypes.c_void_p
-    x11.XDefaultScreen.argtypes = [ctypes.c_void_p]
-    x11.XIconifyWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int]
-    x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
-    display = x11.XOpenDisplay(None)
-    if display:
-        x11.XIconifyWindow(display, int(window, 16), x11.XDefaultScreen(display))
-        x11.XCloseDisplay(display)
-
-
-def follow(bundle, terminator, since, hide=True):
+def follow(bundle, terminator, since):
     signal.signal(signal.SIGUSR1, lambda *args: terminator.terminate())
     done = get_agent_folder(bundle) / "done"
     ended = False
@@ -149,13 +141,9 @@ def follow(bundle, terminator, since, hide=True):
     shown = titled = None
     while True:
         try:
-            return terminator.wait(HIDE_CHECK if hide else CHECK)
+            return terminator.wait(CHECK)
         except subprocess.TimeoutExpired:
             pass
-        if hide and (windows := get_windows(terminator.pid)):
-            for window in windows:
-                minimize(window)
-            hide = False
         record = get_record(bundle, since)
         if bundle.startswith(OPS) and time.monotonic() - refreshed >= REFRESH:
             refreshed, shown = time.monotonic(), None
@@ -187,8 +175,9 @@ def main():
     agent = get_agent_folder(bundle)
     fresh = bundle.startswith(OPS) and not (agent / "task.md").is_file()
     fresh = fresh and not get_transcript(bundle.removeprefix(OPS))
+    terminator += [] if fresh else ["--hidden"]
     since = time.time() * 1000
-    code = follow(bundle, subprocess.Popen(terminator), since, hide=not fresh)
+    code = follow(bundle, subprocess.Popen(terminator), since)
     if bundle.startswith(OPS):
         shutil.rmtree(agent, ignore_errors=True)
     sys.exit(code)
