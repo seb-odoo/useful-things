@@ -130,7 +130,8 @@ for `BUNDLE_CTL_REVIEW_IDLE_DAYS` (default 2, Seb's choice on 2026-10-13): no wi
 queued, and no file newer than that among its `.made`, its `.agent/` files, its Claude config
 (written at each window open and Claude start) and the reflog of its worktrees. The daemon looks
 once an hour and runs `delete_bundle.py`, which keeps a bundle with uncommitted files or a commit no
-remote has; that one is tried again only after a new use. `bctl fetch` brings a bundle back.
+remote has; that one is tried again only after a new use. Commits of others no remote has (the older
+head of a PR its author rebased since) go with `--force`, unless a file is not committed. `bctl fetch` brings a bundle back.
 `python3 test_delete.py` has the cases.
 
 ## Wrong version

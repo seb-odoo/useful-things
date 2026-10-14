@@ -953,6 +953,42 @@ def get_branch_prs(repo, branch):
     return {f"{github_repo}#{pr['number']}": pr["state"].lower() for pr in json.loads(res.stdout)}
 
 
+def get_others_commits(bundle, repo):
+    """The committers of the commits of the branch no remote has, refused when one is Seb."""
+    folder = get_repo_folder(repo)
+    committers = subprocess.run(
+        ["git", "log", "--format=%ce", f"refs/heads/{bundle}", "--not", "--remotes"],
+        capture_output=True,
+        check=False,
+        cwd=folder,
+        text=True,
+    ).stdout.split()
+    me = subprocess.run(
+        ["git", "config", "user.email"],
+        capture_output=True,
+        check=False,
+        cwd=folder,
+        text=True,
+    ).stdout.strip()
+    if committers and (not me or me in committers):
+        raise Refused(f"{bundle} has commits in {repo} that no remote has")
+    return committers
+
+
+def check_uncommitted(bundle):
+    """Refused when a worktree of the bundle has a file not committed, which --force would drop."""
+    for repo in get_repos():
+        worktree = get_worktree_bundle_repo_folder(bundle, repo)
+        if os.path.isdir(worktree) and subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True,
+            check=False,
+            cwd=worktree,
+            text=True,
+        ).stdout.strip():
+            raise Refused(f"{bundle} has uncommitted files in {repo}")
+
+
 def check_deletion(bundle):
     """What the deletion drops, a line by repo where the bundle has its branch, and whether
     delete_bundle needs --force. Refused while a repo holds work: a commit of Seb no remote has, a
@@ -960,32 +996,16 @@ def check_deletion(bundle):
     """
     lines, force = {}, False
     for repo in local_branches(bundle):
-        folder = get_repo_folder(repo)
         pushed = subprocess.run(
             ["git", "rev-parse", "--verify", "--quiet", get_remote_dev_ref(bundle, repo)],
             capture_output=True,
             check=False,
-            cwd=folder,
+            cwd=get_repo_folder(repo),
         )
-        committers = subprocess.run(
-            ["git", "log", "--format=%ce", f"refs/heads/{bundle}", "--not", "--remotes"],
-            capture_output=True,
-            check=False,
-            cwd=folder,
-            text=True,
-        ).stdout.split()
+        committers = get_others_commits(bundle, repo)
         if pushed.returncode and not committers:
             lines[repo] = "no commit of its own, never pushed"
             continue
-        me = subprocess.run(
-            ["git", "config", "user.email"],
-            capture_output=True,
-            check=False,
-            cwd=folder,
-            text=True,
-        ).stdout.strip()
-        if committers and (not me or me in committers):
-            raise Refused(f"{bundle} has commits in {repo} that no remote has")
         prs = get_branch_prs(repo, bundle)
         if not prs:
             raise Refused(
@@ -999,18 +1019,9 @@ def check_deletion(bundle):
         if committers:
             force = True
             lines[repo] += f", commits of {', '.join(sorted(set(committers)))} that no remote has"
-    for repo in get_repos() if force else []:
-        worktree = get_worktree_bundle_repo_folder(bundle, repo)
-        if os.path.isdir(worktree) and subprocess.run(
-            ["git", "status", "--porcelain"],
-            capture_output=True,
-            check=False,
-            cwd=worktree,
-            text=True,
-        ).stdout.strip():
-            raise Refused(f"{bundle} has uncommitted files in {repo}")
+    if force:
+        check_uncommitted(bundle)
     return lines, force
-    return repos
 
 
 def add_repo(caller, query, body):
@@ -1122,7 +1133,8 @@ def get_last_use(bundle):
 
 def drop_idle_reviews():
     """Delete the bundles of the PRs of others that nobody used for REVIEW_IDLE: `bctl fetch`
-    brings one back. One that holds work is kept until it is used again.
+    brings one back. One that holds work is kept until it is used again, but not one that only
+    holds the older head of a PR its author rebased since.
     """
     open_windows = get_open_windows()
     queued = {item["bundle"] for item in read_state().get("queue", [])}
@@ -1145,7 +1157,10 @@ def drop_idle_reviews():
 
         def work(log, bundle=bundle, last_use=last_use):
             try:
-                run_script(log, "delete_bundle.py", bundle)
+                force = any([get_others_commits(bundle, repo) for repo in local_branches(bundle)])
+                if force:
+                    check_uncommitted(bundle)
+                run_script(log, "delete_bundle.py", *(["--force"] if force else []), bundle)
             except Refused:
                 kept_reviews[bundle] = last_use
                 raise

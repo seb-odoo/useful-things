@@ -305,14 +305,27 @@ def check_reviews(root):
     calls, world = [], {"open": set(), "queue": []}
     bundles = (
         "master-commit-aku",
+        "master-fixed-aku",
         "master-kept-aku",
         "master-mine--seb",
         "master-old-aku",
         "master-open-aku",
         "master-queued-aku",
+        "master-rebased-aku",
         "master-recent-aku",
         "master-tab-aku",
     )
+    repo = root / "odoo"
+    git(root, "init", "--quiet", "--bare", str(root / "remote.git"))
+    git(root, "init", "--quiet", "--initial-branch=master", str(repo))
+    git(repo, "config", "user.email", "t@t")
+    git(repo, "-c", "user.name=t", "commit", "--allow-empty", "-qm", "base")
+    git(repo, "remote", "add", "odoo", str(root / "remote.git"))
+    git(repo, "push", "--quiet", "odoo", "master")
+    git(repo, "checkout", "--quiet", "-b", "master-rebased-aku")
+    commit_as_aku(repo, "before the rebase")
+    git(repo, "checkout", "--quiet", "-b", "master-fixed-aku", "master")
+    git(repo, "-c", "user.name=t", "commit", "--allow-empty", "-qm", "fix of the review")
     for bundle in bundles:
         folder = root / "master" / bundle
         (folder / "odoo").mkdir(parents=True)
@@ -333,16 +346,20 @@ def check_reviews(root):
     world["queue"].append({"bundle": "master-queued-aku"})
 
     def run_script(log, script, *args):
-        calls.append(args[0])
-        if args[0] == "master-kept-aku":
+        calls.append(args)
+        if args[-1] == "master-kept-aku":
             raise daemon.Refused("delete_bundle.py exited with 1")
-        shutil.rmtree(root / "master" / args[0])
+        shutil.rmtree(root / "master" / args[-1])
 
     daemon.CLAUDE_CONFIG_CONTAINER = str(root / "claude-config")
     daemon.STATE = root
     daemon.get_open_windows = lambda: set(world["open"])
+    daemon.get_repo_folder = lambda repo_name: str(repo)
     daemon.get_repos = lambda: ["odoo"]
     daemon.get_worktree_bundle_folder = lambda bundle: str(root / "master" / bundle)
+    daemon.get_worktree_bundle_repo_folder = lambda bundle, repo_name: str(
+        root / "master" / bundle / repo_name,
+    )
     daemon.get_worktree_container_folder = lambda: str(root)
     daemon.read_state = lambda: {"queue": world["queue"]}
     daemon.run_script = run_script
@@ -352,7 +369,13 @@ def check_reviews(root):
     checks.append(
         (
             "a bundle of others unused for 2 days goes, not one of Seb, open, queued or used since",
-            calls == ["master-kept-aku", "master-old-aku"],
+            calls[:2] == [("master-kept-aku",), ("master-old-aku",)],
+        ),
+    )
+    checks.append(
+        (
+            "the older head of a rebased PR goes with --force, a commit of Seb keeps the bundle",
+            calls[2:] == [("--force", "master-rebased-aku")],
         ),
     )
     calls.clear()
@@ -366,7 +389,7 @@ def check_reviews(root):
     daemon.drop_idle_reviews()
     wait_jobs()
     checks.append(
-        ("it is tried again once used, and unused for 2 days", calls == ["master-kept-aku"]),
+        ("it is tried again once used, and unused for 2 days", calls == [("master-kept-aku",)]),
     )
     return [name for name, passed in checks if not passed], len(checks)
 
