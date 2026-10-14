@@ -29,6 +29,7 @@ from utils import RemoteRefManager, UtilsRunner
 from agents import read_state
 from branch_status import (
     AGENT_WORKING,
+    FW_BOT,
     get_bundle_agent,
     get_github_repo,
     get_local_branches,
@@ -50,7 +51,6 @@ from commands import (
 )
 from delete_bundle import delete_bundle
 
-FW_BOT = "fw-bot"
 FW_TIP_MESSAGE = "is the last of the forward-port chain"
 R_PLUS = re.compile(r"@robodoo\b.*\br\+")
 

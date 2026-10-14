@@ -60,6 +60,7 @@ AUTO_ASKED_STYLES = ((7 * 86400, "red"), (86400, "yellow"), (0, "dim"))
 BEHIND_STYLES = ((501, "red"), (150, "yellow"), (0, "default"))
 CI_RUNNING = "[dim]ci running[/dim]"
 DELEGATE = re.compile(r"@robodoo\b.*\bdelegate[+=]")
+FW_BOT = "fw-bot"
 GROUPS = {
     "open": "Running",
     "me": "Waits on me",
@@ -171,7 +172,8 @@ def read_prs(pairs):
             f'p{i}: repository(owner: "{owner}", name: "{name}") {{ pullRequests('
             f"headRefName: {json.dumps(branch)}, first: 1, "
             "orderBy: {field: CREATED_AT, direction: DESC}) "
-            "{ nodes { createdAt headRefOid isDraft number reviewDecision state url "
+            "{ nodes { author { login } createdAt headRefName headRefOid isDraft number "
+            "reviewDecision state url "
             "comments(last: 30) { nodes { author { login } body createdAt } } "
             "reviews(last: 30) { nodes { body } } "
             "timelineItems(last: 20, itemTypes: [REVIEW_REQUESTED_EVENT]) { nodes { "
@@ -333,6 +335,14 @@ def get_batch(context):
     return int(match[1]) if match else None
 
 
+def is_mine(pr):
+    """Whether I opened the PR, or fw-bot did as a forward-port of one of mine."""
+    author = (pr["author"] or {}).get("login")
+    return author == pr["viewer"] or (
+        author == FW_BOT and f"{BUNDLE_SUFFIX}-" in pr["headRefName"]
+    )
+
+
 def get_pr_facts(pr, repo, now):
     state = "draft" if pr["isDraft"] and pr["state"] == "OPEN" else pr["state"].lower()
     if pr["mergebot"] == "merged":
@@ -374,6 +384,7 @@ def get_pr_facts(pr, repo, now):
         ],
         "head": pr["headRefOid"],
         "mergebot": pr["mergebot"],
+        "mine": is_mine(pr),
         "number": pr["number"],
         "open": pr["state"] == "OPEN",
         "pending": bool(ci_not_started or running),
@@ -621,13 +632,34 @@ def get_merged_bundles(bundles):
     ]
 
 
+def delete_merged_branch(repo, branch, pr):
+    """Delete the branch of my merged PR on the dev remote while it is at the PR head: a failure."""
+    remote = get_remote_dev_repo(repo)
+    res = subprocess.run(
+        [
+            "git",
+            "push",
+            f"--force-with-lease=refs/heads/{branch}:{pr['head']}",
+            remote,
+            f":refs/heads/{branch}",
+        ],
+        capture_output=True,
+        check=False,
+        cwd=get_repo_folder(repo),
+        text=True,
+    )
+    if res.returncode and "(stale info)" not in res.stderr:
+        return f"Merged branch left on {remote}, {repo}/{branch}: {res.stderr.strip()}"
+    return None
+
+
 def delete_merged(bundles):
-    """Delete the merged bundles with no uncommitted file: their PRs by name, and a failure."""
+    """Delete the merged bundles with no uncommitted file: their PRs by name, and the failures."""
     merged = get_merged_bundles(bundles)
     if not merged:
-        return {}, None
+        return {}, []
     runner = UtilsRunner(live=Live("", auto_refresh=False, console=Console(quiet=True)))
-    failure = None
+    failures = []
     with redirect_stdout(io.StringIO()):
         try:
             names = [
@@ -640,17 +672,32 @@ def delete_merged(bundles):
             ]
             delete_bundles(runner, bundle_names=names, force=True)
         except subprocess.CalledProcessError as error:
-            failure = f"{' '.join(error.cmd)}: {(error.stderr or '').strip()}"
-    return {
-        bundle["bundle"]: [
-            f"{repo}#{row['pr']['number']}" for repo, row in bundle["repos"].items() if row["pr"]
-        ]
+            failures.append(
+                f"Merged bundles not all deleted, {' '.join(error.cmd)}: "
+                f"{(error.stderr or '').strip()}",
+            )
+    deleted = [
+        bundle
         for bundle in merged
         if all(
             git(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{bundle['bundle']}") is None
             for repo in bundle["repos"]
         )
-    }, failure
+    ]
+    pushes = [
+        (repo, bundle["bundle"], row["pr"])
+        for bundle in deleted
+        for repo, row in bundle["repos"].items()
+        if row["pr"] and row["pr"]["mine"]
+    ]
+    with ThreadPoolExecutor(max_workers=max(len(pushes), 1)) as executor:
+        failures += filter(None, executor.map(lambda push: delete_merged_branch(*push), pushes))
+    return {
+        bundle["bundle"]: [
+            f"{repo}#{row['pr']['number']}" for repo, row in bundle["repos"].items() if row["pr"]
+        ]
+        for bundle in deleted
+    }, failures
 
 
 def get_rows(bundle, group, now):
@@ -695,13 +742,13 @@ def main():
     args = parser.parse_args()
     if args.json:
         bundles, errors = get_bundles()
-        deleted, failure = delete_merged(bundles)
+        deleted, failures = delete_merged(bundles)
         print(
             json.dumps(
                 {
                     "bundles": [bundle for bundle in bundles if bundle["bundle"] not in deleted],
                     "deleted": deleted,
-                    "errors": errors + [failure] * bool(failure),
+                    "errors": errors + failures,
                 },
             ),
         )
@@ -710,7 +757,7 @@ def main():
     console = Console()
     with console.status("Reading branches and PRs"):
         bundles, errors = get_bundles()
-        deleted, failure = delete_merged(bundles)
+        deleted, failures = delete_merged(bundles)
     now = time.time()
     groups = {group: [] for group in GROUPS}
     counts = dict.fromkeys(GROUPS, 0)
@@ -742,8 +789,8 @@ def main():
     console.print(table)
     for bundle, prs in deleted.items():
         console.print(f"[magenta]Deleted[/magenta] {bundle}, merged: {', '.join(prs)}")
-    if failure:
-        console.print(f"[red]Merged bundles not all deleted[/red], {failure}")
+    for failure in failures:
+        console.print(f"[red]{failure}[/red]")
     for error in errors:
         console.print(f"[yellow]PR state incomplete[/yellow], {error}")
 

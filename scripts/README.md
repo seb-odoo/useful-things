@@ -333,8 +333,10 @@ A bundle left with merged PRs and such checkouts only is deleted, worktrees and 
 and named under the table: `Deleted <bundle>, merged: odoo#N`. Merged is what mergebot says, or
 GitHub for a repo mergebot does not merge. The bundle stays, its PR in magenta, while its dev
 container runs, an agent works on it, a worktree holds uncommitted files, or its branch holds a
-commit the PR head does not. Its branch on the dev remote is left to mergebot, which deletes it
-within hours. `test_merged_bundles.py` runs each case on scratch repos.
+commit the PR head does not. Its branch on the dev remote goes with it when the PR is mine (or a
+forward-port of mine) and the branch is still at the PR head: fw-bot deletes it only 7 days after
+the merge, and a branch pushed again since, for a new PR, stays. `test_merged_bundles.py` runs
+each case on scratch repos.
 
 `--json` prints the same data for a script: per bundle its group, issue, handled, open state and agent, per
 repo its head, push, behind, conflict and PR, and under `deleted` the PRs of each bundle it

@@ -43,6 +43,8 @@ def main():
             git(folder, "commit", "--allow-empty", "-m", "base")
             git(folder, "push", "odoo", "HEAD:refs/heads/master")
             git(folder, "fetch", "odoo")
+            git(root, "init", "--bare", f"{repo}-odoo-dev.git")
+            git(folder, "remote", "add", "odoo-dev", f"{root}/{repo}-odoo-dev.git")
 
         def make(bundle, repo, commits=1):
             os.makedirs(commands.get_worktree_bundle_folder(bundle), exist_ok=True)
@@ -52,10 +54,20 @@ def main():
             folder = commands.get_worktree_bundle_repo_folder(bundle, repo)
             for i in range(commits):
                 git(folder, "commit", "--allow-empty", "-m", f"work {i}")
+            if commits:
+                git(folder, "push", "odoo-dev", f"HEAD:refs/heads/{bundle}")
             return git(folder, "rev-parse", "HEAD")
 
-        def row(head, state="merged", pr_head=None):
-            pr = {"head": pr_head or head, "number": 1, "state": state}
+        def push_after(bundle, repo, head):
+            folder = commands.get_worktree_bundle_repo_folder(bundle, repo)
+            git(folder, "commit", "--allow-empty", "-m", "pushed from elsewhere")
+            git(folder, "push", "odoo-dev", f"HEAD:refs/heads/{bundle}")
+            pushed = git(folder, "rev-parse", "HEAD")
+            git(folder, "reset", "--hard", head)
+            return pushed
+
+        def row(head, state="merged", pr_head=None, mine=True):
+            pr = {"head": pr_head or head, "mine": mine, "number": 1, "state": state}
             return {"empty": False, "head": head, "pr": pr}
 
         def empty(head):
@@ -68,11 +80,13 @@ def main():
         head = make("master-same-head", "odoo")
         bundles.append(bundle("master-same-head", {"odoo": row(head)}))
         head = make("master-pr-follows", "odoo")
-        folder = commands.get_worktree_bundle_repo_folder("master-pr-follows", "odoo")
-        git(folder, "commit", "--allow-empty", "-m", "pushed from elsewhere")
-        pr_head = git(folder, "rev-parse", "HEAD")
-        git(folder, "reset", "--hard", head)
+        pr_head = push_after("master-pr-follows", "odoo", head)
         bundles.append(bundle("master-pr-follows", {"odoo": row(head, pr_head=pr_head)}))
+        head = make("master-dev-moved", "odoo")
+        push_after("master-dev-moved", "odoo", head)
+        bundles.append(bundle("master-dev-moved", {"odoo": row(head)}))
+        head = make("master-not-mine", "odoo")
+        bundles.append(bundle("master-not-mine", {"odoo": row(head, mine=False)}))
         head = make("master-local-after", "odoo", commits=2)
         pr_head = git(commands.get_repo_folder("odoo"), "rev-parse", f"{head}~1")
         bundles.append(bundle("master-local-after", {"odoo": row(head, pr_head=pr_head)}))
@@ -107,11 +121,12 @@ def main():
 
         output = io.StringIO()
         with redirect_stdout(output):
-            deleted, failure = branch_status.delete_merged(bundles)
-        expected = ["master-pr-follows", "master-same-head", "master-with-empty"]
+            deleted, failures = branch_status.delete_merged(bundles)
+        dev_deleted = ["master-pr-follows", "master-same-head", "master-with-empty"]
+        expected = sorted([*dev_deleted, "master-dev-moved", "master-not-mine"])
         found["bundles deleted"] = (sorted(deleted), expected)
         found["PRs named per deleted bundle"] = (deleted.get("master-same-head"), ["odoo#1"])
-        found["failure"] = (failure, None)
+        found["failures"] = (failures, [])
         found["output of the deletion"] = (output.getvalue(), "")
         for item in bundles:
             name = item["bundle"]
@@ -123,10 +138,30 @@ def main():
                 ],
                 [] if name in expected else sorted(item["repos"]),
             )
+            found[f"{name}: dev branches left"] = (
+                [
+                    repo
+                    for repo in item["repos"]
+                    if git(commands.get_repo_folder(repo), "ls-remote", "--heads", "odoo-dev", name)
+                ],
+                []
+                if name in dev_deleted
+                else [repo for repo, data in sorted(item["repos"].items()) if not data["empty"]],
+            )
             found[f"{name}: folder left"] = (
                 os.path.isdir(commands.get_worktree_bundle_folder(name)),
                 name not in expected,
             )
+    chain = f"20.0-master-x{branch_status.BUNDLE_SUFFIX}-123-fw"
+    for case, author, head, expected in (
+        ("my PR", "me", "master-x", True),
+        ("fw-bot hop of mine", branch_status.FW_BOT, chain, True),
+        ("fw-bot hop of another", branch_status.FW_BOT, "20.0-master-x--other-123-fw", False),
+        ("PR of another", "other", "master-x", False),
+        ("PR of a deleted account", None, "master-x", False),
+    ):
+        pr = {"author": author and {"login": author}, "headRefName": head, "viewer": "me"}
+        found[f"mine: {case}"] = (branch_status.is_mine(pr), expected)
     failures = [
         f"{case}: {got!r}, expected {expected!r}"
         for case, (got, expected) in found.items()
