@@ -77,7 +77,9 @@ def get_rank(title):
 
 
 def get_agent_bundles():
-    """The bundles whose claude runs in a terminal: agent-terminal.py BUNDLE ends with it."""
+    """The bundles whose claude runs in a terminal: agent-terminal.py BUNDLE ends with it. The
+    agent-terminator.py of the window holds the same words as COMMAND for as long as the window
+    lives."""
     bundles = set()
     for path in pathlib.Path("/proc").glob("[0-9]*/cmdline"):
         try:
@@ -85,7 +87,7 @@ def get_agent_bundles():
         except OSError:
             continue
         scripts = [at for at, arg in enumerate(args) if arg.endswith("agent-terminal.py")]
-        if scripts:
+        if scripts and not any(arg.endswith("agent-terminator.py") for arg in args):
             bundles.add(args[scripts[0] + 1])
     return bundles
 

@@ -86,6 +86,14 @@ def start_agent(name):
     return subprocess.Popen([sys.executable, "-c", code, str(HERE / "agent-terminal.py"), name])
 
 
+def start_window(name):
+    """The agent-terminator.py of a window, which holds agent-terminal.py NAME as its COMMAND."""
+    code = "import time; time.sleep(60)"
+    terminal = [sys.executable, str(HERE / "agent-terminal.py"), name]
+    command = [sys.executable, "-c", code, str(HERE / "agent-terminator.py"), name, *terminal]
+    return subprocess.Popen(command)
+
+
 def get_new_ops():
     """The command a pick of the first row starts, in this process: a real bctl reaches the
     daemon."""
@@ -115,6 +123,7 @@ def main():
         write_fake(folder, "xdg-open", f'echo xdg-open "$@" >> {log}; echo code --folder-uri x')
         write_fake(folder, "rofi", f'for arg in "$@"; do echo "[$arg]"; done > {folder}/rofi.log')
         agents = {name: start_agent(name) for name in AGENTS}
+        windows = [start_window(name) for name in AGENTS]
         run(folder, "--show")
         found = (folder / "rofi.log").read_text().split()
         if found != SHOWN:
@@ -157,7 +166,7 @@ def main():
         counts = run(folder, "--counts").splitlines()
         if counts[:1] != ["⏳ 1"]:
             failures.append(f"counts once nothing waits {counts!r}, expected ⏳ 1")
-        for agent in agents.values():
+        for agent in [*agents.values(), *windows]:
             agent.kill()
             agent.wait()
         counts = run(folder, "--counts").splitlines()
