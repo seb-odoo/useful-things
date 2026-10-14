@@ -19,6 +19,7 @@ import re
 import secrets
 import shlex
 import shutil
+import signal
 import socket
 import socketserver
 import struct
@@ -45,7 +46,9 @@ from agents import (  # noqa: E402
     get_agent_folder,
     get_bundle_container,
     get_mtime,
+    get_resume,
     get_transcript,
+    get_window_pids,
     has_window,
     is_agent_running,
     read_state,
@@ -115,6 +118,7 @@ DISK_WARN = float(
 )
 EFFORTS = ("low", "medium", "high", "xhigh")
 GITHUB_OWNER = re.compile(r"[A-Za-z0-9-]{1,39}")
+GO_ON = "Continue from where you left off."
 HELD = load_held()
 HELD_DIR = STATE / "held"
 HELD_LETTER = "b"
@@ -132,6 +136,7 @@ MAX_TASK = 32 * 1024
 MAX_WIDTH = 400
 MODELS = ("haiku", "opus", "sonnet")
 NAME = re.compile(r"[a-z0-9](?:[a-z0-9.]|-(?!-)){0,79}")
+OPS_OPEN = "ops-window-open"
 REVIEW_CHECK = 3600
 REVIEW_IDLE = 86400 * float(
     os.environ.get("BUNDLE_CTL_REVIEW_IDLE_DAYS") or CONFIG.get("BUNDLE_CTL_REVIEW_IDLE_DAYS") or 2,
@@ -154,6 +159,7 @@ SESSION_VARIABLES = (
 )
 SOCKET = STATE / "sock" / "ctl.sock"
 START_CHECK = 10
+WINDOW_CLOSE_WAIT = 30
 
 disk_warning = {}
 folder_by_container = {}
@@ -1256,20 +1262,51 @@ def fetch(caller, query, body):
 
 
 def check_ops_session(bundle, body):
-    """Why the session of a tab of the ops window cannot move to an ops agent window."""
+    """Why a session of the ops container cannot move to an ops agent window, or without
+    `terminal` to a tab of the ops window."""
     session = bundle.removeprefix(OPS)
-    if not SESSION_ID.fullmatch(session) or body != {"bundle": bundle, "terminal": True}:
-        raise ValueError(f"{OPS}SESSION: a session id, with terminal only")
+    bodies = ({"bundle": bundle}, {"bundle": bundle, "terminal": True})
+    if not SESSION_ID.fullmatch(session) or body not in bodies:
+        raise ValueError(f"{OPS}SESSION: a session id, alone or with terminal")
     if not get_transcript(session):
         raise Refused(f"{bundle}: no conversation to go on with")
-    if is_agent_running(bundle):
+    if body.get("terminal") and is_agent_running(bundle):
         raise Refused(f"{bundle}: already in a window")
+
+
+def move_to_tab(log, bundle):
+    """Close the ops agent window of a session, and leave the session to the ops-window extension,
+    which opens it in a tab of the ops window. The storage of the Claude extension is the one
+    folder of the ops container that the host writes too."""
+    log.write(f"moving {bundle} to a tab of the ops window\n")
+    log.flush()
+    for pid in get_window_pids(bundle):
+        try:
+            os.kill(pid, signal.SIGUSR1)
+        except ProcessLookupError:
+            pass
+    deadline = time.monotonic() + WINDOW_CLOSE_WAIT
+    while is_agent_running(bundle):
+        if time.monotonic() > deadline:
+            raise Refused(f"{bundle}: its agent window still runs the session")
+        time.sleep(0.5)
+    session = bundle.removeprefix(OPS)
+    mode, cut = get_resume(get_transcript(session))
+    storage = pathlib.Path(CLAUDE_CONFIG_CONTAINER) / os.path.basename(HOST_FOLDER)
+    storage /= "extension-storage"
+    if mode:
+        (storage / "session-permission-modes").mkdir(parents=True, exist_ok=True)
+        seed = {"mode": mode, "updatedAt": int(time.time() * 1000)}
+        (storage / "session-permission-modes" / f"{session}.json").write_text(json.dumps(seed))
+    (storage / OPS_OPEN).mkdir(parents=True, exist_ok=True)
+    (storage / OPS_OPEN / session).write_text(GO_ON if cut else "")
 
 
 def open_ops(caller, bundle, body):
     """The ops window, or with a task or `terminal` a new ops agent window, at once: no cap and no
     queue, as for a tab of the ops window. ops-SESSION with `terminal` goes on with the session of
-    a tab in an ops agent window. A bundle may not ask, as its task would run where hctl is."""
+    a tab in an ops agent window, and alone with the session of an ops agent window in a tab. A
+    bundle may not ask, as its task would run where hctl is."""
     if caller != HOST or not HOST_FOLDER:
         raise Refused("ops: only the host and the ops container open it")
     if bundle != "ops":
@@ -1286,6 +1323,10 @@ def open_ops(caller, bundle, body):
     def work(log):
         if name == "ops":
             open_window(log, name)
+            return {"bundle": name}
+        if bundle != "ops" and not body.get("terminal"):
+            move_to_tab(log, name)
+            open_window(log, "ops")
             return {"bundle": name}
         if task:
             get_agent_folder(name).mkdir(parents=True)

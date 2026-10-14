@@ -33,7 +33,6 @@ stops it, and a closed terminal stops its own claude.
 
 import contextlib
 import fcntl
-import importlib.util
 import json
 import os
 import pathlib
@@ -55,6 +54,7 @@ from agents import (  # noqa: E402
     get_agent_folder,
     get_bundle_container,
     get_container,
+    get_resume,
     get_transcript,
     has_window,
     read_text,
@@ -267,19 +267,10 @@ def leave_window(agent, bundle):
         (agent / "close-window").unlink(missing_ok=True)
     # A window opened later opens its tab on the session again.
     (agent / "tab-opened").unlink(missing_ok=True)
-    takeover = load_takeover()
-    transcript = TRANSCRIPTS / f"{read_text(agent / 'session')}.jsonl"
-    if mode := takeover.get_mode(transcript):
+    mode, cut = get_resume(TRANSCRIPTS / f"{read_text(agent / 'session')}.jsonl")
+    if mode:
         (agent / "mode").write_text(mode)
-    author, kinds = takeover.get_last_message(takeover.read_entries(transcript))
-    return container, author == "user" or "tool_use" in kinds
-
-
-def load_takeover():
-    spec = importlib.util.spec_from_file_location("takeover", HERE / "client" / "agent-takeover.py")
-    takeover = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(takeover)
-    return takeover
+    return container, cut
 
 
 def get_ops_start(session, task):
@@ -289,10 +280,7 @@ def get_ops_start(session, task):
     if not transcript:
         start = ["--session-id", session, "--permission-mode", "auto"]
         return start + (["--", task] if task else [])
-    takeover = load_takeover()
-    mode = takeover.get_mode(transcript)
-    author, kinds = takeover.get_last_message(takeover.read_entries(transcript))
-    cut = author == "user" or "tool_use" in kinds
+    mode, cut = get_resume(transcript)
     start = ["--resume", session, "--permission-mode", mode if mode in MODES else "auto"]
     return start + (["--", GO_ON] if cut else [])
 
@@ -332,7 +320,8 @@ def run_ops(name):
     except HangUp:
         # podman exec does not pass the hang-up on: the claude of the container still runs.
         if container:
-            stop_claude = ["pkill", "-f", session]
+            # Its parent is 0, as podman exec started it: a tab may hold the session too.
+            stop_claude = ["pkill", "--parent", "0", "-f", session]
             subprocess.run(["podman", "exec", "--user", USER, container, *stop_claude], check=False)
         raise
     except Failure as error:

@@ -362,7 +362,8 @@ unset file
 # Say that a shell of an agent window runs on the host, as the prompt only shows a path.
 if [[ $- == *i* && "${BUNDLE_CTL_AGENT_WINDOW:-}" == ops-* ]]; then
 	printf 'On the host, outside the ops container.\n'
-	printf '\e]8;;odoo-bundle://ops\e\\orepo\e]8;;\e\\ opens its VS Code window.\n'
+	printf '\e]8;;odoo-bundle://%s\e\\orepo\e]8;;\e\\ opens its VS Code window, and a click here moves this session there.\n' \
+		"${BUNDLE_CTL_AGENT_WINDOW}"
 	unset BUNDLE_CTL_AGENT_WINDOW
 elif [[ $- == *i* && -n "${BUNDLE_CTL_AGENT_WINDOW:-}" ]]; then
 	printf 'On the host, outside the container of %s.\n' "${BUNDLE_CTL_AGENT_WINDOW}"

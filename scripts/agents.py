@@ -3,6 +3,7 @@
 Read by the bundle-ctl daemon and by branch_status.py.
 """
 
+import importlib.util
 import json
 import os
 import pathlib
@@ -21,6 +22,7 @@ SESSION_ID = re.compile(r"[0-9a-f-]{36}")
 SESSIONS = pathlib.Path.home() / ".claude" / "projects" / "-workspace"
 STATE = pathlib.Path(STATE_ROOT) / "bundle-ctl"
 STATE_FILE = STATE / "state.json"
+TAKEOVER = pathlib.Path(__file__).resolve().parent.parent / "bundle-ctl/client/agent-takeover.py"
 
 title_by_session = {}
 
@@ -44,6 +46,16 @@ def get_transcript(session):
     return next(PROJECTS.glob(f"*/{session}.jsonl"), None)
 
 
+def get_resume(transcript):
+    """The permission mode a session last ran in, and whether its turn was cut: its last message
+    is a prompt, or a tool call with no result."""
+    spec = importlib.util.spec_from_file_location("takeover", TAKEOVER)
+    takeover = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(takeover)
+    author, kinds = takeover.get_last_message(takeover.read_entries(transcript))
+    return takeover.get_mode(transcript), author == "user" or "tool_use" in kinds
+
+
 def is_agent_running(bundle):
     """Whether the agent of a bundle or an ops window runs: agent-terminal.py BUNDLE, its shell
     aside. The agent-terminator.py of the window holds the same words as COMMAND, and does not
@@ -60,6 +72,19 @@ def is_agent_running(bundle):
         if any(arg.endswith(b"agent-terminal.py") for arg in args):
             return True
     return False
+
+
+def get_window_pids(bundle):
+    """The agent-terminator.py processes that hold an agent window of a bundle or an ops window."""
+    pids = []
+    for path in pathlib.Path("/proc").glob("[0-9]*/cmdline"):
+        try:
+            args = path.read_bytes().split(b"\0")
+        except OSError:
+            continue
+        if bundle.encode() in args and any(arg.endswith(b"agent-terminator.py") for arg in args):
+            pids.append(int(path.parent.name))
+    return pids
 
 
 def is_handled(bundle, news):

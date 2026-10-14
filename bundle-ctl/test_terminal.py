@@ -265,10 +265,12 @@ def check_ops_quit(case):
 
 
 def check_ops_close(case):
+    """A closed ops window stops its own claude, the one podman exec started, and not the claude
+    of a tab on the same session."""
     case.check("claude runs", wait(case.runs))
     os.close(case.terminal.fd)
     case.check("closing the terminal ends it", wait(case.terminal.has_ended))
-    stopped = wait(lambda: "exec --user vscode c1 pkill -f s2" in case.log())
+    stopped = wait(lambda: "exec --user vscode c1 pkill --parent 0 -f s2" in case.log())
     case.check("closing the terminal stops its claude", stopped)
     case.check("closing the terminal keeps the ops container", "stop c1" not in case.log())
 

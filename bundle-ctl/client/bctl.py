@@ -39,7 +39,8 @@ session, minimized: only the bundle itself or the host may ask it.
 open ops opens the VS Code window of the ops container, and with a task or --terminal a new Claude
 session of that container in an agent window of its own, at once. open ops-SESSION --terminal goes
 on with that session in an agent window, once nothing runs it: a session moved from a tab of the
-ops window. Only the host and the ops container may ask them.
+ops window. open ops-SESSION alone closes the agent window of that session and goes on with it in a
+tab of the ops window. Only the host and the ops container may ask them.
 
 branches is gbs run on the host: the table, or with --json the data agents read.
 

@@ -35,7 +35,7 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `POST /delete` | the deletion of a bundle, held for Seb's yes in `hok` (see Deletion); a container asks for its own only |
 | `GET /held` | what became of a deletion this caller asked (`?id=bN`): it waits, or what Seb said in `hok`; `?wait=S` long-polls it, 50 s at most |
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window, or with a task its agent; refused when the bundle is here, a branch has unpushed commits or the disk is short |
-| `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle. On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window (see Ops agents) |
+| `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle. On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents) |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
 | `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, and the memory left on the host, `short` when a start would add to a host that already lacks it |
 | `POST /force-queue` | the tasks queued now may start over the cap; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
@@ -358,9 +358,20 @@ where `hctl` is.
   container, on a session that has a transcript and no `agent-terminal.py` running it. The window
   resumes the session in the mode of the tab, with `Continue from where you left off.` when the tab
   cut a turn, and opens minimized, as any agent window that takes a session.
+- The way back is the `orepo` link that the shell of the window prints, `odoo-bundle://ops-SESSION`
+  (Seb, 2026-10-14: "should automatically close the existing terminal on that agent"): `bctl open
+  ops-SESSION`. The daemon closes the window (SIGUSR1 to its `agent-terminator.py`), waits up to
+  30 s for its claude to end, writes the mode of the session and `ops-window-open/SESSION` in the
+  storage of the Claude extension of the ops container, and opens the ops window. The ops-window
+  extension of host-ctl opens the tab within 2 s, with `Continue from where you left off.` in its
+  input when the window cut a turn. Opening the ops window by hand moves no session: the ops agent
+  windows share its container.
+- A tab of the ops window that resumes the session from its list closes the window within a second
+  (a `claude-vscode` record of the session). The window stops only its own claude, the one `podman
+  exec` started (parent pid 0).
 
-A window closed ends its session: the conversation goes on from the `/resume` list of a tab, or in
-a window again with `bctl open ops-SESSION --terminal`.
+A window closed ends its session: the conversation goes on from the `/resume` list of a tab, in a
+tab with `bctl open ops-SESSION`, or in a window again with `bctl open ops-SESSION --terminal`.
 
 ## Agent windows
 

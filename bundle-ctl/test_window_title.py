@@ -129,7 +129,8 @@ def get_followed(home):
     then ends on a verdict, and when the run fails before its claude starts. A claude of the
     bundle started before the window does not count. Then how its terminator ends on SIGUSR1,
     which agent-terminal.py sends after a takeover. Last, an ops window opened with no task: its
-    title follows the title of the conversation, and loses its mark once its claude ended."""
+    title follows the title of the conversation, and loses its mark once its claude ended. It
+    closes once a tab of the ops VS Code window resumes its session."""
     spec = importlib.util.spec_from_file_location("terminator", HERE / "agent-terminator.py")
     terminator = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(terminator)
@@ -200,7 +201,16 @@ def get_followed(home):
     window = subprocess.Popen(["sleep", "30"])
     threading.Timer(0.3, os.kill, (os.getpid(), signal.SIGUSR1)).start()
     closed = terminator.follow(BUNDLE, window, time.time() * 1000)
-    return titles, closed
+
+    def open_tab():
+        time.sleep(0.3)
+        tab = {"entrypoint": "claude-vscode", "sessionId": "report", "startedAt": time.time() * 1000}
+        (ops_sessions / "16.json").write_text(json.dumps(tab))
+
+    window = subprocess.Popen(["sleep", "30"])
+    threading.Thread(target=open_tab, daemon=True).start()
+    taken = terminator.follow("ops-report", window, time.time() * 1000)
+    return titles, closed, taken
 
 
 def get_configs(home):
@@ -265,15 +275,17 @@ def main():
         failures += get_loaded()
         failures += get_configs(home)
         failures += get_running()
-        titles, closed = get_followed(home)
+        titles, closed, taken = get_followed(home)
         for found, expected in zip(titles, FOLLOWED, strict=True):
             if found != expected:
                 failures.append(f"agent-terminator.py: titled {found}, expected {expected}")
         if closed != -signal.SIGTERM:
             failures.append(f"agent-terminator.py: SIGUSR1 left its terminator on {closed}")
+        if taken != -signal.SIGTERM:
+            failures.append(f"agent-terminator.py: a tab on its session left it on {taken}")
     for line in failures:
         print(line)
-    cases = len(MARKS) + len(OPS_MARKS) + len(CONFIGS) + len(FOLLOWED) + 5
+    cases = len(MARKS) + len(OPS_MARKS) + len(CONFIGS) + len(FOLLOWED) + 6
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

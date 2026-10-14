@@ -24,7 +24,8 @@ not bound: the copy of the config unbinds it.
 An ops agent window (ops-SESSION) follows the record of that session in the sessions folder of
 the ops container, and the title of its conversation, which changes with no change of status. Its mark goes once its claude ended, as the window list cannot tell which ops
 window has an agent left. Opened on a new session with no task, it waits for Seb's first prompt:
-it shows in front.
+it shows in front. When a tab of the ops VS Code window resumes its session, the window closes, as
+two claude processes on one session would each go on from where they loaded it.
 """
 
 import json
@@ -145,6 +146,9 @@ def follow(bundle, terminator, since):
         except subprocess.TimeoutExpired:
             pass
         record = get_record(bundle, since)
+        if record and record.get("entrypoint") == "claude-vscode":
+            terminator.terminate()
+            continue
         if bundle.startswith(OPS) and time.monotonic() - refreshed >= REFRESH:
             refreshed, shown = time.monotonic(), None
             ended = ended or (bool(record) and not is_agent_running(bundle))
