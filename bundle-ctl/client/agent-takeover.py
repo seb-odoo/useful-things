@@ -7,8 +7,9 @@ terminal (agent-terminal.py). It stops that `claude` where the tab can go on, th
 
 - a tool call is in flight: at once. The tab reruns that turn after one window reload, as for a run
   agent-run.sh stopped at its first tool call;
-- the session is idle, as it is after its verdict: at once, with .agent/restarted, so that the
-  window is not reloaded;
+- the session is idle, as it is after its verdict, or its turn ended on a background command (a
+  review watching its PR): at once, with .agent/restarted, so that the window is not reloaded.
+  That command ends with the terminal's claude;
 - else at the first of the two.
 
 agent-terminal.py starts it the same way when another terminal opens on the bundle: that terminal
@@ -155,7 +156,7 @@ def main():
             rerun = author == "assistant" and "tool_use" in kinds
             status = get_status(session, pid)
             at_rest = status is None and not rerun and is_at_rest(transcript, author)
-            if rerun or not is_alive(pid) or status == "idle" or at_rest:
+            if rerun or not is_alive(pid) or status in ("idle", "shell") or at_rest:
                 break
             if time.monotonic() > deadline:
                 rerun = True

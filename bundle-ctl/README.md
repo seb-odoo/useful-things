@@ -313,8 +313,10 @@ A VS Code window opened on the bundle (the folder icon of `gbs`, `ocode`) attach
 container and takes the session over, before or after its verdict: claude-autoopen sees
 `.agent/terminal` and runs `client/agent-takeover.py`. It stops the terminal's claude at once when
 a tool call is in flight or the session is idle, else at the first of the two, and writes
-`handoff`. A session with no record counts as idle once its last turn ended 2 minutes ago: two
-containers whose claude has the same pid write the same `sessions/<pid>.json`. The terminal window closes, its shell too, and from
+`handoff`. A turn that ended on a background command (`shell`, the PR watch of a review) counts as
+idle: that command ends with the terminal's claude. A session with no record counts as idle once its last turn ended 2 minutes ago: two
+containers whose claude has the same pid write the same `sessions/<pid>.json`. `python3
+test_takeover.py` runs each case. The terminal window closes, its shell too, and from
 there on the bundle has an agent window (below): the tab opens on the session and, for a stopped
 tool call, reruns the turn after one reload. The container then lives as long as that window.
 
