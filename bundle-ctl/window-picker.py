@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""List the bundles not open in VS Code and the other windows for rofi, the bundles first by the
-mark of their title, and bring the one picked to the front.
+"""List the bundles not open in VS Code, the ops agent windows and the other windows for rofi, the
+bundles and the ops windows first by the mark of their title, and bring the one picked to the
+front.
 
     window-picker.py --show
     window-picker.py --counts
@@ -19,6 +20,11 @@ runs. Each mark gets a word that the search matches but the row does not show, a
 hard to type; the kind is already in words. The line above the rows counts the bundles of each
 mark. --counts prints the mark that needs Seb most with its count (PRIORITY), or 🪟 when no bundle
 has a mark, then that line, for window-applet/.
+
+An ops agent window has a row of its own, ranked by its mark, and a click brings it up: its title
+shows the title of its conversation in place of a name, and agent-terminator.py drops its mark
+once its claude ended. The first row, `➕ new ops agent`, opens a new one: bctl open ops
+--terminal.
 """
 
 import importlib.util
@@ -39,21 +45,30 @@ MARKS = (
     ("⏳", "running"),
     ("🚀", "starting"),
 )
+NEW_OPS = "➕ new ops agent"
 NO_MARK = "🪟"
 OPENING = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "bundle-ctl" / "opening"
 OPENING_TIME = 300
 PRIORITY = ("✋", "❌", "⏳", "🚀", "✅")
+QUIET = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
 SKIPPED = ("nemo-desktop.",)
 
 
-def get_title_pattern():
+def get_title_patterns():
+    """The pattern of a bundle title, and the one of an ops title, whose conversation title can
+    hold any word."""
     spec = importlib.util.spec_from_file_location("title", HERE / "client" / "window-title.py")
     title = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(title)
     marks = "|".join(re.escape(mark) for mark, _ in MARKS)
-    icons = "|".join(re.escape(icon) for icon, _, _ in title.KINDS)
-    kinds = "|".join(kind for _, kind, _ in title.KINDS)
-    return re.compile(rf"(?:(?:{marks}) )?(?:{icons}) (\S+) \((?:{kinds})\)")
+    kinds = [(icon, kind) for icon, kind, _ in title.KINDS if kind != "ops"]
+    icons = "|".join(re.escape(icon) for icon, _ in kinds)
+    words = "|".join(kind for _, kind in kinds)
+    ops = next(icon for icon, kind, _ in title.KINDS if kind == "ops")
+    return (
+        re.compile(rf"(?:(?:{marks}) )?(?:{icons}) (\S+) \((?:{words})\)"),
+        re.compile(rf"(?:(?:{marks}) )?{re.escape(ops)} .+ \(ops\)"),
+    )
 
 
 def get_rank(title):
@@ -84,13 +99,17 @@ def get_loading(name):
 
 
 def get_windows():
-    """The windows of each bundle, by kind, with the title of its row, and the other windows."""
+    """The windows of each bundle, by kind, with the title of its row, the ops agent windows, and
+    the other windows."""
     out = subprocess.run(["wmctrl", "-l", "-x"], capture_output=True, check=False, text=True)
-    pattern = get_title_pattern()
-    bundles, others = {}, []
+    pattern, ops_pattern = get_title_patterns()
+    bundles, ops, others = {}, [], []
     for line in out.stdout.splitlines():
         window, _desktop, wm_class, _host, title = (line.split(None, 4) + [""])[:5]
         if not title or wm_class.startswith(SKIPPED):
+            continue
+        if wm_class.startswith("terminator.") and ops_pattern.fullmatch(title):
+            ops.append((title, window))
             continue
         match = pattern.match(title)
         if not match:
@@ -101,7 +120,7 @@ def get_windows():
         bundle[kind] = window
         if kind == "code" or "title" not in bundle:
             bundle["title"] = match[0]
-    return bundles, others
+    return bundles, ops, others
 
 
 def pick(name, terminal):
@@ -112,8 +131,12 @@ def pick(name, terminal):
     else:
         OPENING.mkdir(parents=True, exist_ok=True)
         (OPENING / name).touch()
-        quiet = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
-        subprocess.Popen(["xdg-open", f"odoo-bundle://{name}"], start_new_session=True, **quiet)
+        subprocess.Popen(["xdg-open", f"odoo-bundle://{name}"], start_new_session=True, **QUIET)
+
+
+def open_ops():
+    command = [sys.executable, str(HERE / "client" / "bctl.py"), "open", "ops", "--terminal"]
+    subprocess.Popen(command, start_new_session=True, **QUIET)
 
 
 def main():
@@ -125,12 +148,14 @@ def main():
     retv = os.environ.get("ROFI_RETV")
     if retv in ("1", "10"):
         info = os.environ["ROFI_INFO"]
-        if info.startswith("0x"):
+        if info == "new-ops":
+            open_ops()
+        elif info.startswith("0x"):
             subprocess.run(["wmctrl", "-i", "-a", info], check=False)
         else:
             pick(info, terminal=retv == "10")
         return
-    bundles, others = get_windows()
+    bundles, ops, others = get_windows()
     for name in [name for name, bundle in bundles.items() if "code" in bundle]:
         (OPENING / name).unlink(missing_ok=True)
         del bundles[name]
@@ -143,9 +168,11 @@ def main():
             (get_rank(bundle["title"]), get_loading(name) + bundle["title"], name)
             for name, bundle in bundles.items()
         ]
+        + [(get_rank(title), title, window) for title, window in ops]
         + [(len(MARKS), title, window) for title, window in others]
     )
-    ranks = [get_rank(bundle["title"]) for bundle in bundles.values()]
+    titles = [bundle["title"] for bundle in bundles.values()] + [title for title, _ in ops]
+    ranks = [get_rank(title) for title in titles]
     counts = [f"{mark} {word} {ranks.count(rank)}" for rank, (mark, word) in enumerate(MARKS)]
     if sys.argv[1:] == ["--counts"]:
         found = {mark: ranks.count(rank) for rank, (mark, _) in enumerate(MARKS)}
@@ -155,6 +182,7 @@ def main():
     hint = "click: VS Code   right click: terminal"
     sys.stdout.write(f"\0message\x1f{'   '.join(counts)}   |   {hint}\n")
     sys.stdout.write("\0no-custom\x1ftrue\n\0use-hot-keys\x1ftrue\n")
+    sys.stdout.write(f"{NEW_OPS}\0info\x1fnew-ops\n")
     for rank, title, info in rows:
         word = MARKS[rank][1] if rank < len(MARKS) else ""
         sys.stdout.write(f"{title}\0info\x1f{info}\x1fmeta\x1f{word}\n")

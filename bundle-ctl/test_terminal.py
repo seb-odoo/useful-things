@@ -20,7 +20,7 @@ MARKERS = ("terminal", "container")
 PODMAN = """#!/bin/bash
 echo "$*" >>"$LOG"
 case "$1 $*" in
-"exec "*agent-run.sh*)
+"exec "*agent-run.sh* | "exec "*--session-id*)
 \twhile [ -d "$STATE" ]; do
 \t\t[ -e "$STATE/quit" ] && { rm -f "$STATE/quit"; exit 0; }
 \t\tsleep 0.1
@@ -53,6 +53,10 @@ def run_wrapper(root, bundle):
 
     module.up = up
     module.copy_gitconfig = lambda container: None
+    module.get_container = lambda folder: None
+    module.space_start = lambda: None
+    module.HOST_FOLDER = str(root / "host-ctl")
+    module.REPO_ROOT = str(root)
     module.get_agent_folder = lambda name: root / name / ".agent"
     module.get_worktree_bundle_folder = lambda name: str(root / name)
     module.has_window = lambda container: bool(os.environ.get("WINDOW")) or (
@@ -74,11 +78,11 @@ def wait(condition, timeout=8):
 
 
 class Terminal:
-    def __init__(self, root, env):
+    def __init__(self, root, env, bundle):
         self.pid, self.fd = pty.fork()
         if not self.pid:
             os.environ.update(env)
-            os.execv(sys.executable, [sys.executable, __file__, "--run", str(root), "b1"])
+            os.execv(sys.executable, [sys.executable, __file__, "--run", str(root), bundle])
         self.out = b""
 
     def read(self):
@@ -101,10 +105,11 @@ class Terminal:
 
 
 class Case:
-    def __init__(self, folder, name, window=False, tab=None, wait=None):
+    def __init__(self, folder, name, window=False, tab=None, wait=None, bundle="b1"):
         self.name = name
+        self.bundle = bundle
         self.root = pathlib.Path(folder)
-        self.agent = self.root / "b1" / ".agent"
+        self.agent = self.root / bundle / ".agent"
         (self.agent / "run.lock").mkdir(parents=True)
         (self.agent / "task.md").write_text("task\n")
         (self.agent / "session").write_text("s1\n")
@@ -133,7 +138,7 @@ class Case:
         self.terminal = self.open()
 
     def open(self):
-        terminal = Terminal(self.root, self.env)
+        terminal = Terminal(self.root, self.env, self.bundle)
         self.terminals.append(terminal)
         return terminal
 
@@ -147,7 +152,9 @@ class Case:
         return path.read_text().splitlines() if path.exists() else []
 
     def runs(self):
-        return [line for line in self.log() if line.startswith("exec") and "agent-run.sh" in line]
+        claude = ("agent-run.sh", "--session-id")
+        lines = [line for line in self.log() if line.startswith("exec")]
+        return [line for line in lines if any(word in line for word in claude)]
 
     def is_clean(self):
         return not any((self.agent / name).exists() for name in MARKERS)
@@ -241,6 +248,30 @@ def check_close_while_waiting(case):
     case.check("closing the terminal removes close-window", not close.exists())
 
 
+def check_ops_quit(case):
+    """An ops window runs a new session of its name in the ops container, on its task, in the
+    repos, and keeps that container, where other sessions work."""
+    case.check("claude runs", wait(case.runs))
+    run = case.runs()[0]
+    case.check("it starts the container", f"up {case.root / 'host-ctl'}" in case.log())
+    case.check("it starts the session of its name", " --session-id s2 " in run)
+    case.check("it runs in the repos", f" --workdir {case.root} " in run)
+    case.check("it passes the task", run.endswith(" -- task"))
+    case.check("it removes the task", not (case.agent / "task.md").exists())
+    (case.state / "quit").touch()
+    case.check("quitting claude ends it", wait(case.terminal.has_ended))
+    case.check("quitting claude keeps the ops container", "stop c1" not in case.log())
+
+
+def check_ops_close(case):
+    case.check("claude runs", wait(case.runs))
+    os.close(case.terminal.fd)
+    case.check("closing the terminal ends it", wait(case.terminal.has_ended))
+    stopped = wait(lambda: "exec --user vscode c1 pkill -f session-id s2" in case.log())
+    case.check("closing the terminal stops its claude", stopped)
+    case.check("closing the terminal keeps the ops container", "stop c1" not in case.log())
+
+
 def main():
     failures, total = [], 0
     tabs = {
@@ -250,11 +281,13 @@ def main():
         check_close_while_waiting: CUT,
     }
     checks = (check_quit, check_sigterm, check_close, check_close_window, check_handoff, *tabs)
+    checks += (check_ops_quit, check_ops_close)
     for check in checks:
         with tempfile.TemporaryDirectory() as folder:
             wait_time = 1 if check is check_window_stays else None
             window = check is check_close_window
-            case = Case(folder, check.__name__[6:], window, tabs.get(check), wait_time)
+            bundle = "ops-s2" if check.__name__.startswith("check_ops") else "b1"
+            case = Case(folder, check.__name__[6:], window, tabs.get(check), wait_time, bundle)
             try:
                 check(case)
                 case.check("its markers are gone", wait(case.is_clean))

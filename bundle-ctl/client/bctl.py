@@ -36,6 +36,10 @@ no prompt: after the X server took the windows away, for one. It is refused whil
 that session. When a VS Code window holds it, the window closes and the terminal goes on with the
 session, minimized: only the bundle itself or the host may ask it.
 
+open ops opens the VS Code window of the ops container, and with a task or --terminal a new Claude
+session of that container in an agent window of its own, at once. Only the host and the ops
+container may ask it.
+
 branches is gbs run on the host: the table, or with --json the data agents read.
 
 delete asks Seb in hok to delete a bundle, the bundle of this container when none is named (a

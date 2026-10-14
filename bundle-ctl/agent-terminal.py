@@ -20,9 +20,17 @@ Started on a bundle whose run already began, it goes on with that session and do
 task again. When another terminal holds the session, it takes it over as a window does, in the
 same container. When a VS Code window holds it, it has that window close (.agent/close-window),
 waits for the container to stop, and starts it again.
+
+    agent-terminal.py ops-SESSION
+    agent-terminal.py ops-SESSION --shell    a host shell in the repos
+
+An ops agent window runs a new Claude session in the ops container (BUNDLE_CTL_HOST_FOLDER), with
+its task as first prompt when the daemon left one. Other sessions work in that container: neither
+quitting claude nor closing the terminal stops it, and a closed terminal stops its own claude.
 """
 
 import contextlib
+import fcntl
 import importlib.util
 import json
 import os
@@ -33,24 +41,36 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
-from agents import get_agent_folder, get_bundle_container, has_window, read_text  # noqa: E402
+from agents import (  # noqa: E402
+    OPS,
+    get_agent_folder,
+    get_bundle_container,
+    get_container,
+    has_window,
+    read_text,
+)
 from commands import (  # noqa: E402
     drop_stale_containers,
     get_devcontainer_config,
     get_worktree_bundle_folder,
 )
+from config import HOST_FOLDER, REPO_ROOT  # noqa: E402
 
+CLAUDE = "/home/vscode/.claude/bin/claude"
 CLI = "ms-vscode-remote.remote-containers-*/dist/spec-node/devContainersSpecCLI.js"
 CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
 GO_ON = "Continue from where you left off."
 # Leave the alternate screen and the mouse modes a killed claude stays in, and show the cursor.
 RESET = "\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m"
+START_LOCK = pathlib.Path.home() / ".claude" / "agent-start.lock"
+START_SPACE = 10
 TAKEOVER_WAIT = 30
 TRANSCRIPTS = pathlib.Path.home() / ".claude" / "projects" / "-workspace"
 USER = "vscode"
@@ -156,9 +176,13 @@ def keep_open(ending, session=None):
 
 
 def shell(bundle):
-    """Run a shell of the host in the folder of the bundle, for Seb to type in."""
-    folder = pathlib.Path(get_worktree_bundle_folder(bundle))
-    os.chdir(folder / "odoo" if (folder / "odoo").is_dir() else folder)
+    """Run a shell of the host in the folder of the bundle, or in the repos for an ops window, for
+    Seb to type in."""
+    if bundle.startswith(OPS):
+        os.chdir(REPO_ROOT)
+    else:
+        folder = pathlib.Path(get_worktree_bundle_folder(bundle))
+        os.chdir(folder / "odoo" if (folder / "odoo").is_dir() else folder)
     program = os.environ.get("SHELL") or "bash"
     os.execvp(program, [program])
 
@@ -249,10 +273,61 @@ def leave_window(agent, bundle):
     return container, author == "user" or "tool_use" in kinds
 
 
+def space_start():
+    """Start no claude within START_SPACE seconds of another, as client/agent-run.sh: every
+    container shares ~/.claude, and claude processes started together fail each other's token
+    refresh."""
+    lock = START_LOCK.open("a")
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    timer = threading.Timer(START_SPACE, lock.close)
+    timer.daemon = True
+    timer.start()
+
+
+def run_ops(name):
+    session = name.removeprefix(OPS)
+    agent = get_agent_folder(name)
+    task = read_text(agent / "task.md")
+    (agent / "task.md").unlink(missing_ok=True)
+    signal.signal(signal.SIGHUP, stop)
+    signal.signal(signal.SIGTERM, stop)
+    container = None
+    try:
+        if not HOST_FOLDER:
+            raise Failure("no ops container: BUNDLE_CTL_HOST_FOLDER is not set")
+        container = get_container(HOST_FOLDER) or up(HOST_FOLDER)
+        copy_gitconfig(container)
+        space_start()
+        code = subprocess.run(
+            ["podman", "exec", "--interactive", "--tty", "--detach-keys=", "--user", USER]
+            + ["--workdir", REPO_ROOT, "--env", f"TERM={os.environ.get('TERM', 'xterm')}"]
+            + ["--env", "SHELL=/bin/bash", container, CLAUDE, "--session-id", session]
+            + ["--model", "opus", "--permission-mode", "auto"]
+            + (["--", task] if task else []),
+            check=False,
+        ).returncode
+    except HangUp:
+        # podman exec does not pass the hang-up on: the claude of the container still runs.
+        if container:
+            stop_claude = ["pkill", "-f", f"session-id {session}"]
+            subprocess.run(["podman", "exec", "--user", USER, container, *stop_claude], check=False)
+        raise
+    except Failure as error:
+        agent.mkdir(parents=True, exist_ok=True)
+        (agent / "done").write_text("failed\n")
+        keep_open(f"ops: {error}")
+        return
+    if code:
+        keep_open(f"ops: claude ended with code {code}")
+
+
 def main():
     bundle = sys.argv[1]
     if sys.argv[2:] == ["--shell"]:
         shell(bundle)
+        return
+    if bundle.startswith(OPS):
+        run_ops(bundle)
         return
     agent = get_agent_folder(bundle)
     if not (agent / "task.md").is_file():

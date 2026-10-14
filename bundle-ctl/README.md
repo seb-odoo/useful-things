@@ -35,7 +35,7 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `POST /delete` | the deletion of a bundle, held for Seb's yes in `hok` (see Deletion); a container asks for its own only |
 | `GET /held` | what became of a deletion this caller asked (`?id=bN`): it waits, or what Seb said in `hok`; `?wait=S` long-polls it, 50 s at most |
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window, or with a task its agent; refused when the bundle is here, a branch has unpushed commits or the disk is short |
-| `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle |
+| `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle. On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window (see Ops agents) |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
 | `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, and the memory left on the host, `short` when a start would add to a host that already lacks it |
 | `POST /force-queue` | the tasks queued now may start over the cap; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
@@ -320,6 +320,37 @@ move to another process, so the window closes and the terminal starts the contai
 
 `devcontainer/claude-config.py` marks the onboarding as done in the containers' Claude config: the
 interactive claude stops on its theme picker otherwise.
+
+## Ops agents
+
+A Claude session of the ops container (`BUNDLE_CTL_HOST_FOLDER`) can run in an agent window of
+its own too, as a tab of the ops VS Code window has no mark and no row in the window list (Seb,
+2026-10-14: "so I can handle it similarly"). `bctl open ops --terminal` opens one, waiting for a
+first prompt, and `bctl open ops --task TEXT` one on that task. `bctl open ops` alone opens the
+ops VS Code window. Only the host and the ops container may ask: the task of a bundle would run
+where `hctl` is.
+
+- The window is named `ops-SESSION`, a new session id, where a bundle window has the bundle name:
+  the terminator config, `agent-terminal.py ops-SESSION`, `BUNDLE_CTL_AGENT_WINDOW`. The task
+  waits in `~/.local/state/bundle-ctl/ops/SESSION/`, removed when the window closes.
+- `agent-terminal.py` runs `claude --session-id SESSION --model opus --permission-mode auto` in
+  the ops container, in the repos, started first when it is not up. Other sessions work in that
+  container: quitting claude or closing the window never stops it, and a closed window stops its
+  own claude (`pkill`). The shell on the right is a host shell in the repos.
+- No cap and no queue: the window opens at once, as a tab would. Opened with a task it opens
+  minimized, as any agent window; with no task it shows in front, for the first prompt.
+- The title shows the title of the conversation in place of a name, with 🔧 and `(ops)`:
+  `⏳ 🔧 Ops list layout (ops)`. The marks are those of a bundle, but for an idle session: ✅ when
+  the last answer has a Done part and neither a Decide nor a Your action part, the parts of Seb's
+  reports, ✋ otherwise (Seb, 2026-10-14). The ops records go to the host's `~/.claude/sessions`,
+  which the ops container mounts: `agent-terminator.py` looks there by session id. It reads the
+  title again every 10 seconds, and drops the mark once its claude ended.
+- `window-picker.py` lists the ops windows with the bundles, by mark, and a click brings one up.
+  Its first row, `➕ new ops agent` (Seb, 2026-10-14), runs `bctl open ops --terminal`. The applet
+  counts them with the bundles, and hides them from the task bar when minimized.
+
+A session of a VS Code tab does not move to a window, and a window closed ends its session: the
+conversation goes on from the `/resume` list of a tab.
 
 ## Agent windows
 

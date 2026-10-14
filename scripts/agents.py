@@ -15,6 +15,7 @@ from config import STATE_ROOT
 
 IDLE_AFTER = 15 * 60
 LAUNCH_GRACE = 15 * 60
+OPS = "ops-"
 SESSION_ID = re.compile(r"[0-9a-f-]{36}")
 SESSIONS = pathlib.Path.home() / ".claude" / "projects" / "-workspace"
 STATE = pathlib.Path(STATE_ROOT) / "bundle-ctl"
@@ -31,6 +32,9 @@ def read_text(path):
 
 
 def get_agent_folder(bundle):
+    """The `.agent/` folder of a bundle, or the folder of an ops agent window (ops-SESSION)."""
+    if bundle.startswith(OPS):
+        return STATE / "ops" / bundle.removeprefix(OPS)
     return pathlib.Path(get_worktree_bundle_folder(bundle)) / ".agent"
 
 
@@ -64,7 +68,11 @@ def mark_handled(bundle):
 
 def get_bundle_container(bundle):
     """The id of the bundle's running container, None when it has none."""
-    folder = get_worktree_bundle_folder(bundle)
+    return get_container(get_worktree_bundle_folder(bundle))
+
+
+def get_container(folder):
+    """The id of the running container of a folder, None when it has none."""
     out = subprocess.run(
         ["podman", "ps", "--quiet", "--filter", f"label=devcontainer.local_folder={folder}"],
         capture_output=True,

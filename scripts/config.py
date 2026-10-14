@@ -16,6 +16,7 @@ _ROOT = _CONFIG["REPO_ROOT"]
 BUNDLE_SUFFIX = _CONFIG["BUNDLE_SUFFIX"]
 HOST_BOX = _CONFIG.get("HOST_BOX")
 HOST_FOLDER = _CONFIG.get("BUNDLE_CTL_HOST_FOLDER")
+REPO_ROOT = _ROOT
 folder_by_repo = {
     "design-themes": f"{_ROOT}/design-themes",
     "documentation": f"{_ROOT}/documentation",

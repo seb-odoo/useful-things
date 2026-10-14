@@ -28,6 +28,7 @@ import threading
 import time
 import traceback
 import urllib.parse
+import uuid
 
 HERE = pathlib.Path(__file__).resolve().parent
 SCRIPTS = HERE.parent / "scripts"
@@ -35,6 +36,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 from agents import (  # noqa: E402
     LAUNCH_GRACE,
+    OPS,
     STATE,
     STATE_FILE,
     format_time,
@@ -480,7 +482,7 @@ def run_in_session(log, *command, scope=True):
 def open_window(log, bundle):
     log.write(f"opening {bundle}\n")
     log.flush()
-    folder = get_worktree_bundle_folder(bundle)
+    folder = HOST_FOLDER if bundle == "ops" else get_worktree_bundle_folder(bundle)
     drop_stale_containers(folder, log)
     run_in_session(log, "code", "--folder-uri", UtilsRunner()._devcontainer_folder_uri(folder))
 
@@ -1235,8 +1237,36 @@ def fetch(caller, query, body):
     return start_job(caller, "fetch", work)
 
 
+def open_ops(caller, body):
+    """The ops window, or with a task or `terminal` a new ops agent window, at once: no cap and no
+    queue, as for a tab of the ops window. A bundle may not ask, as its task would run where hctl
+    is."""
+    if caller != HOST or not HOST_FOLDER:
+        raise Refused("ops: only the host and the ops container open it")
+    if body.get("resume") or {"effort", "model", "priority"} & set(body):
+        raise ValueError("ops: only a task or terminal")
+    task = body.get("task")
+    if "task" in body and (not isinstance(task, str) or not task.strip() or len(task) > MAX_TASK):
+        raise ValueError(f"task: a text of at most {MAX_TASK} characters")
+    name = f"{OPS}{uuid.uuid4()}" if "task" in body or body.get("terminal") else "ops"
+
+    def work(log):
+        if name == "ops":
+            open_window(log, name)
+            return {"bundle": name}
+        if task:
+            get_agent_folder(name).mkdir(parents=True)
+            (get_agent_folder(name) / "task.md").write_text(task)
+        open_terminal(log, name)
+        return {"bundle": name}
+
+    return start_job(caller, "open", work)
+
+
 def open_bundle(caller, query, body):
     bundle = body.get("bundle") or ""
+    if bundle == "ops":
+        return open_ops(caller, body)
     if not BUNDLE_NAME.fullmatch(bundle) or not os.path.isdir(get_worktree_bundle_folder(bundle)):
         raise ValueError(f"no bundle folder for {bundle}")
     if not is_made(get_worktree_bundle_folder(bundle)):

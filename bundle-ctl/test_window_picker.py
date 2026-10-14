@@ -2,6 +2,7 @@
 """How window-picker.py opens rofi, the rows it gives it, its counts, the window it brings up on a
 pick, with a fake rofi, wmctrl and xdg-open: python3 test_window_picker.py"""
 
+import importlib.util
 import os
 import pathlib
 import subprocess
@@ -20,24 +21,35 @@ WINDOWS = """\
 0x07 0 N/A box
 0x08 0 code.Code box ✋ ⭐ master-a--seb (mine) - models.js
 0x09 0 terminator.Terminator box ⭐ master-e--seb (mine)
+0x0a 0 terminator.Terminator box ✋ 🔧 Ops list layout (ops)
+0x0b 0 terminator.Terminator box 🔧 Refactor (ops)
+0x0c 0 firefox.Firefox box 🔧 Tools (ops) - Mozilla Firefox
 """
-COUNTS = "✅ finished 1   ✋ waiting 1   ❌ failed 0   ⏳ running 1   🚀 starting 0"
+OPS = "✋ 🔧 Ops list layout (ops)\0info\x1f0x0a\x1fmeta\x1fwaiting"
+COUNTS = "✅ finished 1   ✋ waiting 2   ❌ failed 0   ⏳ running 1   🚀 starting 0"
+REVIEW = "✋ 📝 master-c-aku (review)\0info\x1fmaster-c-aku\x1fmeta\x1fwaiting"
 ROWS = [
     f"\0message\x1f{COUNTS}   |   click: VS Code   right click: terminal",
     "\0no-custom\x1ftrue",
     "\0use-hot-keys\x1ftrue",
+    "➕ new ops agent\0info\x1fnew-ops",
     "✅ 🤖 master-d-runbot-12--seb (runbot)\0info\x1fmaster-d-runbot-12--seb\x1fmeta\x1ffinished",
-    "✋ 📝 master-c-aku (review)\0info\x1fmaster-c-aku\x1fmeta\x1fwaiting",
+    REVIEW,
+    OPS,
     "⏳ ⭐ master-b--seb (mine)\0info\x1fmaster-b--seb\x1fmeta\x1frunning",
     "Inbox - Mozilla Firefox\0info\x1f0x03\x1fmeta\x1f",
     "⭐ master-e--seb (mine)\0info\x1fmaster-e--seb\x1fmeta\x1f",
+    "🔧 Refactor (ops)\0info\x1f0x0b\x1fmeta\x1f",
+    "🔧 Tools (ops) - Mozilla Firefox\0info\x1f0x0c\x1fmeta\x1f",
 ]
 AGENTS = ("master-b--seb", "master-c-aku", "master-d-runbot-12--seb")
+OPENING = [f"🔄 {REVIEW}" if row == OPS else OPS if row == REVIEW else row for row in ROWS]
 ENDED = [
-    ROWS[0].replace("✋ waiting 1", "✋ waiting 0"),
-    *ROWS[1:4],
-    *ROWS[5:],
+    ROWS[0].replace("✋ waiting 2", "✋ waiting 1"),
+    *ROWS[1:5],
+    *ROWS[6:10],
     "🔄 📝 master-c-aku (review)\0info\x1fmaster-c-aku\x1fmeta\x1f",
+    *ROWS[10:],
 ]
 SHOWN = [
     "[-modi]",
@@ -74,6 +86,19 @@ def start_agent(name):
     return subprocess.Popen([sys.executable, "-c", code, str(HERE / "agent-terminal.py"), name])
 
 
+def get_new_ops():
+    """The command a pick of the first row starts, in this process: a real bctl reaches the
+    daemon."""
+    spec = importlib.util.spec_from_file_location("picker", HERE / "window-picker.py")
+    picker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(picker)
+    started = []
+    picker.subprocess.Popen = lambda command, **kwargs: started.append(command[1:])
+    os.environ.update(ROFI_RETV="1", ROFI_INFO="new-ops")
+    picker.main()
+    return started
+
+
 def write_fake(folder, name, script):
     path = folder / name
     path.write_text(f"#!/bin/sh\n{script}\n")
@@ -98,8 +123,8 @@ def main():
         if rows != ROWS:
             failures.append(f"rows {rows!r}, expected {ROWS!r}")
         counts = run(folder, "--counts").splitlines()
-        if counts != ["✋ 1", COUNTS]:
-            failures.append(f"counts {counts!r}, expected {['✋ 1', COUNTS]!r}")
+        if counts != ["✋ 2", COUNTS]:
+            failures.append(f"counts {counts!r}, expected {['✋ 2', COUNTS]!r}")
         for retv, info, expected in PICKS:
             log.write_text("")
             found = run(folder, ROFI_RETV=retv, ROFI_INFO=info)
@@ -117,9 +142,8 @@ def main():
         opened = old.with_name("master-a--seb")
         opened.touch()
         rows = run(folder).splitlines()
-        opening = [f"🔄 {row}" if row.startswith("✋ 📝 master-c-aku") else row for row in ROWS]
-        if rows != opening:
-            failures.append(f"rows while VS Code opens {rows!r}, expected {opening!r}")
+        if rows != OPENING:
+            failures.append(f"rows while VS Code opens {rows!r}, expected {OPENING!r}")
         if opened.exists():
             failures.append("the mark of a bundle open in VS Code stays")
         agents.pop("master-c-aku").kill()
@@ -127,17 +151,24 @@ def main():
         if rows != ENDED:
             failures.append(f"rows once a claude ended {rows!r}, expected {ENDED!r}")
         counts = run(folder, "--counts").splitlines()
-        if counts != ["⏳ 1", COUNTS.replace("✋ waiting 1", "✋ waiting 0")]:
-            failures.append(f"counts once no bundle waits {counts!r}, expected ⏳ 1")
+        if counts != ["✋ 1", COUNTS.replace("✋ waiting 2", "✋ waiting 1")]:
+            failures.append(f"counts once no bundle waits {counts!r}, expected ✋ 1 for ops")
+        (folder / "windows").write_text(WINDOWS.replace("✋ 🔧", "🔧"))
+        counts = run(folder, "--counts").splitlines()
+        if counts[:1] != ["⏳ 1"]:
+            failures.append(f"counts once nothing waits {counts!r}, expected ⏳ 1")
         for agent in agents.values():
             agent.kill()
             agent.wait()
         counts = run(folder, "--counts").splitlines()
         if counts[:1] != ["🪟"]:
             failures.append(f"counts once no claude runs {counts!r}, expected 🪟")
+    new_ops = [str(HERE / "client" / "bctl.py"), "open", "ops", "--terminal"]
+    if (started := get_new_ops()) != [new_ops]:
+        failures.append(f"pick 1 new-ops: started {started!r}, expected {[new_ops]!r}")
     for line in failures:
         print(line)
-    cases = 8 + len(PICKS)
+    cases = 10 + len(PICKS)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

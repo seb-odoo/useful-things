@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""What open --terminal refuses, without podman: python3 test_open.py"""
+"""What open --terminal refuses, and what open ops opens, without podman: python3 test_open.py"""
 
 import pathlib
 import sys
@@ -25,6 +25,15 @@ BODIES = [
     ({"terminal": True, "task": "do"}, "terminal: only without a task"),
     ({"terminal": True, "resume": True}, "terminal: only without a task"),
 ]
+# The caller, the body of open ops, and what opens or the refusal.
+OPS_CASES = [
+    ("bundle", {"terminal": True}, "ops: only the host and the ops container open it"),
+    (daemon.HOST, {"task": "do", "priority": 1}, "ops: only a task or terminal"),
+    (daemon.HOST, {"task": " "}, "task: a text of at most 32768 characters"),
+    (daemon.HOST, {}, "window ops"),
+    (daemon.HOST, {"terminal": True}, "terminal ops- with no task"),
+    (daemon.HOST, {"task": "do"}, "terminal ops- on do"),
+]
 
 
 def refusal(body, caller="other"):
@@ -33,6 +42,26 @@ def refusal(body, caller="other"):
     except (ValueError, daemon.Refused) as error:
         return str(error)
     return None
+
+
+def open_ops(root, caller, body):
+    opened = []
+
+    def open_terminal(log, name):
+        task = daemon.get_agent_folder(name) / "task.md"
+        given = f"on {task.read_text()}" if task.exists() else "with no task"
+        opened.append(f"terminal {name[:4]} {given}")
+
+    daemon.HOST_FOLDER = "/ops"
+    daemon.get_agent_folder = lambda name: root / name
+    daemon.open_terminal = open_terminal
+    daemon.open_window = lambda log, bundle: opened.append(f"window {bundle}")
+    daemon.start_job = lambda caller, verb, work: (202, work(None))
+    try:
+        daemon.open_bundle(caller, {}, {"bundle": "ops", **body})
+    except (ValueError, daemon.Refused) as error:
+        return str(error)
+    return " ".join(opened)
 
 
 def main():
@@ -58,9 +87,13 @@ def main():
             found = refusal(body)
             if found != expected:
                 failures.append(f"{body}: {found!r}, expected {expected!r}")
+        for caller, body, expected in OPS_CASES:
+            found = open_ops(pathlib.Path(root), caller, body)
+            if found != expected:
+                failures.append(f"open ops {caller} {body}: {found!r}, expected {expected!r}")
     for line in failures:
         print(line)
-    cases = len(CASES) + len(BODIES)
+    cases = len(CASES) + len(BODIES) + len(OPS_CASES)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 
