@@ -19,14 +19,23 @@ import daemon  # noqa: E402
 from test_queue import run_client  # noqa: E402
 
 CLEAN = "master-clean--seb"
+CLOSED = "master-closed-aku"
 COMMITTED = "master-committed--seb"
+DIRTY = "master-dirty-aku"
+MINE = "master-mine--seb"
+OPENED = "master-opened-aku"
 PUSHED = "master-pushed--seb"
+REBASED = "master-rebased-aku"
 REFUSED = "master-refused--seb"
 STOPPED = "master-stopped--seb"
 
 
 def git(cwd, *args):
     subprocess.run(["git", *args], capture_output=True, check=True, cwd=cwd)
+
+
+def commit_as_aku(repo, message):
+    git(repo, "-c", "user.name=aku", "-c", "user.email=aku@t", "commit", "--allow-empty", "-qm", message)
 
 
 def prepare(root):
@@ -40,20 +49,47 @@ def prepare(root):
     for name in ("odoo", "odoo-dev"):
         git(repo, "remote", "add", name, str(remote))
     git(repo, "push", "--quiet", "odoo", "master")
-    for bundle in (CLEAN, COMMITTED, PUSHED, REFUSED, STOPPED):
+    git(repo, "config", "user.email", "t@t")
+    for bundle in (CLEAN, CLOSED, COMMITTED, DIRTY, MINE, OPENED, PUSHED, REBASED, REFUSED, STOPPED):
         git(repo, "branch", bundle)
         (root / "master" / bundle).mkdir(parents=True)
-    git(repo, "push", "--quiet", "odoo-dev", PUSHED)
+    git(repo, "push", "--quiet", "odoo-dev", CLOSED, MINE, OPENED, PUSHED)
+    for bundle in (DIRTY, REBASED):
+        git(repo, "checkout", "--quiet", bundle)
+        commit_as_aku(repo, "rebased")
+        git(repo, "push", "--quiet", "odoo-dev", bundle)
+        git(repo, "reset", "--quiet", "--hard", "master")
+        commit_as_aku(repo, "before the rebase")
+    git(repo, "checkout", "--quiet", MINE)
+    git(repo, "-c", "user.name=t", "commit", "--allow-empty", "-qm", "after the PR")
     git(repo, "fetch", "--quiet", "--all")
     git(repo, "checkout", "--quiet", COMMITTED)
     git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-qm", "own")
-    world = {"caller": CLEAN, "calls": [], "running": {str(root / "master" / CLEAN)}, "state": {}}
+    git(repo, "worktree", "add", "--quiet", str(root / "master" / DIRTY / "odoo"), DIRTY)
+    (root / "master" / DIRTY / "odoo" / "notes.txt").write_text("review notes\n")
+    world = {
+        "caller": CLEAN,
+        "calls": [],
+        "prs": {
+            CLOSED: {"odoo/odoo#1": "closed"},
+            DIRTY: {"odoo/odoo#4": "closed"},
+            MINE: {"odoo/odoo#5": "closed"},
+            OPENED: {"odoo/odoo#3": "open"},
+            REBASED: {"odoo/odoo#2": "closed"},
+        },
+        "running": {str(root / "master" / CLEAN)},
+        "state": {},
+    }
     daemon.HELD_DIR = root / "held"
     daemon.STATE = root
+    daemon.get_branch_prs = lambda repo_name, branch: world["prs"].get(branch, {})
     daemon.get_open_windows = lambda: set(world["running"])
     daemon.get_repo_folder = lambda repo_name: str(repo)
     daemon.get_repos = lambda: ["odoo"]
     daemon.get_worktree_bundle_folder = lambda bundle: str(root / "master" / bundle)
+    daemon.get_worktree_bundle_repo_folder = lambda bundle, repo_name: str(
+        root / "master" / bundle / repo_name,
+    )
     daemon.identify = lambda connection: world["caller"]
     daemon.is_in_container = lambda connection: world["caller"] != daemon.HOST
     daemon.read_state = lambda: world["state"]
@@ -157,6 +193,27 @@ def check(root):
             (code, lines) == (1, [f"bctl: 409 {PUSHED} is pushed in odoo, a PR may use it"]),
         ),
     )
+    code, lines = run_client(path, "delete", OPENED, "--reason", "r")
+    checks.append(
+        (
+            "a branch with an open PR is kept",
+            (code, lines) == (1, [f"bctl: 409 {OPENED} has an open PR in odoo: odoo/odoo#3"]),
+        ),
+    )
+    code, lines = run_client(path, "delete", MINE, "--reason", "r")
+    checks.append(
+        (
+            "a commit of Seb no remote has is kept, even once the PR is closed",
+            (code, lines) == (1, [f"bctl: 409 {MINE} has commits in odoo that no remote has"]),
+        ),
+    )
+    code, lines = run_client(path, "delete", DIRTY, "--reason", "r")
+    checks.append(
+        (
+            "a file not committed is kept when the deletion needs --force",
+            (code, lines) == (1, [f"bctl: 409 {DIRTY} has uncommitted files in odoo"]),
+        ),
+    )
     code, lines = run_client(path, "delete", "master", "--reason", "r")
     checks.append(
         ("a base is no bundle", (code, lines) == (1, ["bctl: 400 not a bundle name: master"])),
@@ -212,6 +269,31 @@ def check(root):
             == (1, f"{CLEAN} has commits in odoo that no remote has", 2),
         ),
     )
+    for name, bundle, line, call in (
+        (
+            "a branch whose PRs are closed goes",
+            CLOSED,
+            "odoo/odoo#1 closed",
+            ("delete_bundle.py", CLOSED),
+        ),
+        (
+            "the commits of the PR author no remote has go, with --force",
+            REBASED,
+            "odoo/odoo#2 closed, commits of aku@t that no remote has",
+            ("delete_bundle.py", "--force", REBASED),
+        ),
+    ):
+        code, lines = run_client(path, "delete", bundle, "--reason", "r")
+        number = int(lines[0].partition("hok b")[2].partition(".")[0])
+        item = daemon.HELD.read_json(daemon.HELD_DIR / f"{number}.json")
+        result = answer_yes(number)
+        checks.append(
+            (
+                name,
+                (item["lines"][1], result["text"], world["calls"][-1])
+                == (f"the branch in odoo: {line}", f"{bundle} deleted", call),
+            ),
+        )
     server.shutdown()
     server.server_close()
     return [name for name, passed in checks if not passed], len(checks)

@@ -48,6 +48,7 @@ from agents import (  # noqa: E402
 )
 from branch_status import (  # noqa: E402
     PR_URL,
+    get_github_repo,
     get_local_branches,
     get_open_bundle_folders,
     get_pr,
@@ -935,29 +936,78 @@ def check_unpushed(bundle, script):
             raise Refused(f"{bundle} has unpushed commits in {repo}, {script} would reset them")
 
 
+def get_branch_prs(repo, branch):
+    """The PRs whose head is this branch, of any state: their state by `owner/name#number`."""
+    github_repo = get_github_repo(repo)
+    res = subprocess.run(
+        ["gh", "pr", "list", "-R", github_repo, "--head", branch, "--state", "all"]
+        + ["--json", "number,state"],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if res.returncode:
+        raise Refused(f"gh failed on the PRs of {branch}: {res.stderr.strip()}")
+    return {f"{github_repo}#{pr['number']}": pr["state"].lower() for pr in json.loads(res.stdout)}
+
+
 def check_deletion(bundle):
-    """The repos where the bundle has its branch, refused when one holds work: a commit no remote
-    has, or a push to the dev remote, which a PR may use.
+    """What the deletion drops, a line by repo where the bundle has its branch, and whether
+    delete_bundle needs --force. Refused while a repo holds work: a commit of Seb no remote has, a
+    push no PR uses yet, or an open PR.
     """
-    repos = local_branches(bundle)
-    for repo in repos:
+    lines, force = {}, False
+    for repo in local_branches(bundle):
+        folder = get_repo_folder(repo)
         pushed = subprocess.run(
             ["git", "rev-parse", "--verify", "--quiet", get_remote_dev_ref(bundle, repo)],
             capture_output=True,
             check=False,
-            cwd=get_repo_folder(repo),
+            cwd=folder,
         )
-        if pushed.returncode == 0:
-            raise Refused(f"{bundle} is pushed in {repo}, a PR may use it")
-        unpushed = subprocess.run(
-            ["git", "log", "--oneline", f"refs/heads/{bundle}", "--not", "--remotes"],
+        committers = subprocess.run(
+            ["git", "log", "--format=%ce", f"refs/heads/{bundle}", "--not", "--remotes"],
             capture_output=True,
             check=False,
-            cwd=get_repo_folder(repo),
+            cwd=folder,
             text=True,
-        )
-        if unpushed.stdout.strip():
+        ).stdout.split()
+        if pushed.returncode and not committers:
+            lines[repo] = "no commit of its own, never pushed"
+            continue
+        me = subprocess.run(
+            ["git", "config", "user.email"],
+            capture_output=True,
+            check=False,
+            cwd=folder,
+            text=True,
+        ).stdout.strip()
+        if committers and (not me or me in committers):
             raise Refused(f"{bundle} has commits in {repo} that no remote has")
+        prs = get_branch_prs(repo, bundle)
+        if not prs:
+            raise Refused(
+                f"{bundle} has commits in {repo} that no remote has"
+                if pushed.returncode
+                else f"{bundle} is pushed in {repo}, a PR may use it",
+            )
+        if opened := [pr for pr, state in prs.items() if state == "open"]:
+            raise Refused(f"{bundle} has an open PR in {repo}: {', '.join(opened)}")
+        lines[repo] = ", ".join(f"{pr} {state}" for pr, state in prs.items())
+        if committers:
+            force = True
+            lines[repo] += f", commits of {', '.join(sorted(set(committers)))} that no remote has"
+    for repo in get_repos() if force else []:
+        worktree = get_worktree_bundle_repo_folder(bundle, repo)
+        if os.path.isdir(worktree) and subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True,
+            check=False,
+            cwd=worktree,
+            text=True,
+        ).stdout.strip():
+            raise Refused(f"{bundle} has uncommitted files in {repo}")
+    return lines, force
     return repos
 
 
@@ -991,17 +1041,15 @@ def delete(caller, query, body):
     if HELD is None:
         raise Refused("no gateway-core beside useful-things: hok cannot list the deletion")
     folder = get_worktree_bundle_folder(bundle)
-    repos = check_deletion(bundle)
-    if not repos and not os.path.isdir(folder):
+    branches, _force = check_deletion(bundle)
+    if not branches and not os.path.isdir(folder):
         raise ValueError(f"no bundle {bundle}")
     item = {
         "client": caller,
         "key": f"delete {bundle}",
         "lines": [
             f"the folder {folder}",
-            f"the branch in {', '.join(repos)}: no commit of its own, never pushed"
-            if repos
-            else "no branch",
+            *([f"the branch in {repo}: {line}" for repo, line in branches.items()] or ["no branch"]),
             "its container, and the databases named after it",
         ],
         "reason": str(body.get("reason") or ""),
@@ -1045,11 +1093,12 @@ def delete_stopped():
         write_state(state)
     started = {}
     for bundle in stopped:
-        _code, answer = start_job(
-            HOST,
-            f"delete {bundle}",
-            lambda log, bundle=bundle: run_script(log, "delete_bundle.py", bundle),
-        )
+
+        def work(log, bundle=bundle):
+            _branches, force = check_deletion(bundle)
+            run_script(log, "delete_bundle.py", *(["--force"] if force else []), bundle)
+
+        _code, answer = start_job(HOST, f"delete {bundle}", work)
         started[bundle] = jobs[answer["job"]]
     return started
 

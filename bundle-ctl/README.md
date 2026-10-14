@@ -143,8 +143,10 @@ cherry-pick, as all the bundles share the base repos' `.git`.
 ## Deletion
 
 `bctl delete [BUNDLE] --reason TEXT` lets an agent whose work moved to another bundle ask for its
-own to go, where it would hand Seb a `delete_bundle` line to type. It is refused when a branch of
-the bundle has a commit no remote has, or is on the dev remote, where a PR may use it.
+own to go, where it would hand Seb a `delete_bundle` line to type. It is refused while a branch of
+the bundle holds work: a commit of Seb no remote has, a branch on the dev remote that no PR uses
+yet, or an open PR. A branch whose PRs are all closed or merged goes, even with commits of others
+no remote has: in a review bundle, the older head of a PR its author rebased since.
 
 - The daemon holds the request in `held/` beside `state.json`, in the format of
   `gateway-core/held.py`, and `hok` lists it as `bN` (the `config.py` of host-ctl names the
@@ -156,7 +158,8 @@ the bundle has a commit no remote has, or is on the dev remote, where a PR may u
 - `--wait S` waits that long for his answer and prints it, as `hctl --wait` does: exit 0 on his
   yes, 126 when he refused, 75 when it still waits. The same delete asked again replaces the
   request that waits, under the same `bN`, and waits for it.
-- `delete_bundle` still refuses uncommitted files: the job log in `jobs/` says so.
+- `delete_bundle` still refuses uncommitted files: the job log in `jobs/` says so. Commits of
+  others need its `--force`, which drops such files too: the request is then refused on them.
 - `python3 test_delete.py` runs each case on git repos of its own.
 
 ## Agents in a terminal
