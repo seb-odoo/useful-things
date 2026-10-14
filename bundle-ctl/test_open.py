@@ -25,14 +25,27 @@ BODIES = [
     ({"terminal": True, "task": "do"}, "terminal: only without a task"),
     ({"terminal": True, "resume": True}, "terminal: only without a task"),
 ]
-# The caller, the body of open ops, and what opens or the refusal.
+MOVED = "ops-0f897331-3dea-4b5b-a0c4-1c27061e4efc"
+NEW = "ops-11111111-2222-3333-4444-555555555555"
+ONLY_HOST = "ops: only the host and the ops container open it"
+ONLY_TERMINAL = "ops-SESSION: a session id, with terminal only"
+RUNNING = "ops-71d0d27c-e3f6-46e7-96dc-f7b640411a66"
+# The caller, the body of open ops, and what opens or the refusal. ops-SESSION is the session of a
+# tab moved to a window: MOVED and RUNNING have a transcript, and an agent-terminal.py runs RUNNING.
 OPS_CASES = [
-    ("bundle", {"terminal": True}, "ops: only the host and the ops container open it"),
+    ("bundle", {"terminal": True}, ONLY_HOST),
     (daemon.HOST, {"task": "do", "priority": 1}, "ops: only a task or terminal"),
     (daemon.HOST, {"task": " "}, "task: a text of at most 32768 characters"),
     (daemon.HOST, {}, "window ops"),
     (daemon.HOST, {"terminal": True}, "terminal ops- with no task"),
     (daemon.HOST, {"task": "do"}, "terminal ops- on do"),
+    (daemon.HOST, {"bundle": MOVED, "terminal": True}, f"terminal {MOVED} with no task"),
+    ("bundle", {"bundle": MOVED, "terminal": True}, ONLY_HOST),
+    (daemon.HOST, {"bundle": MOVED}, ONLY_TERMINAL),
+    (daemon.HOST, {"bundle": MOVED, "task": "do", "terminal": True}, ONLY_TERMINAL),
+    (daemon.HOST, {"bundle": "ops-x", "terminal": True}, ONLY_TERMINAL),
+    (daemon.HOST, {"bundle": NEW, "terminal": True}, f"{NEW}: no conversation to go on with"),
+    (daemon.HOST, {"bundle": RUNNING, "terminal": True}, f"{RUNNING}: already in a window"),
 ]
 
 
@@ -50,9 +63,11 @@ def open_ops(root, caller, body):
     def open_terminal(log, name):
         task = daemon.get_agent_folder(name) / "task.md"
         given = f"on {task.read_text()}" if task.exists() else "with no task"
-        opened.append(f"terminal {name[:4]} {given}")
+        opened.append(f"terminal {name if name in (MOVED, RUNNING) else name[:4]} {given}")
 
     daemon.HOST_FOLDER = "/ops"
+    daemon.get_transcript = lambda session: "ops-" + session in (MOVED, RUNNING) or None
+    daemon.is_agent_running = lambda bundle: bundle == RUNNING
     daemon.get_agent_folder = lambda name: root / name
     daemon.open_terminal = open_terminal
     daemon.open_window = lambda log, bundle: opened.append(f"window {bundle}")

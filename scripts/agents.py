@@ -16,6 +16,7 @@ from config import STATE_ROOT
 IDLE_AFTER = 15 * 60
 LAUNCH_GRACE = 15 * 60
 OPS = "ops-"
+PROJECTS = pathlib.Path.home() / ".claude" / "projects"
 SESSION_ID = re.compile(r"[0-9a-f-]{36}")
 SESSIONS = pathlib.Path.home() / ".claude" / "projects" / "-workspace"
 STATE = pathlib.Path(STATE_ROOT) / "bundle-ctl"
@@ -36,6 +37,29 @@ def get_agent_folder(bundle):
     if bundle.startswith(OPS):
         return STATE / "ops" / bundle.removeprefix(OPS)
     return pathlib.Path(get_worktree_bundle_folder(bundle)) / ".agent"
+
+
+def get_transcript(session):
+    """The transcript of a Claude session of any container, None when it has none."""
+    return next(PROJECTS.glob(f"*/{session}.jsonl"), None)
+
+
+def is_agent_running(bundle):
+    """Whether the agent of a bundle or an ops window runs: agent-terminal.py BUNDLE, its shell
+    aside. The agent-terminator.py of the window holds the same words as COMMAND, and does not
+    count."""
+    for path in pathlib.Path("/proc").glob("[0-9]*/cmdline"):
+        try:
+            args = path.read_bytes().split(b"\0")
+        except OSError:
+            continue
+        if bundle.encode() not in args or b"--shell" in args:
+            continue
+        if any(arg.endswith(b"agent-terminator.py") for arg in args):
+            continue
+        if any(arg.endswith(b"agent-terminal.py") for arg in args):
+            return True
+    return False
 
 
 def is_handled(bundle, news):

@@ -37,6 +37,7 @@ sys.path.insert(0, str(SCRIPTS))
 from agents import (  # noqa: E402
     LAUNCH_GRACE,
     OPS,
+    SESSION_ID,
     STATE,
     STATE_FILE,
     format_time,
@@ -44,7 +45,9 @@ from agents import (  # noqa: E402
     get_agent_folder,
     get_bundle_container,
     get_mtime,
+    get_transcript,
     has_window,
+    is_agent_running,
     read_state,
     read_text,
 )
@@ -1252,18 +1255,33 @@ def fetch(caller, query, body):
     return start_job(caller, "fetch", work)
 
 
-def open_ops(caller, body):
+def check_ops_session(bundle, body):
+    """Why the session of a tab of the ops window cannot move to an ops agent window."""
+    session = bundle.removeprefix(OPS)
+    if not SESSION_ID.fullmatch(session) or body != {"bundle": bundle, "terminal": True}:
+        raise ValueError(f"{OPS}SESSION: a session id, with terminal only")
+    if not get_transcript(session):
+        raise Refused(f"{bundle}: no conversation to go on with")
+    if is_agent_running(bundle):
+        raise Refused(f"{bundle}: already in a window")
+
+
+def open_ops(caller, bundle, body):
     """The ops window, or with a task or `terminal` a new ops agent window, at once: no cap and no
-    queue, as for a tab of the ops window. A bundle may not ask, as its task would run where hctl
-    is."""
+    queue, as for a tab of the ops window. ops-SESSION with `terminal` goes on with the session of
+    a tab in an ops agent window. A bundle may not ask, as its task would run where hctl is."""
     if caller != HOST or not HOST_FOLDER:
         raise Refused("ops: only the host and the ops container open it")
-    if body.get("resume") or {"effort", "model", "priority"} & set(body):
+    if bundle != "ops":
+        check_ops_session(bundle, body)
+    elif body.get("resume") or {"effort", "model", "priority"} & set(body):
         raise ValueError("ops: only a task or terminal")
     task = body.get("task")
     if "task" in body and (not isinstance(task, str) or not task.strip() or len(task) > MAX_TASK):
         raise ValueError(f"task: a text of at most {MAX_TASK} characters")
-    name = f"{OPS}{uuid.uuid4()}" if "task" in body or body.get("terminal") else "ops"
+    name = bundle
+    if bundle == "ops" and ("task" in body or body.get("terminal")):
+        name = f"{OPS}{uuid.uuid4()}"
 
     def work(log):
         if name == "ops":
@@ -1280,8 +1298,8 @@ def open_ops(caller, body):
 
 def open_bundle(caller, query, body):
     bundle = body.get("bundle") or ""
-    if bundle == "ops":
-        return open_ops(caller, body)
+    if bundle == "ops" or bundle.startswith(OPS):
+        return open_ops(caller, bundle, body)
     if not BUNDLE_NAME.fullmatch(bundle) or not os.path.isdir(get_worktree_bundle_folder(bundle)):
         raise ValueError(f"no bundle folder for {bundle}")
     if not is_made(get_worktree_bundle_folder(bundle)):

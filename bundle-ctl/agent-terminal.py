@@ -25,8 +25,10 @@ waits for the container to stop, and starts it again.
     agent-terminal.py ops-SESSION --shell    a host shell in the repos
 
 An ops agent window runs a new Claude session in the ops container (BUNDLE_CTL_HOST_FOLDER), with
-its task as first prompt when the daemon left one. Other sessions work in that container: neither
-quitting claude nor closing the terminal stops it, and a closed terminal stops its own claude.
+its task as first prompt when the daemon left one. On a session that has a transcript, moved from a
+tab of the ops window, it resumes it in the mode of the tab, and tells it to go on when its turn
+was cut. Other sessions work in that container: neither quitting claude nor closing the terminal
+stops it, and a closed terminal stops its own claude.
 """
 
 import contextlib
@@ -53,6 +55,7 @@ from agents import (  # noqa: E402
     get_agent_folder,
     get_bundle_container,
     get_container,
+    get_transcript,
     has_window,
     read_text,
 )
@@ -67,6 +70,7 @@ CLAUDE = "/home/vscode/.claude/bin/claude"
 CLI = "ms-vscode-remote.remote-containers-*/dist/spec-node/devContainersSpecCLI.js"
 CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
 GO_ON = "Continue from where you left off."
+MODES = ("acceptEdits", "auto", "default", "plan")
 # Leave the alternate screen and the mouse modes a killed claude stays in, and show the cursor.
 RESET = "\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m"
 START_LOCK = pathlib.Path.home() / ".claude" / "agent-start.lock"
@@ -263,14 +267,34 @@ def leave_window(agent, bundle):
         (agent / "close-window").unlink(missing_ok=True)
     # A window opened later opens its tab on the session again.
     (agent / "tab-opened").unlink(missing_ok=True)
-    spec = importlib.util.spec_from_file_location("takeover", HERE / "client" / "agent-takeover.py")
-    takeover = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(takeover)
+    takeover = load_takeover()
     transcript = TRANSCRIPTS / f"{read_text(agent / 'session')}.jsonl"
     if mode := takeover.get_mode(transcript):
         (agent / "mode").write_text(mode)
     author, kinds = takeover.get_last_message(takeover.read_entries(transcript))
     return container, author == "user" or "tool_use" in kinds
+
+
+def load_takeover():
+    spec = importlib.util.spec_from_file_location("takeover", HERE / "client" / "agent-takeover.py")
+    takeover = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(takeover)
+    return takeover
+
+
+def get_ops_start(session, task):
+    """The claude options of an ops window: a new session on its task, or the session of a tab
+    moved here, in the mode of the tab, told to go on when its turn was cut."""
+    transcript = get_transcript(session)
+    if not transcript:
+        start = ["--session-id", session, "--permission-mode", "auto"]
+        return start + (["--", task] if task else [])
+    takeover = load_takeover()
+    mode = takeover.get_mode(transcript)
+    author, kinds = takeover.get_last_message(takeover.read_entries(transcript))
+    cut = author == "user" or "tool_use" in kinds
+    start = ["--resume", session, "--permission-mode", mode if mode in MODES else "auto"]
+    return start + (["--", GO_ON] if cut else [])
 
 
 def space_start():
@@ -301,15 +325,14 @@ def run_ops(name):
         code = subprocess.run(
             ["podman", "exec", "--interactive", "--tty", "--detach-keys=", "--user", USER]
             + ["--workdir", REPO_ROOT, "--env", f"TERM={os.environ.get('TERM', 'xterm')}"]
-            + ["--env", "SHELL=/bin/bash", container, CLAUDE, "--session-id", session]
-            + ["--model", "opus", "--permission-mode", "auto"]
-            + (["--", task] if task else []),
+            + ["--env", "SHELL=/bin/bash", container, CLAUDE, "--model", "opus"]
+            + get_ops_start(session, task),
             check=False,
         ).returncode
     except HangUp:
         # podman exec does not pass the hang-up on: the claude of the container still runs.
         if container:
-            stop_claude = ["pkill", "-f", f"session-id {session}"]
+            stop_claude = ["pkill", "-f", session]
             subprocess.run(["podman", "exec", "--user", USER, container, *stop_claude], check=False)
         raise
     except Failure as error:

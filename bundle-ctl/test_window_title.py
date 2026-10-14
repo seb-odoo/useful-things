@@ -175,7 +175,7 @@ def get_followed(home):
     running = [True]
     terminator.HOST_FOLDER = "/repo/host-ctl"
     terminator.REFRESH = 0.4
-    terminator.is_running = lambda bundle: running[0]
+    terminator.is_agent_running = lambda bundle: running[0]
 
     def run_ops():
         record = {"name": "repo-ab", "sessionId": "report", "startedAt": time.time() * 1000}
@@ -208,7 +208,7 @@ def get_running():
         "import importlib.util as util, sys;"
         f"spec = util.spec_from_file_location('terminator', {str(HERE / 'agent-terminator.py')!r});"
         "terminator = util.module_from_spec(spec); spec.loader.exec_module(terminator);"
-        "print(terminator.is_running(sys.argv[-1]))"
+        "print(terminator.is_agent_running(sys.argv[-1]))"
     )
     cases = [
         ([*sleep, script, "ops-a"], "ops-a", "True"),
@@ -219,7 +219,7 @@ def get_running():
     for command, name, expected in cases:
         agent = command and subprocess.Popen(command)
         time.sleep(0.2)
-        holder = [sys.executable, "-c", check, script, name]
+        holder = [sys.executable, "-c", check, str(HERE / "agent-terminator.py"), name, script, name]
         found = subprocess.run(holder, capture_output=True, check=False, text=True).stdout.strip()
         if agent:
             agent.kill()

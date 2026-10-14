@@ -350,9 +350,15 @@ where `hctl` is.
 - `window-picker.py` lists the ops windows with the bundles, by mark, and a click brings one up.
   Its first row, `➕ new ops agent` (Seb, 2026-10-14), runs `bctl open ops --terminal`. The applet
   counts them with the bundles, and hides them from the task bar when minimized.
+- A session of a tab of the ops VS Code window moves to an ops agent window (Seb, 2026-10-14: the
+  icon of the bundles): an extension of that window stops the claude of the tab, closes the tab,
+  and asks `bctl open ops-SESSION --terminal`. The daemon takes it from the host or the ops
+  container, on a session that has a transcript and no `agent-terminal.py` running it. The window
+  resumes the session in the mode of the tab, with `Continue from where you left off.` when the tab
+  cut a turn, and opens minimized, as any agent window that takes a session.
 
-A session of a VS Code tab does not move to a window, and a window closed ends its session: the
-conversation goes on from the `/resume` list of a tab.
+A window closed ends its session: the conversation goes on from the `/resume` list of a tab, or in
+a window again with `bctl open ops-SESSION --terminal`.
 
 ## Agent windows
 

@@ -20,7 +20,7 @@ MARKERS = ("terminal", "container")
 PODMAN = """#!/bin/bash
 echo "$*" >>"$LOG"
 case "$1 $*" in
-"exec "*agent-run.sh* | "exec "*--session-id*)
+"exec "*agent-run.sh* | "exec "*--session-id* | "exec "*--resume*)
 \twhile [ -d "$STATE" ]; do
 \t\t[ -e "$STATE/quit" ] && { rm -f "$STATE/quit"; exit 0; }
 \t\tsleep 0.1
@@ -54,6 +54,7 @@ def run_wrapper(root, bundle):
     module.up = up
     module.copy_gitconfig = lambda container: None
     module.get_container = lambda folder: None
+    module.get_transcript = lambda session: next(root.glob(f"{session}.jsonl"), None)
     module.space_start = lambda: None
     module.HOST_FOLDER = str(root / "host-ctl")
     module.REPO_ROOT = str(root)
@@ -152,7 +153,7 @@ class Case:
         return path.read_text().splitlines() if path.exists() else []
 
     def runs(self):
-        claude = ("agent-run.sh", "--session-id")
+        claude = ("agent-run.sh", "--session-id", "--resume")
         lines = [line for line in self.log() if line.startswith("exec")]
         return [line for line in lines if any(word in line for word in claude)]
 
@@ -267,9 +268,21 @@ def check_ops_close(case):
     case.check("claude runs", wait(case.runs))
     os.close(case.terminal.fd)
     case.check("closing the terminal ends it", wait(case.terminal.has_ended))
-    stopped = wait(lambda: "exec --user vscode c1 pkill -f session-id s2" in case.log())
+    stopped = wait(lambda: "exec --user vscode c1 pkill -f s2" in case.log())
     case.check("closing the terminal stops its claude", stopped)
     case.check("closing the terminal keeps the ops container", "stop c1" not in case.log())
+
+
+def check_ops_resume(case):
+    """An ops window on a session that has a transcript, moved from a tab, resumes it in the mode
+    of the tab, and tells it to go on with the turn the tab cut."""
+    case.check("claude runs", wait(case.runs))
+    run = case.runs()[0]
+    case.check("it resumes the session", " --resume s1 --permission-mode acceptEdits " in run)
+    case.check("it passes the go-on prompt", run.endswith(f" -- {GO_ON}"))
+    (case.state / "quit").touch()
+    case.check("quitting claude ends it", wait(case.terminal.has_ended))
+    case.check("quitting claude keeps the ops container", "stop c1" not in case.log())
 
 
 def main():
@@ -279,14 +292,16 @@ def main():
         check_from_idle_window: ENDED,
         check_window_stays: CUT,
         check_close_while_waiting: CUT,
+        check_ops_resume: CUT,
     }
     checks = (check_quit, check_sigterm, check_close, check_close_window, check_handoff, *tabs)
     checks += (check_ops_quit, check_ops_close)
+    bundles = {check_ops_quit: "ops-s2", check_ops_close: "ops-s2", check_ops_resume: "ops-s1"}
     for check in checks:
         with tempfile.TemporaryDirectory() as folder:
             wait_time = 1 if check is check_window_stays else None
             window = check is check_close_window
-            bundle = "ops-s2" if check.__name__.startswith("check_ops") else "b1"
+            bundle = bundles.get(check, "b1")
             case = Case(folder, check.__name__[6:], window, tabs.get(check), wait_time, bundle)
             try:
                 check(case)

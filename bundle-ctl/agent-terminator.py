@@ -22,7 +22,8 @@ minimized, so that a new agent does not take the screen: it waits in the window 
 
 An ops agent window (ops-SESSION) follows the record of that session in the sessions folder of
 the ops container, and the title of its conversation, which changes with no change of status. Its mark goes once its claude ended, as the window list cannot tell which ops
-window has an agent left. Opened with no task, it waits for Seb's first prompt: it shows in front.
+window has an agent left. Opened on a new session with no task, it waits for Seb's first prompt:
+it shows in front.
 """
 
 import ctypes
@@ -40,7 +41,7 @@ import time
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
-from agents import OPS, get_agent_folder, get_mtime  # noqa: E402
+from agents import OPS, get_agent_folder, get_mtime, get_transcript, is_agent_running  # noqa: E402
 from config import CLAUDE_CONFIG_CONTAINER, HOST_FOLDER  # noqa: E402
 
 CHECK = 1
@@ -121,22 +122,6 @@ def get_record(bundle, since):
     return max(records, key=lambda record: record["startedAt"], default=None)
 
 
-def is_running(bundle):
-    """Whether the agent of the window runs: agent-terminal.py BUNDLE, its shell aside, and this
-    process aside, which holds it as COMMAND."""
-    for path in pathlib.Path("/proc").glob("[0-9]*/cmdline"):
-        if path.parent.name == str(os.getpid()):
-            continue
-        try:
-            args = path.read_bytes().split(b"\0")
-        except OSError:
-            continue
-        if bundle.encode() in args and b"--shell" not in args:
-            if any(arg.endswith(b"agent-terminal.py") for arg in args):
-                return True
-    return False
-
-
 def get_windows(pid):
     out = subprocess.run([WMCTRL, "-l", "-p"], capture_output=True, check=False, text=True)
     lines = [line.split() for line in out.stdout.splitlines()]
@@ -174,7 +159,7 @@ def follow(bundle, terminator, since, hide=True):
         record = get_record(bundle, since)
         if bundle.startswith(OPS) and time.monotonic() - refreshed >= REFRESH:
             refreshed, shown = time.monotonic(), None
-            ended = ended or (bool(record) and not is_running(bundle))
+            ended = ended or (bool(record) and not is_agent_running(bundle))
         status = record and f"{record['sessionId']}={record.get('status') or ''}"
         if not status and not shown and (get_mtime(done) or 0) * 1000 >= since:
             status = "--failed"
@@ -200,9 +185,10 @@ def main():
         os.execvp(terminator[0], [*terminator, "--title", get_title(bundle)])
     terminator += ["--title", get_title(bundle, "--starting")]
     agent = get_agent_folder(bundle)
-    hide = not bundle.startswith(OPS) or (agent / "task.md").is_file()
+    fresh = bundle.startswith(OPS) and not (agent / "task.md").is_file()
+    fresh = fresh and not get_transcript(bundle.removeprefix(OPS))
     since = time.time() * 1000
-    code = follow(bundle, subprocess.Popen(terminator), since, hide)
+    code = follow(bundle, subprocess.Popen(terminator), since, hide=not fresh)
     if bundle.startswith(OPS):
         shutil.rmtree(agent, ignore_errors=True)
     sys.exit(code)
