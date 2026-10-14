@@ -37,9 +37,12 @@ pinned Claude tab that is already there is reused, unless a session of the windo
 closing a tab stops its turn. The rest is in [`bundle-ctl/`](../bundle-ctl/).
 
 The terminal icon of the Claude tab ("Move the agent to a terminal", also in the command palette)
-sends that agent back to a terminal of the host: the extension asks `bctl open BUNDLE --terminal`,
-then closes the window when the terminal writes `.agent/close-window`. It shows only in a window
-whose bundle has an agent session, and refuses while another Claude session of the window works.
+sends a session of the window to a terminal of the host: the one that works, else the only one,
+else the agent's. A session that is not the agent's becomes it (`.agent/session`), as a new
+conversation in the tab is what Seb wants to move. The extension then asks `bctl open BUNDLE
+--terminal`, and closes the window when the terminal writes `.agent/close-window`. It shows only in
+a window whose bundle has an agent session, and refuses while two sessions of the window work: the
+closing would cut one.
 
 ## Install
 

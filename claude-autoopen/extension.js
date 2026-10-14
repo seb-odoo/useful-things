@@ -143,17 +143,23 @@ async function writeAgentFile(root, name, text) {
 async function moveToTerminal(root) {
   const client = process.env.BUNDLE_CTL_CLIENT;
   const bundle = process.env.ODOO_PROXY_HOST;
-  const session = root && (await readAgentFile(root, "session"));
-  if (!client || !bundle || !session) {
+  const agentSession = root && (await readAgentFile(root, "session"));
+  if (!client || !bundle || !agentSession) {
     vscode.window.showWarningMessage("This window has no agent session to move to a terminal.");
     return;
   }
-  const others = getLiveSessions().filter((record) => record.sessionId !== session);
-  if (others.some((record) => record.status !== "idle")) {
+  const sessions = getLiveSessions();
+  const busy = sessions.filter((record) => record.status !== "idle");
+  if (busy.length > 1) {
     vscode.window.showWarningMessage(
-      "Another Claude session of this window works: closing the window would cut it.",
+      "Two Claude sessions of this window work: closing the window would cut one.",
     );
     return;
+  }
+  const moved = busy[0] ?? (sessions.length === 1 ? sessions[0] : undefined);
+  const session = moved?.sessionId ?? agentSession;
+  if (session !== agentSession) {
+    await writeAgentFile(root, "session", session);
   }
   vscode.window.setStatusBarMessage("Moving the agent to a terminal...", 30000);
   const args = [`${client}/bctl.py`, "open", bundle, "--terminal"];
