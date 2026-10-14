@@ -49,7 +49,7 @@ NEW_OPS = "➕ new ops agent"
 NO_MARK = "🪟"
 OPENING = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "bundle-ctl" / "opening"
 OPENING_TIME = 300
-PRIORITY = ("✋", "❌", "✅", "⏳", "🚀")
+PRIORITY = ("🚀", "✋", "❌", "✅", "⏳")
 QUIET = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
 SKIPPED = ("nemo-desktop.",)
 

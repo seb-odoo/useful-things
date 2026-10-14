@@ -134,6 +134,11 @@ def main():
         counts = run(folder, "--counts").splitlines()
         if counts != ["✋ 2", COUNTS]:
             failures.append(f"counts {counts!r}, expected {['✋ 2', COUNTS]!r}")
+        (folder / "windows").write_text(WINDOWS.replace("⭐ master-e", "🚀 ⭐ master-e"))
+        counts = run(folder, "--counts").splitlines()
+        if counts[:1] != ["🚀 1"]:
+            failures.append(f"counts while a bundle starts {counts!r}, expected 🚀 1 before ✋")
+        (folder / "windows").write_text(WINDOWS)
         for retv, info, expected in PICKS:
             log.write_text("")
             found = run(folder, ROFI_RETV=retv, ROFI_INFO=info)
@@ -181,7 +186,7 @@ def main():
         failures.append(f"pick 1 new-ops: started {started!r}, expected {[new_ops]!r}")
     for line in failures:
         print(line)
-    cases = 11 + len(PICKS)
+    cases = 12 + len(PICKS)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

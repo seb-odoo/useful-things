@@ -274,9 +274,9 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   bundle shows 🔄 (a file per bundle in `$XDG_RUNTIME_DIR/bundle-ctl/opening`, 5 minutes at most,
   dropped once the window is up). A Cinnamon shortcut runs it.
 - `window-applet/`, a Cinnamon applet, shows the mark that needs Seb most and how many bundles
-  have it, in the order ✋ ❌ ✅ ⏳ 🚀 (Seb, 2026-10-14: a finished agent waits for him, one in
-  progress does not), or 🪟 when no bundle has a mark. Its tooltip has the counts of each mark,
-  and a click opens the same list.
+  have it, in the order 🚀 ✋ ❌ ✅ ⏳ (Seb, 2026-10-14: an agent stuck on starting may be a bug,
+  a finished one waits for him, one in progress does not), or 🪟 when no bundle has a mark. Its
+  tooltip has the counts of each mark, and a click opens the same list.
   The label comes from `window-picker.py --counts` every 2 seconds. It also sets `skip_taskbar` on
   an agent window (its terminator runs on a `bundle-ctl/terminator-` config) while it is
   minimized. It is a link to that folder,
