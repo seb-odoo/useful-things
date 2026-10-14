@@ -268,8 +268,10 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
 
 - `window-picker.py`, a rofi script, lists the bundles first by mark (✅, ✋, ❌, ⏳, 🚀), one row
   each, then the other windows. A bundle open in VS Code has no row (Seb, 2026-10-13): he works
-  there, and its window is in the task bar. A terminal keeps its last mark once its claude ends,
-  so a ✅, ✋ or ⏳ shows only while an `agent-terminal.py BUNDLE` process runs. The search also
+  there, and its window is in the task bar. Nor has a bundle or an ops agent whose terminal is not
+  minimized (Seb, 2026-10-14): it is in the task bar too, and the applet does not count it. A
+  terminal keeps its last mark once its claude ends, so a ✅, ✋ or ⏳ shows only while an
+  `agent-terminal.py BUNDLE` process runs. The search also
   takes the mark in words (`finished`, `waiting`, `failed`, `running`, `starting`), the kind is
   already in the title, and the line above the rows counts the bundles of each mark.
   `window-picker.py --show` opens it in rofi, where the row under the mouse is selected: a click on
@@ -351,7 +353,8 @@ where `hctl` is.
   reports, ✋ otherwise (Seb, 2026-10-14). The ops container has a sessions folder of its own, as
   a bundle container has: `agent-terminator.py` looks there by session id. It reads the title
   again every 10 seconds, and drops the mark once its claude ended.
-- `window-picker.py` lists the ops windows with the bundles, by mark, and a click brings one up.
+- `window-picker.py` lists the minimized ops windows with the bundles, by mark, and a click brings
+  one up.
   Its first row, `➕ new ops agent` (Seb, 2026-10-14), runs `bctl open ops --terminal`. The applet
   counts them with the bundles, and hides them from the task bar when minimized.
 - A session of a tab of the ops VS Code window moves to an ops agent window (Seb, 2026-10-14: the

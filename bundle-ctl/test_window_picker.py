@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """How window-picker.py opens rofi, the rows it gives it, its counts, the window it brings up on a
-pick, with a fake rofi, wmctrl and xdg-open: python3 test_window_picker.py"""
+pick, with a fake rofi, wmctrl, xdg-open and xprop: python3 test_window_picker.py"""
 
 import importlib.util
 import os
@@ -43,6 +43,10 @@ ROWS = [
     "🔧 Tools (ops) - Mozilla Firefox\0info\x1f0x0c\x1fmeta\x1f",
 ]
 AGENTS = ("master-b--seb", "master-c-aku", "master-d-runbot-12--seb")
+RESTORED = [
+    ROWS[0].replace("✋ waiting 2", "✋ waiting 0"),
+    *[row for row in ROWS[1:] if row not in (OPS, REVIEW)],
+]
 OPENING = [f"🔄 {REVIEW}" if row == OPS else OPS if row == REVIEW else row for row in ROWS]
 ENDED = [
     ROWS[0].replace("✋ waiting 2", "✋ waiting 1"),
@@ -122,6 +126,9 @@ def main():
         write_fake(folder, "wmctrl", f'[ "$1" = -l ] && cat {folder}/windows || echo wmctrl "$@" >> {log}')
         write_fake(folder, "xdg-open", f'echo xdg-open "$@" >> {log}; echo code --folder-uri x')
         write_fake(folder, "rofi", f'for arg in "$@"; do echo "[$arg]"; done > {folder}/rofi.log')
+        (folder / "shown").write_text("")
+        hidden = "_NET_WM_STATE_HIDDEN, _NET_WM_STATE_SKIP_TASKBAR"
+        write_fake(folder, "xprop", f'grep -qx "$2" {folder}/shown || echo "$3(ATOM) = {hidden}"')
         agents = {name: start_agent(name) for name in AGENTS}
         windows = [start_window(name) for name in AGENTS]
         run(folder, "--show")
@@ -139,6 +146,14 @@ def main():
         if counts[:1] != ["🚀 1"]:
             failures.append(f"counts while a bundle starts {counts!r}, expected 🚀 1 before ✋")
         (folder / "windows").write_text(WINDOWS)
+        (folder / "shown").write_text("0x04\n0x0a\n")
+        rows = run(folder).splitlines()
+        if rows != RESTORED:
+            failures.append(f"rows while 2 terminals are restored {rows!r}, expected {RESTORED!r}")
+        counts = run(folder, "--counts").splitlines()
+        if counts[:1] != ["✅ 1"]:
+            failures.append(f"counts while 2 terminals are restored {counts!r}, expected ✅ 1")
+        (folder / "shown").write_text("")
         for retv, info, expected in PICKS:
             log.write_text("")
             found = run(folder, ROFI_RETV=retv, ROFI_INFO=info)
@@ -186,7 +201,7 @@ def main():
         failures.append(f"pick 1 new-ops: started {started!r}, expected {[new_ops]!r}")
     for line in failures:
         print(line)
-    cases = 12 + len(PICKS)
+    cases = 14 + len(PICKS)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

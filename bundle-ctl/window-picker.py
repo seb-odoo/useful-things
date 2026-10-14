@@ -14,16 +14,17 @@ row away: closed later, the window gives the row back without 🔄.
 
 A rofi script: it prints the rows when called with no argument, and rofi calls it again on a pick,
 with the bundle or the window id in ROFI_INFO. A bundle has one row, from the title of its terminal
-(client/window-title.py), and none once its VS Code window is open: Seb then works there. The
-terminal keeps its last mark once its claude ends, so a ✅, ✋ or ⏳ shows only while that claude
-runs. Each mark gets a word that the search matches but the row does not show, as the emoji are
-hard to type; the kind is already in words. The line above the rows counts the bundles of each
-mark. --counts prints the mark that needs Seb most with its count (PRIORITY), or 🪟 when no bundle
-has a mark, then that line, for window-applet/.
+(client/window-title.py), and none once its VS Code window is open: Seb then works there. Nor
+has a bundle or an ops agent whose terminal is not minimized: it is in the task bar. The terminal
+keeps its last mark once its claude ends, so a ✅, ✋ or ⏳ shows only while that claude runs. Each
+mark gets a word that the search matches but the row does not show, as the emoji are hard to type;
+the kind is already in words. The line above the rows counts the bundles of each mark. --counts
+prints the mark that needs Seb most with its count (PRIORITY), or 🪟 when no bundle has a mark,
+then that line, for window-applet/.
 
-An ops agent window has a row of its own, ranked by its mark, and a click brings it up: its title
-shows the title of its conversation in place of a name, and agent-terminator.py drops its mark
-once its claude ended. The first row, `➕ new ops agent`, opens a new one: bctl open ops
+A minimized ops agent window has a row of its own, ranked by its mark, and a click brings it up:
+its title shows the title of its conversation in place of a name, and agent-terminator.py drops its
+mark once its claude ended. The first row, `➕ new ops agent`, opens a new one: bctl open ops
 --terminal.
 """
 
@@ -125,6 +126,12 @@ def get_windows():
     return bundles, ops, others
 
 
+def is_minimized(window):
+    command = ["xprop", "-id", window, "_NET_WM_STATE"]
+    out = subprocess.run(command, capture_output=True, check=False, text=True)
+    return "_NET_WM_STATE_HIDDEN" in out.stdout
+
+
 def pick(name, terminal):
     windows = get_windows()[0].get(name, {})
     window = (terminal and windows.get("terminal")) or windows.get("code")
@@ -161,6 +168,8 @@ def main():
     for name in [name for name, bundle in bundles.items() if "code" in bundle]:
         (OPENING / name).unlink(missing_ok=True)
         del bundles[name]
+    bundles = {name: bundle for name, bundle in bundles.items() if is_minimized(bundle["terminal"])}
+    ops = [(title, window) for title, window in ops if is_minimized(window)]
     agents = get_agent_bundles()
     for name, bundle in bundles.items():
         if bundle["title"].startswith(LIVE) and name not in agents:
