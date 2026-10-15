@@ -297,6 +297,55 @@ def check_clients(root):
     return [f"clients: {name}: {lines}" for name, passed in checks if not passed], len(checks)
 
 
+def check_moves(root):
+    """Real clients: the host forces one task over the cap, then moves another up and down,
+    where it keeps its priority while that priority fits between its neighbours; a bundle moves
+    only its own task or a task it queued."""
+    bundles = {"busy": RUNS_ANOTHER, "a": FRESH, "b": FRESH, "c": FRESH, "d": FRESH}
+    state, launched = prepare(root, bundles, 1)
+    for item, priority in zip(state["queue"], (5, 0, 0, 0, -20)):
+        item["priority"] = priority
+    daemon.identify = lambda connection: daemon.HOST
+    daemon.is_in_container = lambda connection: False
+    path = root / "ctl.sock"
+    server = daemon.Server(str(path), daemon.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    def get_queue():
+        return [
+            (item["bundle"], item.get("priority", 0), item.get("forced", False))
+            for item in state["queue"]
+        ]
+
+    checks = []
+    code, _lines = run_client(path, "force-queue", "b")
+    found = (code, launched, get_queue())
+    queue = [("busy", 5, False), ("a", 0, False), ("c", 0, False), ("d", -20, False)]
+    checks.append(("the host forces one task", found == (0, ["b"], queue)))
+    for place, queue, name in (
+        (2, [("busy", 5, False), ("c", 0, False), ("a", 0, False), ("d", -20, False)], "up"),
+        (1, [("c", 5, False), ("busy", 5, False), ("a", 0, False), ("d", -20, False)], "first"),
+        (4, [("busy", 5, False), ("a", 0, False), ("d", -20, False), ("c", -20, False)], "last"),
+    ):
+        code, _lines = run_client(path, "move", "c", str(place))
+        checks.append((f"a task moves {name}", (code, get_queue()) == (0, queue)))
+    daemon.identify = lambda connection: "a"
+    refused = ["bctl: 409 a bundle moves its own task or a task it queued only"]
+    found = (*run_client(path, "move", "c", "1"), get_queue())
+    checks.append(("a bundle cannot move the task of another", found == (1, refused, queue)))
+    daemon.identify = lambda connection: daemon.HOST
+    for args, error in (
+        (("move", "gone", "1"), "gone is not queued"),
+        (("move", "c", "5"), "place: an integer from 1 to 4"),
+        (("force-queue", "gone"), "gone is not queued"),
+    ):
+        found = run_client(path, *args)
+        checks.append((f"{' '.join(args)} is refused", found == (1, [f"bctl: 400 {error}"])))
+    server.shutdown()
+    server.server_close()
+    return [f"moves: {name}: {get_queue()}" for name, passed in checks if not passed], len(checks)
+
+
 def check_disk(_root):
     """Under the floor a new bundle is refused, and the desktop hears of each 10 GB less."""
     checks = []
@@ -438,7 +487,7 @@ def main():
         if found != (launched, queue):
             failures.append(f"{list(bundles)}: {found}, expected {(launched, queue)}")
     total = len(CASES)
-    for check in (check_clients, check_disk, check_build, check_priority, check_ramp):
+    for check in (check_clients, check_moves, check_disk, check_build, check_priority, check_ramp):
         with tempfile.TemporaryDirectory() as root:
             failed, count = check(pathlib.Path(root))
         failures += failed

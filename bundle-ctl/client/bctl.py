@@ -4,7 +4,8 @@
     bctl whoami
     bctl status [--json]
     bctl queue [--json]
-    bctl force-queue
+    bctl force-queue [BUNDLE]
+    bctl move BUNDLE PLACE
     bctl unqueue BUNDLE
     bctl branches [--json]
     bctl create BASE NAME [--branch-repo REPO]... [--no-open] [TASK]
@@ -30,11 +31,12 @@ in that order, with what each task waits for. One agent
 starts at a time: the next task waits until the run of the last one began.
 
 queue is that list alone, at once, with the memory left on the host. force-queue lets the tasks
-queued now start over the cap, still one at a time; a task queued later waits for a slot again.
-Only the host may ask it: a container gets a 403.
+queued now start over the cap, or the one of BUNDLE, still one at a time; a task queued later waits
+for a slot again. Only the host may ask it: a container gets a 403.
 
-unqueue drops the queued task of a bundle. The host, that bundle, or the bundle that queued the
-task may ask it.
+move puts the queued task of a bundle at PLACE in the queue, from 1: it keeps its priority when
+that priority fits between the tasks around, else takes the nearest of theirs. unqueue drops the
+queued task of a bundle. The host, that bundle, or the bundle that queued the task may ask them.
 
 open --resume gives the task to the last Claude session of the bundle as its next prompt, where a
 task alone starts a new session. Without a task, the session is told to go on.
@@ -411,7 +413,8 @@ def main():
     commands.add_parser("whoami", help="the bundle of this container, its base and parent")
     commands.add_parser("status", help="every local bundle: behind/conflict per repo, open")
     commands.add_parser("queue", help="the agent tasks that wait, and the memory left on the host")
-    commands.add_parser("force-queue", help="let the tasks queued now start over the cap")
+    force = commands.add_parser("force-queue", help="let the tasks queued now start over the cap")
+    force.add_argument("bundle", nargs="?", help="default: every task queued now")
     commands.add_parser("branches", help="gbs: every local bundle with its PR, grouped")
     create = commands.add_parser("create", help="a new bundle BASE-NAME<suffix>, branched on BASE")
     create.add_argument("base")
@@ -471,6 +474,9 @@ def main():
     run_.add_argument("--label", help="what `bctl runs` shows (default: the command)")
     run_.add_argument("--workers", default=1, type=int, help="the workers of a hoot run")
     run_.add_argument("run_command", metavar="COMMAND", nargs=argparse.REMAINDER)
+    move = commands.add_parser("move", help="put the queued task of a bundle at another place")
+    move.add_argument("bundle")
+    move.add_argument("place", type=int, help="from 1, as bctl queue counts")
     commands.add_parser("runs", help="the heavy commands that run and the ones that wait")
     unqueue = commands.add_parser("unqueue", help="drop the queued task of a bundle")
     unqueue.add_argument("bundle")
@@ -491,7 +497,10 @@ def main():
         answer = request("GET", "/queue")
         printer = print_queue
     elif args.command == "force-queue":
-        answer = request("POST", "/force-queue", {})
+        answer = request("POST", "/force-queue", {"bundle": args.bundle} if args.bundle else {})
+        printer = print_queue
+    elif args.command == "move":
+        answer = request("POST", "/move", {"bundle": args.bundle, "place": args.place})
         printer = print_queue
     elif args.command == "unqueue":
         answer = request("POST", "/unqueue", {"bundle": args.bundle})

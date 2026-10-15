@@ -480,13 +480,18 @@ def get_queue(caller, query, body):
 
 
 def force_queue(caller, query, body):
-    """Let the tasks queued now start over the cap. The ones queued later wait for a slot."""
+    """Let the tasks queued now start over the cap, or the one of a bundle. The ones queued later
+    wait for a slot."""
+    bundle = body.get("bundle")
     with state_lock:
         state = read_state()
-        forced = [item["bundle"] for item in state["queue"]]
-        for item in state["queue"]:
+        items = [item for item in state["queue"] if bundle in (None, item["bundle"])]
+        if bundle is not None and not items:
+            raise ValueError(f"{bundle} is not queued")
+        for item in items:
             item["forced"] = True
         write_state(state)
+    forced = [item["bundle"] for item in items]
     launch_queued()
     code, answer = get_queue(caller, query, body)
     left = {item["bundle"] for item in answer["queue"]}
@@ -507,6 +512,35 @@ def unqueue(caller, query, body):
         state.setdefault("relaunches", {})[bundle] = MAX_RELAUNCHES
         write_state(state)
     return 200, {"bundle": bundle, "parent": item["parent"], "queued": format_time(item["queued"])}
+
+
+def move_task(caller, query, body):
+    """Move the queued task of a bundle to a place of the queue, from 1. It keeps its priority when
+    that priority fits between the tasks around its new place, else takes the nearest of theirs, so
+    that the queue stays in the order of priority. The host, that bundle or the one that queued
+    the task asks."""
+    bundle, place = body.get("bundle") or "", body.get("place")
+    with state_lock:
+        state = read_state()
+        queue = state["queue"]
+        if type(place) is not int or not 1 <= place <= len(queue):
+            raise ValueError(f"place: an integer from 1 to {len(queue)}")
+        item = next((item for item in queue if item["bundle"] == bundle), None)
+        if item is None:
+            raise ValueError(f"{bundle} is not queued")
+        if caller not in (HOST, bundle, item["parent"]):
+            raise Refused("a bundle moves its own task or a task it queued only")
+        queue.remove(item)
+        queue.insert(place - 1, item)
+        priority = item.get("priority", 0)
+        if place > 1:
+            priority = min(priority, queue[place - 2].get("priority", 0))
+        if place < len(queue):
+            priority = max(priority, queue[place].get("priority", 0))
+        item["priority"] = priority
+        write_state(state)
+    launch_queued()
+    return get_queue(caller, query, body)
 
 
 def list_runs(caller, query, body):
@@ -1718,6 +1752,7 @@ VERBS = {
     ("POST", "/delete"): delete,
     ("POST", "/fetch"): fetch,
     ("POST", "/force-queue"): force_queue,
+    ("POST", "/move"): move_task,
     ("POST", "/open"): open_bundle,
     ("POST", "/unqueue"): unqueue,
 }

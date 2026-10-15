@@ -39,7 +39,8 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle. On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window, and from a bundle a task alone, held as `bN` for Seb's yes in `hok`; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents) |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
 | `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, and the memory left on the host, `short` when a start would add to a host that already lacks it |
-| `POST /force-queue` | the tasks queued now may start over the cap; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
+| `POST /force-queue` | the tasks queued now may start over the cap, or with `bundle` the task of that bundle; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
+| `POST /move` | the queued task of `bundle` put at `place` (from 1), where it keeps its priority when that priority fits between the tasks around it, else takes the nearest of theirs; then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
 | `POST /unqueue` | the queued task of a bundle dropped; the host, that bundle or the one that queued the task asks |
 | `POST /run` | a heavy command waits for cores: one JSON line each time its place changes, then the CPUs it got (see Runs) |
 | `GET /runs` | the runs that hold cores and the ones that wait, the pool and the memory available |
@@ -359,7 +360,11 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   dropped once the window is up). A Cinnamon shortcut runs it.
 - `agent-list.py`, a GTK window that stays open (Seb, 2026-10-15: "a new display for agents list
   that I can keep open and that updates live"), has the rows of the picker, read again every 2
-  seconds, the terminals shown on screen included, and no other window. A bundle row also has the
+  seconds, the terminals shown on screen included, and no other window. The mark and the kind of
+  a row have columns of their own (Seb, 2026-10-15), and the title keeps the bundle, or the title
+  of the conversation of an ops window. A click on any column header sorts the rows by it (his
+  ask: "all of them"): the mark in the order of the picker, which a first start shows, the kind
+  in its order, the times and the sizes as numbers. A bundle row also has the
   state of its agent and since when, from its `.agent/` files (`done 12 min ago`, `waiting for 5
   min`, `running for 3 min`, then `shown` when its terminal is not minimized), and the first line
   of its `result.md`. Each row has its CPU and RAM (Seb, 2026-10-15), read every 5 seconds: those
@@ -367,15 +372,21 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   without the file cache as the run queue counts it; those of the claude of an ops window and its
   children, as the ops agents share one container. 100% is one core. The disk of a bundle is a
   `du` of its folder when its row comes, then every 10 minutes: its `node_modules` counts there,
-  though they are hard links of the base. Buttons above the rows count each mark and each kind;
+  though they are hard links of the base. Buttons above the rows count each mark among the kinds
+  pressed, and each kind among the marks pressed (his ask: the counts followed no other filter);
   pressed, they keep the rows of one of the marks pressed and of one of the kinds pressed. Under
   the rows, behind a handle, the queue of `bctl queue`, read every 10 seconds, as `GET /queue`
-  runs `podman ps`. Ctrl+click and Shift+click select several rows: Enter, a double click or
-  Terminal brings up their terminals where they were, the first row in front (his pick: no
-  tiling); VS Code opens the window of each selected bundle; Close closes the window of each after
-  a question, as the daemon does (SIGUSR1 to its `agent-terminator.py`), so its claude stops. A
-  right click on a row opens a menu with these three. New ops agent runs `bctl open ops
-  --terminal`. It runs on the system python of the host, which has GTK. A second start brings the
+  runs `podman ps`, in its order, which no header click changes. Under it, Force lets each
+  selected task start over the cap (`POST /force-queue` with its bundle), and Up and Down move the
+  first selected task one place (`POST /move`). Ctrl+click and Shift+click select several rows:
+  Enter, a double click or Terminal brings up their terminals where they were, the first row in
+  front (his pick: no tiling); VS Code opens the window of each selected bundle; Close closes the
+  window of each after a question, as the daemon does (SIGUSR1 to its `agent-terminator.py`), so
+  its claude stops. Back to queue, after a question too, queues the session of each selected
+  bundle again (`open --resume`, at the lowest priority of the queue, so last), then closes its
+  window: when its turn comes, a new terminal goes on with that session on `Continue from where
+  you left off.`. A right click on a row opens a menu with these four. New ops agent runs `bctl
+  open ops --terminal`. It runs on the system python of the host, which has GTK. A second start brings the
   open window up, and its size, its place and the height of the queue are kept in
   `~/.local/state/bundle-ctl/agent-list.json`.
 - `window-applet/`, a Cinnamon applet, shows the mark that needs Seb most and how many bundles
