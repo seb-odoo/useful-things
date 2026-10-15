@@ -141,10 +141,10 @@ MODELS = ("haiku", "opus", "sonnet")
 NAME = re.compile(r"[a-z0-9](?:[a-z0-9.]|-(?!-)){0,79}")
 NOT_BUILT = (
     "Nothing of this bundle is checked out yet: /workspace holds no worktree. The base repos are"
-    f" read at {os.path.dirname(get_repo_folder('odoo'))}/<repo> (git show, log or grep at any"
-    " ref), and a PR through gh. First see whether the task still needs doing, and whether"
-    " reading is enough to do it: then do it and end here with your verdict. When it needs the"
-    " code checked out or tests run, `bctl build` (Bash timeout 600000) builds the bundle in"
+    f" read with `git --git-dir={os.path.dirname(get_repo_folder('odoo'))}/<repo>/.git` (show, log"
+    " or grep at any ref), and a PR through gh. First see whether the task still needs doing, and"
+    " whether reading is enough to do it: then do it and end here with your verdict. When it needs"
+    " the code checked out or tests run, `bctl build` (Bash timeout 600000) builds the bundle in"
     " /workspace, and you go on."
 )
 OPS_OPEN = "ops-window-open"
