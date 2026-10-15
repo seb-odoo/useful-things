@@ -120,8 +120,9 @@ before every start:
   host, git cannot replace these files any more (`Device or resource busy`): a `checkout` leaves
   the old content, a `pull` or a `reset --hard` stops with the other files rewritten. Write the
   file in place first, `git show REV:settings.json > settings.json`. A read-only mount of the
-  whole `~/.claude` takes `bind-nonrecursive`: a bound file comes into a recursive one as a mount
-  of its own, which stays writable.
+  whole `~/.claude` binds each of these files again read-only: a bound file comes into it as a
+  mount of its own, which stays writable, and podman cannot start a container with
+  `bind-nonrecursive` on that folder (`Invalid argument`).
 - the project `.claude`, a folder of the bundle where the files all bundles share (`CLAUDE.md`,
   `settings.json`) are links into a read-only mount, and `settings.local.json` is its own: an
   "always allow" holds for that bundle.
