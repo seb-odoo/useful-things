@@ -9,6 +9,7 @@
     bctl create BASE NAME [--branch-repo REPO]... [--no-open] [TASK]
     bctl fetch BUNDLE|PR_LINK|OWNER:BRANCH [--no-open] [TASK]
     bctl open BUNDLE [TASK] [--resume | --terminal]
+    bctl build
     bctl delete [BUNDLE] --reason TEXT [--wait SECONDS]
     bctl run [--kind KIND] [--workers N] [-- COMMAND...]
     bctl runs [--json]
@@ -16,7 +17,9 @@
 TASK is --task TEXT or --task-file FILE, with an optional --priority N.
 
 create, fetch and open run as a job on the host: bctl prints its log until it ends, which can take
-minutes for a new bundle. With a task, no window opens: once the bundle fits under the cap of
+minutes for a new bundle. With a task, create and fetch only queue it, and no window opens: when
+its turn comes, its agent starts in the bare folder of the bundle, with no worktree, and runs
+`bctl build` once the task needs the code (see build). Once the bundle fits under the cap of
 running bundles, Claude runs the task in a terminal of the host, in the bundle's container, and a
 VS Code window opened on the bundle later takes the session over in a Claude tab. A bundle whose
 window is already open runs the task in that window. A task for a bundle whose agent has not ended
@@ -41,6 +44,9 @@ session of that container in an agent window of its own, at once. open ops-SESSI
 on with that session in an agent window, once nothing runs it: a session moved from a tab of the
 ops window. open ops-SESSION alone closes the agent window of that session and goes on with it in a
 tab of the ops window. Only the host and the ops container may ask them.
+
+build makes the bundle of this container, whose agent started in its bare folder: the create or
+fetch its task was queued with runs now, and the worktrees appear in /workspace.
 
 branches is gbs run on the host: the table, or with --json the data agents read.
 
@@ -161,6 +167,7 @@ def print_queued(queue):
         asked = ", over the cap" if item.get("forced") else ""
         asked += f", on {item['model']}" if item.get("model") else ""
         asked += f", effort {item['effort']}" if item.get("effort") else ""
+        asked += ", not built yet" if not item.get("built", True) else ""
         since = f", since {item['queued']}" if item.get("queued") else ""
         since += f", waits for {item['waits_for']}" if item.get("waits_for") else ""
         print(
@@ -411,6 +418,7 @@ def main():
         action="store_true",
         help="the agent terminal on the bundle's last Claude session, with no prompt",
     )
+    commands.add_parser("build", help="make the bundle of this container, started bare")
     add_repo = commands.add_parser(
         "add-repo",
         help="the worktree of a repo the bundle was made without (design-themes, documentation)",
@@ -451,6 +459,8 @@ def main():
     elif args.command == "force-queue":
         answer = request("POST", "/force-queue", {})
         printer = print_queue
+    elif args.command == "build":
+        answer = follow(request("POST", "/build", {})["job"])
     elif args.command == "add-repo":
         answer = request("POST", "/add-repo", {"bundle": args.bundle, "repo": args.repo})
         answer = follow(answer["job"])

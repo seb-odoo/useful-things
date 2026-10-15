@@ -106,6 +106,7 @@ def load_held():
 
 CONFIG = load_config()
 AGENT_TERMINAL = CONFIG.get("AGENT_TERMINAL") or "gnome-terminal --window --title {bundle} --"
+BARE_FOLDER = frozenset({".agent", ".claude", ".devcontainer", ".vscode", "odools.toml"})
 BRANCHES_TIMEOUT = 120
 BUNDLE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 CONTAINER_ID = re.compile(r"/libpod-(?:payload-)?([0-9a-f]{64})")
@@ -138,6 +139,14 @@ MAX_TASK = 32 * 1024
 MAX_WIDTH = 400
 MODELS = ("haiku", "opus", "sonnet")
 NAME = re.compile(r"[a-z0-9](?:[a-z0-9.]|-(?!-)){0,79}")
+NOT_BUILT = (
+    "Nothing of this bundle is checked out yet: /workspace holds no worktree. The base repos are"
+    f" read at {os.path.dirname(get_repo_folder('odoo'))}/<repo> (git show, log or grep at any"
+    " ref), and a PR through gh. First see whether the task still needs doing, and whether"
+    " reading is enough to do it: then do it and end here with your verdict. When it needs the"
+    " code checked out or tests run, `bctl build` (Bash timeout 600000) builds the bundle in"
+    " /workspace, and you go on."
+)
 OPS_OPEN = "ops-window-open"
 REVIEW_CHECK = 60
 REVIEW_CLOSED = 60 * float(
@@ -314,6 +323,20 @@ def status(caller, query, body):
                 "repos": {repo: statuses[repo, bundle] for repo in names},
             },
         )
+    for bundle in sorted(set(state.get("builds", {})) - set(repos_by_bundle)):
+        folder = get_worktree_bundle_folder(bundle)
+        is_open = folder in open_folders
+        rows.append(
+            {
+                "agent": get_agent(bundle, 0, is_open),
+                "base": get_base_from_bundle_name(bundle),
+                "bundle": bundle,
+                "folder": os.path.isdir(folder),
+                "open": is_open,
+                "opening": False,
+                "repos": {},
+            },
+        )
     return 200, {
         "agents": count_agents(get_open_windows()),
         "bundles": rows,
@@ -332,6 +355,7 @@ def describe_queue(state):
             model=item.get("model"),
             parent=item["parent"],
             priority=item.get("priority", 0),
+            built=not item.get("build"),
             queued=item.get("queued") and format_time(item["queued"]),
             waits_for=item.get("waits_for"),
         )
@@ -640,7 +664,9 @@ def check_task(bundle, body):
             raise Refused(f"{bundle} is open in a window: its session goes on in its Claude tab")
 
 
-def enqueue(caller, bundle, body):
+def enqueue(caller, bundle, body, build=None):
+    """Queue the task of a bundle. `build` is the script that makes a bundle not made yet: the
+    agent starts in its bare folder and runs it with `bctl build` once it needs the code."""
     priority = body.get("priority", 0)
     effort, model = body.get("effort"), body.get("model")
     with state_lock:
@@ -653,6 +679,7 @@ def enqueue(caller, bundle, body):
         queue.insert(
             position,
             {
+                "build": build,
                 "bundle": bundle,
                 "effort": None if effort == DEFAULT_EFFORT else effort,
                 "model": None if model == DEFAULT_MODEL else model,
@@ -782,7 +809,7 @@ def launch_queued():
         for item in state["queue"]:
             bundle = item["bundle"]
             folder = get_agent_folder(bundle)
-            if not folder.parent.is_dir():
+            if not folder.parent.is_dir() and not item.get("build"):
                 print(f"dropped the task of {bundle}: its folder is gone", flush=True)
                 continue
             # A pass that dies after a launch saves no state, and the next one reads it queued.
@@ -813,6 +840,10 @@ def launch_queued():
                 item["waits_for"] = f"the agent of {starting} to start"
                 paced = True
             elif can_start:
+                if item.get("build"):
+                    prepare_folder(bundle)
+                    state.setdefault("builds", {})[bundle] = item.pop("build")
+                    item["task"] = f"{NOT_BUILT}\n\n{item['task']}"
                 write_task(item)
                 if not is_running:
                     state["launches"][bundle] = now
@@ -1204,6 +1235,16 @@ def get_unused_since(bundle, closed):
     return max(get_last_use(bundle), closed.get(get_worktree_bundle_folder(bundle), 0))
 
 
+def is_bare(folder):
+    """Whether the folder holds an agent and the links of a bundle, and no worktree: its agent
+    never ran `bctl build`."""
+    return (
+        (folder / ".agent").is_dir()
+        and not is_made(folder)
+        and {path.name for path in folder.iterdir()} <= BARE_FOLDER
+    )
+
+
 def drop_idle_reviews():
     """Delete the bundles of the PRs of others that nobody used for REVIEW_CLOSED since their
     container stopped, or for REVIEW_IDLE when none ever ran: `bctl fetch` brings one back. One
@@ -1222,12 +1263,13 @@ def drop_idle_reviews():
     started = {}
     for folder in sorted(pathlib.Path(get_worktree_container_folder()).glob("*/*")):
         bundle = folder.name
+        bare = is_bare(folder)
         if (
-            BUNDLE_SUFFIX in bundle
+            (BUNDLE_SUFFIX in bundle and not bare)
             or bundle in STICKY_BUNDLES
             or bundle in busy
             or not BUNDLE_NAME.fullmatch(bundle)
-            or not is_made(folder)
+            or not (bare or is_made(folder))
             or str(folder) in open_windows
             or get_worktree_bundle_folder(bundle) != str(folder)
         ):
@@ -1237,12 +1279,22 @@ def drop_idle_reviews():
         if time.time() - since < idle or kept_reviews.get(bundle) == since:
             continue
 
-        def work(log, bundle=bundle, since=since):
+        def work(log, bundle=bundle, since=since, bare=bare):
             if (
                 get_worktree_bundle_folder(bundle) in get_open_windows()
                 or get_unused_since(bundle, get_closed_windows()) != since
             ):
                 log.write(f"{bundle} was used since {format_time(since)}\n")
+                return {}
+            if bare:
+                if not is_bare(pathlib.Path(get_worktree_bundle_folder(bundle))):
+                    log.write(f"{bundle} was built since\n")
+                    return {}
+                shutil.rmtree(get_worktree_bundle_folder(bundle))
+                with state_lock:
+                    state = read_state()
+                    state.get("builds", {}).pop(bundle, None)
+                    write_state(state)
                 return {}
             try:
                 force = any([get_others_commits(bundle, repo) for repo in local_branches(bundle)])
@@ -1299,17 +1351,20 @@ def create(caller, query, body):
     branch_repos = body.get("branch_repos") or ["odoo"]
     if unknown := set(branch_repos) - set(get_repos()):
         raise ValueError(f"unknown repos: {', '.join(sorted(unknown))}")
-    check_disk()
+    if "task" not in body:
+        check_disk()
     folder = get_worktree_bundle_folder(bundle)
     if is_made(folder) or (not os.path.exists(folder) and local_branches(bundle)):
         raise Refused(f"{bundle} already exists")
     check_unpushed(bundle, "gnb")
     check_task(bundle, body)
+    args = [base, name, "--no-push", "--no-open"]
+    for repo in branch_repos:
+        args += ["--branch-repo", repo]
+    if "task" in body:
+        return 202, enqueue(caller, bundle, body, ["create_bundle.py", *args])
 
     def work(log):
-        args = [base, name, "--no-push", "--no-open"]
-        for repo in branch_repos:
-            args += ["--branch-repo", repo]
         return build(log, caller, bundle, body, "create_bundle.py", *args)
 
     return start_job(caller, "create", work)
@@ -1328,16 +1383,50 @@ def fetch(caller, query, body):
         base = get_base_from_bundle_name(bundle)
     if not BUNDLE_NAME.fullmatch(bundle) or base not in STICKY_BUNDLES:
         raise ValueError(f"not a bundle name: {bundle}")
-    check_disk()
+    if "task" not in body:
+        check_disk()
     if is_made(get_worktree_bundle_folder(bundle)):
         raise Refused(f"{bundle} is already here, open it instead")
     check_unpushed(bundle, "pfb")
     check_task(bundle, body)
+    if "task" in body:
+        return 202, enqueue(caller, bundle, body, ["fetch_bundle.py", name, "--no-open"])
 
     def work(log):
         return build(log, caller, bundle, body, "fetch_bundle.py", name, "--no-open")
 
     return start_job(caller, "fetch", work)
+
+
+def prepare_folder(bundle):
+    UtilsRunner().prepare_worktree_bundle_folder(bundle_name=bundle)
+
+
+def build_bundle(caller, query, body):
+    """Make the bundle whose agent started in its bare folder, with the script its task was queued
+    with: only that bundle or the host may ask it."""
+    bundle = body.get("bundle") or caller
+    if caller not in (HOST, bundle):
+        raise Refused("build: a container builds its own bundle only")
+    with state_lock:
+        args = read_state().get("builds", {}).get(bundle)
+    if not args:
+        raise Refused(f"{bundle}: nothing to build, its bundle is made or was never queued")
+    check_disk()
+
+    def work(log):
+        set_building(bundle, True)
+        try:
+            run_script(log, *args)
+        finally:
+            set_building(bundle, False)
+        with state_lock:
+            state = read_state()
+            state.get("builds", {}).pop(bundle, None)
+            write_state(state)
+        return {"bundle": bundle}
+
+    return start_job(caller, "build", work)
 
 
 def check_ops_session(bundle, body):
@@ -1479,6 +1568,7 @@ VERBS = {
     ("GET", "/runs"): list_runs,
     ("GET", "/status"): status,
     ("GET", "/whoami"): whoami,
+    ("POST", "/build"): build_bundle,
     ("POST", "/create"): create,
     ("POST", "/delete"): delete,
     ("POST", "/fetch"): fetch,

@@ -302,6 +302,59 @@ def check_disk(_root):
     return [f"disk: {name}" for name, passed in checks if not passed], len(checks)
 
 
+def check_build(root):
+    """A task queued with its build starts in the bare folder, told so, and only its own bundle
+    builds it; under the disk floor such a task is still queued."""
+    checks = []
+    state, launched = prepare(root, {"new": GONE, "later": GONE}, 8)
+    build = ["fetch_bundle.py", "new", "--no-open"]
+    for item in state["queue"]:
+        item["build"] = build
+    daemon.prepare_folder = lambda bundle: os.makedirs(daemon.get_worktree_bundle_folder(bundle))
+    daemon.launch_queued()
+    task = (root / "master" / "new" / ".agent" / "task.md").read_text()
+    checks.append(("the first starts", launched == ["new"]))
+    checks.append(("its task says it is not built", task == f"{daemon.NOT_BUILT}\n\n{TASK}"))
+    checks.append(
+        (
+            "the next waits, still to build",
+            [(item["bundle"], item["build"], item["waits_for"]) for item in state["queue"]]
+            == [("later", build, "the agent of new to start")],
+        ),
+    )
+    try:
+        daemon.build_bundle("later", {}, {"bundle": "new"})
+        refusal = None
+    except daemon.Refused as error:
+        refusal = str(error)
+    checks.append(("another bundle cannot build it", refusal == "build: a container builds its own bundle only"))
+    ran = []
+    daemon.run_script = lambda log, *args: ran.append(list(args))
+    daemon.build_bundle("new", {}, {})
+    checks.append(("its bundle builds it once", (ran, state["builds"]) == ([build], {})))
+    daemon.read_disk_free = lambda: 20.4
+    daemon.check_unpushed = lambda bundle, script: None
+    daemon.local_branches = lambda bundle: []
+    daemon.get_worktree_bundle_folder = lambda bundle: str(root / "master" / bundle)
+    daemon.get_agent_folder = lambda bundle: root / "master" / bundle / ".agent"
+    code, answer = daemon.create(daemon.HOST, {}, {"base": "master", "name": "x", "task": TASK})
+    queued = next(item for item in state["queue"] if item["bundle"] == answer["bundle"])
+    checks.append(
+        (
+            "under the floor a task is queued with its build",
+            (code, queued["build"][0], queued["waits_for"])
+            == (202, "create_bundle.py", "disk space (20 GB left, 30 needed)"),
+        ),
+    )
+    bare = root / "bare"
+    (bare / ".agent").mkdir(parents=True)
+    (bare / ".claude").symlink_to(root)
+    checks.append(("a folder of links and an agent is bare", daemon.is_bare(bare)))
+    (bare / "odoo").mkdir()
+    checks.append(("a worktree makes it no longer bare", not daemon.is_bare(bare)))
+    return [f"build: {name}" for name, passed in checks if not passed], len(checks)
+
+
 def main():
     failures = []
     for bundles, launched, queue, *options in CASES:
@@ -313,7 +366,7 @@ def main():
         if found != (launched, queue):
             failures.append(f"{list(bundles)}: {found}, expected {(launched, queue)}")
     total = len(CASES)
-    for check in (check_clients, check_disk):
+    for check in (check_clients, check_disk, check_build):
         with tempfile.TemporaryDirectory() as root:
             failed, count = check(pathlib.Path(root))
         failures += failed

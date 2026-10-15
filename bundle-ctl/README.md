@@ -31,10 +31,11 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `GET /branches` | `gbs --json` run on the host, which deletes the bundles left with merged PRs only; `?format=table&width=N`: its colored table |
 | `GET /status` | every local bundle branch: base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open, and its agent: state (`running`, `waiting`, `done`, or `stopped` when its terminal or its window closed before the verdict: nothing runs it any more, and a new task may replace it; a stopped agent carries its `task` text, to queue it again as it was), when it was queued, when its run started (none for a task no window took), when it ended, `stale` when a branch of the bundle got a commit, or its dev remote ref an update (the mtime of its reflog), after that end, retry, and the last write to a session titled with the bundle, its own or an earlier agent's tab Seb went on in (`active N min ago`, or `idle since HH:MM` after 15 minutes; a tab opened by hand has no title and does not count); the queue, each task with its priority, the bundle that queued it, when, and what it waits for |
 | `POST /add-repo` | `add_repo.py`: the worktree of a repo the bundle was made without (`design-themes`, `documentation`); a container asks for its own only |
-| `POST /create` | `gnb` with `--no-push`, then a window, or with a task its agent; refused when the bundle exists, a branch has unpushed commits or the disk is short (see Disk) |
+| `POST /build` | the `gnb` or `pfb` a task was queued with, for the bundle whose agent started bare (see Bare start); the bundle itself or the host asks; refused when the disk is short |
+| `POST /create` | `gnb` with `--no-push`, then a window; with a task, only its queue entry, the bundle being made when its agent asks (see Bare start); refused when the bundle exists, a branch has unpushed commits or, with no task, the disk is short (see Disk) |
 | `POST /delete` | the deletion of a bundle, held for Seb's yes in `hok` (see Deletion); a container asks for its own only |
 | `GET /held` | what became of a deletion this caller asked (`?id=bN`): it waits, or what Seb said in `hok`; `?wait=S` long-polls it, 50 s at most |
-| `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window, or with a task its agent; refused when the bundle is here, a branch has unpushed commits or the disk is short |
+| `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window; with a task, only its queue entry, as for `create`; refused when the bundle is here, a branch has unpushed commits or, with no task, the disk is short |
 | `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle. On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents) |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
 | `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, and the memory left on the host, `short` when a start would add to a host that already lacks it |
@@ -118,9 +119,9 @@ hook on agent commands, the order of the queue, and real clients on a socket of 
 A bundle takes about 3 GB at once, so agents that each make one can fill the disk in minutes. The
 daemon reads what is left on the disk of the bundles:
 
-- Under `BUNDLE_CTL_DISK_STOP_GB` (default 30), `create` and `fetch` are refused, and the queue
-  holds its tasks, forced ones too: `waits for disk space (20 GB left, 30 needed)`. They start by
-  themselves once the space is back.
+- Under `BUNDLE_CTL_DISK_STOP_GB` (default 30), `create` and `fetch` with no task and `build` are
+  refused, and the queue holds its tasks, forced ones too: `waits for disk space (20 GB left, 30
+  needed)`. They start by themselves once the space is back.
 - Under `BUNDLE_CTL_DISK_WARN_GB` (default 60), a desktop notification says what is left, then
   again at each 10 GB less, and again once the disk went 10 GB over that line in between.
 - `python3 test_queue.py` has the cases.
@@ -137,6 +138,21 @@ uncommitted files or a commit no remote has; that one is tried again only after 
 head of a PR its author rebased since) and commits whose change the base has go with `--force`,
 unless a file is not committed. `bctl fetch` brings a bundle back.
 `python3 test_delete.py` has the cases.
+
+A bare folder (an agent and the links of a bundle, no worktree: its agent never asked `build`) goes
+the same way, whatever its name: the daemon removes the folder.
+
+## Bare start
+
+A bundle takes minutes and about 3 GB to make, and many tasks need none: a PR closed since, a
+review that reading the diff settles, a bug already fixed. So `create` and `fetch` with a task
+only queue it, with the script that would make the bundle (Seb's choice on 2026-10-15). When its
+turn comes, the daemon prepares the folder (`.agent` and the links, no worktree) and starts the
+agent there, its task opened by a note: nothing is checked out, the base repos are read through
+their `.git`, GitHub through `gh`. The agent drops the task or does it from there, or runs `bctl
+build`, which makes the bundle in that folder, and goes on in the same session. Until then the
+queue says `not built yet` and `status` lists the bundle with no repo. `python3 test_queue.py` has
+the cases.
 
 ## Wrong version
 
