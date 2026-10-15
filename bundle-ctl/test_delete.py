@@ -24,6 +24,7 @@ CLEAN = "master-clean--seb"
 CLOSED = "master-closed-aku"
 COMMITTED = "master-committed--seb"
 DIRTY = "master-dirty-aku"
+DROPPED = "master-dropped--seb"
 MERGED = "master-merged--seb"
 MINE = "master-mine--seb"
 OPENED = "master-opened-aku"
@@ -38,6 +39,16 @@ TYPED = "master-typed--seb"
 
 def git(cwd, *args):
     subprocess.run(["git", *args], capture_output=True, check=True, cwd=cwd)
+
+
+def sha(repo, ref):
+    return subprocess.run(
+        ["git", "rev-parse", ref],
+        capture_output=True,
+        check=True,
+        cwd=repo,
+        text=True,
+    ).stdout.strip()
 
 
 def commit_as_aku(repo, message):
@@ -62,6 +73,7 @@ def prepare(root):
         CLOSED,
         COMMITTED,
         DIRTY,
+        DROPPED,
         MERGED,
         MINE,
         OPENED,
@@ -115,6 +127,8 @@ def prepare(root):
     git(repo, "fetch", "--quiet", "--all")
     git(repo, "checkout", "--quiet", COMMITTED)
     git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-qm", "own")
+    git(repo, "checkout", "--quiet", DROPPED)
+    git(repo, "-c", "user.name=t", "commit", "--allow-empty", "-qm", "fw conflict fix")
     git(repo, "worktree", "add", "--quiet", str(root / "master" / DIRTY / "odoo"), DIRTY)
     (root / "master" / DIRTY / "odoo" / "notes.txt").write_text("review notes\n")
     world = {
@@ -410,6 +424,63 @@ def check(root):
                 f"{TYPED} is deleted once its container stops: close its window or its terminal",
             )
             and world["closed"] == [REPORTED],
+        ),
+    )
+    first = sha(root / "odoo", DROPPED)
+    code, lines = run_client(path, "delete", DROPPED, "--reason", "r", "--drop", first[:6])
+    checks.append(
+        (
+            "a sha shorter than 7 characters is no commit to drop",
+            (code, lines)
+            == (1, [f"bctl: 400 not a commit sha of 7 characters or more: {first[:6]}"]),
+        ),
+    )
+    base = sha(root / "odoo", "master")
+    code, lines = run_client(path, "delete", DROPPED, "--reason", "r", "--drop", base)
+    checks.append(
+        (
+            "a commit a remote has is no commit to drop",
+            (code, lines) == (1, [f"bctl: 400 no commit of {DROPPED} that no remote has: {base}"]),
+        ),
+    )
+    world["running"].add(str(root / "master" / DROPPED))
+    code, lines = run_client(path, "delete", DROPPED, "--reason", "r", "--drop", first[:12])
+    number = int(lines[0].partition("hok b")[2].partition(".")[0])
+    item = daemon.HELD.read_json(daemon.HELD_DIR / f"{number}.json")
+    checks.append(
+        (
+            "a commit of Seb no remote has goes once named, and hok lists it",
+            (item["lines"][1:3], item["send"])
+            == (
+                [
+                    "the branch in odoo: never pushed, commits of t@t that no remote has",
+                    f"its commit in odoo that no remote has, lost: {first[:12]} fw conflict fix",
+                ],
+                {"bundle": DROPPED, "drop": [first]},
+            ),
+        ),
+    )
+    git(root / "odoo", "-c", "user.name=t", "commit", "--allow-empty", "-qm", "after the request")
+    result = answer_yes(number)
+    checks.append(
+        (
+            "a commit not named keeps the bundle",
+            (result["code"], result["text"])
+            == (1, f"{DROPPED} has commits in odoo that no remote has"),
+        ),
+    )
+    second = sha(root / "odoo", DROPPED)
+    code, lines = run_client(path, "delete", DROPPED, "--reason", "r", "--drop", first, "--drop", second)
+    calls = len(world["calls"])
+    answer_yes(int(lines[0].partition("hok b")[2].partition(".")[0]))
+    world["running"].discard(str(root / "master" / DROPPED))
+    daemon.delete_stopped()
+    wait_jobs()
+    checks.append(
+        (
+            "the commits named still go at the stop of the container, with --force",
+            (world["calls"][calls:], world["state"]["drops"])
+            == ([("delete_bundle.py", "--force", DROPPED)], {}),
         ),
     )
     server.shutdown()

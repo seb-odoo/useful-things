@@ -1124,9 +1124,9 @@ def get_cherry(bundle, repo):
     return {line[2:]: line.startswith("-") for line in lines}
 
 
-def get_others_commits(bundle, repo):
+def get_others_commits(bundle, repo, drop=()):
     """The committers of the commits of the branch no remote has, refused when one is Seb and its
-    base does not have its change.
+    base does not have its change, unless the commit is in `drop`.
     """
     folder = get_repo_folder(repo)
     commits = [
@@ -1147,7 +1147,7 @@ def get_others_commits(bundle, repo):
         text=True,
     ).stdout.strip()
     cherry = get_cherry(bundle, repo) if commits else {}
-    work = [committer for sha, committer in commits if not cherry.get(sha)]
+    work = [committer for sha, committer in commits if not cherry.get(sha) and sha not in drop]
     if work and (not me or me in work):
         raise Refused(f"{bundle} has commits in {repo} that no remote has")
     return [committer for _sha, committer in commits]
@@ -1167,10 +1167,35 @@ def check_uncommitted(bundle):
             raise Refused(f"{bundle} has uncommitted files in {repo}")
 
 
-def check_deletion(bundle):
+def get_dropped(bundle, commits):
+    """The commits a deletion may lose, as full sha and subject by repo: each one named must be a
+    commit of the branch that no remote has.
+    """
+    if bad := [commit for commit in commits if not re.fullmatch(r"[0-9a-f]{7,40}", commit)]:
+        raise ValueError(f"not a commit sha of 7 characters or more: {', '.join(bad)}")
+    dropped, left = {}, set(commits)
+    for repo in local_branches(bundle):
+        for line in subprocess.run(
+            ["git", "log", "--format=%H %s", f"refs/heads/{bundle}", "--not", "--remotes"],
+            capture_output=True,
+            check=False,
+            cwd=get_repo_folder(repo),
+            text=True,
+        ).stdout.splitlines():
+            sha, _, subject = line.partition(" ")
+            if named := {commit for commit in commits if sha.startswith(commit)}:
+                dropped.setdefault(repo, []).append((sha, subject))
+                left -= named
+    if left:
+        raise ValueError(f"no commit of {bundle} that no remote has: {', '.join(sorted(left))}")
+    return dropped
+
+
+def check_deletion(bundle, drop=()):
     """What the deletion drops, a line by repo where the bundle has its branch, and whether
     delete_bundle needs --force. Refused while a repo holds work: a commit of Seb no remote has
-    whose change its base does not have, a push no PR uses yet, or an open PR.
+    whose change its base does not have and that `drop` does not name, a push no PR uses yet, or
+    an open PR.
     """
     lines, force = {}, False
     for repo in local_branches(bundle):
@@ -1180,13 +1205,13 @@ def check_deletion(bundle):
             check=False,
             cwd=get_repo_folder(repo),
         )
-        committers = get_others_commits(bundle, repo)
+        committers = get_others_commits(bundle, repo, drop)
         if pushed.returncode and not committers:
             lines[repo] = "no commit of its own, never pushed"
             continue
         prs = get_branch_prs(repo, bundle)
         cherry = get_cherry(bundle, repo) if pushed.returncode and not prs else {}
-        if not prs and not (cherry and all(cherry.values())):
+        if not prs and not (cherry and all(cherry[sha] or sha in drop for sha in cherry)):
             raise Refused(
                 f"{bundle} has commits in {repo} that no remote has"
                 if pushed.returncode
@@ -1195,8 +1220,8 @@ def check_deletion(bundle):
         if opened := [pr for pr, state in prs.items() if state == "open"]:
             raise Refused(f"{bundle} has an open PR in {repo}: {', '.join(opened)}")
         base = get_base_for_repo(get_base_from_bundle_name(bundle), repo)
-        lines[repo] = (
-            ", ".join(f"{pr} {state}" for pr, state in prs.items()) or f"its commits are in {base}"
+        lines[repo] = ", ".join(f"{pr} {state}" for pr, state in prs.items()) or (
+            f"its commits are in {base}" if all(cherry.values()) else "never pushed"
         )
         if committers:
             force = True
@@ -1237,7 +1262,9 @@ def delete(caller, query, body):
     if HELD is None:
         raise Refused("no gateway-core beside useful-things: hok cannot list the deletion")
     folder = get_worktree_bundle_folder(bundle)
-    branches, _force = check_deletion(bundle)
+    dropped = get_dropped(bundle, body.get("drop") or [])
+    drop = [sha for commits in dropped.values() for sha, _subject in commits]
+    branches, _force = check_deletion(bundle, drop)
     if not branches and not os.path.isdir(folder):
         raise ValueError(f"no bundle {bundle}")
     with state_lock:
@@ -1249,6 +1276,11 @@ def delete(caller, query, body):
         "lines": [
             f"the folder {folder}",
             *([f"the branch in {repo}: {line}" for repo, line in branches.items()] or ["no branch"]),
+            *(
+                f"its commit in {repo} that no remote has, lost: {sha[:12]} {subject}"
+                for repo, commits in dropped.items()
+                for sha, subject in commits
+            ),
             "its container, and the databases named after it",
             *([f"its queued task, from {queued['parent']}"] if queued else []),
             *(
@@ -1259,7 +1291,11 @@ def delete(caller, query, body):
             ),
         ],
         "reason": str(body.get("reason") or ""),
-        "send": {"bundle": bundle, **({"report": report} if report else {})},
+        "send": {
+            "bundle": bundle,
+            **({"drop": drop} if drop else {}),
+            **({"report": report} if report else {}),
+        },
         "title": f"delete the bundle {bundle}",
         "yes": (
             "its agent window closes, then delete_bundle deletes it"
@@ -1337,12 +1373,13 @@ def delete_stopped():
             if get_worktree_bundle_folder(bundle) not in running
         ]
         state["deletions"] = [bundle for bundle in state["deletions"] if bundle not in stopped]
+        drops = {bundle: state.get("drops", {}).pop(bundle, []) for bundle in stopped}
         write_state(state)
     started = {}
     for bundle in stopped:
 
-        def work(log, bundle=bundle):
-            _branches, force = check_deletion(bundle)
+        def work(log, bundle=bundle, drop=drops[bundle]):
+            _branches, force = check_deletion(bundle, drop)
             run_script(log, "delete_bundle.py", *(["--force"] if force else []), bundle)
 
         _code, answer = start_job(HOST, f"delete {bundle}", work)
@@ -1476,9 +1513,9 @@ def send_deletion(item):
     """Seb's yes to a deletion: it runs now when the container of the bundle stopped, else at its
     stop. The answer is what hok shows him.
     """
-    bundle = item["send"]["bundle"]
+    bundle, drop = item["send"]["bundle"], item["send"].get("drop", [])
     try:
-        check_deletion(bundle)
+        check_deletion(bundle, drop)
     except Refused as error:
         raise ValueError(str(error)) from None
     with state_lock:
@@ -1486,6 +1523,10 @@ def send_deletion(item):
         deletions = state.setdefault("deletions", [])
         if bundle not in deletions:
             deletions.append(bundle)
+        if drop:
+            state.setdefault("drops", {})[bundle] = drop
+        else:
+            state.get("drops", {}).pop(bundle, None)
         state["queue"] = [queued for queued in state["queue"] if queued["bundle"] != bundle]
         write_state(state)
     closes = item["send"].get("report") and get_report(bundle) == item["send"]["report"]

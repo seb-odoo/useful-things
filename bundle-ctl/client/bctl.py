@@ -12,7 +12,7 @@
     bctl fetch BUNDLE|PR_LINK|OWNER:BRANCH [--no-open] [TASK]
     bctl open BUNDLE [TASK] [--resume | --terminal] [--wait SECONDS]
     bctl build
-    bctl delete [BUNDLE] --reason TEXT [--wait SECONDS]
+    bctl delete [BUNDLE] --reason TEXT [--drop COMMIT]... [--wait SECONDS]
     bctl run [--kind KIND] [--workers N] [-- COMMAND...]
     bctl runs [--json]
 
@@ -61,11 +61,12 @@ branches is gbs run on the host: the table, or with --json the data agents read.
 
 delete asks Seb in hok to delete a bundle, the bundle of this container when none is named (a
 container asks for its own, or for a bundle whose last task it queued). It is refused when a
-branch of the bundle has a commit no remote has, or is pushed. His yes runs delete_bundle once
-the container of the bundle stopped. When the session of its agent window ended on its report,
-hok shows the report and the yes closes the window. With --wait, bctl waits that long for his
-answer and prints it: exit 0 on his yes, 126 when he refused, 75 when it still waits. The same
-delete asked again takes back the request that waits.
+branch of the bundle has a commit no remote has, or is pushed. --drop COMMIT names a commit of Seb
+no remote has that the deletion may lose: hok lists it, and his yes loses it. His yes runs
+delete_bundle once the container of the bundle stopped. When the session of its agent window ended
+on its report, hok shows the report and the yes closes the window. With --wait, bctl waits that
+long for his answer and prints it: exit 0 on his yes, 126 when he refused, 75 when it still waits.
+The same delete asked again takes back the request that waits.
 
 run waits in the run queue of the host until cores and memory are free for a heavy command, then
 runs COMMAND pinned to the cores it got, which it holds until COMMAND ends. Without COMMAND the
@@ -462,6 +463,13 @@ def main():
     add_repo.add_argument("bundle", nargs="?", help="default: the bundle of this container")
     delete = commands.add_parser("delete", help="ask Seb in hok to delete a bundle")
     delete.add_argument("bundle", nargs="?", help="default: the bundle of this container")
+    delete.add_argument(
+        "--drop",
+        action="append",
+        default=[],
+        help="a commit of Seb no remote has that the deletion may lose, listed in hok",
+        metavar="COMMIT",
+    )
     delete.add_argument("--reason", required=True, help="the line Seb reads before his yes")
     delete.add_argument("--wait", default=0, type=int, help="seconds to wait for his answer")
     run_ = commands.add_parser("run", help="a heavy command, once the host has cores for it")
@@ -511,7 +519,11 @@ def main():
         answer = request("POST", "/add-repo", {"bundle": args.bundle, "repo": args.repo})
         answer = follow(answer["job"])
     elif args.command == "delete":
-        answer = request("POST", "/delete", {"bundle": args.bundle, "reason": args.reason})
+        answer = request(
+            "POST",
+            "/delete",
+            {"bundle": args.bundle, "drop": args.drop, "reason": args.reason},
+        )
         printer = print_deletion
         if args.wait:
             print_deletion(answer)

@@ -205,6 +205,11 @@ change the base of the bundle already has under another sha (`git cherry`, same 
 work: a branch never pushed whose commits are all in its base goes too, with no PR, as the copy
 of a fix that reached master by a forward-port.
 
+`--drop COMMIT` (7 characters of its sha or more, once per commit) names a commit of Seb no remote
+has that the deletion may lose: the request lists it with its subject, and his yes loses it. A
+commit named that the branch does not hold, or one a remote has, is refused. The yes checks the
+branches again with the same commits, so a commit made after the request still keeps the bundle.
+
 - The daemon holds the request in `held/` beside `state.json`, in the format of
   `gateway-core/held.py`, and `hok` lists it as `bN` (the `config.py` of host-ctl names the
   folder). No container mounts that folder: who asks cannot answer. Without gateway-core beside
