@@ -255,6 +255,13 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   no prompt: the way back once the X server took the windows away. It is refused while a terminal
   holds the session: a new terminal would take it over and cut its turn. A VS Code window that
   holds it gives it back (below).
+- What Seb selects with the mouse in claude, and what `/copy` copies, reach the clipboard of the
+  host (Seb, 2026-10-15). claude sends it as an OSC 52 escape, which VTE ignores, so the wrapper
+  runs `podman exec` in a pty of its own, takes the escape out of the output and gives its text
+  to `xclip`. Only while the window of the terminal has the focus (its `_NET_WM_PID` is the parent
+  of the wrapper, its terminator), so that a process of the container cannot fill the clipboard
+  behind Seb's back; a query of the clipboard gets no answer. claude sends the escape only while
+  it finds no `xclip` in the container and no `VTE_VERSION` in its environment.
 - A claude that ends on an error leaves the terminal open on its exit code and on the tool calls
   and answers of the session (`client/stream-format.py` on its transcript): claude draws on the
   alternate screen, which empties when claude ends.
@@ -335,10 +342,11 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
 
 - `window-picker.py`, a rofi script, lists the bundles first by mark (✅, ✋, ❌, ⏳, 🚀), then by
   kind (ops, fw, runbot, task, mine, analysis, review: Seb, 2026-10-15), one row each, then the
-  other windows. A ✅ or ✋ ops agent comes before all of them, as it waits for him (Seb,
-  2026-10-15). A bundle open in VS Code has no row (Seb, 2026-10-13): he works
-  there, and its window is in the task bar. Nor has a bundle or an ops agent whose terminal is not
-  minimized (Seb, 2026-10-14): it is in the task bar too, and the applet does not count it. A
+  other windows. A ✅ or ✋ ops, fw, runbot or mine agent comes before all of them, by kind then by
+  mark, as it waits for him (Seb, 2026-10-15): a ✋ fw comes after a ✅ fw, before a ✅ runbot. A
+  bundle open in VS Code has no row (Seb, 2026-10-13): he works there, and its window is in the
+  task bar. Nor has a bundle or an ops agent whose terminal is not minimized (Seb, 2026-10-14): it
+  is in the task bar too, and the applet does not count it. A
   terminal keeps its last mark once its claude ends, so a ✅, ✋ or ⏳ shows only while an
   `agent-terminal.py BUNDLE` process runs. The search also
   takes the mark in words (`finished`, `waiting`, `failed`, `running`, `starting`), the kind is
@@ -505,8 +513,10 @@ queues to send a job that needs less to a model that costs less. `--effort low|m
 the three models, and the `xhigh` of Seb's settings stays for his own sessions. The daemon refuses
 any other name, `max` included, and `client/agent-run.sh` runs on `opus` at `medium` when
 `.agent/model` or `.agent/effort` holds anything else. `python3 test_options.py` runs each case.
-`--priority N` (-100 to 100, default 0) puts the task ahead of the ones with a lower priority; equal
-priorities leave in arrival order. The answer is the task's place (`queued`) and what it waits for
+`--priority N` (-100 to 100) puts the task ahead of the ones with a lower priority; equal
+priorities leave in arrival order. With none, a task from the host gets 0, and one an agent queues
+the priority of the agent's own task, kept in `.agent/priority` (Seb, 2026-10-15: "same level as
+his, unless it thinks it should be higher"). The answer is the task's place (`queued`) and what it waits for
 (`waits_for`), or `started` when a slot was free. `bctl status` lists the queue in that order with
 each priority, the bundle that queued it, since when and what it waits for, so a caller can pick
 where it goes.

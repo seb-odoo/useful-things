@@ -15,6 +15,8 @@ stops the container. A VS Code window opened on the bundle takes the session ove
 (client/agent-takeover.py): the terminal window closes, its shell too, and the container lives
 as long as that window.
 A terminal closed while such a window is attached hands its session to that window the same way.
+The claude runs in a pty of the wrapper, which hands its clipboard escapes (OSC 52), ignored by
+terminator, to xclip while the window has the focus.
 
 Started on a bundle whose run already began, it goes on with that session and does not run the
 task again. When another terminal holds the session, it takes it over as a window does, in the
@@ -31,19 +33,24 @@ was cut. Other sessions work in that container: neither quitting claude nor clos
 stops it, and a closed terminal stops its own claude.
 """
 
+import base64
 import contextlib
 import fcntl
 import json
 import os
 import pathlib
+import pty
 import re
+import select
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
+import termios
 import threading
 import time
+import tty
 import uuid
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -68,11 +75,16 @@ from config import HOST_FOLDER, REPO_ROOT  # noqa: E402
 
 CLAUDE = "/home/vscode/.claude/bin/claude"
 CLI = "ms-vscode-remote.remote-containers-*/dist/spec-node/devContainersSpecCLI.js"
+CLIPBOARD = re.compile(rb"\x1b\]52;([a-z0-9]*);([A-Za-z0-9+/=]*|\?)(?:\x07|\x1b\\)")
+CLIPBOARD_LIMIT = 1 << 22
+CLIPBOARD_PART = re.compile(rb"\x1b\]52;[a-z0-9]*(?:;(?:[A-Za-z0-9+/=]*|\?)\x1b?)?")
+CLIPBOARD_START = b"\x1b]52;"
 CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
 GO_ON = "Continue from where you left off."
 MODES = ("acceptEdits", "auto", "default", "plan")
 # Leave the alternate screen and the mouse modes a killed claude stays in, and show the cursor.
 RESET = "\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m"
+SELECTIONS = {"c": "clipboard", "p": "primary"}
 START_LOCK = pathlib.Path.home() / ".claude" / "agent-start.lock"
 START_SPACE = 10
 TAKEOVER_WAIT = 30
@@ -189,6 +201,143 @@ def shell(bundle):
         os.chdir(folder / "odoo" if (folder / "odoo").is_dir() else folder)
     program = os.environ.get("SHELL") or "bash"
     os.execvp(program, [program])
+
+
+def run_tty(command):
+    """Run the podman exec of a claude in a pty of its own, and copy this terminal to it and back,
+    so that the clipboard escape (OSC 52) of claude, which terminator ignores, reaches the clipboard
+    of the host. Its exit code."""
+    if not os.isatty(0):
+        return subprocess.run(command, check=False).returncode
+    size = fcntl.ioctl(0, termios.TIOCGWINSZ, bytes(8))
+    pid, fd = pty.fork()
+    if not pid:
+        fcntl.ioctl(0, termios.TIOCSWINSZ, size)
+        os.execvp(command[0], command)
+    resize = signal.signal(signal.SIGWINCH, lambda *args: copy_size(fd))
+    mode = termios.tcgetattr(0)
+    tty.setraw(0)
+    try:
+        copy_tty(fd)
+    except BaseException:
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+        raise
+    finally:
+        signal.signal(signal.SIGWINCH, resize)
+        with contextlib.suppress(OSError, termios.error):
+            termios.tcsetattr(0, termios.TCSADRAIN, mode)
+        os.close(fd)
+    return os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1])
+
+
+def copy_size(fd):
+    with contextlib.suppress(OSError):
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, fcntl.ioctl(0, termios.TIOCGWINSZ, bytes(8)))
+
+
+def copy_tty(fd):
+    """Copy the keys to the pty and its output to this terminal, until the command ends. A tail
+    that may start a clipboard escape waits for the next read; a lone start of one goes out after
+    50 ms with no output."""
+    held = b""
+    inputs = [0, fd]
+    while True:
+        ready = select.select(inputs, [], [], 0.05 if held else None)[0]
+        if not ready and len(held) < len(CLIPBOARD_START):
+            write_terminal(held)
+            held = b""
+        if fd in ready:
+            try:
+                data = os.read(fd, 65536)
+            except OSError:
+                data = b""
+            if not data:
+                write_terminal(held)
+                return
+            out, held = take_clipboard(held + data)
+            write_terminal(out)
+        if 0 in ready:
+            try:
+                data = os.read(0, 65536)
+            except OSError:
+                data = b""
+            if not data:
+                stop()
+            with contextlib.suppress(OSError):
+                write_all(fd, data)
+
+
+def write_terminal(data):
+    try:
+        write_all(1, data)
+    except OSError:
+        stop()
+
+
+def write_all(fd, data):
+    while data:
+        data = data[os.write(fd, data) :]
+
+
+def take_clipboard(data):
+    """The output without its clipboard escapes, each set on the host, and the tail held for the
+    next read: an escape not ended yet, or what may start one. A tail that cannot be one goes out,
+    as a program may print the start of an escape (a cat of a binary file)."""
+    out = CLIPBOARD.sub(lambda match: set_clipboard(*match.groups()), data)
+    start = out.rfind(CLIPBOARD_START)
+    if start >= 0 and len(out) - start < CLIPBOARD_LIMIT and CLIPBOARD_PART.fullmatch(out, start):
+        return out[:start], out[start:]
+    for size in range(len(CLIPBOARD_START) - 1, 0, -1):
+        if out.endswith(CLIPBOARD_START[:size]):
+            return out[:-size], out[-size:]
+    return out, b""
+
+
+def set_clipboard(targets, payload):
+    """Set the text of a clipboard escape in the selections it names, never answer the query of
+    one (its payload is ?). Done aside, as xclip waits for the X server."""
+    try:
+        text = base64.b64decode(payload, validate=True)
+    except ValueError:
+        return b""
+    targets = targets.decode() or "c"
+    selections = [SELECTIONS[target] for target in targets if target in SELECTIONS]
+    threading.Thread(target=write_clipboard, args=(text, selections), daemon=True).start()
+    return b""
+
+
+def write_clipboard(text, selections):
+    """xclip, in a session of its own, as it stays to serve the selection after the window closes.
+    Only while the window of this terminal has the focus, its terminator being the parent of this
+    process: else a process of the container could fill the clipboard behind Seb's back."""
+    if not is_focused():
+        return
+    for selection in selections:
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
+            subprocess.run(
+                ["xclip", "-selection", selection],
+                check=False,
+                input=text,
+                start_new_session=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+
+
+def is_focused():
+    try:
+        window = get_property("-root", "_NET_ACTIVE_WINDOW")
+        return get_property("-id", window, "_NET_WM_PID") == str(os.getppid())
+    except (IndexError, OSError, subprocess.SubprocessError):
+        return False
+
+
+def get_property(*args):
+    """The value of an X property: the last word xprop prints."""
+    out = subprocess.run(["xprop", *args], capture_output=True, check=False, text=True, timeout=2)
+    return out.stdout.split()[-1]
 
 
 def stop(*args):
@@ -310,13 +459,12 @@ def run_ops(name):
         container = get_container(HOST_FOLDER) or up(HOST_FOLDER)
         copy_gitconfig(container)
         space_start()
-        code = subprocess.run(
+        code = run_tty(
             ["podman", "exec", "--interactive", "--tty", "--detach-keys=", "--user", USER]
             + ["--workdir", REPO_ROOT, "--env", f"TERM={os.environ.get('TERM', 'xterm')}"]
             + ["--env", "SHELL=/bin/bash", container, CLAUDE, "--model", "opus"]
-            + get_ops_start(session, task),
-            check=False,
-        ).returncode
+            + get_ops_start(session, task)
+        )
     except HangUp:
         # podman exec does not pass the hang-up on: the claude of the container still runs.
         if container:
@@ -375,13 +523,12 @@ def main():
         container = container or up(get_worktree_bundle_folder(bundle))
         copy_gitconfig(container)
         (agent / "container").write_text(f"{container}\n")
-        code = subprocess.run(
+        code = run_tty(
             ["podman", "exec", "--interactive", "--tty", "--detach-keys=", "--user", USER]
             + ["--workdir", "/workspace", "--env", f"TERM={os.environ.get('TERM', 'xterm')}"]
             + [container, "bash", str(HERE / "client" / "agent-run.sh"), "--terminal", session]
-            + ([GO_ON] if cut else []),
-            check=False,
-        ).returncode
+            + ([GO_ON] if cut else [])
+        )
         if code:
             ending = f"claude ended with code {code}"
     except HangUp:

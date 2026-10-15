@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""What agent-terminal.py does when its claude or its terminal ends, and when a VS Code window
-holds its session, with a fake podman and the wrapper in a pty: python3 test_terminal.py
+"""What agent-terminal.py does when its claude or its terminal ends, when a VS Code window holds
+its session, and with the clipboard escape of claude, with a fake podman, xprop and xclip and the
+wrapper in a pty: python3 test_terminal.py
 """
 
 import importlib.util
@@ -23,12 +24,27 @@ case "$1 $*" in
 "exec "*agent-run.sh* | "exec "*--session-id* | "exec "*--resume*)
 \twhile [ -d "$STATE" ]; do
 \t\t[ -e "$STATE/quit" ] && { rm -f "$STATE/quit"; exit 0; }
+\t\t[ -e "$STATE/copy" ] && {
+\t\t\trm -f "$STATE/copy"
+\t\t\tprintf 'before\\033]52;c;%s' "$(printf 'copied text' | base64)"
+\t\t\tsleep 0.2
+\t\t\tprintf '\\007after\\033]52;c;?\\007'
+\t\t}
 \t\tsleep 0.1
 \tdone ;;
 "exec "*agent-takeover.py*) touch "$AGENT/handoff" ;;
 "exec "*) cat >/dev/null ;;
 "inspect "*) echo true ;;
 "ps "*) [ -e "$STATE/window" ] && echo c1 ;;
+esac
+"""
+XCLIP = """#!/bin/bash
+printf '%s: %s\\n' "$2" "$(cat)" >>"$STATE/clipboard"
+"""
+XPROP = """#!/bin/bash
+case "$1" in
+-root) echo "_NET_ACTIVE_WINDOW(WINDOW): window id # 0x1" ;;
+*) echo "_NET_WM_PID(CARDINAL) = $(cat "$STATE/focus")" ;;
 esac
 """
 # The transcript of a session cut at a tool call, and of one that ended its turn.
@@ -122,8 +138,10 @@ class Case:
             (self.root / "s1.jsonl").write_text("\n".join(tab) + "\n")
         self.terminator = subprocess.Popen(["sleep", "60"])
         (self.root / "bin").mkdir()
-        (self.root / "bin" / "podman").write_text(PODMAN)
-        (self.root / "bin" / "podman").chmod(0o755)
+        for program, script in (("podman", PODMAN), ("xclip", XCLIP), ("xprop", XPROP)):
+            (self.root / "bin" / program).write_text(script)
+            (self.root / "bin" / program).chmod(0o755)
+        (self.state / "focus").write_text(f"{os.getpid()}\n")
         self.env = {
             "AGENT": str(self.agent),
             "BUNDLE_CTL_WINDOW_PID": str(self.terminator.pid),
@@ -173,6 +191,31 @@ def check_quit(case):
     (case.state / "quit").touch()
     case.check_stopped("quitting claude")
     case.check("quitting claude keeps its window", case.terminator.poll() is None)
+
+
+def check_clipboard(case):
+    """The clipboard escape of claude, even cut over two reads, goes to xclip and not to the
+    terminal, while the window has the focus: its terminator, the parent of the wrapper, here the
+    test. A query of the clipboard gets no answer."""
+    case.start()
+    clipboard = case.state / "clipboard"
+    (case.state / "copy").touch()
+    case.check("a copy reaches xclip", wait(clipboard.exists))
+    text = "clipboard: copied text\n"
+    copied = wait(lambda: clipboard.exists() and clipboard.read_text() == text)
+    case.check("xclip gets the text", copied)
+    shown = wait(lambda: "beforeafter" in case.terminal.read())
+    case.check("the terminal shows the output around the escape", shown)
+    case.check("the terminal gets no clipboard escape", "\x1b]52" not in case.terminal.read())
+    (case.state / "focus").write_text("1\n")
+    (case.state / "copy").touch()
+    shown = wait(lambda: case.terminal.read().count("after") == 2)
+    case.check("a copy from a window without the focus shows", shown)
+    time.sleep(0.5)
+    dropped = clipboard.exists() and clipboard.read_text().count("\n") == 1
+    case.check("a copy from a window without the focus is dropped", dropped)
+    (case.state / "quit").touch()
+    case.check_stopped("quitting claude")
 
 
 def check_handoff(case):
@@ -296,7 +339,8 @@ def main():
         check_close_while_waiting: CUT,
         check_ops_resume: CUT,
     }
-    checks = (check_quit, check_sigterm, check_close, check_close_window, check_handoff, *tabs)
+    checks = (check_quit, check_clipboard, check_sigterm, check_close, check_close_window)
+    checks += (check_handoff, *tabs)
     checks += (check_ops_quit, check_ops_close)
     bundles = {check_ops_quit: "ops-s2", check_ops_close: "ops-s2", check_ops_resume: "ops-s1"}
     for check in checks:
