@@ -44,10 +44,26 @@ ROWS = [
     "Inbox - Mozilla Firefox\0info\x1f0x03\x1fmeta\x1f",
     "🔧 Tools (ops) - Mozilla Firefox\0info\x1f0x0c\x1fmeta\x1f",
 ]
-AGENTS = ("master-b--seb", "master-c-aku", "master-d-runbot-12--seb")
+AGENTS = (
+    "master-b--seb",
+    "master-c-aku",
+    "master-d-runbot-12--seb",
+    "master-f-fw--seb",
+    "master-g-runbot-13--seb",
+)
 RESTORED = [
     ROWS[0].replace("✋ waiting 2", "✋ waiting 0"),
     *[row for row in ROWS[1:] if row not in (OPS, REVIEW)],
+]
+WAITING = f"""{WINDOWS.replace("⏩", "✋ ⏩")}\
+0x0e 0 terminator.Terminator box ✋ 🤖 master-g-runbot-13--seb (runbot)
+"""
+WAITING_ROWS = [
+    OPS,
+    "✋ ⏩ master-f-fw--seb (fw)\0info\x1fmaster-f-fw--seb\x1fmeta\x1fwaiting",
+    ROWS[5],
+    "✋ 🤖 master-g-runbot-13--seb (runbot)\0info\x1fmaster-g-runbot-13--seb\x1fmeta\x1fwaiting",
+    REVIEW,
 ]
 OPENING = [f"🔄 {row}" if row == REVIEW else row for row in ROWS]
 ENDED = [
@@ -147,6 +163,10 @@ def main():
         counts = run(folder, "--counts").splitlines()
         if counts[:1] != ["🚀 1"]:
             failures.append(f"counts while a bundle starts {counts!r}, expected 🚀 1 before ✋")
+        (folder / "windows").write_text(WAITING)
+        rows = run(folder).splitlines()[4:9]
+        if rows != WAITING_ROWS:
+            failures.append(f"rows while fw and runbot wait {rows!r}, expected {WAITING_ROWS!r}")
         (folder / "windows").write_text(WINDOWS)
         (folder / "shown").write_text("0x04\n0x0a\n")
         rows = run(folder).splitlines()
@@ -203,7 +223,7 @@ def main():
         failures.append(f"pick 1 new-ops: started {started!r}, expected {[new_ops]!r}")
     for line in failures:
         print(line)
-    cases = 14 + len(PICKS)
+    cases = 15 + len(PICKS)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

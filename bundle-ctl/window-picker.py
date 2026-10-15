@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """List the bundles not open in VS Code, the ops agent windows and the other windows for rofi, the
 bundles and the ops windows first by the mark of their title, then by kind, and bring the one
-picked to the front.
+picked to the front. A ✅ or ✋ row of an ops, fw, runbot or mine agent comes first, by kind then
+by mark, as it waits for Seb (Seb, 2026-10-15): a ✋ fw comes after a ✅ fw, before a ✅ runbot.
 
     window-picker.py --show
     window-picker.py --counts
@@ -24,8 +25,8 @@ then that line, for window-applet/.
 
 A minimized ops agent window has a row of its own, ranked by its mark, and a click brings it up:
 its title shows the title of its conversation in place of a name, and agent-terminator.py drops its
-mark once its claude ended. A ✅ or ✋ one comes before the bundles, as it waits for Seb (Seb,
-2026-10-15). The first row, `➕ new ops agent`, opens a new one: bctl open ops --terminal.
+mark once its claude ended. The first row, `➕ new ops agent`, opens a new one: bctl open ops
+--terminal.
 """
 
 import importlib.util
@@ -36,6 +37,7 @@ import subprocess
 import sys
 import time
 
+FIRST_KINDS = ("fw", "mine", "ops", "runbot")
 FOR_SEB = ("✅", "✋")
 HERE = pathlib.Path(__file__).resolve().parent
 KINDS = ("ops", "fw", "runbot", "task", "mine", "analysis", "review")
@@ -82,6 +84,13 @@ def get_rank(title):
 def get_order(title):
     orders = (order for order, kind in enumerate(KINDS) if title.endswith(f"({kind})"))
     return next(orders, len(KINDS))
+
+
+def get_place(title):
+    rank, order = get_rank(title), get_order(title)
+    if title.startswith(FOR_SEB) and order < len(KINDS) and KINDS[order] in FIRST_KINDS:
+        return (0, order, rank)
+    return (1, rank, order)
 
 
 def get_agent_bundles():
@@ -184,19 +193,15 @@ def main():
     rows = sorted(
         [
             (
-                1,
+                get_place(bundle["title"]),
                 get_rank(bundle["title"]),
-                get_order(bundle["title"]),
                 get_loading(name) + bundle["title"],
                 name,
             )
             for name, bundle in bundles.items()
         ]
-        + [
-            (0 if title.startswith(FOR_SEB) else 1, get_rank(title), get_order(title), title, window)
-            for title, window in ops
-        ]
-        + [(1, len(MARKS), len(KINDS), title, window) for title, window in others]
+        + [(get_place(title), get_rank(title), title, window) for title, window in ops]
+        + [((1, len(MARKS), len(KINDS)), len(MARKS), title, window) for title, window in others]
     )
     titles = [bundle["title"] for bundle in bundles.values()] + [title for title, _ in ops]
     ranks = [get_rank(title) for title in titles]
@@ -210,7 +215,7 @@ def main():
     sys.stdout.write(f"\0message\x1f{'   '.join(counts)}   |   {hint}\n")
     sys.stdout.write("\0no-custom\x1ftrue\n\0use-hot-keys\x1ftrue\n")
     sys.stdout.write(f"{NEW_OPS}\0info\x1fnew-ops\n")
-    for _, rank, _, title, info in rows:
+    for _, rank, title, info in rows:
         word = MARKS[rank][1] if rank < len(MARKS) else ""
         sys.stdout.write(f"{title}\0info\x1f{info}\x1fmeta\x1f{word}\n")
 
