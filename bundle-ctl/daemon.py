@@ -10,6 +10,7 @@ kernel and never from the request.
 """
 
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import http.server
 import importlib.util
 import json
@@ -148,6 +149,7 @@ NOT_BUILT = (
     " /workspace, and you go on."
 )
 OPS_OPEN = "ops-window-open"
+OPS_TASK = "The agent of the bundle {bundle} sends this task, and Seb said yes to it in hok:\n\n"
 REVIEW_CHECK = 60
 REVIEW_CLOSED = 60 * float(
     os.environ.get("BUNDLE_CTL_REVIEW_CLOSED_MINUTES")
@@ -1146,6 +1148,22 @@ def delete(caller, query, body):
     return 200, {"bundle": bundle, "held": f"{HELD_LETTER}{HELD.add(HELD_DIR, item)}"}
 
 
+def hold_ops_task(caller, task):
+    """Hold the task a bundle sends to a new ops agent for Seb's yes in hok. The same task asked
+    again takes back the request that waits."""
+    if HELD is None:
+        raise Refused("no gateway-core beside useful-things: hok cannot list the task")
+    item = {
+        "client": caller,
+        "key": f"ops {caller} {hashlib.sha256(task.encode()).hexdigest()}",
+        "lines": task.splitlines(),
+        "send": {"task": OPS_TASK.format(bundle=caller) + task},
+        "title": "send a task to a new ops agent",
+        "yes": "an ops agent window opens on the task below, with hctl and the drafts",
+    }
+    return 200, {"bundle": "ops", "held": f"{HELD_LETTER}{HELD.add(HELD_DIR, item)}"}
+
+
 def get_held(caller, query, body):
     """What became of a request this caller held for Seb: it waits, or what hok said."""
     if HELD is None:
@@ -1329,14 +1347,28 @@ def send_deletion(item):
     job = delete_stopped().get(bundle)
     if job is None:
         return f"{bundle} is deleted once its container stops: close its window or its terminal"
+    wait_job(job)
+    if job["state"] == "done":
+        return f"{bundle} deleted"
+    return f"{bundle} is being deleted, see {job['log']}"
+
+
+def send_held(item):
+    """Seb's yes to what a bundle held: its deletion, or its task for a new ops agent."""
+    if "bundle" in item["send"]:
+        return send_deletion(item)
+    _code, answer = open_ops(HOST, "ops", {"task": item["send"]["task"]})
+    wait_job(jobs[answer["job"]])
+    return f"an ops agent window opens on the task of {item['client']}"
+
+
+def wait_job(job):
+    """Wait a while for a job a yes started: a failure is what hok shows."""
     deadline = time.monotonic() + DELETE_WAIT
     while job["state"] in ("waiting", "running") and time.monotonic() < deadline:
         time.sleep(0.5)
     if job["state"] == "failed":
         raise ValueError(f"{job['result']['error']}, see {job['log']}")
-    if job["state"] == "done":
-        return f"{bundle} deleted"
-    return f"{bundle} is being deleted, see {job['log']}"
 
 
 def create(caller, query, body):
@@ -1474,16 +1506,18 @@ def open_ops(caller, bundle, body):
     """The ops window, or with a task or `terminal` a new ops agent window, at once: no cap and no
     queue, as for a tab of the ops window. ops-SESSION with `terminal` goes on with the session of
     a tab in an ops agent window, and alone with the session of an ops agent window in a tab. A
-    bundle may not ask, as its task would run where hctl is."""
+    bundle may only send a task, which waits for Seb's yes in hok, as it would run where hctl is."""
+    task = body.get("task")
+    if "task" in body and (not isinstance(task, str) or not task.strip() or len(task) > MAX_TASK):
+        raise ValueError(f"task: a text of at most {MAX_TASK} characters")
+    if caller != HOST and HOST_FOLDER and body == {"bundle": "ops", "task": task}:
+        return hold_ops_task(caller, task)
     if caller != HOST or not HOST_FOLDER:
-        raise Refused("ops: only the host and the ops container open it")
+        raise Refused("ops: only the host and the ops container open it, a bundle sends a task")
     if bundle != "ops":
         check_ops_session(bundle, body)
     elif body.get("resume") or {"effort", "model", "priority"} & set(body):
         raise ValueError("ops: only a task or terminal")
-    task = body.get("task")
-    if "task" in body and (not isinstance(task, str) or not task.strip() or len(task) > MAX_TASK):
-        raise ValueError(f"task: a text of at most {MAX_TASK} characters")
     name = bundle
     if bundle == "ops" and ("task" in body or body.get("terminal")):
         name = f"{OPS}{uuid.uuid4()}"
@@ -1650,7 +1684,7 @@ def main():
     print(f"listening on {SOCKET}", flush=True)
     RUNS.watch()
     if HELD:
-        threading.Thread(target=HELD.serve, args=(HELD_DIR, send_deletion), daemon=True).start()
+        threading.Thread(target=HELD.serve, args=(HELD_DIR, send_held), daemon=True).start()
     keep_launching()
     server.serve_forever()
 

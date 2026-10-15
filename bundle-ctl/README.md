@@ -34,9 +34,9 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `POST /build` | the `gnb` or `pfb` a task was queued with, for the bundle whose agent started bare (see Bare start); the bundle itself or the host asks; refused when the disk is short |
 | `POST /create` | `gnb` with `--no-push`, then a window; with a task, only its queue entry, the bundle being made when its agent asks (see Bare start); refused when the bundle exists, a branch has unpushed commits or, with no task, the disk is short (see Disk) |
 | `POST /delete` | the deletion of a bundle, held for Seb's yes in `hok` (see Deletion); a container asks for its own only |
-| `GET /held` | what became of a deletion this caller asked (`?id=bN`): it waits, or what Seb said in `hok`; `?wait=S` long-polls it, 50 s at most |
+| `GET /held` | what became of a deletion or an ops task this caller asked (`?id=bN`): it waits, or what Seb said in `hok`; `?wait=S` long-polls it, 50 s at most |
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window; with a task, only its queue entry, as for `create`; refused when the bundle is here, a branch has unpushed commits or, with no task, the disk is short |
-| `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle. On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents) |
+| `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle. On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window, and from a bundle a task alone, held as `bN` for Seb's yes in `hok`; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents) |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
 | `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, and the memory left on the host, `short` when a start would add to a host that already lacks it |
 | `POST /force-queue` | the tasks queued now may start over the cap; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
@@ -363,7 +363,10 @@ its own too, as a tab of the ops VS Code window has no mark and no row in the wi
 2026-10-14: "so I can handle it similarly"). `bctl open ops --terminal` opens one, waiting for a
 first prompt, and `bctl open ops --task TEXT` one on that task. `bctl open ops` alone opens the
 ops VS Code window. Only the host and the ops container may ask: the task of a bundle would run
-where `hctl` is.
+where `hctl` is. A bundle sends a task alone, as feedback on the tooling (a skill, a hook, bctl, a
+gateway): the daemon holds it as `bN`, `hok` shows it word for word, and a yes opens an ops agent
+on it, after a line that names the bundle. `bctl open ops --task TEXT --wait 1750` waits for that
+answer as `bctl delete` does, and the same task sent again takes back the request that waits.
 
 - The window is named `ops-SESSION`, a new session id, where a bundle window has the bundle name:
   the terminator config, `agent-terminal.py ops-SESSION`, `BUNDLE_CTL_AGENT_WINDOW`. The task

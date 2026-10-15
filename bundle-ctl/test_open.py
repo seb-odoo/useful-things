@@ -30,7 +30,7 @@ BODIES = [
 ]
 MOVED = "ops-0f897331-3dea-4b5b-a0c4-1c27061e4efc"
 NEW = "ops-11111111-2222-3333-4444-555555555555"
-ONLY_HOST = "ops: only the host and the ops container open it"
+ONLY_HOST = "ops: only the host and the ops container open it, a bundle sends a task"
 ONLY_TERMINAL = "ops-SESSION: a session id, alone or with terminal"
 RUNNING = "ops-71d0d27c-e3f6-46e7-96dc-f7b640411a66"
 # The caller, the body of open ops, and what opens or the refusal. ops-SESSION is the session of a
@@ -38,6 +38,11 @@ RUNNING = "ops-71d0d27c-e3f6-46e7-96dc-f7b640411a66"
 # and an agent-terminal.py runs RUNNING.
 OPS_CASES = [
     ("bundle", {"terminal": True}, ONLY_HOST),
+    ("bundle", {"task": "do"}, "held b1"),
+    ("bundle", {"task": "do"}, "held b1"),
+    ("bundle", {"task": "other"}, "held b2"),
+    ("bundle", {"task": "do", "model": "opus"}, ONLY_HOST),
+    ("bundle", {"task": " "}, "task: a text of at most 32768 characters"),
     (daemon.HOST, {"task": "do", "priority": 1}, "ops: only a task or terminal"),
     (daemon.HOST, {"task": " "}, "task: a text of at most 32768 characters"),
     (daemon.HOST, {}, "window ops"),
@@ -82,10 +87,30 @@ def open_ops(root, caller, body):
     daemon.open_window = lambda log, bundle: opened.append(f"window {bundle}")
     daemon.start_job = lambda caller, verb, work: (202, work(None))
     try:
-        daemon.open_bundle(caller, {}, {"bundle": "ops", **body})
+        _code, answer = daemon.open_bundle(caller, {}, {"bundle": "ops", **body})
     except (ValueError, daemon.Refused) as error:
         return str(error)
-    return " ".join(opened)
+    return f"held {answer['held']}" if "held" in answer else " ".join(opened)
+
+
+def answer_held(root, start_job):
+    """What Seb's yes to the task a bundle sends opens, with the real jobs of the daemon."""
+    opened = []
+    daemon.STATE = root
+    daemon.open_terminal = lambda log, name: opened.append(
+        (daemon.get_agent_folder(name) / "task.md").read_text(),
+    )
+    daemon.start_job = start_job
+    path = daemon.HELD_DIR / "1.json"
+    answer = path.with_suffix(".answer")
+    answer.write_text(f"yes {daemon.HELD.read_json(path)['digest']}\n")
+    daemon.HELD.take(answer, daemon.send_held)
+    found = [daemon.HELD.read_json(path.with_suffix(".result"))["text"], *opened]
+    expected = [
+        "an ops agent window opens on the task of bundle",
+        "The agent of the bundle bundle sends this task, and Seb said yes to it in hok:\n\ndo",
+    ]
+    return [] if found == expected else [f"yes to b1: {found!r}, expected {expected!r}"]
 
 
 def get_moved(root):
@@ -123,7 +148,9 @@ def get_moved(root):
 def main():
     failures = []
     move_to_tab = daemon.move_to_tab
+    start_job = daemon.start_job
     with tempfile.TemporaryDirectory() as root:
+        daemon.HELD_DIR = pathlib.Path(root) / "held"
         agent = pathlib.Path(root) / "bundle" / ".agent"
         agent.mkdir(parents=True)
         daemon.get_agent_folder = lambda bundle: agent
@@ -148,11 +175,12 @@ def main():
             found = open_ops(pathlib.Path(root), caller, body)
             if found != expected:
                 failures.append(f"open ops {caller} {body}: {found!r}, expected {expected!r}")
+        failures += answer_held(pathlib.Path(root), start_job)
         daemon.move_to_tab = move_to_tab
         failures += get_moved(pathlib.Path(root))
     for line in failures:
         print(line)
-    cases = len(CASES) + len(BODIES) + len(OPS_CASES) + 1
+    cases = len(CASES) + len(BODIES) + len(OPS_CASES) + 2
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

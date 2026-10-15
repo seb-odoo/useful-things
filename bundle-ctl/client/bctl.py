@@ -8,7 +8,7 @@
     bctl branches [--json]
     bctl create BASE NAME [--branch-repo REPO]... [--no-open] [TASK]
     bctl fetch BUNDLE|PR_LINK|OWNER:BRANCH [--no-open] [TASK]
-    bctl open BUNDLE [TASK] [--resume | --terminal]
+    bctl open BUNDLE [TASK] [--resume | --terminal] [--wait SECONDS]
     bctl build
     bctl delete [BUNDLE] --reason TEXT [--wait SECONDS]
     bctl run [--kind KIND] [--workers N] [-- COMMAND...]
@@ -43,7 +43,9 @@ open ops opens the VS Code window of the ops container, and with a task or --ter
 session of that container in an agent window of its own, at once. open ops-SESSION --terminal goes
 on with that session in an agent window, once nothing runs it: a session moved from a tab of the
 ops window. open ops-SESSION alone closes the agent window of that session and goes on with it in a
-tab of the ops window. Only the host and the ops container may ask them.
+tab of the ops window. Only the host and the ops container may ask them, but for open ops with a
+task alone from a bundle: it waits for Seb in hok, whose yes opens the ops agent on it. --wait
+then works as for delete, and the same task sent again takes back the request that waits.
 
 build makes the bundle of this container, whose agent started in its bare folder: the create or
 fetch its task was queued with runs now, and the worktrees appear in /workspace.
@@ -203,6 +205,10 @@ def print_deletion(answer):
         f"waits for Seb: hok {answer['held']}. His yes deletes {answer['bundle']} once its"
         " container stopped.",
     )
+
+
+def print_ops_task(answer):
+    print(f"waits for Seb: hok {answer['held']}. His yes opens an ops agent on this task.")
 
 
 def print_table(answer):
@@ -418,6 +424,12 @@ def main():
         action="store_true",
         help="the agent terminal on the bundle's last Claude session, with no prompt",
     )
+    open_.add_argument(
+        "--wait",
+        default=0,
+        type=int,
+        help="ops with a task, from a bundle: seconds to wait for Seb's answer",
+    )
     commands.add_parser("build", help="make the bundle of this container, started bare")
     add_repo = commands.add_parser(
         "add-repo",
@@ -503,6 +515,12 @@ def main():
         answer = request("POST", f"/{args.command}", body)
         if "job" in answer:
             answer = follow(answer["job"])
+        if "held" in answer:
+            printer = print_ops_task
+            if args.wait:
+                print_ops_task(answer)
+                sys.stdout.flush()
+                wait_held(answer["held"], args.wait)
     if args.json or printer is None:
         print(json.dumps(answer, indent=2))
     else:
