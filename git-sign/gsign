@@ -17,7 +17,7 @@ ask_password() {
         esac
         printf '\r\033[K%s%s' "$prompt" "${shown:+$password}" >&2
     done
-    echo >&2
+    printf '\nUnlocking the vault...\n' >&2
 }
 
 until [[ $password ]] && session=$(BW_PASSWORD=$password bw unlock --raw --passwordenv BW_PASSWORD); do
@@ -27,6 +27,7 @@ done
 unset password
 trap 'bw lock >/dev/null' EXIT
 # Offline at login is fine, bw get reads the local copy of the vault.
+echo 'Syncing the vault...' >&2
 bw sync --session "$session" >/dev/null 2>&1 || true
 bw get item github-seb-odoo-signing --session "$session" | jq -r .sshKey.privateKey \
     | SSH_AUTH_SOCK=$ram ssh-add -
