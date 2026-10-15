@@ -362,12 +362,22 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   seconds, the terminals shown on screen included, and no other window. A bundle row also has the
   state of its agent and since when, from its `.agent/` files (`done 12 min ago`, `waiting for 5
   min`, `running for 3 min`, then `shown` when its terminal is not minimized), and the first line
-  of its `result.md`. Under the rows, the queue of `bctl queue`, read every 10 seconds, as `GET
-  /queue` runs `podman ps`. Ctrl+click and Shift+click select several rows: Enter, a double click
-  or Terminal brings up their terminals where they were, the first row in front (his pick: no
-  tiling); VS Code opens the window of each selected bundle, New ops agent runs `bctl open ops
+  of its `result.md`. Each row has its CPU and RAM (Seb, 2026-10-15), read every 5 seconds: those
+  of the container of a bundle, from its `libpod-ID.scope` cgroup under the user manager, the RAM
+  without the file cache as the run queue counts it; those of the claude of an ops window and its
+  children, as the ops agents share one container. 100% is one core. The disk of a bundle is a
+  `du` of its folder when its row comes, then every 10 minutes: its `node_modules` counts there,
+  though they are hard links of the base. Buttons above the rows count each mark and each kind;
+  pressed, they keep the rows of one of the marks pressed and of one of the kinds pressed. Under
+  the rows, behind a handle, the queue of `bctl queue`, read every 10 seconds, as `GET /queue`
+  runs `podman ps`. Ctrl+click and Shift+click select several rows: Enter, a double click or
+  Terminal brings up their terminals where they were, the first row in front (his pick: no
+  tiling); VS Code opens the window of each selected bundle; Close closes the window of each after
+  a question, as the daemon does (SIGUSR1 to its `agent-terminator.py`), so its claude stops. A
+  right click on a row opens a menu with these three. New ops agent runs `bctl open ops
   --terminal`. It runs on the system python of the host, which has GTK. A second start brings the
-  open window up, and its size and place are kept in `~/.local/state/bundle-ctl/agent-list.json`.
+  open window up, and its size, its place and the height of the queue are kept in
+  `~/.local/state/bundle-ctl/agent-list.json`.
 - `window-applet/`, a Cinnamon applet, shows the mark that needs Seb most and how many bundles
   have it, in the order ❌ ✋ ✅ 🚀 ⏳ (Seb, 2026-10-15: a failed agent is an error to fix, a
   waiting or finished one waits for him, one stuck on starting comes after, one in progress does

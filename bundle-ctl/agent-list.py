@@ -5,18 +5,31 @@ again every 2 seconds, the queue every 10.
     agent-list.py
 
 The rows are the ones of the picker, the terminals shown on screen included: each bundle with the
-state of its agent and since when, ", shown" when its terminal is not minimized, and the first line
-of its last answer. Enter, a double click or Terminal brings up the terminal of each selected row
-(Ctrl+click, Shift+click) where it was, the first row last, so that it ends in front. VS Code opens
-the window of each selected bundle, which takes its session over. New ops agent runs bctl open ops
---terminal. A second start brings the open window up. The size and the place of the window are
-kept in agent-list.json, beside the state of the daemon.
+state of its agent and since when, ", shown" when its terminal is not minimized, its CPU, RAM and
+disk, and the first line of its last answer. CPU and RAM are those of the container of a bundle,
+its file cache aside, or of the claude of an ops window and its children, as the ops agents share
+one container; read every 5 seconds, 100% is one core. Disk is the folder of a bundle, measured
+with du when its row comes, then every 10 minutes.
+
+The buttons above the rows count the rows of each mark and of each kind. Pressed, they keep the
+rows of one of the marks pressed and of one of the kinds pressed. Enter, a double click or Terminal
+brings up the terminal of each selected row (Ctrl+click, Shift+click) where it was, the first row
+last, so that it ends in front. VS Code opens the window of each selected bundle, which takes its
+session over. Close closes the window of each selected row after a question, as the daemon does:
+SIGUSR1 to its agent-terminator.py, and its claude stops. A right click on a row opens a menu with
+these three. New ops agent runs bctl open ops --terminal. A second start brings the open window
+up. The size and the place of the window, and the height of the queue under its handle, are kept
+in agent-list.json, beside the state of the daemon.
 """
 
+import collections
+import contextlib
 import importlib.util
 import json
 import os
 import pathlib
+import re
+import signal
 import subprocess
 import sys
 import threading
@@ -24,23 +37,32 @@ import time
 
 import gi
 
+gi.require_version("Gdk", "3.0")
 gi.require_version("GdkX11", "3.0")
 gi.require_version("Gtk", "3.0")
-from gi.repository import GdkX11, GLib, Gtk, Pango  # noqa: F401
+from gi.repository import Gdk, GdkX11, GLib, Gtk, Pango  # noqa: F401
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
-from agents import get_agent_folder, get_mtime, read_text  # noqa: E402
+from agents import OPS, get_agent_folder, get_mtime, read_text  # noqa: E402
+from commands import get_worktree_bundle_folder  # noqa: E402
 
 AGENTS_CHECK = 2
-KEY, WINDOW = 3, 4
+CONTAINERS = pathlib.Path(
+    f"/sys/fs/cgroup/user.slice/user-{os.getuid()}.slice/user@{os.getuid()}.service/user.slice"
+)
+DISK_AGE = 600
+DISK_CHECK = 60
+KEY, TITLE, WINDOW = 6, 0, 7
 PLACE = (
     pathlib.Path(os.environ.get("XDG_STATE_HOME") or pathlib.Path.home() / ".local/state")
     / "bundle-ctl"
     / "agent-list.json"
 )
 QUEUE_CHECK = 10
+SCOPE = re.compile(r"libpod-([0-9a-f]{64})\.scope")
+USAGE_CHECK = 5
 
 
 def load(name, path):
@@ -52,6 +74,8 @@ def load(name, path):
 
 bctl = load("bctl", HERE / "client" / "bctl.py")
 picker = load("picker", HERE / "window-picker.py")
+runs = load("runs", HERE / "runs.py")
+ICONS = {kind: icon for icon, kind, _ in load("title", HERE / "client" / "window-title.py").KINDS}
 
 
 def get_info(row):
@@ -77,8 +101,164 @@ def get_info(row):
 
 def read_agents():
     rows = picker.get_rows(picker.get_windows(), shown=True)
-    lines = [[row.title, *get_info(row), row.key, row.window] for row in rows]
-    return "   ".join(picker.get_counts(rows)), lines
+    return [(row, get_info(row)) for row in rows]
+
+
+def get_kind(row):
+    order = picker.get_order(row.title)
+    return picker.KINDS[order] if order < len(picker.KINDS) else None
+
+
+def get_filters(rows):
+    """The label of each filter button: each mark, then each kind, with its number of rows."""
+    kinds = [get_kind(row) for row in rows]
+    labels = [f"{ICONS[kind]} {kind} {kinds.count(kind)}" for kind in picker.KINDS]
+    return [*picker.get_counts(rows), *labels]
+
+
+def is_kept(row, ranks, kinds):
+    """Whether a row has one of the marks of ranks and one of the kinds, an empty set keeps all."""
+    return (not ranks or row.rank in ranks) and (not kinds or get_kind(row) in kinds)
+
+
+def format_size(size):
+    return f"{size / runs.GIGABYTE:.1f} GB"
+
+
+def read_window_pids():
+    out = subprocess.run(["wmctrl", "-l", "-p"], capture_output=True, check=False, text=True)
+    return {line.split()[0]: line.split()[2] for line in out.stdout.splitlines()}
+
+
+def get_terminator(pid):
+    """The agent-terminator.py process whose terminator is pid, and the bundle of its window, None
+    for another window."""
+    try:
+        parent = pathlib.Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()[1]
+        args = pathlib.Path(f"/proc/{parent}/cmdline").read_text(errors="replace").split("\0")
+        script = next(at for at, arg in enumerate(args) if arg.endswith("agent-terminator.py"))
+        return int(parent), args[script + 1]
+    except (IndexError, OSError, StopIteration):
+        return None
+
+
+def close_windows(windows):
+    """Close agent windows as the daemon does, so that their claude stops. Another window closes as
+    by its close button."""
+    pids = read_window_pids()
+    for window in windows:
+        if terminator := get_terminator(pids.get(window)):
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(terminator[0], signal.SIGUSR1)
+        else:
+            subprocess.run(["wmctrl", "-i", "-c", window], check=False)
+
+
+def read_cgroup(path):
+    """The CPU seconds of a cgroup, and the memory it holds, its file cache aside."""
+    try:
+        stat = dict(line.split() for line in (path / "memory.stat").read_text().splitlines())
+        current = int((path / "memory.current").read_text())
+    except OSError:
+        return None
+    cpu = runs.read_cpu_seconds(path)
+    return cpu is not None and (cpu, current - int(stat["file"]) + int(stat["shmem"]))
+
+
+def read_processes():
+    """Each process: its parent, its CPU seconds with those of the children it waited for, its
+    resident memory and its arguments."""
+    tick, page = os.sysconf("SC_CLK_TCK"), os.sysconf("SC_PAGE_SIZE")
+    processes = {}
+    for path in pathlib.Path("/proc").glob("[0-9]*"):
+        try:
+            fields = (path / "stat").read_text().rpartition(")")[2].split()
+            args = (path / "cmdline").read_text(errors="replace").split("\0")
+        except OSError:
+            continue
+        cpu = sum(int(value) for value in fields[11:15]) / tick
+        processes[int(path.name)] = (int(fields[1]), cpu, int(fields[21]) * page, args)
+    return processes
+
+
+def read_tree(processes, session):
+    """The CPU seconds and the resident memory of the claude of a session and its children, None
+    when it does not run."""
+    children = collections.defaultdict(list)
+    for pid, (parent, *_rest) in processes.items():
+        children[parent].append(pid)
+    todo = [
+        pid
+        for pid, (*_rest, args) in processes.items()
+        if pathlib.Path(args[0]).name == "claude" and session in args
+    ]
+    if not todo:
+        return None
+    cpu = memory = 0
+    while todo:
+        pid = todo.pop()
+        cpu, memory = cpu + processes[pid][1], memory + processes[pid][2]
+        todo += children[pid]
+    return cpu, memory
+
+
+class Usage:
+    """The CPU, the RAM and the disk of the rows of keys, (key, window) pairs, as text by key."""
+
+    def __init__(self):
+        self.disks = {}
+        self.folders = {}
+        self.keys = []
+        self.samples = {}
+
+    def get_containers(self):
+        """The cgroup of each running container, by its folder. podman tells the folder of the
+        containers it did not see yet."""
+        scopes = {}
+        for path in CONTAINERS.glob("libpod-*.scope"):
+            if match := SCOPE.fullmatch(path.name):
+                scopes[match[1]] = path
+        if not scopes.keys() <= self.folders.keys():
+            labels = '{{.ID}} {{index .Labels "devcontainer.local_folder"}}'
+            command = ["podman", "ps", "--no-trunc", "--format", labels]
+            out = subprocess.run(command, capture_output=True, check=False, text=True).stdout
+            self.folders = dict(line.partition(" ")[::2] for line in out.splitlines())
+        return {self.folders[id_]: path for id_, path in scopes.items() if self.folders.get(id_)}
+
+    def read(self):
+        """The CPU since the last read and the RAM of each row."""
+        now, rows = time.monotonic(), self.keys
+        containers = self.get_containers()
+        pids = read_window_pids() if any(key == window for key, window in rows) else {}
+        processes = read_processes() if pids else {}
+        samples, found = {}, {}
+        for key, window in rows:
+            if key != window:
+                cgroup = containers.get(get_worktree_bundle_folder(key))
+                sample = cgroup and read_cgroup(cgroup)
+            else:
+                terminator = get_terminator(pids.get(window))
+                sample = terminator and read_tree(processes, terminator[1].removeprefix(OPS))
+            if not sample:
+                continue
+            samples[key] = (sample[0], now)
+            before = self.samples.get(key)
+            cpu = before and f"{max(0, sample[0] - before[0]) / (now - before[1]) * 100:.0f}%"
+            found[key] = (cpu or "", format_size(sample[1]))
+        self.samples = samples
+        return found
+
+    def read_disks(self):
+        """The disk of the folder of each bundle of the rows, measured again after DISK_AGE."""
+        for key, window in self.keys:
+            measured = self.disks.get(key)
+            if key == window or (measured and time.monotonic() - measured[1] < DISK_AGE):
+                continue
+            command = ["du", "-s", "-k", get_worktree_bundle_folder(key)]
+            out = subprocess.run(command, capture_output=True, check=False, text=True).stdout
+            size = out.split()[:1]
+            self.disks[key] = (format_size(int(size[0]) * 1024) if size else "", time.monotonic())
+        return {key: text for key, (text, _at) in self.disks.items()}
 
 
 def read_queue():
@@ -125,7 +305,7 @@ def fill(model, lines):
 
 def follow(seconds, read, show):
     """Run read in a thread now and every few seconds, one at a time, and show its result in the
-    main loop."""
+    main loop. The function returned runs it once more, unless it runs."""
     running = threading.Lock()
 
     def work():
@@ -142,6 +322,7 @@ def follow(seconds, read, show):
 
     tick()
     GLib.timeout_add_seconds(seconds, tick)
+    return tick
 
 
 def make_view(model, titles, expand):
@@ -162,6 +343,10 @@ def make_view(model, titles, expand):
 class AgentList(Gtk.Application):
     def __init__(self):
         super().__init__(application_id="org.bundle_ctl.AgentList")
+        self.agents_read = []
+        self.disks = {}
+        self.usage = {}
+        self.usage_reader = Usage()
         self.window = None
 
     def do_activate(self):
@@ -176,71 +361,164 @@ class AgentList(Gtk.Application):
             self.window.set_default_size(place["width"], place["height"])
             self.window.move(place["x"], place["y"])
         except (OSError, ValueError, KeyError):
+            place = {}
             self.window.set_default_size(900, 500)
-        self.counts = Gtk.Label(xalign=0)
-        self.agents = Gtk.ListStore(str, str, str, str, str)
-        self.agents_view, agents = make_view(self.agents, ("Agent", "State", "Last answer"), 2)
+        labels = get_filters([])
+        self.marks = [Gtk.ToggleButton(label=label) for label in labels[: len(picker.MARKS)]]
+        self.kinds = [Gtk.ToggleButton(label=label) for label in labels[len(picker.MARKS) :]]
+        filters = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        for buttons in (self.marks, self.kinds):
+            line = Gtk.Box(spacing=6)
+            for button in buttons:
+                button.connect("toggled", self.show)
+                line.pack_start(button, False, False, 0)
+            filters.pack_start(line, False, False, 0)
+        self.agents = Gtk.ListStore(*[str] * 8)
+        titles = ("Agent", "State", "CPU", "RAM", "Disk", "Last answer")
+        self.agents_view, agents = make_view(self.agents, titles, 5)
         self.agents_view.get_selection().set_mode(Gtk.SelectionMode.MULTIPLE)
+        self.agents_view.connect("button-press-event", self.open_menu)
         self.agents_view.connect("row-activated", self.bring_up)
         self.queue_head = Gtk.Label(xalign=0)
         self.queue = Gtk.ListStore(str, str, str, str)
         queue_view, queue = make_view(self.queue, ("Queued", "Priority", "Since", "Waits for"), 3)
         queue_view.get_selection().set_mode(Gtk.SelectionMode.NONE)
         queue.set_min_content_height(100)
+        queue_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        queue_box.pack_start(self.queue_head, False, False, 0)
+        queue_box.pack_start(queue, True, True, 0)
+        self.panes = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL, wide_handle=True)
+        self.panes.pack1(agents, True, False)
+        self.panes.pack2(queue_box, False, False)
+        if "split" in place:
+            self.panes.set_position(place["split"])
+        actions = (("Terminal", self.bring_up), ("VS Code", self.open_code), ("Close", self.close))
+        self.menu = Gtk.Menu()
+        for label, action in actions:
+            item = Gtk.MenuItem(label=label)
+            item.connect("activate", action)
+            self.menu.append(item)
+        self.menu.show_all()
         buttons = Gtk.Box(spacing=6)
-        for label, action in (
-            ("Terminal", self.bring_up),
-            ("VS Code", self.open_code),
-            ("New ops agent", lambda _button: picker.open_ops()),
-        ):
+        for label, action in (*actions, ("New ops agent", lambda _button: picker.open_ops())):
             button = Gtk.Button(label=label)
             button.connect("clicked", action)
             buttons.pack_start(button, False, False, 0)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=6)
-        box.pack_start(self.counts, False, False, 0)
-        box.pack_start(agents, True, True, 0)
-        box.pack_start(self.queue_head, False, False, 0)
-        box.pack_start(queue, False, False, 0)
+        box.pack_start(filters, False, False, 0)
+        box.pack_start(self.panes, True, True, 0)
         box.pack_start(buttons, False, False, 0)
         self.window.add(box)
         self.window.show_all()
         follow(AGENTS_CHECK, read_agents, self.show_agents)
         follow(QUEUE_CHECK, read_queue, self.show_queue)
+        follow(USAGE_CHECK, self.usage_reader.read, self.show_usage)
+        self.measure_disks = follow(DISK_CHECK, self.usage_reader.read_disks, self.show_disks)
 
     def get_selected(self):
         model, paths = self.agents_view.get_selection().get_selected_rows()
-        return [(model[path][KEY], model[path][WINDOW]) for path in paths]
+        return [list(model[path]) for path in paths]
 
-    def show_agents(self, result):
-        counts, lines = result
-        self.counts.set_text(counts)
+    def show(self, *_args):
+        """Write the rows the filters keep, with what was read last, and keep their selection."""
+        ranks = {rank for rank, button in enumerate(self.marks) if button.get_active()}
+        kinds = {kind for kind, button in zip(picker.KINDS, self.kinds) if button.get_active()}
+        labels = get_filters([row for row, _info in self.agents_read])
+        for button, label in zip(self.marks + self.kinds, labels):
+            if button.get_label() != label:
+                button.set_label(label)
+        lines = [
+            [
+                row.title,
+                state,
+                *self.usage.get(row.key, ("", "")),
+                self.disks.get(row.key, ""),
+                answer,
+                row.key,
+                row.window,
+            ]
+            for row, (state, answer) in self.agents_read
+            if is_kept(row, ranks, kinds)
+        ]
         selection = self.agents_view.get_selection()
-        keys = {key for key, _ in self.get_selected()}
+        keys = {row[KEY] for row in self.get_selected()}
         fill(self.agents, lines)
         selection.unselect_all()
         for row in self.agents:
             if row[KEY] in keys:
                 selection.select_iter(row.iter)
 
+    def show_agents(self, agents):
+        keys = [(row.key, row.window) for row, _info in agents]
+        new = set(keys) - set(self.usage_reader.keys)
+        self.usage_reader.keys = keys
+        self.agents_read = agents
+        self.show()
+        if new:
+            self.measure_disks()
+
+    def show_usage(self, usage):
+        self.usage = usage
+        self.show()
+
+    def show_disks(self, disks):
+        self.disks = disks
+        self.show()
+
     def show_queue(self, answer):
         head, lines = describe_queue(answer)
         self.queue_head.set_text(head)
         fill(self.queue, lines)
 
-    def bring_up(self, *_args):
-        for _key, window in reversed(self.get_selected()):
-            subprocess.run(["wmctrl", "-i", "-a", window], check=False)
+    def open_menu(self, view, event):
+        """On a right click, select the row under the mouse unless it is selected, and open the
+        menu of the selected rows."""
+        if event.type != Gdk.EventType.BUTTON_PRESS or event.button != Gdk.BUTTON_SECONDARY:
+            return False
+        found = view.get_path_at_pos(int(event.x), int(event.y))
+        if found is None:
+            return False
+        selection = view.get_selection()
+        if not selection.path_is_selected(found[0]):
+            selection.unselect_all()
+            selection.select_path(found[0])
+        self.menu.popup_at_pointer(event)
+        return True
 
-    def open_code(self, _button):
-        for key, window in self.get_selected():
-            if key != window:
-                picker.pick(key, terminal=False)
+    def bring_up(self, *_args):
+        for row in reversed(self.get_selected()):
+            subprocess.run(["wmctrl", "-i", "-a", row[WINDOW]], check=False)
+
+    def open_code(self, *_args):
+        for row in self.get_selected():
+            if row[KEY] != row[WINDOW]:
+                picker.pick(row[KEY], terminal=False)
+
+    def close(self, *_args):
+        rows = self.get_selected()
+        if not rows:
+            return
+        dialog = Gtk.MessageDialog(
+            transient_for=self.window,
+            modal=True,
+            message_type=Gtk.MessageType.QUESTION,
+            text="Close the window of these agents? Their claude stops.",
+            secondary_text="\n".join(row[TITLE] for row in rows),
+        )
+        dialog.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Close", Gtk.ResponseType.OK)
+        dialog.set_default_response(Gtk.ResponseType.OK)
+        answer = dialog.run()
+        dialog.destroy()
+        if answer == Gtk.ResponseType.OK:
+            close_windows([row[WINDOW] for row in rows])
 
     def save_place(self, window, _event):
         x, y = window.get_position()
         width, height = window.get_size()
+        split = self.panes.get_position()
+        place = {"height": height, "split": split, "width": width, "x": x, "y": y}
         PLACE.parent.mkdir(parents=True, exist_ok=True)
-        PLACE.write_text(json.dumps({"height": height, "width": width, "x": x, "y": y}))
+        PLACE.write_text(json.dumps(place))
 
 
 if __name__ == "__main__":
