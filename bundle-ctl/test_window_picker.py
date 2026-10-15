@@ -190,12 +190,15 @@ def main():
             failures.append(f"counts {counts!r}, expected {['✋ 2', COUNTS]!r}")
         (folder / "windows").write_text(WINDOWS.replace("⭐ master-e", "🚀 ⭐ master-e"))
         counts = run(folder, "--counts").splitlines()
-        if counts[:1] != ["🚀 1"]:
-            failures.append(f"counts while a bundle starts {counts!r}, expected 🚀 1 before ✋")
+        if counts[:1] != ["✋ 2"]:
+            failures.append(f"counts while a bundle starts {counts!r}, expected ✋ 2 before 🚀")
         (folder / "windows").write_text(WAITING)
         rows = run(folder).splitlines()[4:10]
         if rows != WAITING_ROWS:
             failures.append(f"rows while fw and runbot wait {rows!r}, expected {WAITING_ROWS!r}")
+        counts = run(folder, "--counts").splitlines()
+        if counts[:1] != ["❌ 1"]:
+            failures.append(f"counts while an agent failed {counts!r}, expected ❌ 1 before ✋")
         (folder / "windows").write_text(WINDOWS)
         (folder / "shown").write_text("0x04\n0x0a\n")
         rows = run(folder).splitlines()
@@ -235,10 +238,15 @@ def main():
         counts = run(folder, "--counts").splitlines()
         if counts != ["✋ 1", COUNTS.replace("✋ waiting 2", "✋ waiting 1")]:
             failures.append(f"counts once no bundle waits {counts!r}, expected ✋ 1 for ops")
-        (folder / "windows").write_text(WINDOWS.replace("✋ 🔧", "🔧"))
+        starting = WINDOWS.replace("✋ 🔧", "🔧").replace("⭐ master-e", "🚀 ⭐ master-e")
+        (folder / "windows").write_text(starting)
         counts = run(folder, "--counts").splitlines()
         if counts[:1] != ["✅ 1"]:
-            failures.append(f"counts once nothing waits {counts!r}, expected ✅ 1 before ⏳")
+            failures.append(f"counts once nothing waits {counts!r}, expected ✅ 1 before 🚀")
+        (folder / "windows").write_text(starting.replace("✅ ", ""))
+        counts = run(folder, "--counts").splitlines()
+        if counts[:1] != ["🚀 1"]:
+            failures.append(f"counts once nothing waits {counts!r}, expected 🚀 1 before ⏳")
         (folder / "windows").write_text(WINDOWS.replace("✋ 🔧", "🔧").replace("✅ ", ""))
         counts = run(folder, "--counts").splitlines()
         if counts[:1] != ["⏳ 1"]:
@@ -254,7 +262,7 @@ def main():
         failures.append(f"pick 1 new-ops: started {started!r}, expected {[new_ops]!r}")
     for line in failures:
         print(line)
-    cases = 16 + len(PICKS)
+    cases = 18 + len(PICKS)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

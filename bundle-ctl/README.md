@@ -369,8 +369,9 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   --terminal`. It runs on the system python of the host, which has GTK. A second start brings the
   open window up, and its size and place are kept in `~/.local/state/bundle-ctl/agent-list.json`.
 - `window-applet/`, a Cinnamon applet, shows the mark that needs Seb most and how many bundles
-  have it, in the order 🚀 ✋ ❌ ✅ ⏳ (Seb, 2026-10-14: an agent stuck on starting may be a bug,
-  a finished one waits for him, one in progress does not), or 🪟 when no bundle has a mark. Its
+  have it, in the order ❌ ✋ ✅ 🚀 ⏳ (Seb, 2026-10-15: a failed agent is an error to fix, a
+  waiting or finished one waits for him, one stuck on starting comes after, one in progress does
+  not), or 🪟 when no bundle has a mark. Its
   tooltip has the counts of each mark, and a click opens `agent-list.py`, or brings it up. The
   rofi list stays on its shortcut.
   The label comes from `window-picker.py --counts` every 2 seconds. It also sets `skip_taskbar` on
