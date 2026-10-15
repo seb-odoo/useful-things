@@ -335,7 +335,8 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
 
 - `window-picker.py`, a rofi script, lists the bundles first by mark (✅, ✋, ❌, ⏳, 🚀), then by
   kind (ops, fw, runbot, task, mine, analysis, review: Seb, 2026-10-15), one row each, then the
-  other windows. A bundle open in VS Code has no row (Seb, 2026-10-13): he works
+  other windows. A ✅ or ✋ ops agent comes before all of them, as it waits for him (Seb,
+  2026-10-15). A bundle open in VS Code has no row (Seb, 2026-10-13): he works
   there, and its window is in the task bar. Nor has a bundle or an ops agent whose terminal is not
   minimized (Seb, 2026-10-14): it is in the task bar too, and the applet does not count it. A
   terminal keeps its last mark once its claude ends, so a ✅, ✋ or ⏳ shows only while an

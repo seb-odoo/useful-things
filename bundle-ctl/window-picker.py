@@ -24,8 +24,8 @@ then that line, for window-applet/.
 
 A minimized ops agent window has a row of its own, ranked by its mark, and a click brings it up:
 its title shows the title of its conversation in place of a name, and agent-terminator.py drops its
-mark once its claude ended. The first row, `➕ new ops agent`, opens a new one: bctl open ops
---terminal.
+mark once its claude ended. A ✅ or ✋ one comes before the bundles, as it waits for Seb (Seb,
+2026-10-15). The first row, `➕ new ops agent`, opens a new one: bctl open ops --terminal.
 """
 
 import importlib.util
@@ -36,6 +36,7 @@ import subprocess
 import sys
 import time
 
+FOR_SEB = ("✅", "✋")
 HERE = pathlib.Path(__file__).resolve().parent
 KINDS = ("ops", "fw", "runbot", "task", "mine", "analysis", "review")
 LIVE = ("✅", "✋", "⏳")
@@ -183,6 +184,7 @@ def main():
     rows = sorted(
         [
             (
+                1,
                 get_rank(bundle["title"]),
                 get_order(bundle["title"]),
                 get_loading(name) + bundle["title"],
@@ -190,8 +192,11 @@ def main():
             )
             for name, bundle in bundles.items()
         ]
-        + [(get_rank(title), get_order(title), title, window) for title, window in ops]
-        + [(len(MARKS), len(KINDS), title, window) for title, window in others]
+        + [
+            (0 if title.startswith(FOR_SEB) else 1, get_rank(title), get_order(title), title, window)
+            for title, window in ops
+        ]
+        + [(1, len(MARKS), len(KINDS), title, window) for title, window in others]
     )
     titles = [bundle["title"] for bundle in bundles.values()] + [title for title, _ in ops]
     ranks = [get_rank(title) for title in titles]
@@ -205,7 +210,7 @@ def main():
     sys.stdout.write(f"\0message\x1f{'   '.join(counts)}   |   {hint}\n")
     sys.stdout.write("\0no-custom\x1ftrue\n\0use-hot-keys\x1ftrue\n")
     sys.stdout.write(f"{NEW_OPS}\0info\x1fnew-ops\n")
-    for rank, _, title, info in rows:
+    for _, rank, _, title, info in rows:
         word = MARKS[rank][1] if rank < len(MARKS) else ""
         sys.stdout.write(f"{title}\0info\x1f{info}\x1fmeta\x1f{word}\n")
 
