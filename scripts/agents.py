@@ -46,14 +46,35 @@ def get_transcript(session):
     return next(PROJECTS.glob(f"*/{session}.jsonl"), None)
 
 
-def get_resume(transcript):
-    """The permission mode a session last ran in, and whether its turn was cut: its last message
-    is a prompt, or a tool call with no result."""
+def load_takeover():
     spec = importlib.util.spec_from_file_location("takeover", TAKEOVER)
     takeover = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(takeover)
+    return takeover
+
+
+def get_resume(transcript):
+    """The permission mode a session last ran in, and whether its turn was cut: its last message
+    is a prompt, or a tool call with no result."""
+    takeover = load_takeover()
     author, kinds = takeover.get_last_message(takeover.read_entries(transcript))
     return takeover.get_mode(transcript), author == "user" or "tool_use" in kinds
+
+
+def get_last_text(transcript):
+    """The last message of a session when it is a text of the assistant, thinking aside: None
+    when a prompt, a tool call or its result came after."""
+    for entry in reversed(load_takeover().read_entries(transcript)):
+        if entry.get("type") not in ("assistant", "user") or entry.get("isSidechain"):
+            continue
+        content = entry.get("message", {}).get("content")
+        kinds = {block.get("type") for block in content} if isinstance(content, list) else set()
+        if kinds == {"thinking"}:
+            continue
+        if entry["type"] != "assistant" or kinds != {"text"}:
+            return None
+        return "".join(block["text"] for block in content)
+    return None
 
 
 def is_agent_running(bundle):

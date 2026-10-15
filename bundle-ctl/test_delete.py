@@ -3,6 +3,7 @@
 own and without podman: python3 test_delete.py
 """
 
+import json
 import os
 import pathlib
 import shutil
@@ -29,7 +30,10 @@ OPENED = "master-opened-aku"
 PUSHED = "master-pushed--seb"
 REBASED = "master-rebased-aku"
 REFUSED = "master-refused--seb"
+REPORT = "blocked: needs opus\n\n- measured"
+REPORTED = "master-reported--seb"
 STOPPED = "master-stopped--seb"
+TYPED = "master-typed--seb"
 
 
 def git(cwd, *args):
@@ -52,13 +56,48 @@ def prepare(root):
         git(repo, "remote", "add", name, str(remote))
     git(repo, "push", "--quiet", "odoo", "master")
     git(repo, "config", "user.email", "t@t")
-    bundles = (CHILD, CLEAN, CLOSED, COMMITTED, DIRTY, MERGED, MINE, OPENED, PUSHED, REBASED, REFUSED, STOPPED)
+    bundles = (
+        CHILD,
+        CLEAN,
+        CLOSED,
+        COMMITTED,
+        DIRTY,
+        MERGED,
+        MINE,
+        OPENED,
+        PUSHED,
+        REBASED,
+        REFUSED,
+        REPORTED,
+        STOPPED,
+        TYPED,
+    )
     for bundle in bundles:
         git(repo, "branch", bundle)
         (root / "master" / bundle).mkdir(parents=True)
     git(repo, "push", "--quiet", "odoo-dev", CLOSED, MINE, OPENED, PUSHED)
     (root / "master" / CHILD / ".agent").mkdir()
     (root / "master" / CHILD / ".agent" / "parent").write_text(f"{CLEAN}\n")
+    (root / "transcripts").mkdir()
+    typed = [("user", "why 41/50?"), ("assistant", "because")]
+    for bundle, after in ((REPORTED, []), (TYPED, typed)):
+        agent = root / "master" / bundle / ".agent"
+        agent.mkdir()
+        for name, text in (("done", "0"), ("result.md", REPORT), ("session", bundle)):
+            (agent / name).write_text(f"{text}\n")
+        entries = [
+            {"type": "user", "message": {"content": "measure it"}},
+            {"type": "assistant", "message": {"content": [{"type": "thinking", "thinking": "t"}]}},
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": REPORT}]}},
+            {"type": "system", "subtype": "turn_duration"},
+            *(
+                {"type": author, "message": {"content": [{"type": "text", "text": text}]}}
+                for author, text in after
+            ),
+        ]
+        (root / "transcripts" / f"{bundle}.jsonl").write_text(
+            "".join(f"{json.dumps(entry)}\n" for entry in entries),
+        )
     for bundle in (DIRTY, REBASED):
         git(repo, "checkout", "--quiet", bundle)
         commit_as_aku(repo, "rebased")
@@ -88,11 +127,15 @@ def prepare(root):
             OPENED: {"odoo/odoo#3": "open"},
             REBASED: {"odoo/odoo#2": "closed"},
         },
+        "closed": [],
         "running": {str(root / "master" / CLEAN)},
-        "state": {},
+        "state": {"queue": [{"bundle": REPORTED, "parent": CLEAN}]},
     }
     daemon.HELD_DIR = root / "held"
     daemon.STATE = root
+    daemon.close_window = world["closed"].append
+    daemon.get_transcript = lambda session: root / "transcripts" / f"{session}.jsonl"
+    daemon.get_window_pids = lambda bundle: [1] if bundle in (REPORTED, TYPED) else []
     daemon.get_agent_folder = lambda bundle: root / "master" / bundle / ".agent"
     daemon.get_branch_prs = lambda repo_name, branch: world["prs"].get(branch, {})
     daemon.get_open_windows = lambda: set(world["running"])
@@ -321,6 +364,54 @@ def check(root):
                 == (f"the branch in odoo: {line}", f"{bundle} deleted", call),
             ),
         )
+    world["running"].update(str(root / "master" / bundle) for bundle in (REPORTED, TYPED))
+    code, lines = run_client(path, "delete", REPORTED, "--reason", "r")
+    number = int(lines[0].partition("hok b")[2].partition(".")[0])
+    item = daemon.HELD.read_json(daemon.HELD_DIR / f"{number}.json")
+    checks.append(
+        (
+            "the request shows the report its session ended on, and its yes closes the window",
+            (lines, item["lines"][3:], item["yes"])
+            == (
+                [
+                    f"waits for Seb: hok b{number}. His yes deletes {REPORTED} once its agent"
+                    " window closed.",
+                ],
+                [
+                    f"its queued task, from {CLEAN}",
+                    "its agent window, which ends on this report:",
+                    "  blocked: needs opus",
+                    "",
+                    "  - measured",
+                ],
+                "its agent window closes, then delete_bundle deletes it",
+            ),
+        ),
+    )
+    result = answer_yes(number)
+    checks.append(
+        (
+            "the yes closes the window and drops the queued task",
+            (result["text"], world["closed"], world["state"]["queue"], world["state"]["deletions"])
+            == (f"{REPORTED} is deleted once its agent window closed", [REPORTED], [], [REPORTED]),
+        ),
+    )
+    code, lines = run_client(path, "delete", TYPED, "--reason", "r")
+    number = int(lines[0].partition("hok b")[2].partition(".")[0])
+    item = daemon.HELD.read_json(daemon.HELD_DIR / f"{number}.json")
+    result = answer_yes(number)
+    checks.append(
+        (
+            "a session that went on after its report keeps its window for Seb",
+            (lines[0].endswith("once its container stopped."), len(item["lines"]), result["text"])
+            == (
+                True,
+                3,
+                f"{TYPED} is deleted once its container stops: close its window or its terminal",
+            )
+            and world["closed"] == [REPORTED],
+        ),
+    )
     server.shutdown()
     server.server_close()
     return [name for name, passed in checks if not passed], len(checks)

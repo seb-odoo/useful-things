@@ -47,6 +47,7 @@ from agents import (  # noqa: E402
     get_agent,
     get_agent_folder,
     get_bundle_container,
+    get_last_text,
     get_mtime,
     get_resume,
     get_transcript,
@@ -1195,6 +1196,9 @@ def delete(caller, query, body):
     branches, _force = check_deletion(bundle)
     if not branches and not os.path.isdir(folder):
         raise ValueError(f"no bundle {bundle}")
+    with state_lock:
+        queued = next((item for item in read_state()["queue"] if item["bundle"] == bundle), None)
+    report = get_report(bundle) if get_window_pids(bundle) else None
     item = {
         "client": caller,
         "key": f"delete {bundle}",
@@ -1202,13 +1206,45 @@ def delete(caller, query, body):
             f"the folder {folder}",
             *([f"the branch in {repo}: {line}" for repo, line in branches.items()] or ["no branch"]),
             "its container, and the databases named after it",
+            *([f"its queued task, from {queued['parent']}"] if queued else []),
+            *(
+                ["its agent window, which ends on this report:"]
+                + [f"  {line}".rstrip() for line in report.splitlines()]
+                if report
+                else []
+            ),
         ],
         "reason": str(body.get("reason") or ""),
-        "send": {"bundle": bundle},
+        "send": {"bundle": bundle, **({"report": report} if report else {})},
         "title": f"delete the bundle {bundle}",
-        "yes": "delete_bundle deletes it, once its container stopped",
+        "yes": (
+            "its agent window closes, then delete_bundle deletes it"
+            if report
+            else "delete_bundle deletes it, once its container stopped"
+        ),
     }
-    return 200, {"bundle": bundle, "held": f"{HELD_LETTER}{HELD.add(HELD_DIR, item)}"}
+    held = f"{HELD_LETTER}{HELD.add(HELD_DIR, item)}"
+    return 200, {"bundle": bundle, "closes": bool(report), "held": held}
+
+
+def get_report(bundle):
+    """The report of the verdict of a bundle's agent when its session ended on it: its agent
+    window then shows nothing more to read."""
+    agent = get_agent_folder(bundle)
+    report, session = read_text(agent / "result.md"), read_text(agent / "session")
+    transcript = session and get_transcript(session)
+    if read_text(agent / "done") is None or not report or not transcript:
+        return None
+    return report if (get_last_text(transcript) or "").strip() == report else None
+
+
+def close_window(bundle):
+    """Close the agent window of a bundle, as Seb would: its claude and its container stop."""
+    for pid in get_window_pids(bundle):
+        try:
+            os.kill(pid, signal.SIGUSR1)
+        except ProcessLookupError:
+            pass
 
 
 def hold_ops_task(caller, task):
@@ -1406,8 +1442,14 @@ def send_deletion(item):
         deletions = state.setdefault("deletions", [])
         if bundle not in deletions:
             deletions.append(bundle)
+        state["queue"] = [queued for queued in state["queue"] if queued["bundle"] != bundle]
         write_state(state)
+    closes = item["send"].get("report") and get_report(bundle) == item["send"]["report"]
+    if closes:
+        close_window(bundle)
     job = delete_stopped().get(bundle)
+    if job is None and closes:
+        return f"{bundle} is deleted once its agent window closed"
     if job is None:
         return f"{bundle} is deleted once its container stops: close its window or its terminal"
     wait_job(job)
@@ -1543,11 +1585,7 @@ def move_to_tab(log, bundle):
     folder of the ops container that the host writes too."""
     log.write(f"moving {bundle} to a tab of the ops window\n")
     log.flush()
-    for pid in get_window_pids(bundle):
-        try:
-            os.kill(pid, signal.SIGUSR1)
-        except ProcessLookupError:
-            pass
+    close_window(bundle)
     deadline = time.monotonic() + WINDOW_CLOSE_WAIT
     while is_agent_running(bundle):
         if time.monotonic() > deadline:

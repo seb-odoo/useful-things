@@ -210,7 +210,12 @@ of a fix that reached master by a forward-port.
   useful-things, the verb is refused.
 - A yes checks the branches again, then runs `delete_bundle.py BUNDLE` as a job, at once when the
   container of the bundle stopped, else when it stops: `deletions` in `state.json` holds the
-  bundles that wait for that. Closing the window or the terminal stays Seb's call.
+  bundles that wait for that. It also drops a task queued for the bundle, which the stop of its
+  container would start.
+- When the session of its agent window ended on the report of its verdict, nothing typed or
+  answered after it, the request shows that report and the yes closes the window, so the bundle
+  goes with no click (Seb, 2026-10-15: "yes if there is nothing useful for me there to read").
+  Else closing the window or the terminal stays Seb's call.
 - `--wait S` waits that long for his answer and prints it, as `hctl --wait` does: exit 0 on his
   yes, 126 when he refused, 75 when it still waits. The same delete asked again replaces the
   request that waits, under the same `bN`, and waits for it.

@@ -59,9 +59,10 @@ branches is gbs run on the host: the table, or with --json the data agents read.
 delete asks Seb in hok to delete a bundle, the bundle of this container when none is named (a
 container asks for its own, or for a bundle whose last task it queued). It is refused when a
 branch of the bundle has a commit no remote has, or is pushed. His yes runs delete_bundle once
-the container of the bundle stopped. With --wait, bctl waits that long for his answer and prints
-it: exit 0 on his yes, 126 when he refused, 75 when it still waits. The same delete asked again
-takes back the request that waits.
+the container of the bundle stopped. When the session of its agent window ended on its report,
+hok shows the report and the yes closes the window. With --wait, bctl waits that long for his
+answer and prints it: exit 0 on his yes, 126 when he refused, 75 when it still waits. The same
+delete asked again takes back the request that waits.
 
 run waits in the run queue of the host until cores and memory are free for a heavy command, then
 runs COMMAND pinned to the cores it got, which it holds until COMMAND ends. Without COMMAND the
@@ -213,10 +214,8 @@ def print_queue(answer):
 
 
 def print_deletion(answer):
-    print(
-        f"waits for Seb: hok {answer['held']}. His yes deletes {answer['bundle']} once its"
-        " container stopped.",
-    )
+    stop = "its agent window closed" if answer.get("closes") else "its container stopped"
+    print(f"waits for Seb: hok {answer['held']}. His yes deletes {answer['bundle']} once {stop}.")
 
 
 def print_ops_task(answer):
