@@ -202,7 +202,7 @@ def check_clients(root):
     """Real clients on a socket of their own: a container may read the queue and not force it,
     the host may, and the answer says what started.
     """
-    _state, launched = prepare(root, {"busy": RUNS_ANOTHER, "fresh": FRESH, "later": FRESH}, 1)
+    state, launched = prepare(root, {"busy": RUNS_ANOTHER, "fresh": FRESH, "later": FRESH}, 1)
     daemon.identify = lambda connection: daemon.HOST
     daemon.launch_queued()
     path = root / "ctl.sock"
@@ -260,6 +260,36 @@ def check_clients(root):
             lines[4]
             == f"queued 2: later (priority 0, over the cap, {since}, waits for the agent of fresh"
             " to start)",
+        ),
+    )
+    next(item for item in state["queue"] if item["bundle"] == "later")["parent"] = "busy"
+    daemon.identify = lambda connection: "fresh"
+    code, lines = run_client(path, "unqueue", "later")
+    checks.append(
+        (
+            "a bundle cannot drop the task another one queued",
+            (code, lines)
+            == (1, ["bctl: 409 a bundle drops its own task or a task it queued only"]),
+        ),
+    )
+    daemon.identify = lambda connection: "busy"
+    code, lines = run_client(path, "unqueue", "later")
+    checks.append(
+        (
+            "the bundle that queued a task drops it",
+            (code, lines, [item["bundle"] for item in state["queue"]])
+            == (
+                0,
+                [f"dropped the task of later, from busy since {daemon.format_time(QUEUED)}"],
+                ["busy"],
+            ),
+        ),
+    )
+    code, lines = run_client(path, "unqueue", "later")
+    checks.append(
+        (
+            "a task not queued cannot be dropped",
+            (code, lines) == (1, ["bctl: 400 later is not queued"]),
         ),
     )
     server.shutdown()

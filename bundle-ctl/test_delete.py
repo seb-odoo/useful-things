@@ -18,6 +18,7 @@ sys.path.insert(0, str(HERE))
 import daemon  # noqa: E402
 from test_queue import run_client  # noqa: E402
 
+CHILD = "master-child--seb"
 CLEAN = "master-clean--seb"
 CLOSED = "master-closed-aku"
 COMMITTED = "master-committed--seb"
@@ -51,11 +52,13 @@ def prepare(root):
         git(repo, "remote", "add", name, str(remote))
     git(repo, "push", "--quiet", "odoo", "master")
     git(repo, "config", "user.email", "t@t")
-    bundles = (CLEAN, CLOSED, COMMITTED, DIRTY, MERGED, MINE, OPENED, PUSHED, REBASED, REFUSED, STOPPED)
+    bundles = (CHILD, CLEAN, CLOSED, COMMITTED, DIRTY, MERGED, MINE, OPENED, PUSHED, REBASED, REFUSED, STOPPED)
     for bundle in bundles:
         git(repo, "branch", bundle)
         (root / "master" / bundle).mkdir(parents=True)
     git(repo, "push", "--quiet", "odoo-dev", CLOSED, MINE, OPENED, PUSHED)
+    (root / "master" / CHILD / ".agent").mkdir()
+    (root / "master" / CHILD / ".agent" / "parent").write_text(f"{CLEAN}\n")
     for bundle in (DIRTY, REBASED):
         git(repo, "checkout", "--quiet", bundle)
         commit_as_aku(repo, "rebased")
@@ -90,6 +93,7 @@ def prepare(root):
     }
     daemon.HELD_DIR = root / "held"
     daemon.STATE = root
+    daemon.get_agent_folder = lambda bundle: root / "master" / bundle / ".agent"
     daemon.get_branch_prs = lambda repo_name, branch: world["prs"].get(branch, {})
     daemon.get_open_windows = lambda: set(world["running"])
     daemon.get_repo_folder = lambda repo_name: str(repo)
@@ -183,7 +187,16 @@ def check(root):
     checks.append(
         (
             "a bundle cannot ask for another one",
-            (code, lines) == (1, ["bctl: 409 a bundle asks for its own deletion only"]),
+            (code, lines)
+            == (1, ["bctl: 409 a bundle asks for the deletion of itself or of its children only"]),
+        ),
+    )
+    code, lines = run_client(path, "delete", CHILD, "--reason", "measured, nothing to keep")
+    checks.append(
+        (
+            "a bundle asks for the deletion of a bundle whose last task it queued",
+            (code, lines)
+            == (0, [f"waits for Seb: hok b2. His yes deletes {CHILD} once its container stopped."]),
         ),
     )
     world["caller"] = daemon.HOST

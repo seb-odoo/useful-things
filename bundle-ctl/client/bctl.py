@@ -5,6 +5,7 @@
     bctl status [--json]
     bctl queue [--json]
     bctl force-queue
+    bctl unqueue BUNDLE
     bctl branches [--json]
     bctl create BASE NAME [--branch-repo REPO]... [--no-open] [TASK]
     bctl fetch BUNDLE|PR_LINK|OWNER:BRANCH [--no-open] [TASK]
@@ -31,6 +32,9 @@ queue is that list alone, at once, with the memory left on the host. force-queue
 queued now start over the cap, still one at a time; a task queued later waits for a slot again.
 Only the host may ask it: a container gets a 403.
 
+unqueue drops the queued task of a bundle. The host, that bundle, or the bundle that queued the
+task may ask it.
+
 open --resume gives the task to the last Claude session of the bundle as its next prompt, where a
 task alone starts a new session. Without a task, the session is told to go on.
 
@@ -53,10 +57,11 @@ fetch its task was queued with runs now, and the worktrees appear in /workspace.
 branches is gbs run on the host: the table, or with --json the data agents read.
 
 delete asks Seb in hok to delete a bundle, the bundle of this container when none is named (a
-container asks for its own only). It is refused when a branch of the bundle has a commit no
-remote has, or is pushed. His yes runs delete_bundle once the container of the bundle stopped.
-With --wait, bctl waits that long for his answer and prints it: exit 0 on his yes, 126 when he
-refused, 75 when it still waits. The same delete asked again takes back the request that waits.
+container asks for its own, or for a bundle whose last task it queued). It is refused when a
+branch of the bundle has a commit no remote has, or is pushed. His yes runs delete_bundle once
+the container of the bundle stopped. With --wait, bctl waits that long for his answer and prints
+it: exit 0 on his yes, 126 when he refused, 75 when it still waits. The same delete asked again
+takes back the request that waits.
 
 run waits in the run queue of the host until cores and memory are free for a heavy command, then
 runs COMMAND pinned to the cores it got, which it holds until COMMAND ends. Without COMMAND the
@@ -220,6 +225,12 @@ def print_ops_task(answer):
 
 def print_table(answer):
     sys.stdout.write(answer["table"])
+
+
+def print_unqueued(answer):
+    print(
+        f"dropped the task of {answer['bundle']}, from {answer['parent']} since {answer['queued']}",
+    )
 
 
 def format_span(seconds):
@@ -460,6 +471,8 @@ def main():
     run_.add_argument("--workers", default=1, type=int, help="the workers of a hoot run")
     run_.add_argument("run_command", metavar="COMMAND", nargs=argparse.REMAINDER)
     commands.add_parser("runs", help="the heavy commands that run and the ones that wait")
+    unqueue = commands.add_parser("unqueue", help="drop the queued task of a bundle")
+    unqueue.add_argument("bundle")
     args = parser.parse_args()
 
     printer = None
@@ -479,6 +492,9 @@ def main():
     elif args.command == "force-queue":
         answer = request("POST", "/force-queue", {})
         printer = print_queue
+    elif args.command == "unqueue":
+        answer = request("POST", "/unqueue", {"bundle": args.bundle})
+        printer = print_unqueued
     elif args.command == "build":
         answer = follow(request("POST", "/build", {})["job"])
     elif args.command == "add-repo":

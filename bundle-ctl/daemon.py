@@ -492,6 +492,22 @@ def force_queue(caller, query, body):
     return code, dict(answer, forced=forced, started=[name for name in forced if name not in left])
 
 
+def unqueue(caller, query, body):
+    """Drop the queued task of a bundle. The host, the bundle or the one that queued it asks."""
+    bundle = body.get("bundle") or ""
+    with state_lock:
+        state = read_state()
+        item = next((item for item in state["queue"] if item["bundle"] == bundle), None)
+        if item is None:
+            raise ValueError(f"{bundle} is not queued")
+        if caller not in (HOST, bundle, item["parent"]):
+            raise Refused("a bundle drops its own task or a task it queued only")
+        state["queue"].remove(item)
+        state.setdefault("relaunches", {})[bundle] = MAX_RELAUNCHES
+        write_state(state)
+    return 200, {"bundle": bundle, "parent": item["parent"], "queued": format_time(item["queued"])}
+
+
 def list_runs(caller, query, body):
     return 200, RUNS.describe()
 
@@ -1166,12 +1182,13 @@ def add_repo(caller, query, body):
 
 
 def delete(caller, query, body):
-    """Hold the deletion of a bundle for Seb's yes in hok. A container asks for its own only."""
+    """Hold the deletion of a bundle for Seb's yes in hok. A container asks for its own, or for
+    the one of a bundle whose last task it queued."""
     bundle = body.get("bundle") or ("" if caller == HOST else caller)
-    if caller != HOST and bundle != caller:
-        raise Refused("a bundle asks for its own deletion only")
     if not BUNDLE_NAME.fullmatch(bundle) or bundle in STICKY_BUNDLES:
         raise ValueError(f"not a bundle name: {bundle}")
+    if caller not in (HOST, bundle, read_text(get_agent_folder(bundle) / "parent")):
+        raise Refused("a bundle asks for the deletion of itself or of its children only")
     if HELD is None:
         raise Refused("no gateway-core beside useful-things: hok cannot list the deletion")
     folder = get_worktree_bundle_folder(bundle)
@@ -1654,6 +1671,7 @@ VERBS = {
     ("POST", "/fetch"): fetch,
     ("POST", "/force-queue"): force_queue,
     ("POST", "/open"): open_bundle,
+    ("POST", "/unqueue"): unqueue,
 }
 
 
