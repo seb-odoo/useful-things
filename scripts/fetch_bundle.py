@@ -43,14 +43,14 @@ def get_bundle_names_from_pr(github_repo, number):
         print(f"[red]{github_repo}[/red] is none of the cloned repos")
         raise SystemExit(1)
     try:
-        pr = get_pr(github_repo, number, "baseRefName,headRefName,headRepository")
+        pr = get_pr(github_repo, number, "baseRefName,headRefName,headRepository,headRepositoryOwner")
     except ValueError as error:
         print(f"[red]{error}[/red]")
         raise SystemExit(1) from None
     head, base = pr["headRefName"], pr["baseRefName"]
     dev_remote = get_remote_dev_repo(repo)
     dev_github_repo = get_github_repo(repo, dev_remote)
-    head_github_repo = pr["headRepository"]["nameWithOwner"]
+    head_github_repo = f"{pr['headRepositoryOwner']['login']}/{pr['headRepository']['name']}"
     if head_github_repo == dev_github_repo:
         return head, head, base
     fork_remote = head_github_repo.split("/")[0]
