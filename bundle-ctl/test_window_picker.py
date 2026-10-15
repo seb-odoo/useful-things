@@ -75,6 +75,15 @@ ENDED = [
     "🔄 📝 master-c-aku (review)\0info\x1fmaster-c-aku\x1fmeta\x1f",
     *ROWS[11:],
 ]
+SHOWN_ROWS = [
+    ("0x0a", False),
+    ("master-d-runbot-12--seb", True),
+    ("master-c-aku", False),
+    ("master-b--seb", True),
+    ("0x0b", True),
+    ("master-f-fw--seb", True),
+    ("master-e--seb", True),
+]
 SHOWN = [
     "[-modi]",
     f"[windows:{HERE / 'window-picker.py'}]",
@@ -118,12 +127,30 @@ def start_window(name):
     return subprocess.Popen(command)
 
 
-def get_new_ops():
-    """The command a pick of the first row starts, in this process: a real bctl reaches the
-    daemon."""
+def load_picker():
     spec = importlib.util.spec_from_file_location("picker", HERE / "window-picker.py")
     picker = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(picker)
+    return picker
+
+
+def get_shown_rows(folder):
+    """The rows agent-list.py asks for, the windows not minimized included: (key, minimized)."""
+    env = dict(os.environ)
+    os.environ.update(PATH=f"{folder}:{env['PATH']}", XDG_RUNTIME_DIR=str(folder))
+    try:
+        picker = load_picker()
+        rows = picker.get_rows(picker.get_windows(), shown=True)
+    finally:
+        os.environ.clear()
+        os.environ.update(env)
+    return [(row.key, row.minimized) for row in rows]
+
+
+def get_new_ops():
+    """The command a pick of the first row starts, in this process: a real bctl reaches the
+    daemon."""
+    picker = load_picker()
     started = []
     picker.subprocess.Popen = lambda command, **kwargs: started.append(command[1:])
     os.environ.update(ROFI_RETV="1", ROFI_INFO="new-ops")
@@ -177,6 +204,8 @@ def main():
         counts = run(folder, "--counts").splitlines()
         if counts[:1] != ["✅ 1"]:
             failures.append(f"counts while 2 terminals are restored {counts!r}, expected ✅ 1")
+        if (found := get_shown_rows(folder)) != SHOWN_ROWS:
+            failures.append(f"rows of agent-list.py {found!r}, expected {SHOWN_ROWS!r}")
         (folder / "shown").write_text("")
         for retv, info, expected in PICKS:
             log.write_text("")
@@ -225,7 +254,7 @@ def main():
         failures.append(f"pick 1 new-ops: started {started!r}, expected {[new_ops]!r}")
     for line in failures:
         print(line)
-    cases = 15 + len(PICKS)
+    cases = 16 + len(PICKS)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

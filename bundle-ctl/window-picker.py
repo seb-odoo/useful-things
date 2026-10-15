@@ -30,6 +30,7 @@ mark once its claude ended. The first row, `➕ new ops agent`, opens a new one:
 --terminal.
 """
 
+import collections
 import importlib.util
 import os
 import pathlib
@@ -58,6 +59,7 @@ OPENING = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "bundle-ct
 OPENING_TIME = 300
 PRIORITY = ("🚀", "✋", "❌", "✅", "⏳")
 QUIET = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+Row = collections.namedtuple("Row", "place rank title key window minimized")
 SKIPPED = ("nemo-desktop.",)
 
 
@@ -150,6 +152,33 @@ def is_minimized(window):
     return "_NET_WM_STATE_HIDDEN" in out.stdout
 
 
+def get_rows(windows, shown=False):
+    """The rows of the bundles not open in VS Code and of the ops agent windows, in their order:
+    the minimized ones, or all of them with shown. The key of a row is its bundle, or its window
+    for an ops agent."""
+    bundles, ops, _others = windows
+    for name in [name for name, bundle in bundles.items() if "code" in bundle]:
+        (OPENING / name).unlink(missing_ok=True)
+        del bundles[name]
+    agents = get_agent_bundles()
+    rows = []
+    for name, bundle in bundles.items():
+        title, window = bundle["title"], bundle["terminal"]
+        if title.startswith(LIVE) and name not in agents:
+            title = title.split(" ", 1)[1]
+        place, rank = get_place(title), get_rank(title)
+        rows.append(Row(place, rank, get_loading(name) + title, name, window, is_minimized(window)))
+    for title, window in ops:
+        place, rank = get_place(title), get_rank(title)
+        rows.append(Row(place, rank, title, window, window, is_minimized(window)))
+    return sorted(row for row in rows if shown or row.minimized)
+
+
+def get_counts(rows):
+    ranks = [row.rank for row in rows]
+    return [f"{mark} {word} {ranks.count(rank)}" for rank, (mark, word) in enumerate(MARKS)]
+
+
 def pick(name, terminal):
     windows = get_windows()[0].get(name, {})
     window = (terminal and windows.get("terminal")) or windows.get("code")
@@ -182,33 +211,11 @@ def main():
         else:
             pick(info, terminal=retv == "10")
         return
-    bundles, ops, others = get_windows()
-    for name in [name for name, bundle in bundles.items() if "code" in bundle]:
-        (OPENING / name).unlink(missing_ok=True)
-        del bundles[name]
-    bundles = {name: bundle for name, bundle in bundles.items() if is_minimized(bundle["terminal"])}
-    ops = [(title, window) for title, window in ops if is_minimized(window)]
-    agents = get_agent_bundles()
-    for name, bundle in bundles.items():
-        if bundle["title"].startswith(LIVE) and name not in agents:
-            bundle["title"] = bundle["title"].split(" ", 1)[1]
-    rows = sorted(
-        [
-            (
-                get_place(bundle["title"]),
-                get_rank(bundle["title"]),
-                get_loading(name) + bundle["title"],
-                name,
-            )
-            for name, bundle in bundles.items()
-        ]
-        + [(get_place(title), get_rank(title), title, window) for title, window in ops]
-        + [((2, len(MARKS), len(KINDS)), len(MARKS), title, window) for title, window in others]
-    )
-    titles = [bundle["title"] for bundle in bundles.values()] + [title for title, _ in ops]
-    ranks = [get_rank(title) for title in titles]
-    counts = [f"{mark} {word} {ranks.count(rank)}" for rank, (mark, word) in enumerate(MARKS)]
+    windows = get_windows()
+    rows = get_rows(windows)
+    counts = get_counts(rows)
     if sys.argv[1:] == ["--counts"]:
+        ranks = [row.rank for row in rows]
         found = {mark: ranks.count(rank) for rank, (mark, _) in enumerate(MARKS)}
         label = next((f"{mark} {found[mark]}" for mark in PRIORITY if found[mark]), NO_MARK)
         print(f"{label}\n{'   '.join(counts)}")
@@ -217,9 +224,11 @@ def main():
     sys.stdout.write(f"\0message\x1f{'   '.join(counts)}   |   {hint}\n")
     sys.stdout.write("\0no-custom\x1ftrue\n\0use-hot-keys\x1ftrue\n")
     sys.stdout.write(f"{NEW_OPS}\0info\x1fnew-ops\n")
-    for _, rank, title, info in rows:
-        word = MARKS[rank][1] if rank < len(MARKS) else ""
-        sys.stdout.write(f"{title}\0info\x1f{info}\x1fmeta\x1f{word}\n")
+    for row in rows:
+        word = MARKS[row.rank][1] if row.rank < len(MARKS) else ""
+        sys.stdout.write(f"{row.title}\0info\x1f{row.key}\x1fmeta\x1f{word}\n")
+    for title, window in sorted(windows[2]):
+        sys.stdout.write(f"{title}\0info\x1f{window}\x1fmeta\x1f\n")
 
 
 if __name__ == "__main__":

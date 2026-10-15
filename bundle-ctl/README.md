@@ -357,17 +357,29 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   click or Shift+Enter brings its terminal up. Until that VS Code window is up, the row of the
   bundle shows 🔄 (a file per bundle in `$XDG_RUNTIME_DIR/bundle-ctl/opening`, 5 minutes at most,
   dropped once the window is up). A Cinnamon shortcut runs it.
+- `agent-list.py`, a GTK window that stays open (Seb, 2026-10-15: "a new display for agents list
+  that I can keep open and that updates live"), has the rows of the picker, read again every 2
+  seconds, the terminals shown on screen included, and no other window. A bundle row also has the
+  state of its agent and since when, from its `.agent/` files (`done 12 min ago`, `waiting for 5
+  min`, `running for 3 min`, then `shown` when its terminal is not minimized), and the first line
+  of its `result.md`. Under the rows, the queue of `bctl queue`, read every 10 seconds, as `GET
+  /queue` runs `podman ps`. Ctrl+click and Shift+click select several rows: Enter, a double click
+  or Terminal brings up their terminals where they were, the first row in front (his pick: no
+  tiling); VS Code opens the window of each selected bundle, New ops agent runs `bctl open ops
+  --terminal`. It runs on the system python of the host, which has GTK. A second start brings the
+  open window up, and its size and place are kept in `~/.local/state/bundle-ctl/agent-list.json`.
 - `window-applet/`, a Cinnamon applet, shows the mark that needs Seb most and how many bundles
   have it, in the order 🚀 ✋ ❌ ✅ ⏳ (Seb, 2026-10-14: an agent stuck on starting may be a bug,
   a finished one waits for him, one in progress does not), or 🪟 when no bundle has a mark. Its
-  tooltip has the counts of each mark, and a click opens the same list.
+  tooltip has the counts of each mark, and a click opens `agent-list.py`, or brings it up. The
+  rofi list stays on its shortcut.
   The label comes from `window-picker.py --counts` every 2 seconds. It also sets `skip_taskbar` on
   an agent window (its terminator runs on a `bundle-ctl/terminator-` config) while it is
   minimized: as it is minimized, and as it is created, since it opens minimized. It is a link to
   that folder, `~/.local/share/cinnamon/applets/bundle-windows@useful-things`, added to a panel in
   the `enabled-applets` key of `org.cinnamon`.
 
-`python3 test_window_picker.py` runs each case.
+`python3 test_window_picker.py` and `python3 test_agent_list.py` run each case.
 
 `agent-terminal.py BUNDLE` started on a bundle whose run already began (`run.lock`) does not run
 the task again: it opens the session as it was, in its permission mode (`.agent/mode`) and with
