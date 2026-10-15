@@ -21,6 +21,7 @@ ask_password() {
 }
 
 until [[ $password ]] && session=$(BW_PASSWORD=$password bw unlock --raw --passwordenv BW_PASSWORD); do
+    (( $? == 1 )) || exit
     ask_password
 done
 unset password
