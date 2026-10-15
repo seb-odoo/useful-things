@@ -28,6 +28,6 @@ unset password
 trap 'bw lock >/dev/null' EXIT
 # Offline at login is fine, bw get reads the local copy of the vault.
 echo 'Syncing the vault...' >&2
-bw sync --session "$session" >/dev/null 2>&1 || true
-bw get item github-seb-odoo-signing --session "$session" | jq -r .sshKey.privateKey \
+BW_SESSION=$session bw sync >/dev/null 2>&1 || true
+BW_SESSION=$session bw get item github-seb-odoo-signing | jq -r .sshKey.privateKey \
     | SSH_AUTH_SOCK=$ram ssh-add -

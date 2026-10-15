@@ -6,7 +6,8 @@ boot into an ssh-agent that holds it in memory until reboot.
 
 - `gsign` asks the master password (Tab shows or hides what is typed, a wrong one is asked
   again), loads `github-seb-odoo-signing` into `ssh-agent-sign.service`, and locks the CLI again.
-  The key goes through a pipe, never a file.
+  The key goes through a pipe, never a file, and the vault session through `BW_SESSION`, never
+  the command line that `ps` shows.
 - `sign` is `gpg.ssh.program`: it signs with that agent, or asks Bitwarden before `gsign` ran. So
   when Bitwarden asks at each commit of the host, run `gsign` in a host terminal.
 - `gsign.desktop` opens a terminal running `gsign` at each login, so only the master password is
