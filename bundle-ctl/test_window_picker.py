@@ -27,7 +27,7 @@ WINDOWS = """\
 0x0d 0 terminator.Terminator box ⏩ master-f-fw--seb (fw)
 """
 OPS = "✋ 🔧 Ops list layout (ops)\0info\x1f0x0a\x1fmeta\x1fwaiting"
-COUNTS = "✅ finished 1   ✋ waiting 2   ❌ failed 0   ⏳ running 1   🚀 starting 0"
+COUNTS = "❌ failed 0   ✅ finished 1   ✋ waiting 2   ⏳ running 1   🚀 starting 0"
 REVIEW = "✋ 📝 master-c-aku (review)\0info\x1fmaster-c-aku\x1fmeta\x1fwaiting"
 ROWS = [
     f"\0message\x1f{COUNTS}   |   click: VS Code   right click: terminal",
@@ -57,8 +57,10 @@ RESTORED = [
 ]
 WAITING = f"""{WINDOWS.replace("⏩", "✋ ⏩")}\
 0x0e 0 terminator.Terminator box ✋ 🤖 master-g-runbot-13--seb (runbot)
+0x0f 0 terminator.Terminator box ❌ 📝 master-h-aku (review)
 """
 WAITING_ROWS = [
+    "❌ 📝 master-h-aku (review)\0info\x1fmaster-h-aku\x1fmeta\x1ffailed",
     OPS,
     "✋ ⏩ master-f-fw--seb (fw)\0info\x1fmaster-f-fw--seb\x1fmeta\x1fwaiting",
     ROWS[5],
@@ -164,7 +166,7 @@ def main():
         if counts[:1] != ["🚀 1"]:
             failures.append(f"counts while a bundle starts {counts!r}, expected 🚀 1 before ✋")
         (folder / "windows").write_text(WAITING)
-        rows = run(folder).splitlines()[4:9]
+        rows = run(folder).splitlines()[4:10]
         if rows != WAITING_ROWS:
             failures.append(f"rows while fw and runbot wait {rows!r}, expected {WAITING_ROWS!r}")
         (folder / "windows").write_text(WINDOWS)

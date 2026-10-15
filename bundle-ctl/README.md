@@ -340,10 +340,11 @@ focus (Seb, 2026-10-14), so that a first prompt goes to claude: the layout names
 A minimized agent window leaves the task bar and Alt+Tab, and comes back when it is restored:
 25 agent windows left the task bar no room to show a title. To reach them:
 
-- `window-picker.py`, a rofi script, lists the bundles first by mark (✅, ✋, ❌, ⏳, 🚀), then by
+- `window-picker.py`, a rofi script, lists the bundles first by mark (❌, ✅, ✋, ⏳, 🚀), then by
   kind (ops, fw, runbot, task, mine, analysis, review: Seb, 2026-10-15), one row each, then the
-  other windows. A ✅ or ✋ ops, fw, runbot or mine agent comes before all of them, by kind then by
-  mark, as it waits for him (Seb, 2026-10-15): a ✋ fw comes after a ✅ fw, before a ✅ runbot. A
+  other windows. A ❌ comes first, as an error to fix, then a ✅ or ✋ ops, fw, runbot or mine
+  agent, by kind then by mark, as it waits for him (Seb, 2026-10-15): a ✋ fw comes after a ✅ fw,
+  before a ✅ runbot. A
   bundle open in VS Code has no row (Seb, 2026-10-13): he works there, and its window is in the
   task bar. Nor has a bundle or an ops agent whose terminal is not minimized (Seb, 2026-10-14): it
   is in the task bar too, and the applet does not count it. A

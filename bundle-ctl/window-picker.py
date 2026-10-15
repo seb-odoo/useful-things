@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """List the bundles not open in VS Code, the ops agent windows and the other windows for rofi, the
 bundles and the ops windows first by the mark of their title, then by kind, and bring the one
-picked to the front. A ✅ or ✋ row of an ops, fw, runbot or mine agent comes first, by kind then
-by mark, as it waits for Seb (Seb, 2026-10-15): a ✋ fw comes after a ✅ fw, before a ✅ runbot.
+picked to the front. A ❌ row comes first, as an error to fix, then a ✅ or ✋ row of an ops, fw,
+runbot or mine agent, by kind then by mark, as it waits for Seb (Seb, 2026-10-15): a ✋ fw comes
+after a ✅ fw, before a ✅ runbot.
 
     window-picker.py --show
     window-picker.py --counts
@@ -37,6 +38,7 @@ import subprocess
 import sys
 import time
 
+FAILED = "❌"
 FIRST_KINDS = ("fw", "mine", "ops", "runbot")
 FOR_SEB = ("✅", "✋")
 HERE = pathlib.Path(__file__).resolve().parent
@@ -44,9 +46,9 @@ KINDS = ("ops", "fw", "runbot", "task", "mine", "analysis", "review")
 LIVE = ("✅", "✋", "⏳")
 LOADING = "🔄"
 MARKS = (
+    (FAILED, "failed"),
     ("✅", "finished"),
     ("✋", "waiting"),
-    ("❌", "failed"),
     ("⏳", "running"),
     ("🚀", "starting"),
 )
@@ -89,8 +91,8 @@ def get_order(title):
 def get_place(title):
     rank, order = get_rank(title), get_order(title)
     if title.startswith(FOR_SEB) and order < len(KINDS) and KINDS[order] in FIRST_KINDS:
-        return (0, order, rank)
-    return (1, rank, order)
+        return (1, order, rank)
+    return (0 if title.startswith(FAILED) else 2, rank, order)
 
 
 def get_agent_bundles():
@@ -201,7 +203,7 @@ def main():
             for name, bundle in bundles.items()
         ]
         + [(get_place(title), get_rank(title), title, window) for title, window in ops]
-        + [((1, len(MARKS), len(KINDS)), len(MARKS), title, window) for title, window in others]
+        + [((2, len(MARKS), len(KINDS)), len(MARKS), title, window) for title, window in others]
     )
     titles = [bundle["title"] for bundle in bundles.values()] + [title for title, _ in ops]
     ranks = [get_rank(title) for title in titles]
