@@ -24,6 +24,7 @@ WINDOWS = """\
 0x0a 0 terminator.Terminator box ✋ 🔧 Ops list layout (ops)
 0x0b 0 terminator.Terminator box 🔧 Refactor (ops)
 0x0c 0 firefox.Firefox box 🔧 Tools (ops) - Mozilla Firefox
+0x0d 0 terminator.Terminator box ⏩ master-f-fw--seb (fw)
 """
 OPS = "✋ 🔧 Ops list layout (ops)\0info\x1f0x0a\x1fmeta\x1fwaiting"
 COUNTS = "✅ finished 1   ✋ waiting 2   ❌ failed 0   ⏳ running 1   🚀 starting 0"
@@ -34,12 +35,13 @@ ROWS = [
     "\0use-hot-keys\x1ftrue",
     "➕ new ops agent\0info\x1fnew-ops",
     "✅ 🤖 master-d-runbot-12--seb (runbot)\0info\x1fmaster-d-runbot-12--seb\x1fmeta\x1ffinished",
-    REVIEW,
     OPS,
+    REVIEW,
     "⏳ ⭐ master-b--seb (mine)\0info\x1fmaster-b--seb\x1fmeta\x1frunning",
-    "Inbox - Mozilla Firefox\0info\x1f0x03\x1fmeta\x1f",
-    "⭐ master-e--seb (mine)\0info\x1fmaster-e--seb\x1fmeta\x1f",
     "🔧 Refactor (ops)\0info\x1f0x0b\x1fmeta\x1f",
+    "⏩ master-f-fw--seb (fw)\0info\x1fmaster-f-fw--seb\x1fmeta\x1f",
+    "⭐ master-e--seb (mine)\0info\x1fmaster-e--seb\x1fmeta\x1f",
+    "Inbox - Mozilla Firefox\0info\x1f0x03\x1fmeta\x1f",
     "🔧 Tools (ops) - Mozilla Firefox\0info\x1f0x0c\x1fmeta\x1f",
 ]
 AGENTS = ("master-b--seb", "master-c-aku", "master-d-runbot-12--seb")
@@ -47,13 +49,13 @@ RESTORED = [
     ROWS[0].replace("✋ waiting 2", "✋ waiting 0"),
     *[row for row in ROWS[1:] if row not in (OPS, REVIEW)],
 ]
-OPENING = [f"🔄 {REVIEW}" if row == OPS else OPS if row == REVIEW else row for row in ROWS]
+OPENING = [f"🔄 {row}" if row == REVIEW else row for row in ROWS]
 ENDED = [
     ROWS[0].replace("✋ waiting 2", "✋ waiting 1"),
-    *ROWS[1:5],
-    *ROWS[6:10],
+    *ROWS[1:6],
+    *ROWS[7:11],
     "🔄 📝 master-c-aku (review)\0info\x1fmaster-c-aku\x1fmeta\x1f",
-    *ROWS[10:],
+    *ROWS[11:],
 ]
 SHOWN = [
     "[-modi]",

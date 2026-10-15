@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """List the bundles not open in VS Code, the ops agent windows and the other windows for rofi, the
-bundles and the ops windows first by the mark of their title, and bring the one picked to the
-front.
+bundles and the ops windows first by the mark of their title, then by kind, and bring the one
+picked to the front.
 
     window-picker.py --show
     window-picker.py --counts
@@ -37,6 +37,7 @@ import sys
 import time
 
 HERE = pathlib.Path(__file__).resolve().parent
+KINDS = ("ops", "fw", "runbot", "task", "mine", "analysis", "review")
 LIVE = ("✅", "✋", "⏳")
 LOADING = "🔄"
 MARKS = (
@@ -75,6 +76,11 @@ def get_title_patterns():
 def get_rank(title):
     ranks = (rank for rank, (mark, _) in enumerate(MARKS) if title.startswith(mark))
     return next(ranks, len(MARKS))
+
+
+def get_order(title):
+    orders = (order for order, kind in enumerate(KINDS) if title.endswith(f"({kind})"))
+    return next(orders, len(KINDS))
 
 
 def get_agent_bundles():
@@ -176,11 +182,16 @@ def main():
             bundle["title"] = bundle["title"].split(" ", 1)[1]
     rows = sorted(
         [
-            (get_rank(bundle["title"]), get_loading(name) + bundle["title"], name)
+            (
+                get_rank(bundle["title"]),
+                get_order(bundle["title"]),
+                get_loading(name) + bundle["title"],
+                name,
+            )
             for name, bundle in bundles.items()
         ]
-        + [(get_rank(title), title, window) for title, window in ops]
-        + [(len(MARKS), title, window) for title, window in others]
+        + [(get_rank(title), get_order(title), title, window) for title, window in ops]
+        + [(len(MARKS), len(KINDS), title, window) for title, window in others]
     )
     titles = [bundle["title"] for bundle in bundles.values()] + [title for title, _ in ops]
     ranks = [get_rank(title) for title in titles]
@@ -194,7 +205,7 @@ def main():
     sys.stdout.write(f"\0message\x1f{'   '.join(counts)}   |   {hint}\n")
     sys.stdout.write("\0no-custom\x1ftrue\n\0use-hot-keys\x1ftrue\n")
     sys.stdout.write(f"{NEW_OPS}\0info\x1fnew-ops\n")
-    for rank, title, info in rows:
+    for rank, _, title, info in rows:
         word = MARKS[rank][1] if rank < len(MARKS) else ""
         sys.stdout.write(f"{title}\0info\x1f{info}\x1fmeta\x1f{word}\n")
 
