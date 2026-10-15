@@ -14,6 +14,7 @@ import hashlib
 import http.server
 import importlib.util
 import json
+import math
 import os
 import pathlib
 import re
@@ -106,6 +107,8 @@ def load_held():
 
 
 CONFIG = load_config()
+AGENT_GIGABYTES = 2
+AGENT_RAMP = 10 * 60
 AGENT_TERMINAL = CONFIG.get("AGENT_TERMINAL") or "gnome-terminal --window --title {bundle} --"
 BARE_FOLDER = frozenset({".agent", ".claude", ".devcontainer", ".vscode", "odools.toml"})
 BRANCHES_TIMEOUT = 120
@@ -177,13 +180,16 @@ SESSION_VARIABLES = (
 )
 SOCKET = STATE / "sock" / "ctl.sock"
 START_CHECK = 10
+STATUS_FRESH = 30
 WINDOW_CLOSE_WAIT = 30
 
+bundle_rows = {"read": float("-inf"), "rows": []}
 disk_warning = {}
 folder_by_container = {}
 jobs = {}
 kept_reviews = {}
 state_lock = threading.Lock()
+status_lock = threading.Lock()
 work_lock = threading.Lock()
 
 
@@ -285,6 +291,25 @@ def branches(caller, query, body):
 
 
 def status(caller, query, body):
+    """The bundles as read in the last STATUS_FRESH seconds: agents poll this, and each read runs
+    git on every branch.
+    """
+    with status_lock:
+        if time.monotonic() - bundle_rows["read"] > STATUS_FRESH:
+            bundle_rows.update(rows=list_bundles(), read=time.monotonic())
+        rows = bundle_rows["rows"]
+    with state_lock:
+        state = read_state()
+    return 200, {
+        "agents": count_agents(get_open_windows()),
+        "bundles": rows,
+        "max_agents": MAX_AGENTS,
+        "queue": describe_queue(state),
+        "runs": RUNS.describe(),
+    }
+
+
+def list_bundles():
     repos = [repo for repo in get_repos() if os.path.isdir(get_repo_folder(repo))]
     write_tree = has_write_tree()
     repos_by_bundle = {}
@@ -339,13 +364,7 @@ def status(caller, query, body):
                 "repos": {},
             },
         )
-    return 200, {
-        "agents": count_agents(get_open_windows()),
-        "bundles": rows,
-        "max_agents": MAX_AGENTS,
-        "queue": describe_queue(state),
-        "runs": RUNS.describe(),
-    }
+    return rows
 
 
 def describe_queue(state):
@@ -365,18 +384,33 @@ def describe_queue(state):
     ]
 
 
-def describe_memory():
-    """What the host has left, and whether it is short of it: less available than the runs keep
-    free, or tasks that stalled on memory in the last minute as much as holds a run back.
+def describe_memory(open_windows):
+    """What the host and the containers have left, and whether it is short for one more agent:
+    the agents that began in the last AGENT_RAMP seconds count at AGENT_GIGABYTES each, as their
+    tests come later, and tasks that stalled on memory in the last minute hold every start back.
     """
-    available, _stall = runs.read_memory()
+    available, _stall, room = runs.read_memory()
     stall = runs.read_stall(60)
+    ramping = count_ramping(open_windows)
+    left = min(available - RUN_MIN_FREE, room) - ramping * AGENT_GIGABYTES
     return {
         "available": round(available, 1),
-        "short": available < RUN_MIN_FREE or stall >= runs.MAX_STALL,
+        "ramping": ramping,
+        "room": None if room == math.inf else round(room, 1),
+        "short": left < AGENT_GIGABYTES or stall >= runs.MAX_STALL,
         "stall": stall,
         "swap": round(runs.read_swap(), 1),
     }
+
+
+def log_memory():
+    memory = describe_memory(get_open_windows())
+    print(
+        "memory "
+        + " ".join(f"{key}={value}" for key, value in memory.items() if key != "short")
+        + " short" * memory["short"],
+        flush=True,
+    )
 
 
 def read_disk_free():
@@ -435,10 +469,11 @@ def warn_disk():
 def get_queue(caller, query, body):
     with state_lock:
         state = read_state()
+    open_windows = get_open_windows()
     return 200, {
-        "agents": count_agents(get_open_windows()),
+        "agents": count_agents(open_windows),
         "max_agents": MAX_AGENTS,
-        "memory": describe_memory(),
+        "memory": describe_memory(open_windows),
         "queue": describe_queue(state),
     }
 
@@ -604,6 +639,16 @@ def count_agents(folders):
     """The agents at work in a terminal: one that gave its verdict leaves its slot."""
     return sum(
         os.path.exists(f"{folder}/.agent/terminal") and not os.path.exists(f"{folder}/.agent/done")
+        for folder in folders
+    )
+
+
+def count_ramping(folders):
+    """The agents that began their run in the last AGENT_RAMP seconds and gave no verdict yet."""
+    now = time.time()
+    return sum(
+        now - (get_mtime(pathlib.Path(folder, ".agent/run.lock")) or 0) < AGENT_RAMP
+        and not os.path.exists(f"{folder}/.agent/done")
         for folder in folders
     )
 
@@ -805,7 +850,7 @@ def launch_queued():
         has_display = env.get("DISPLAY") or env.get("WAYLAND_DISPLAY")
         starting = get_starting(state["launches"], open_windows, now)
         free = read_disk_free()
-        short = describe_memory()["short"]
+        short = describe_memory(open_windows)["short"]
         paced = False
         queue = []
         for item in state["queue"]:
@@ -927,6 +972,7 @@ def keep_launching():
             if time.monotonic() - checked > REVIEW_CHECK:
                 checked = time.monotonic()
                 drop_reviews_safely()
+                log_memory()
             time.sleep(START_CHECK if launch_safely() else 60)
 
     threading.Thread(target=on_events, daemon=True).start()

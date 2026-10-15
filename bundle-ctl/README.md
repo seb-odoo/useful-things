@@ -29,7 +29,7 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | --- | --- |
 | `GET /whoami` | the caller's bundle, base and parent |
 | `GET /branches` | `gbs --json` run on the host, which deletes the bundles left with merged PRs only; `?format=table&width=N`: its colored table |
-| `GET /status` | every local bundle branch: base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open, and its agent: state (`running`, `waiting`, `done`, or `stopped` when its terminal or its window closed before the verdict: nothing runs it any more, and a new task may replace it; a stopped agent carries its `task` text, to queue it again as it was), when it was queued, when its run started (none for a task no window took), when it ended, `stale` when a branch of the bundle got a commit, or its dev remote ref an update (the mtime of its reflog), after that end, retry, and the last write to a session titled with the bundle, its own or an earlier agent's tab Seb went on in (`active N min ago`, or `idle since HH:MM` after 15 minutes; a tab opened by hand has no title and does not count); the queue, each task with its priority, the bundle that queued it, when, and what it waits for |
+| `GET /status` | every local bundle branch, as read in the last 30 seconds (agents poll it, and a read runs git on each branch): base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open, and its agent: state (`running`, `waiting`, `done`, or `stopped` when its terminal or its window closed before the verdict: nothing runs it any more, and a new task may replace it; a stopped agent carries its `task` text, to queue it again as it was), when it was queued, when its run started (none for a task no window took), when it ended, `stale` when a branch of the bundle got a commit, or its dev remote ref an update (the mtime of its reflog), after that end, retry, and the last write to a session titled with the bundle, its own or an earlier agent's tab Seb went on in (`active N min ago`, or `idle since HH:MM` after 15 minutes; a tab opened by hand has no title and does not count); the queue, each task with its priority, the bundle that queued it, when, and what it waits for |
 | `POST /add-repo` | `add_repo.py`: the worktree of a repo the bundle was made without (`design-themes`, `documentation`); a container asks for its own only |
 | `POST /build` | the `gnb` or `pfb` a task was queued with, for the bundle whose agent started bare (see Bare start); the bundle itself or the host asks; refused when the disk is short |
 | `POST /create` | `gnb` with `--no-push`, then a window; with a task, only its queue entry, the bundle being made when its agent asks (see Bare start); refused when the bundle exists, a branch has unpushed commits or, with no task, the disk is short (see Disk) |
@@ -85,9 +85,10 @@ the daemon, which gives each of them cores of its own.
 
 - Runs start in arrival order, and a run that waits holds back the ones behind it.
 - While another run holds cores, a run also waits when its start would leave less than
-  `BUNDLE_CTL_RUN_MIN_FREE_GB` (default 4) of available memory, the runs started in the last
-  minute counted at what the table says, or when the host stalls on memory (`full avg10` of
-  `/proc/pressure/memory` at 5 or more). The first run always starts.
+  `BUNDLE_CTL_RUN_MIN_FREE_GB` (default 4) of available memory or take more than the containers
+  have left under their limit (see Memory), the runs started in the last minute counted at what
+  the table says, or when the host stalls on memory (`some avg10` of `/proc/pressure/memory` at 5
+  or more). The first run always starts.
 - A client that leaves the queue before its start (a call that timed out) finds its place again
   when the same bundle asks for the same command within 15 minutes.
 - A command started by a run that holds cores gets the same ones, and no entry of its own.
@@ -113,6 +114,34 @@ The journal has one line per start and per end, `run started BUNDLE KIND cpus=4-
 `run done BUNDLE KIND ran=95s cpu=3.1`, where `cpu` is how many CPUs the container of the run kept
 busy on average: read it before changing the cores of a kind. `python3 test_runs.py` runs the
 hook on agent commands, the order of the queue, and real clients on a socket of their own.
+
+## Memory
+
+The containers sit in one cgroup, the `user.slice` of the user manager. It has `MemoryHigh=16G`
+and `CPUWeight=20` (`systemctl --user set-property`, kept in `~/.config/systemd/user.control/`):
+above 16 GB the kernel swaps the pages of the containers before the desktop's, and kills nothing;
+when the CPU is short, the desktop gets it first. The CPU weight needs the `cpu` controller in the
+user manager, which Ubuntu 22.04 does not delegate: the root drop-in
+`/etc/systemd/system/user@.service.d/delegate.conf` (`Delegate=cpu cpuset io memory pids`) gives it
+from the next boot.
+
+An agent starts only when 2 GB fit in what is left, and a run when what the Runs table says
+fits. What is left is the smaller of:
+
+- what the containers have left: 16 GB minus what they hold besides their file cache (the
+  `memory.current`, less `file`, plus `shmem` of the slice); what they swapped out does not count;
+- `MemAvailable`, less the 4 GB kept free.
+
+Less what already started and has not taken its memory yet: for an agent, 2 GB for each agent
+that began its run in the last 10 minutes, as its install and its tests come later; for a run,
+what the table says for each run in its first minute. And nothing starts while programs stall on
+memory (`some` of `/proc/pressure/memory`) 5% of the last minute for an agent, of the last 10
+seconds for a run.
+
+`MemAvailable` alone is not enough: it counts the page cache, and read 12 GB on 2026-10-15 while
+the host had 9 GB in swap and stalled. Every minute the journal has a line such as
+`memory available=11.8 ramping=1 room=0.4 stall=19.17 swap=16.1`: read it before changing one of
+these numbers.
 
 ## Disk
 
@@ -480,8 +509,7 @@ after what else it waits for; `bctl status` shows them `over the cap`, and a tas
 waits for a slot again. Only a process of the host may ask it: a container gets a 403, the one
 of `BUNDLE_CTL_HOST_FOLDER` too, so that going over the cap stays Seb's call. `bctl queue` lists
 the queue alone, at once, and ends on the memory of the host: `the host is short of memory` when
-less is available than the runs keep free, or when tasks stalled on memory 5% of the last minute
-or more.
+one more agent would not fit (see Memory).
 The cap is read from `~/.config/odoo-dev/config.env` or the unit's environment. The queue is checked
 again on every podman container start and stop, every minute, and every 10 seconds while a task
 waits for an agent to start; it lives in

@@ -4,6 +4,7 @@ start in, and real `bctl run` clients on a socket of their own: python3 test_run
 """
 
 import importlib.util
+import math
 import os
 import pathlib
 import signal
@@ -83,12 +84,13 @@ class Host:
     def __init__(self, path=None):
         self.available = 20.0
         self.births = {}
+        self.room = math.inf
         self.stall = 0.0
         cores = [(0, 1), (2, 3), (4, 5), (6, 7)]
         self.queue = runs.RunQueue(cores, 4, path, self.read_memory, self.births.get)
 
     def read_memory(self):
-        return self.available, self.stall
+        return self.available, self.stall, self.room
 
     def ask(self, pid, kind, workers=1, bundle=None):
         self.births[pid] = pid
@@ -137,6 +139,18 @@ def order_by_memory():
     return before, ramping, host.state()
 
 
+def order_by_room():
+    host = Host()
+    host.room = 3.0
+    host.ask(1, "odoo")
+    host.ask(2, "odoo")
+    before = host.state()
+    host.queue.running[0]["started"] -= runs.RAMP
+    host.room = 4.0
+    host.queue.reap()
+    return before, host.state()
+
+
 def keep_place():
     host = Host()
     host.ask(1, "hoot", 2)
@@ -161,7 +175,7 @@ def lend_after_an_hour():
 
 
 def share_cores_of_parent():
-    queue = runs.RunQueue([(0, 1), (2, 3)], 4, None, lambda: (20.0, 0.0))
+    queue = runs.RunQueue([(0, 1), (2, 3)], 4, None, lambda: (20.0, 0.0, math.inf))
     child = subprocess.Popen(["sleep", "5"])
     try:
         queue.request("bundle", os.getpid(), "hoot", 2, "outer")
@@ -201,6 +215,13 @@ QUEUE_CASES = [
             ({1: "0-1", 2: "2-3"}, {3: "memory"}),
         ),
     ),
+    (
+        order_by_room,
+        (
+            ({1: "0-1"}, {2: "memory"}),
+            ({1: "0-1", 2: "2-3"}, {}),
+        ),
+    ),
     (keep_place, [3, 4, 5]),
     (
         lend_after_an_hour,
@@ -221,6 +242,28 @@ def check_queue(failures):
         if found != expected:
             failures.append(f"{case.__name__}: {found}, expected {expected}")
     return len(QUEUE_CASES)
+
+
+def check_room(failures):
+    with tempfile.TemporaryDirectory() as folder:
+        path = pathlib.Path(folder)
+        (path / "memory.current").write_text(f"{10 * runs.GIGABYTE}\n")
+        (path / "memory.stat").write_text(
+            f"anon {6 * runs.GIGABYTE}\nfile {3 * runs.GIGABYTE}\nshmem {runs.GIGABYTE}\n",
+        )
+        found = [runs.read_room(None)]
+        for high in ("max", 16 * runs.GIGABYTE):
+            (path / "memory.high").write_text(f"{high}\n")
+            found.append(runs.read_room(path))
+        (path / "pressure").write_text(
+            "some avg10=1.50 avg60=9.57 avg300=9.17 total=207148868\n"
+            "full avg10=0.07 avg60=4.48 avg300=4.56 total=134719842\n",
+        )
+        found += [runs.read_stall(seconds, path / "pressure") for seconds in (10, 60, 300)]
+    expected = [math.inf, math.inf, 8.0, 1.5, 9.57, 9.17]
+    if found != expected:
+        failures.append(f"memory: {found}, expected {expected}")
+    return 1
 
 
 def serve(queue, path):
@@ -268,7 +311,7 @@ def check_clients(failures):
     checks = []
     with tempfile.TemporaryDirectory() as folder:
         path = pathlib.Path(folder) / "ctl.sock"
-        queue = runs.RunQueue(cores, 0, None, lambda: (20.0, 0.0))
+        queue = runs.RunQueue(cores, 0, None, lambda: (20.0, 0.0, math.inf))
         queue.watch()
         server = serve(queue, path)
         holder = start_client(
@@ -326,7 +369,12 @@ def check_clients(failures):
 
 def main():
     failures = []
-    count = check_kinds(failures) + check_queue(failures) + check_clients(failures)
+    count = (
+        check_kinds(failures)
+        + check_queue(failures)
+        + check_room(failures)
+        + check_clients(failures)
+    )
     for line in failures:
         print(line)
     print(f"{count - len(failures)}/{count} cases as expected")

@@ -178,12 +178,19 @@ def print_queued(queue):
         )
 
 
+def format_room(memory):
+    room = memory.get("room")
+    return "" if room is None else f"{room} GB left under the limit of the containers, "
+
+
 def format_memory(memory):
     """What the host has left, as one line that starts with a warning when it is short of it."""
     figures = (
-        f"{memory['available']} GB available, {memory['swap']} GB in swap,"
+        f"{memory['available']} GB available, {format_room(memory)}{memory['swap']} GB in swap,"
         f" programs stalled {memory['stall']:.0f}% of the last minute"
     )
+    if memory.get("ramping"):
+        figures += f", {memory['ramping']} agents started in the last 10 minutes"
     return f"the host is short of memory: {figures}" if memory["short"] else f"memory: {figures}"
 
 
@@ -244,7 +251,8 @@ def print_runs(answer):
         print()
     print(
         f"{answer['cores'] - answer['free']}/{answer['cores']} cores taken (CPUs {answer['cpus']}),"
-        f" {answer['available']} GB of memory available, {answer['min_free']:g} GB kept free",
+        f" {answer['available']} GB of memory available, {format_room(answer)}"
+        f"{answer['min_free']:g} GB kept free",
     )
 
 

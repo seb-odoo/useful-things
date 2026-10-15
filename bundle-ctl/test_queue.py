@@ -139,7 +139,14 @@ def prepare(root, bundles, cap, short=False, disk=100):
     launched = []
     daemon.DISK_STOP = 30
     daemon.MAX_AGENTS = cap
-    daemon.describe_memory = lambda: {"available": 9.0, "short": short, "stall": 0, "swap": 0}
+    daemon.describe_memory = lambda _open_windows: {
+        "available": 9.0,
+        "ramping": 0,
+        "room": None,
+        "short": short,
+        "stall": 0,
+        "swap": 0,
+    }
     daemon.get_agent_folder = lambda bundle: pathlib.Path(folders[bundle]) / ".agent"
     daemon.get_bundle_container = lambda bundle: bundle
     daemon.get_open_windows = lambda: {
@@ -355,6 +362,23 @@ def check_build(root):
     return [f"build: {name}" for name, passed in checks if not passed], len(checks)
 
 
+def check_ramp(root):
+    """Only an agent that began its run in the last AGENT_RAMP seconds and gave no verdict counts
+    for the memory it takes soon.
+    """
+    old = time.time() - daemon.AGENT_RAMP - 1
+    for name, files in (("fresh", ()), ("old", ()), ("ended", ("done",))):
+        agent = root / name / ".agent"
+        (agent / "run.lock").mkdir(parents=True)
+        for file in files:
+            (agent / file).touch()
+        if name == "old":
+            os.utime(agent / "run.lock", (old, old))
+    folders = [str(root / name) for name in ("fresh", "old", "ended", "never")]
+    found = daemon.count_ramping(folders)
+    return [] if found == 1 else [f"ramp: {found} agents counted, expected 1"], 1
+
+
 def main():
     failures = []
     for bundles, launched, queue, *options in CASES:
@@ -366,7 +390,7 @@ def main():
         if found != (launched, queue):
             failures.append(f"{list(bundles)}: {found}, expected {(launched, queue)}")
     total = len(CASES)
-    for check in (check_clients, check_disk, check_build):
+    for check in (check_clients, check_disk, check_build, check_ramp):
         with tempfile.TemporaryDirectory() as root:
             failed, count = check(pathlib.Path(root))
         failures += failed

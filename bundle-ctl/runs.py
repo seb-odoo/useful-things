@@ -7,6 +7,7 @@ arrival order, and the client pins the run to the CPUs it was given.
 """
 
 import json
+import math
 import os
 import pathlib
 import re
@@ -94,18 +95,50 @@ def get_parent(pid):
     return stat[1] if stat else 0
 
 
+def get_container_slice():
+    """The cgroup where podman puts the containers: the user.slice of the user manager the daemon
+    runs under, None outside one.
+    """
+    try:
+        line = pathlib.Path("/proc/self/cgroup").read_text().splitlines()[0]
+    except (IndexError, OSError):
+        return None
+    manager = re.search(r"::(/.*?/user@\d+\.service)/", line)
+    return manager and pathlib.Path(f"/sys/fs/cgroup{manager[1]}/user.slice")
+
+
+CONTAINER_SLICE = get_container_slice()
+
+
 def read_memory():
-    """The gigabytes available, and the percent of the last 10 seconds tasks stalled on memory."""
+    """The gigabytes available, the percent of the last 10 seconds tasks stalled on memory, and
+    the gigabytes the containers have left under their limit.
+    """
     meminfo = pathlib.Path("/proc/meminfo").read_text()
     available = int(re.search(r"MemAvailable:\s+(\d+)", meminfo)[1])
-    return available * 1024 / GIGABYTE, read_stall()
+    return available * 1024 / GIGABYTE, read_stall(), read_room()
 
 
-def read_stall(seconds=10):
-    """The percent of the last 10, 60 or 300 seconds tasks stalled on memory."""
+def read_room(path=CONTAINER_SLICE):
+    """The gigabytes the containers have left under the memory.high of their slice, infinite with
+    none: what they hold counts, but not their file cache, which the kernel drops first.
+    """
     try:
-        pressure = pathlib.Path("/proc/pressure/memory").read_text()
-        return float(re.search(rf"full avg{seconds}=([\d.]+)", pressure)[1])
+        high = (path / "memory.high").read_text().strip()
+        current = int((path / "memory.current").read_text())
+        stat = dict(line.split() for line in (path / "memory.stat").read_text().splitlines())
+    except (OSError, TypeError):
+        return math.inf
+    if high == "max":
+        return math.inf
+    return (int(high) - current + int(stat["file"]) - int(stat["shmem"])) / GIGABYTE
+
+
+def read_stall(seconds=10, path=pathlib.Path("/proc/pressure/memory")):
+    """The percent of the last 10, 60 or 300 seconds some task stalled on memory."""
+    try:
+        pressure = path.read_text()
+        return float(re.search(rf"some.* avg{seconds}=([\d.]+)", pressure)[1])
     except (OSError, TypeError):
         return 0.0
 
@@ -223,11 +256,11 @@ class RunQueue:
         if not any(self.holds_cores(other) for other in self.running):
             return None
         now = time.time()
-        available, stall = self.read_memory()
+        available, stall, room = self.read_memory()
         ramping = sum(
             other["gigabytes"] for other in self.running if now - other["started"] < RAMP
         )
-        if stall >= MAX_STALL or available - ramping < run["gigabytes"] + self.min_free:
+        if stall >= MAX_STALL or min(available - self.min_free, room) - ramping < run["gigabytes"]:
             return "memory"
         return None
 
@@ -308,7 +341,7 @@ class RunQueue:
 
     def describe(self):
         with self.changed:
-            available, stall = self.read_memory()
+            available, stall, room = self.read_memory()
             keys = ("bundle", "kind", "label", "need", "queued", "started", "workers")
             return {
                 "available": round(available, 1),
@@ -320,6 +353,7 @@ class RunQueue:
                     dict({key: run[key] for key in keys}, blocker=run["blocker"])
                     for run in self.waiting
                 ],
+                "room": None if room == math.inf else round(room, 1),
                 "running": [
                     dict(
                         {key: run[key] for key in keys},
