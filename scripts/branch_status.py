@@ -90,6 +90,7 @@ MERGEBOT_TAGS = {
 }
 MERGEBOT_TIMEOUT = 3
 MINOR_CHECKS = {"ci/security": "dim", "ci/style": "yellow"}
+OVERRIDE = re.compile(r"@robodoo\b.*\boverride=([\w/.,-]+)")
 PR_STYLES = {"closed": "red", "draft": "dim", "merged": "magenta"}
 PR_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
 PRS_PER_QUERY = 5
@@ -175,7 +176,7 @@ def read_prs(pairs):
             "{ nodes { author { login } createdAt headRefName headRefOid isDraft number "
             "reviewDecision state url "
             "comments(last: 30) { nodes { author { login } body createdAt } } "
-            "reviews(last: 30) { nodes { body } } "
+            "reviews(last: 30) { nodes { body submittedAt } } "
             "timelineItems(last: 20, itemTypes: [REVIEW_REQUESTED_EVENT]) { nodes { "
             "... on ReviewRequestedEvent { actor { login } createdAt } } } "
             "reviewThreads(first: 100) { nodes { isResolved "
@@ -343,11 +344,25 @@ def is_mine(pr):
     )
 
 
+def get_overridden(pr):
+    """The checks a `@robodoo override=` posted since the head commit sets aside."""
+    head_date = pr["commits"]["nodes"][0]["commit"]["committedDate"]
+    return {
+        context
+        for key, date in (("comments", "createdAt"), ("reviews", "submittedAt"))
+        for node in pr[key]["nodes"]
+        if (node[date] or "") > head_date
+        for match in OVERRIDE.finditer(node["body"])
+        for context in match[1].split(",")
+    }
+
+
 def get_pr_facts(pr, repo, now):
     state = "draft" if pr["isDraft"] and pr["state"] == "OPEN" else pr["state"].lower()
     if pr["mergebot"] == "merged":
         state = "merged"
     bodies = [node["body"] for key in ("comments", "reviews") for node in pr[key]["nodes"]]
+    overridden = get_overridden(pr)
     contexts = [
         c
         for c in (pr["commits"]["nodes"][0]["commit"]["status"] or {}).get("contexts", [])
@@ -380,7 +395,7 @@ def get_pr_facts(pr, repo, now):
         "failing": [
             {"context": c["context"], "url": c["targetUrl"]}
             for c in contexts
-            if c["state"] in ("ERROR", "FAILURE") and c["context"] not in stale
+            if c["state"] in ("ERROR", "FAILURE") and c["context"] not in stale | overridden
         ],
         "head": pr["headRefOid"],
         "mergebot": pr["mergebot"],

@@ -42,6 +42,14 @@ def main():
     facts.update(head="a", mergebot="error", review="CHANGES_REQUESTED")
     rows = {"enterprise": {"conflict": None, "pr": None}, "odoo": {"conflict": True, "pr": facts}}
     found["what waits on me"] = branch_status.get_news(rows)
+    comment = {"body": "@robodoo override=ci/security", "createdAt": "2026-10-14T09:00:00Z"}
+    review = {"body": "@robodoo override=ci/style,ci/runbot", "submittedAt": "2026-10-15T06:13:02Z"}
+    overrides = {
+        "comments": {"nodes": [comment]},
+        "commits": {"nodes": [{"commit": {"committedDate": "2026-10-14T15:00:00Z"}}]},
+        "reviews": {"nodes": [review]},
+    }
+    found["checks overridden since the head"] = sorted(branch_status.get_overridden(overrides))
     expected = {
         "never opened": False,
         "opened, no agent yet": True,
@@ -54,6 +62,7 @@ def main():
         "CI running goes to": "ci",
         "a draft goes to": "drafts",
         "a ready PR goes to": "reviewer",
+        "checks overridden since the head": ["ci/runbot", "ci/style"],
         "what waits on me": [
             "odoo changes requested",
             "odoo conflict a",

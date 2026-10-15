@@ -359,6 +359,9 @@ Each bundle sits in one group, the most urgent among its repos. On screen, in th
 | Waits on mergebot | ready or staged, merged or closed |
 | Not mine | the branch of a colleague: no `BUNDLE_SUFFIX`, the fw-bot heads of my PRs count as mine |
 
+A red check stops failing once a `@robodoo override=` of it, in a comment or a review posted after
+the head commit, sets it aside for mergebot: GitHub still shows it red.
+
 When the repos of a bundle disagree, the bundle takes the first of: me, CI, drafts, reviewer,
 mergebot, not mine.
 
