@@ -112,12 +112,13 @@ def describe_queue(answer):
 
 
 def fill(model, lines):
-    """Write the lines over the rows of model, so that the view keeps its scroll."""
+    """Write the lines over the rows of model, so that the view keeps its scroll, and redraws only
+    the rows that changed."""
     for at, line in enumerate(lines):
-        if at < len(model):
-            model[at] = line
-        else:
+        if at >= len(model):
             model.append(line)
+        elif list(model[at]) != line:
+            model[at] = line
     while len(model) > len(lines):
         model.remove(model.get_iter(len(lines)))
 
