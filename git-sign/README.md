@@ -4,9 +4,11 @@ Commits on the host are signed with an SSH key (the dev containers do not sign).
 for each signature ("Always"), so here a signing-only key, kept in Bitwarden, is loaded once per
 boot into an ssh-agent that holds it in memory until reboot.
 
-- `gsign` asks the master password (bw CLI), loads `github-seb-odoo-signing` into
-  `ssh-agent-sign.service`, and locks the CLI again. The key goes through a pipe, never a file.
-- `sign` is `gpg.ssh.program`: it signs with that agent, or asks Bitwarden before `gsign` ran.
+- `gsign` asks the master password (Tab shows or hides what is typed, a wrong one is asked
+  again), loads `github-seb-odoo-signing` into `ssh-agent-sign.service`, and locks the CLI again.
+  The key goes through a pipe, never a file.
+- `sign` is `gpg.ssh.program`: it signs with that agent, or asks Bitwarden before `gsign` ran. So
+  when Bitwarden asks at each commit of the host, run `gsign` in a host terminal.
 - `gsign.desktop` opens a terminal running `gsign` at each login, so only the master password is
   left to type.
 - `bitwarden.desktop` opens the Bitwarden window at each login, for the github.com pushes. The

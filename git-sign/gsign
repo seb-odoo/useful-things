@@ -1,7 +1,29 @@
-#!/bin/sh
+#!/bin/bash
 set -e
 ram=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ssh-sign.sock
-session=$(bw unlock --raw)
+prompt='Master password (Tab shows it): '
+
+ask_password() {
+    local char shown=
+    password=
+    printf '%s' "$prompt" >&2
+    while :; do
+        IFS= read -rsn1 char || exit 1
+        case $char in
+            '') break ;;
+            $'\t') if [[ $shown ]]; then shown=; else shown=1; fi ;;
+            $'\177' | $'\b') password=${password%?} ;;
+            *) password+=$char ;;
+        esac
+        printf '\r\033[K%s%s' "$prompt" "${shown:+$password}" >&2
+    done
+    echo >&2
+}
+
+until [[ $password ]] && session=$(BW_PASSWORD=$password bw unlock --raw --passwordenv BW_PASSWORD); do
+    ask_password
+done
+unset password
 trap 'bw lock >/dev/null' EXIT
 # Offline at login is fine, bw get reads the local copy of the vault.
 bw sync --session "$session" >/dev/null 2>&1 || true
