@@ -19,7 +19,8 @@ stays. When a VS Code window or another terminal takes the session over, agent-t
 the window, its shell too: SIGUSR1 to BUNDLE_CTL_WINDOW_PID, this process. The window opens
 minimized, so that a new agent does not take the screen: it waits in the window list
 (window-picker.py). Terminator maps it minimized with --hidden, only when its hide_window key is
-not bound: the copy of the config unbinds it.
+not bound: the copy of the config unbinds it. The copy also enables shift_enter_newline.py, linked
+into the plugins folder of the user's config: Shift+Enter starts a new line in claude.
 
 An ops agent window (ops-SESSION) follows the record of that session in the sessions folder of
 the ops container, and the title of its conversation, which changes with no change of status. Its mark goes once its claude ended, as the window list cannot tell which ops
@@ -28,6 +29,7 @@ it shows in front. When a tab of the ops VS Code window resumes its session, the
 two claude processes on one session would each go on from where they loaded it.
 """
 
+import contextlib
 import json
 import os
 import pathlib
@@ -47,6 +49,8 @@ from config import CLAUDE_CONFIG_CONTAINER, HOST_FOLDER  # noqa: E402
 CHECK = 1
 CLAUDE_CONFIG = pathlib.Path(CLAUDE_CONFIG_CONTAINER)
 CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
+DEFAULT_PLUGINS = ["LaunchpadBugURLHandler", "LaunchpadCodeURLHandler", "APTURLHandler"]
+GLOBAL_CONFIG = "[global_config]"
 HIDE_KEY = "hide_window"
 KEYBINDINGS = "[keybindings]"
 LAYOUT = "bundle-ctl agent"
@@ -80,6 +84,9 @@ PANES = """\
       title = "on the host: shell"
       command = "{shell}"
 """
+PLUGIN = "ShiftEnterNewline"
+PLUGIN_FILE = HERE / "shift_enter_newline.py"
+PLUGINS_KEY = "enabled_plugins"
 REFRESH = 10
 RUNTIME = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR") or pathlib.Path.home() / ".cache")
 WMCTRL = shutil.which("wmctrl")
@@ -93,7 +100,13 @@ def get_config(command):
         lines = (CONFIG_ROOT / "terminator" / "config").read_text().splitlines(keepends=True)
     except OSError:
         lines = []
-    lines = [line for line in lines if line.split("=")[0].strip() != HIDE_KEY]
+    plugins = DEFAULT_PLUGINS
+    for line in lines:
+        key, _, value = line.partition("=")
+        if key.strip() == PLUGINS_KEY:
+            plugins = [name.strip() for name in value.split(",") if name.strip()]
+    lines = [line for line in lines if line.split("=")[0].strip() not in (HIDE_KEY, PLUGINS_KEY)]
+    insert(lines, GLOBAL_CONFIG, f"  {PLUGINS_KEY} = {', '.join(dict.fromkeys([*plugins, PLUGIN]))}\n")
     insert(lines, KEYBINDINGS, f"  {HIDE_KEY} = None\n")
     insert(lines, LAYOUTS, PANES.format(layout=LAYOUT, agent=agent, shell=shell))
     return "".join(lines)
@@ -103,6 +116,14 @@ def insert(lines, section, text):
     if section not in [line.strip() for line in lines]:
         lines.append(f"\n{section}\n")
     lines.insert([line.strip() for line in lines].index(section) + 1, text)
+
+
+def link_plugin():
+    link = CONFIG_ROOT / "terminator" / "plugins" / PLUGIN_FILE.name
+    if not link.is_symlink():
+        link.parent.mkdir(parents=True, exist_ok=True)
+        with contextlib.suppress(FileExistsError):
+            link.symlink_to(PLUGIN_FILE)
 
 
 def get_title(bundle, *statuses):
@@ -172,6 +193,7 @@ def main():
     path = RUNTIME / "bundle-ctl" / f"terminator-{bundle}.config"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(get_config(command))
+    link_plugin()
     terminator = ["terminator", "--no-dbus", "--config", str(path), "--layout", LAYOUT]
     os.environ["BUNDLE_CTL_AGENT_WINDOW"] = bundle
     os.environ["BUNDLE_CTL_WINDOW_PID"] = str(os.getpid())

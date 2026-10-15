@@ -60,12 +60,19 @@ TOPICS = {
     ],
     "seb": [("custom-title", "customTitle", "Pick a base"), ("ai-title", "aiTitle", "Base")],
 }
+PLUGINS = "  enabled_plugins = LaunchpadBugURLHandler, LaunchpadCodeURLHandler, APTURLHandler, "
 CONFIGS = [
     (
-        "[keybindings]\n  hide_window = <Control>h\n  copy = <Control>c\n[layouts]\n",
-        "[keybindings]\n  hide_window = None\n  copy = <Control>c\n[layouts]\n",
+        "[global_config]\n  enabled_plugins = Logger\n[keybindings]\n  hide_window = <Control>h\n"
+        "  copy = <Control>c\n[layouts]\n",
+        "[global_config]\n  enabled_plugins = Logger, ShiftEnterNewline\n[keybindings]\n"
+        "  hide_window = None\n  copy = <Control>c\n[layouts]\n",
     ),
-    ("[layouts]\n", "[layouts]\n\n[keybindings]\n  hide_window = None\n"),
+    (
+        "[layouts]\n",
+        f"[layouts]\n\n[global_config]\n{PLUGINS}ShiftEnterNewline\n\n[keybindings]\n"
+        "  hide_window = None\n",
+    ),
 ]
 FOLLOWED = [
     [f"⏳ {TITLE}", f"✅ {TITLE}"],
@@ -217,7 +224,8 @@ def get_followed(home):
 
 def get_configs(home):
     """The copy of the terminator config of an agent window: the user's, its hide_window key
-    unbound, as terminator maps a --hidden window minimized only then, and the layout added."""
+    unbound, as terminator maps a --hidden window minimized only then, the Shift+Enter plugin
+    enabled next to the user's, and the layout added."""
     spec = importlib.util.spec_from_file_location("terminator", HERE / "agent-terminator.py")
     terminator = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(terminator)

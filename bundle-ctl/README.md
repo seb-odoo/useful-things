@@ -283,6 +283,11 @@ focus (Seb, 2026-10-14), so that a first prompt goes to claude: the layout names
   so that it never shows first. It does so only while its `hide_window` key is not bound (with the
   key bound, `--hidden` keeps the window unmapped until that key): the copy of the config sets
   `hide_window = None`.
+- Shift+Enter starts a new line in claude, as in its VS Code tab. VTE sends the same carriage
+  return for Enter and Shift+Enter, so the copy of the config enables `shift_enter_newline.py`, a
+  terminator plugin that sends a line feed (Ctrl+J) instead: a shell runs the line on it, as on
+  Enter. The launcher links it into `~/.config/terminator/plugins/`, where terminator looks for
+  plugins; the other terminator windows of Seb do not enable it.
 - Each pane says where it runs. The two panes of the layout carry a title, `in the container:
   claude` and `on the host: shell`. A shell of the window, one split by hand included, also
   starts on `On the host, outside the container of BUNDLE.` and on `ocode BUNDLE opens its VS
