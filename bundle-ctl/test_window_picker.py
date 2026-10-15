@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """How window-picker.py opens rofi, the rows it gives it, its counts, the window it brings up on a
-pick, with a fake rofi, wmctrl, xdg-open and xprop: python3 test_window_picker.py"""
+pick, with a fake rofi, wmctrl and xdg-open, and the windows of a file of its own shown, the
+others minimized: python3 test_window_picker.py"""
 
 import importlib.util
 import os
@@ -75,6 +76,15 @@ ENDED = [
     "🔄 📝 master-c-aku (review)\0info\x1fmaster-c-aku\x1fmeta\x1f",
     *ROWS[11:],
 ]
+RUN = """\
+import pathlib, sys
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]).parent))
+import test_window_picker
+picker = test_window_picker.load_picker()
+test_window_picker.hide(picker, pathlib.Path(sys.argv[2]))
+sys.argv[1:] = sys.argv[3:]
+picker.main()
+"""
 SHOWN_ROWS = [
     ("0x0a", False),
     ("master-d-runbot-12--seb", True),
@@ -110,8 +120,14 @@ PICKS = [
 
 def run(folder, *args, **env):
     env = {**os.environ, "PATH": f"{folder}:{os.environ['PATH']}", "XDG_RUNTIME_DIR": str(folder), **env}
-    command = [sys.executable, str(HERE / "window-picker.py"), *args]
+    command = [sys.executable, "-c", RUN, str(HERE / "window-picker.py"), str(folder), *args]
     return subprocess.run(command, capture_output=True, check=True, env=env, text=True).stdout
+
+
+def hide(picker, folder):
+    """Give picker the windows of the file `shown` of folder as shown, the others as minimized."""
+    shown = (folder / "shown").read_text().split()
+    picker.get_hidden = lambda windows: {window for window in windows if window not in shown}
 
 
 def start_agent(name):
@@ -140,6 +156,7 @@ def get_shown_rows(folder):
     os.environ.update(PATH=f"{folder}:{env['PATH']}", XDG_RUNTIME_DIR=str(folder))
     try:
         picker = load_picker()
+        hide(picker, folder)
         rows = picker.get_rows(picker.get_windows(), shown=True)
     finally:
         os.environ.clear()
@@ -174,8 +191,6 @@ def main():
         write_fake(folder, "xdg-open", f'echo xdg-open "$@" >> {log}; echo code --folder-uri x')
         write_fake(folder, "rofi", f'for arg in "$@"; do echo "[$arg]"; done > {folder}/rofi.log')
         (folder / "shown").write_text("")
-        hidden = "_NET_WM_STATE_HIDDEN, _NET_WM_STATE_SKIP_TASKBAR"
-        write_fake(folder, "xprop", f'grep -qx "$2" {folder}/shown || echo "$3(ATOM) = {hidden}"')
         agents = {name: start_agent(name) for name in AGENTS}
         windows = [start_window(name) for name in AGENTS]
         run(folder, "--show")

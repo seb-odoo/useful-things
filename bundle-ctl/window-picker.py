@@ -31,6 +31,8 @@ mark once its claude ended. The first row, `➕ new ops agent`, opens a new one:
 """
 
 import collections
+import ctypes
+import functools
 import importlib.util
 import os
 import pathlib
@@ -60,6 +62,21 @@ OPENING_TIME = 300
 PRIORITY = (FAILED, "✋", "✅", "🚀", "⏳")
 QUIET = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
 Row = collections.namedtuple("Row", "place rank title key window minimized")
+XCB_ATOM_ATOM = 4
+
+
+class AtomReply(ctypes.Structure):
+    _fields_ = [
+        ("response_type", ctypes.c_uint8),
+        ("pad0", ctypes.c_uint8),
+        ("sequence", ctypes.c_uint16),
+        ("length", ctypes.c_uint32),
+        ("atom", ctypes.c_uint32),
+    ]
+
+
+class Cookie(ctypes.Structure):
+    _fields_ = [("sequence", ctypes.c_uint)]
 SKIPPED = ("nemo-desktop.",)
 
 
@@ -100,13 +117,18 @@ def get_place(title):
 def get_agent_bundles():
     """The bundles whose claude runs in a terminal: agent-terminal.py BUNDLE ends with it. The
     agent-terminator.py of the window holds the same words as COMMAND for as long as the window
-    lives."""
+    lives. The command lines are read as bytes and most are left at once: a thousand processes
+    read as text took 70 ms, every 2 seconds."""
     bundles = set()
-    for path in pathlib.Path("/proc").glob("[0-9]*/cmdline"):
+    for pid in os.listdir("/proc"):
         try:
-            args = path.read_text(errors="replace").split("\0")
+            with open(f"/proc/{pid}/cmdline", "rb") as file:
+                data = file.read()
         except OSError:
             continue
+        if b"agent-terminal.py" not in data:
+            continue
+        args = data.decode(errors="replace").split("\0")
         scripts = [at for at, arg in enumerate(args) if arg.endswith("agent-terminal.py")]
         if scripts and not any(arg.endswith("agent-terminator.py") for arg in args):
             bundles.add(args[scripts[0] + 1])
@@ -146,10 +168,62 @@ def get_windows():
     return bundles, ops, others
 
 
-def is_minimized(window):
-    command = ["xprop", "-id", window, "_NET_WM_STATE"]
-    out = subprocess.run(command, capture_output=True, check=False, text=True)
-    return "_NET_WM_STATE_HIDDEN" in out.stdout
+@functools.cache
+def load_xcb():
+    xcb, libc = ctypes.CDLL("libxcb.so.1"), ctypes.CDLL(None)
+    pointer, word = ctypes.c_void_p, ctypes.c_uint32
+    for name, result, args in (
+        ("xcb_connect", pointer, [ctypes.c_char_p, pointer]),
+        ("xcb_connection_has_error", ctypes.c_int, [pointer]),
+        ("xcb_disconnect", None, [pointer]),
+        ("xcb_get_property", Cookie, [pointer, ctypes.c_uint8, word, word, word, word, word]),
+        ("xcb_get_property_reply", pointer, [pointer, Cookie, pointer]),
+        ("xcb_get_property_value", ctypes.POINTER(word), [pointer]),
+        ("xcb_get_property_value_length", ctypes.c_int, [pointer]),
+        ("xcb_intern_atom", Cookie, [pointer, ctypes.c_uint8, ctypes.c_uint16, ctypes.c_char_p]),
+        ("xcb_intern_atom_reply", ctypes.POINTER(AtomReply), [pointer, Cookie, pointer]),
+    ):
+        function = getattr(xcb, name)
+        function.restype, function.argtypes = result, args
+    libc.free.argtypes = [pointer]
+    return xcb, libc
+
+
+def get_hidden(windows):
+    """The minimized windows among these ids, whose _NET_WM_STATE holds _NET_WM_STATE_HIDDEN. One X
+    connection asks for all of them before it reads the first answer: an xprop per window took
+    130 ms for 52 windows, every 2 seconds."""
+    xcb, libc = load_xcb()
+    connection = xcb.xcb_connect(None, None)
+    try:
+        if xcb.xcb_connection_has_error(connection):
+            return set()
+        names = (b"_NET_WM_STATE", b"_NET_WM_STATE_HIDDEN")
+        cookies = [xcb.xcb_intern_atom(connection, 0, len(name), name) for name in names]
+        atoms = []
+        for cookie in cookies:
+            reply = xcb.xcb_intern_atom_reply(connection, cookie, None)
+            if not reply:
+                return set()
+            atoms.append(reply.contents.atom)
+            libc.free(reply)
+        state, hidden = atoms
+        cookies = [
+            xcb.xcb_get_property(connection, 0, int(window, 16), state, XCB_ATOM_ATOM, 0, 32)
+            for window in windows
+        ]
+        found = set()
+        for window, cookie in zip(windows, cookies):
+            reply = xcb.xcb_get_property_reply(connection, cookie, None)
+            if not reply:
+                continue
+            count = xcb.xcb_get_property_value_length(reply) // 4
+            if hidden in xcb.xcb_get_property_value(reply)[:count]:
+                found.add(window)
+            libc.free(reply)
+        return found
+    finally:
+        xcb.xcb_disconnect(connection)
 
 
 def get_rows(windows, shown=False):
@@ -161,16 +235,17 @@ def get_rows(windows, shown=False):
         (OPENING / name).unlink(missing_ok=True)
         del bundles[name]
     agents = get_agent_bundles()
+    hidden = get_hidden([bundle["terminal"] for bundle in bundles.values()] + [w for _, w in ops])
     rows = []
     for name, bundle in bundles.items():
         title, window = bundle["title"], bundle["terminal"]
         if title.startswith(LIVE) and name not in agents:
             title = title.split(" ", 1)[1]
         place, rank = get_place(title), get_rank(title)
-        rows.append(Row(place, rank, get_loading(name) + title, name, window, is_minimized(window)))
+        rows.append(Row(place, rank, get_loading(name) + title, name, window, window in hidden))
     for title, window in ops:
         place, rank = get_place(title), get_rank(title)
-        rows.append(Row(place, rank, title, window, window, is_minimized(window)))
+        rows.append(Row(place, rank, title, window, window, window in hidden))
     return sorted(row for row in rows if shown or row.minimized)
 
 
