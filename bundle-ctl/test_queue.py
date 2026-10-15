@@ -339,6 +339,24 @@ def check_disk(_root):
     return [f"disk: {name}" for name, passed in checks if not passed], len(checks)
 
 
+def check_priority(root):
+    """A task an agent queues takes the priority of the agent's own task unless it gives one, and
+    the started task keeps its priority for the tasks it queues in turn."""
+    state, _launched = prepare(root, {"agent": {"priority": "-20\n"}, "child": FRESH}, 8)
+    state["queue"] = []
+    answer = daemon.enqueue("agent", "child", {"task": TASK})
+    written = (root / "master" / "child" / ".agent" / "priority").read_text()
+    checks = [
+        ("no priority: the agent's own", (answer["priority"], written) == (-20, "-20\n")),
+        (
+            "a given priority stays",
+            daemon.enqueue("agent", "child", {"priority": 5, "task": TASK})["priority"] == 5,
+        ),
+        ("the host gets 0", daemon.get_task_priority(daemon.HOST) == 0),
+    ]
+    return [f"priority: {name}" for name, passed in checks if not passed], len(checks)
+
+
 def check_build(root):
     """A task queued with its build starts in the bare folder, told so, and only its own bundle
     builds it; under the disk floor such a task is still queued."""
@@ -420,7 +438,7 @@ def main():
         if found != (launched, queue):
             failures.append(f"{list(bundles)}: {found}, expected {(launched, queue)}")
     total = len(CASES)
-    for check in (check_clients, check_disk, check_build, check_ramp):
+    for check in (check_clients, check_disk, check_build, check_priority, check_ramp):
         with tempfile.TemporaryDirectory() as root:
             failed, count = check(pathlib.Path(root))
         failures += failed

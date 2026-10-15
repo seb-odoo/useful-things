@@ -24,8 +24,9 @@ its turn comes, its agent starts in the bare folder of the bundle, with no workt
 running bundles, Claude runs the task in a terminal of the host, in the bundle's container, and a
 VS Code window opened on the bundle later takes the session over in a Claude tab. A bundle whose
 window is already open runs the task in that window. A task for a bundle whose agent has not ended
-is queued behind it. The queue runs the highest priority first (-100 to 100, default 0), then in
-arrival order: bctl status lists it in that order, with what each task waits for. One agent
+is queued behind it. The queue runs the highest priority first (-100 to 100; by default 0 from the
+host, and from an agent the priority of its own task), then in arrival order: bctl status lists it
+in that order, with what each task waits for. One agent
 starts at a time: the next task waits until the run of the last one began.
 
 queue is that list alone, at once, with the memory left on the host. force-queue lets the tasks
@@ -358,7 +359,8 @@ def add_task_arguments(parser):
     parser.add_argument(
         "--priority",
         type=int,
-        help="with a task: higher leaves the queue first, from -100 to 100 (default 0)",
+        help="with a task: higher leaves the queue first, from -100 to 100 (default: the priority"
+        " of this agent's own task, 0 from the host)",
     )
     parser.add_argument(
         "--model",

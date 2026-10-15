@@ -728,10 +728,18 @@ def check_task(bundle, body):
             raise Refused(f"{bundle} is open in a window: its session goes on in its Claude tab")
 
 
+def get_task_priority(bundle):
+    if bundle == HOST:
+        return 0
+    text = read_text(get_agent_folder(bundle) / "priority") or "0"
+    return int(text) if re.fullmatch(r"-?\d+", text) else 0
+
+
 def enqueue(caller, bundle, body, build=None):
     """Queue the task of a bundle. `build` is the script that makes a bundle not made yet: the
-    agent starts in its bare folder and runs it with `bctl build` once it needs the code."""
-    priority = body.get("priority", 0)
+    agent starts in its bare folder and runs it with `bctl build` once it needs the code. With no
+    priority, the task of an agent takes the one of the agent's own task."""
+    priority = body["priority"] if "priority" in body else get_task_priority(caller)
     effort, model = body.get("effort"), body.get("model")
     with state_lock:
         state = read_state()
@@ -812,6 +820,7 @@ def write_task(item):
     (folder / "parent").write_text(f"{item['parent']}\n")
     if "queued" in item:
         (folder / "queued").write_text(f"{item['queued']}\n")
+    (folder / "priority").write_text(f"{item.get('priority', 0)}\n")
     (folder / "task.md").write_text(item["task"])
     for name in ("effort", "model"):
         if item.get(name):
@@ -858,6 +867,7 @@ def launch_queued():
                         "effort": read_text(task.parent / "effort"),
                         "model": read_text(task.parent / "model"),
                         "parent": parent,
+                        "priority": get_task_priority(bundle),
                         "queued": float(read_text(task.parent / "queued") or now),
                         "task": task.read_text(),
                     },
