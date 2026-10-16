@@ -90,6 +90,8 @@ function branchdb() {
 #   testdb hoot  -> <branch>-claude-hoot  (JS/Hoot runs)
 function testdb() { echo "$(branchdb)-claude${1:+-${1}}"; }
 
+function bug-fix() { bash ~/.claude/skills/serve-for-seb/bug-fix.sh "$@"; }
+
 # --- odoo-bin helpers ---
 function odoo-bin() {
 	RES="./odoo-bin $(odoo-bin-params $*)"
