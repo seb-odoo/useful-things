@@ -209,15 +209,15 @@ def get_live_sessions(records, proc="/proc"):
     return live
 
 
-def get_prompt(row):
+def get_prompt(row, why="after a crash or a restart"):
     """The prompt a cut session goes on with: what stopped it, and what to check before its last
     call runs again."""
     when = time.strftime("%H:%M on %Y-%m-%d", time.localtime(row["stopped"]))
     call = f"\n\nYour last call: {row['call']}" if row.get("call") else ""
     return (
         f"{GO_ON}\n\nThis session was cut at {when}: its claude stopped with its container or its"
-        " window, after a crash or a restart, nothing you did. The background commands, servers"
-        " and agents of the session died with it: start again the ones you still need. Before you"
-        " run your last call again, check what it already did (a commit, a push, a file written,"
-        f" a request held in hok), so that nothing is done twice.{call}"
+        f" window, {why}, nothing you did. The background commands, servers and agents of the"
+        " session died with it: start again the ones you still need. Before you run your last call"
+        " again, check what it already did (a commit, a push, a file written, a request held in"
+        f" hok), so that nothing is done twice.{call}"
     )

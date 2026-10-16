@@ -6,6 +6,7 @@
     bctl queue [--json]
     bctl force-queue [BUNDLE]
     bctl move BUNDLE PLACE
+    bctl requeue BUNDLE [--paused]
     bctl schedule BUNDLE spot|manual|HH:MM
     bctl unqueue BUNDLE
     bctl branches [--json]
@@ -46,6 +47,11 @@ the queued task of a bundle may start: spot, as soon as a slot and the memory le
 it is scheduled again; HH:MM, once that time of the host came, today or tomorrow. It no longer goes
 over the cap. unqueue drops the queued task of a bundle. The host, that bundle, or the bundle that
 queued the task may ask them.
+
+requeue queues the session of a bundle's agent again, last, and closes its agent window once its
+turn ended, 2 minutes at most: meanwhile its Bash calls are refused, on a reason that tells it to
+end its turn. A turn cut there goes on told so. With --paused, it waits for a manual resume. Only
+the host may ask it.
 
 open --resume gives the task to the last Claude session of the bundle as its next prompt, where a
 task alone starts a new session. Without a task, the session is told to go on.
@@ -219,6 +225,13 @@ def format_memory(memory):
     if memory.get("ramping"):
         figures += f", {memory['ramping']} agents started in the last 10 minutes"
     return f"the host is short of memory: {figures}" if memory["short"] else f"memory: {figures}"
+
+
+def print_requeued(answer):
+    print(
+        f"{answer['bundle']}: its window closes once its turn ends, in {answer['wait']} seconds at"
+        f" most; queued {answer['queued']}, waits for {answer['waits_for']}",
+    )
 
 
 def print_queue(answer):
@@ -534,6 +547,16 @@ def main():
     move = commands.add_parser("move", help="put the queued task of a bundle at another place")
     move.add_argument("bundle")
     move.add_argument("place", type=int, help="from 1, as bctl queue counts")
+    requeue = commands.add_parser(
+        "requeue",
+        help="queue the session of a bundle's agent again, and close its window after its turn",
+    )
+    requeue.add_argument("bundle")
+    requeue.add_argument(
+        "--paused",
+        action="store_true",
+        help="it waits in the queue until `bctl schedule BUNDLE spot`",
+    )
     schedule = commands.add_parser("schedule", help="set when the queued task of a bundle starts")
     schedule.add_argument("bundle")
     schedule.add_argument(
@@ -569,6 +592,9 @@ def main():
     elif args.command == "move":
         answer = request("POST", "/move", {"bundle": args.bundle, "place": args.place})
         printer = print_queue
+    elif args.command == "requeue":
+        answer = request("POST", "/requeue", {"bundle": args.bundle, "paused": args.paused})
+        printer = print_requeued
     elif args.command == "schedule":
         answer = request("POST", "/schedule", {"bundle": args.bundle, "when": args.when})
         printer = print_queue

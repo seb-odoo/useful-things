@@ -6,6 +6,9 @@ in front of it, `bctl.py run`, which waits for cores and pins the shell of the c
 agent writes its command as before, and bundle-ctl decides when it runs (README.md, "Runs"). The
 line lets the command go on when the daemon does not answer.
 
+While the daemon waits for the turn of the agent to end before it closes its window (`bctl
+requeue`), it refuses every command, on a reason that tells the agent to end its turn.
+
     echo '{"tool_input": {"command": "./odoo-bin -d x --test-tags /mail"}}' | python3 run-hook.py
 """
 
@@ -15,6 +18,7 @@ import pathlib
 import re
 import shlex
 import sys
+import time
 
 ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*", re.DOTALL)
 CLIENT = pathlib.Path(__file__).resolve().parent / "bctl.py"
@@ -44,6 +48,8 @@ ODOO_RUN = {
     "-u",
 }
 OPERAND = re.compile(r"-.*|[\d.,-]+[smhd]?")
+PAUSE = pathlib.Path("/workspace/.agent/pause")
+PAUSE_MARGIN = 60
 PUNCTUATION = "();<>|&\n"
 PYTHON = re.compile(r"python[\d.]*")
 RANK = ("shell", "server", "odoo", "hoot")
@@ -219,10 +225,30 @@ def classify(text, folder=".", depth=0):
     return max(found, key=lambda run: (RANK.index(run[0]), run[1]), default=None)
 
 
+def get_pause():
+    """The seconds left before the daemon closes the agent window, None when it waits for no turn.
+    A file the daemon left behind counts for PAUSE_MARGIN seconds past its time."""
+    try:
+        left = float(PAUSE.read_text()) - time.time()
+    except (OSError, ValueError):
+        return None
+    return max(0, round(left)) if left > -PAUSE_MARGIN else None
+
+
 def main():
     try:
         data = json.load(sys.stdin)
     except ValueError:
+        return
+    left = get_pause()
+    if left is not None:
+        reason = (
+            f"Seb stops this agent: its window closes in {left} seconds, and the session goes on"
+            " later from here. Run no new command, and end your turn now on where the work is and"
+            " what comes next. Your files and this conversation stay as they are."
+        )
+        output = {"hookEventName": "PreToolUse", "permissionDecision": "deny"}
+        print(json.dumps({"hookSpecificOutput": {**output, "permissionDecisionReason": reason}}))
         return
     tool_input = data.get("tool_input") or {}
     command = tool_input.get("command") or ""

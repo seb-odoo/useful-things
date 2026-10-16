@@ -20,15 +20,15 @@ kinds pressed. Enter, a double click or Terminal brings up the terminal of each 
 the window of each selected bundle, which takes its session over. Close closes the window of each
 selected row after a question, as the daemon does: SIGUSR1 to its agent-terminator.py, and its
 claude stops. Back to queue queues the session of each selected bundle again, at the end of the
-queue (the lowest priority there), then closes its window: the queue starts it again with "Continue
-from where you left off." when its turn comes. Pause does the same, and the task waits in the
-queue for a manual resume. A right click on a row opens a menu with these five. New ops agent runs
-bctl open ops --terminal. Under the queue, Force lets each selected task start over the cap, Up and
-Down move the first selected task one place, Pause makes each selected task wait for a manual
-resume, Resume for a slot, and Time for a time of the day it asks (bctl schedule). A second start
-brings the open
-window up. The size and the place of the window, and the height of the queue under its handle, are
-kept in agent-list.json, beside the state of the daemon.
+queue (the lowest priority there), and the daemon closes its window once its turn ended, 2 minutes
+at most (bctl requeue): the queue starts it again with "Continue from where you left off." when its
+turn comes. Pause does the same, and the task waits in the queue for a manual resume. A right
+click on a row opens a menu with these five. New ops agent runs bctl open ops --terminal. Under
+the queue, Force lets each selected task start over the cap, Up and Down move the first selected
+task one place, Pause makes each selected task wait for a manual resume, Resume for a slot, and
+Time for a time of the day it asks (bctl schedule). A second start brings the open window up. The
+size and the place of the window, and the height of the queue under its handle, are kept in
+agent-list.json, beside the state of the daemon.
 """
 
 import collections
@@ -664,26 +664,20 @@ class AgentList(Gtk.Application):
             close_windows([row[WINDOW] for row in rows])
 
     def queue_again(self, *_args, paused=False):
-        """Queue the session of each selected bundle again, last, then close its window: its
-        claude stops, and the queue starts it again when its turn comes, or once it is resumed
-        when paused."""
+        """Queue the session of each selected bundle again, last: the daemon closes its window
+        once its turn ended, and the queue starts it again when its turn comes, or once it is
+        resumed when paused."""
         rows = [row for row in self.get_selected() if row[KEY] != row[WINDOW]]
-        text = "Their window closes, claude stops"
+        text = "Each one ends its turn, 2 minutes at most, then its window closes"
         if paused:
-            text = f"Pause these agents? {text}, and they wait at the end of the queue until you"
-            text += " resume them."
+            text = f"Pause these agents? {text}, and it waits at the end of the queue until you"
+            text += " resume it."
         else:
             text = f"Put these agents back at the end of the queue? {text}."
         if not rows or not self.confirm(text, rows, "Pause" if paused else "Back to queue"):
             return
-        queue = (self.queue_answer or {}).get("queue", [])
-        priority = min((item["priority"] for item in queue), default=0)
         for row in rows:
-            body = {"bundle": row[KEY], "priority": priority, "resume": True, "task": bctl.GO_ON}
-            if paused:
-                body["paused"] = True
-            if self.send("/open", body):
-                close_windows([row[WINDOW]])
+            self.send("/requeue", {"bundle": row[KEY], "paused": paused})
 
     def save_place(self, window, _event):
         x, y = window.get_position()

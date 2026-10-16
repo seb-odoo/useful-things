@@ -158,6 +158,7 @@ NOT_BUILT = (
 )
 OPS_OPEN = "ops-window-open"
 OPS_TASK = "The agent of the bundle {bundle} sends this task, and Seb said yes to it in hok:\n\n"
+PAUSE_WAIT = 120
 REVIEW_CHECK = 60
 REVIEW_CLOSED = 60 * float(
     os.environ.get("BUNDLE_CTL_REVIEW_CLOSED_MINUTES")
@@ -579,6 +580,78 @@ def schedule_task(caller, query, body):
         write_state(state)
     launch_queued()
     return get_queue(caller, query, body)
+
+
+def requeue_agent(caller, query, body):
+    """Queue the session of a bundle's agent again, last, paused with `paused`, and close its
+    window once its turn ended, PAUSE_WAIT seconds at most. Meanwhile its Bash calls are refused on
+    a reason that tells it to end its turn (client/run-hook.py). The host asks."""
+    bundle = body.get("bundle") or ""
+    if caller != HOST:
+        raise Refused("requeue: only the host and the ops container stop an agent")
+    if set(body) - {"bundle", "paused"} or type(body.get("paused", False)) is not bool:
+        raise ValueError("requeue: a bundle, and paused true or false")
+    if not BUNDLE_NAME.fullmatch(bundle) or not os.path.isdir(get_worktree_bundle_folder(bundle)):
+        raise ValueError(f"no bundle folder for {bundle}")
+    session = read_text(get_agent_folder(bundle) / "session")
+    if not session or not get_window_pids(bundle):
+        raise ValueError(f"{bundle} has no agent window")
+    paused = body.get("paused", False)
+    with state_lock:
+        priority = min((item.get("priority", 0) for item in read_state()["queue"]), default=0)
+    task = {"paused": paused, "priority": priority, "resume": True, "task": GO_ON}
+    check_task(bundle, task)
+    answer = enqueue(caller, bundle, task)
+    threading.Thread(target=stop_after_turn, args=(bundle, session, paused), daemon=True).start()
+    return 202, {**answer, "wait": PAUSE_WAIT}
+
+
+def get_session_status(bundle, session):
+    """What the claude of a bundle's session does, as its newest record says: `busy` in a turn,
+    `idle` or `shell` once the turn ended, None with no record."""
+    records = []
+    for path in pathlib.Path(CLAUDE_CONFIG_CONTAINER, bundle, "sessions").glob("*.json"):
+        try:
+            record = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if isinstance(record, dict) and record.get("sessionId") == session:
+            records.append(record)
+    newest = max(records, key=lambda record: record.get("startedAt") or 0, default={})
+    return newest.get("status")
+
+
+def stop_after_turn(bundle, session, paused):
+    """Close the agent window of a bundle once the turn of its session ended, or at PAUSE_WAIT.
+    When that cut the turn, the queued task tells the session so, as for a session a crash cut."""
+    pause = get_agent_folder(bundle) / "pause"
+    deadline = time.time() + PAUSE_WAIT
+    pause.write_text(f"{deadline}\n")
+    try:
+        busy = get_session_status(bundle, session) == "busy"
+        while busy and get_window_pids(bundle) and time.time() < deadline:
+            time.sleep(1)
+            busy = get_session_status(bundle, session) == "busy"
+        try:
+            transcript = get_transcript(session)
+            row = transcript and cut.read_session(transcript)
+        except OSError:
+            row = None
+        if row and (busy or cut.get_cut(row)):
+            why = "when Seb paused it" if paused else "when Seb put it back in the queue"
+            prompt = cut.get_prompt({"call": row["call"], "stopped": time.time()}, why)
+            with state_lock:
+                state = read_state()
+                for item in state["queue"]:
+                    if item["bundle"] == bundle and item.get("resume") and item["task"] == GO_ON:
+                        item["task"] = prompt
+                write_state(state)
+        close_window(bundle)
+        deadline = time.monotonic() + WINDOW_CLOSE_WAIT
+        while get_window_pids(bundle) and time.monotonic() < deadline:
+            time.sleep(0.5)
+    finally:
+        pause.unlink(missing_ok=True)
 
 
 def list_runs(caller, query, body):
@@ -2039,6 +2112,7 @@ VERBS = {
     ("POST", "/force-queue"): force_queue,
     ("POST", "/move"): move_task,
     ("POST", "/open"): open_bundle,
+    ("POST", "/requeue"): requeue_agent,
     ("POST", "/schedule"): schedule_task,
     ("POST", "/unqueue"): unqueue,
 }

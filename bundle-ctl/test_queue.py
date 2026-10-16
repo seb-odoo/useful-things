@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """What a pass of the queue launches, keeps and drops, without podman: python3 test_queue.py"""
 
+import contextlib
+import importlib.util
+import io
+import json
 import os
 import pathlib
 import subprocess
@@ -538,6 +542,110 @@ def check_pause(root):
     return [f"pause: {name}: {get_queue()} {launched}" for name in failed], len(checks)
 
 
+def check_requeue(root):
+    """Real clients: requeue queues the session of an agent again, last, and closes its window once
+    its turn ended, or at PAUSE_WAIT; meanwhile the hook refuses its commands, and a turn cut there
+    goes on told so. Only the host asks, for an agent window."""
+    agents = {"idle": RUNS_IT, "busy": RUNS_IT, "slow": RUNS_IT, "other": FRESH}
+    state, _launched = prepare(root, agents, 8)
+    state["queue"] = [{**state["queue"][-1], "paused": True, "priority": -5}]
+    windows, statuses = {"idle", "busy", "slow"}, {"idle": "idle", "busy": "busy", "slow": "busy"}
+    last = {
+        "idle": {"type": "text", "text": "Nothing left: done."},
+        "busy": {"type": "text", "text": "Nothing left: done."},
+        "slow": {"type": "tool_use", "name": "Bash", "input": {"command": "sleep 600"}},
+    }
+    for bundle in windows:
+        (daemon.get_agent_folder(bundle) / "session").write_text(f"{bundle}\n")
+        records = root / "claude-config" / bundle / "sessions"
+        records.mkdir(parents=True)
+        record = {"sessionId": bundle, "startedAt": 2, "status": statuses[bundle]}
+        (records / "1.json").write_text(json.dumps(record))
+        (records / "0.json").write_text(json.dumps({**record, "startedAt": 1, "status": "idle"}))
+        entry = {"type": "assistant", "entrypoint": "cli", "message": {"content": [last[bundle]]}}
+        (root / f"{bundle}.jsonl").write_text(json.dumps(entry) + "\n")
+    daemon.CLAUDE_CONFIG_CONTAINER = str(root / "claude-config")
+    daemon.PAUSE_WAIT = 3
+    daemon.close_window = windows.discard
+    daemon.get_transcript = lambda session: root / f"{session}.jsonl"
+    daemon.get_window_pids = lambda bundle: [1] * (bundle in windows)
+    spec = importlib.util.spec_from_file_location("run_hook", HERE / "client" / "run-hook.py")
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+
+    def ask_hook(bundle):
+        hook.PAUSE = daemon.get_agent_folder(bundle) / "pause"
+        sys.stdin, stdin = io.StringIO('{"tool_input": {"command": "ls"}}'), sys.stdin
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            hook.main()
+        sys.stdin = stdin
+        return json.loads(out.getvalue() or "{}").get("hookSpecificOutput", {})
+
+    def wait_closed(bundle):
+        deadline = time.monotonic() + 6
+        while bundle in windows and time.monotonic() < deadline:
+            time.sleep(0.1)
+        time.sleep(0.2)
+        return bundle not in windows
+
+    def get_task(bundle):
+        return next(item["task"] for item in state["queue"] if item["bundle"] == bundle)
+
+    daemon.identify = lambda connection: daemon.HOST
+    path = root / "ctl.sock"
+    server = daemon.Server(str(path), daemon.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    code, lines = run_client(path, "requeue", "idle", "--paused")
+    said = ["idle: its window closes once its turn ends, in 3 seconds at most; queued 2, waits for"]
+    said[0] += " a manual resume"
+    checks = [("the client queues it paused, last", (code, lines) == (0, said))]
+    found = wait_closed("idle"), get_task("idle"), ask_hook("idle")
+    closed = (True, daemon.GO_ON, {})
+    checks.append(("an idle agent closes at once, told to go on", found == closed))
+    code, _lines = run_client(path, "requeue", "busy")
+    item = state["queue"][-1]
+    found = item["bundle"], item["paused"], item["priority"], item["resume"]
+    checks.append(("a busy agent is queued again, not paused", found == ("busy", False, -5, True)))
+    answer = ask_hook("busy")
+    reason = answer.get("permissionDecisionReason", "")
+    found = answer.get("permissionDecision"), "window closes in" in reason
+    checks.append(("the hook refuses its commands", found == ("deny", True)))
+    refused = ["bctl: 409 busy is already queued"]
+    checks.append(("it is queued once", run_client(path, "requeue", "busy") == (1, refused)))
+    statuses["busy"] = "idle"
+    record = {"sessionId": "busy", "startedAt": 2, "status": "idle"}
+    (root / "claude-config" / "busy" / "sessions" / "1.json").write_text(json.dumps(record))
+    found = wait_closed("busy"), get_task("busy"), ask_hook("busy")
+    checks.append(("it closes once its turn ended", found == closed))
+    started = time.monotonic()
+    code, _lines = run_client(path, "requeue", "slow", "--paused")
+    closed = wait_closed("slow")
+    found = closed, time.monotonic() - started > 2.5, get_task("slow")
+    checks.append(("a turn that goes on closes at the wait", found[:2] == (True, True)))
+    told = "when Seb paused it, nothing you did" in found[2] and "Bash sleep 600" in found[2]
+    checks.append(("and goes on told it was cut", told))
+    for caller, args, error in (
+        ("idle", ("requeue", "busy"), "409 requeue: only the host and the ops container stop an"),
+        (daemon.HOST, ("requeue", "other"), "400 other has no agent window"),
+        (daemon.HOST, ("requeue", "../x"), "400 no bundle folder for ../x"),
+    ):
+        daemon.identify = lambda connection, caller=caller: caller
+        found = run_client(path, *args)
+        refused = found[0] == 1 and found[1][0].startswith(f"bctl: {error}")
+        checks.append((f"{' '.join(args)} from {caller} is refused", refused))
+    server.shutdown()
+    server.server_close()
+    try:
+        daemon.requeue_agent(daemon.HOST, {}, {"bundle": "idle", "paused": "yes"})
+        found = None
+    except ValueError as refusal:
+        found = str(refusal)
+    refused = found == "requeue: a bundle, and paused true or false"
+    checks.append(("paused is true or false", refused))
+    failed = [name for name, passed in checks if not passed]
+    return [f"requeue: {name}: {state['queue']}" for name in failed], len(checks)
+
+
 def check_build(root):
     """A task queued with its build starts in the bare folder, told so, and only its own bundle
     builds it; under the disk floor such a task is still queued."""
@@ -638,6 +746,7 @@ def main():
         check_disk,
         check_after,
         check_pause,
+        check_requeue,
         check_build,
         check_priority,
         check_ramp,

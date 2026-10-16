@@ -42,6 +42,7 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, and the memory left on the host, `short` when a start would add to a host that already lacks it |
 | `POST /force-queue` | the tasks queued now may start over the cap, those that wait for their time (`--after`) or for a manual resume (`--paused`) aside, or with `bundle` the task of that bundle, its time and its pause too; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
 | `POST /move` | the queued task of `bundle` put at `place` (from 1), where it keeps its priority when that priority fits between the tasks around it, else takes the nearest of theirs; then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
+| `POST /requeue` | the session of the agent of `bundle` queued again, last, paused with `paused`, and its agent window closed once its turn ended, 2 minutes at most: meanwhile `client/run-hook.py` refuses its Bash calls, on a reason that tells it to end its turn, and a turn still running at the end goes on told it was cut (see Cut sessions). The host or the ops container asks |
 | `POST /schedule` | when the queued task of `bundle` may start: `when` is `spot` (once a slot and the memory let it), `manual` (it waits for a manual resume, until it is scheduled again) or `HH:MM` (that time of the host, today or tomorrow); it no longer goes over the cap. Then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
 | `POST /unqueue` | the queued task of a bundle dropped; the host, that bundle or the one that queued the task asks |
 | `POST /run` | a heavy command waits for cores: one JSON line each time its place changes, then the CPUs it got (see Runs) |
@@ -405,9 +406,10 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   front (his pick: no tiling); VS Code opens the window of each selected bundle; Close closes the
   window of each after a question, as the daemon does (SIGUSR1 to its `agent-terminator.py`), so
   its claude stops. Back to queue, after a question too, queues the session of each selected
-  bundle again (`open --resume`, at the lowest priority of the queue, so last), then closes its
-  window: when its turn comes, a new terminal goes on with that session on `Continue from where
-  you left off.`. Pause does the same with `paused`: the task waits in the queue until Resume or
+  bundle again (`POST /requeue`, at the lowest priority of the queue, so last), and the daemon
+  closes its window once its turn ended, 2 minutes at most: when its turn comes, a new terminal
+  goes on with that session on `Continue from where you left off.`. Pause does the same with
+  `paused`: the task waits in the queue until Resume or
   Time there (Seb, 2026-10-16: "move agents from and to the queue easily, or pause them"). A
   right click on a row opens a menu with these five. New ops agent runs `bctl
   open ops --terminal`. It runs on the system python of the host, which has GTK. A second start brings the
@@ -636,6 +638,15 @@ reboot: on 2026-10-16 an emptied queue let the daemon delete 12 review bundles. 
 BUNDLE spot|manual|HH:MM` changes when a queued task may start: once a slot is free, once
 scheduled again, or at that time; a forced task no longer goes over the cap. `bctl force-queue
 BUNDLE` starts it at once, its time or its pause aside; a force of the whole queue leaves both.
+`bctl requeue BUNDLE [--paused]`, Back to queue and Pause in the agent list, puts a running agent
+back in the queue, last, and waits for the end of its turn to close its window, 2 minutes at most
+(Seb, 2026-10-16: "ok for end of turn but with a small timeout, I don't want to wait 20 minutes
+for a test"). Meanwhile `.agent/pause` holds that time, and `client/run-hook.py` refuses each Bash
+call on a reason that says when the window closes and asks for the end of the turn, on where the
+work is (his "can we prompt the agent to finish quickly"). A turn still running at the end, a test
+run for one, is cut: its task becomes the prompt of a cut session, which says that Seb stopped it
+and what to check before its last call runs again. The agent is not asked to save its work: its
+files and its transcript stay as they are, and a resume reads both.
 The answer is the task's place (`queued`) and what it waits for
 (`waits_for`), or `started` when a slot was free. `bctl status` lists the queue in that order with
 each priority, the bundle that queued it, since when and what it waits for, so a caller can pick
