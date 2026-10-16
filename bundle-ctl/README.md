@@ -412,7 +412,10 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   `paused`: the task waits in the queue until Resume or
   Time there (Seb, 2026-10-16: "move agents from and to the queue easily, or pause them"). A
   right click on a row opens a menu with these five. New ops agent runs `bctl
-  open ops --terminal`. It runs on the system python of the host, which has GTK. A second start brings the
+  open ops --terminal`. It runs on the system python of the host, which has GTK. It is dark when the
+  `color-scheme` of the desktop portal asks for it, as VS Code and the browsers are, and follows
+  each change of it (Seb, 2026-10-16: "should follow os color theme"). Dark is the dark Adwaita
+  of GTK, as the GTK theme the desktop names may have no dark variant. A second start brings the
   open window up, and its size, its place and the height of the queue are kept in
   `~/.local/state/bundle-ctl/agent-list.json`.
 - `window-applet/`, a Cinnamon applet, shows the mark that needs Seb most and how many bundles

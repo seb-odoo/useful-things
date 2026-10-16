@@ -93,7 +93,7 @@ def load_list():
     gi.require_version = lambda name, version: None
     repository = types.ModuleType("gi.repository")
     repository.Gtk = types.SimpleNamespace(Application=object)
-    repository.Gdk = repository.GdkX11 = repository.GLib = repository.Pango = None
+    repository.Gdk = repository.GdkX11 = repository.Gio = repository.GLib = repository.Pango = None
     gi.repository = repository
     sys.modules.update({"gi": gi, "gi.repository": repository})
     spec = importlib.util.spec_from_file_location("agent_list", HERE / "agent-list.py")

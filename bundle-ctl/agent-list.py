@@ -49,7 +49,7 @@ import gi
 gi.require_version("Gdk", "3.0")
 gi.require_version("GdkX11", "3.0")
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gdk, GdkX11, GLib, Gtk, Pango  # noqa: F401
+from gi.repository import Gdk, GdkX11, Gio, GLib, Gtk, Pango  # noqa: F401
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
@@ -58,6 +58,7 @@ from agents import OPS, get_agent_folder, get_mtime, read_text  # noqa: E402
 from commands import get_worktree_bundle_folder  # noqa: E402
 
 AGENTS_CHECK = 2
+APPEARANCE = ("org.freedesktop.appearance", "color-scheme")
 COLUMNS = ("State", "Type", "Agent", "Since", "CPU", "RAM", "Disk", "Last answer")
 CONTAINERS = pathlib.Path(
     f"/sys/fs/cgroup/user.slice/user-{os.getuid()}.slice/user@{os.getuid()}.service/user.slice"
@@ -378,6 +379,45 @@ def make_view(model, titles, expand, sorts=()):
     return view, scrolled
 
 
+def follow_color_scheme():
+    """Dark when the desktop asks for it, as VS Code and the browsers are, then at each change of
+    the color-scheme of the portal. Dark is the dark Adwaita, which GTK always has: the theme of
+    the desktop may have no dark variant, or not be installed. The proxy returned is kept, else
+    no change comes."""
+    settings = Gtk.Settings.get_default()
+
+    def apply(scheme):
+        if scheme == 1:
+            settings.props.gtk_theme_name = "Adwaita"
+            settings.props.gtk_application_prefer_dark_theme = True
+        else:
+            settings.reset_property("gtk-theme-name")
+            settings.reset_property("gtk-application-prefer-dark-theme")
+
+    def changed(_proxy, _sender, signal, parameters):
+        if signal == "SettingChanged" and parameters.unpack()[:2] == APPEARANCE:
+            apply(parameters.unpack()[2])
+
+    try:
+        portal = Gio.DBusProxy.new_for_bus_sync(
+            Gio.BusType.SESSION,
+            Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES,
+            None,
+            "org.freedesktop.portal.Desktop",
+            "/org/freedesktop/portal/desktop",
+            "org.freedesktop.portal.Settings",
+            None,
+        )
+        answer = portal.call_sync(
+            "Read", GLib.Variant("(ss)", APPEARANCE), Gio.DBusCallFlags.NONE, 5000, None
+        )
+    except GLib.Error:
+        return None
+    apply(answer.unpack()[0])
+    portal.connect("g-signal", changed)
+    return portal
+
+
 class AgentList(Gtk.Application):
     def __init__(self):
         super().__init__(application_id="org.bundle_ctl.AgentList")
@@ -393,6 +433,7 @@ class AgentList(Gtk.Application):
             xid = self.window.get_window().get_xid()
             subprocess.run(["wmctrl", "-i", "-a", hex(xid)], check=False)
             return
+        self.portal = follow_color_scheme()
         self.window = Gtk.ApplicationWindow(application=self, title="Agent list")
         self.window.connect("delete-event", self.save_place)
         try:
