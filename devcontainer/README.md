@@ -57,6 +57,8 @@ with pip inside. The rest follows from that choice.
   config file, and the host keeps signing.
 - **The shell helpers reach non-interactive shells** through `BASH_ENV`, which points at
   `container-rw/devcontainer.bashrc`: an agent runs `bash -c`, which does not read `~/.bashrc`.
+  Claude Code then sources a copy of the functions it took at the start of the session, which
+  wins: a function changed in the bashrc reaches a running agent only through a nested `bash -c`.
 - **Claude runs from the extension.** At its first interactive start, the CLI copies itself into
   `~/.local/share/claude` (250 MB in the layer of each container, 12 GB for 45 of them on
   2026-10-13), and nothing runs that copy. `DISABLE_AUTOUPDATER` stops it.
