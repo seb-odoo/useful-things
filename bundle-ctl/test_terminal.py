@@ -122,13 +122,14 @@ class Terminal:
 
 
 class Case:
-    def __init__(self, folder, name, window=False, tab=None, wait=None, bundle="b1"):
+    def __init__(self, folder, name, window=False, tab=None, wait=None, bundle="b1", task=True):
         self.name = name
         self.bundle = bundle
         self.root = pathlib.Path(folder)
         self.agent = self.root / bundle / ".agent"
         (self.agent / "run.lock").mkdir(parents=True)
-        (self.agent / "task.md").write_text("task\n")
+        if task:
+            (self.agent / "task.md").write_text("task\n")
         (self.agent / "session").write_text("s1\n")
         self.state = self.root / "state"
         self.state.mkdir()
@@ -330,6 +331,17 @@ def check_ops_resume(case):
     case.check("quitting claude keeps the ops container", "stop c1" not in case.log())
 
 
+def check_ops_cut(case):
+    """An ops window on a session a crash cut resumes it on the task the daemon left there, the
+    prompt that tells it what to check."""
+    case.check("claude runs", wait(case.runs))
+    run = case.runs()[0]
+    case.check("it resumes the session", " --resume s1 --permission-mode acceptEdits " in run)
+    case.check("it passes the task", run.endswith(" -- task"))
+    (case.state / "quit").touch()
+    case.check("quitting claude ends it", wait(case.terminal.has_ended))
+
+
 def main():
     failures, total = [], 0
     tabs = {
@@ -338,17 +350,21 @@ def main():
         check_window_stays: CUT,
         check_close_while_waiting: CUT,
         check_ops_resume: CUT,
+        check_ops_cut: CUT,
     }
     checks = (check_quit, check_clipboard, check_sigterm, check_close, check_close_window)
     checks += (check_handoff, *tabs)
     checks += (check_ops_quit, check_ops_close)
-    bundles = {check_ops_quit: "ops-s2", check_ops_close: "ops-s2", check_ops_resume: "ops-s1"}
+    bundles = {check_ops_quit: "ops-s2", check_ops_close: "ops-s2"}
+    bundles |= {check_ops_resume: "ops-s1", check_ops_cut: "ops-s1"}
     for check in checks:
         with tempfile.TemporaryDirectory() as folder:
             wait_time = 1 if check is check_window_stays else None
             window = check is check_close_window
             bundle = bundles.get(check, "b1")
-            case = Case(folder, check.__name__[6:], window, tabs.get(check), wait_time, bundle)
+            task = check is not check_ops_resume
+            name = check.__name__[6:]
+            case = Case(folder, name, window, tabs.get(check), wait_time, bundle, task)
             try:
                 check(case)
                 case.check("its markers are gone", wait(case.is_clean))

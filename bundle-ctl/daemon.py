@@ -41,6 +41,7 @@ sys.path.insert(0, str(SCRIPTS))
 from agents import (  # noqa: E402
     LAUNCH_GRACE,
     OPS,
+    PROJECTS,
     SESSION_ID,
     STATE,
     STATE_FILE,
@@ -85,6 +86,7 @@ from commands import (  # noqa: E402
 from config import BUNDLE_SUFFIX, CLAUDE_CONFIG_CONTAINER, STICKY_BUNDLES  # noqa: E402
 from utils import UtilsRunner  # noqa: E402
 
+import cut  # noqa: E402
 import runs  # noqa: E402
 
 
@@ -766,7 +768,7 @@ def check_terminal(caller, bundle, body):
         raise Refused(f"{bundle} is open in a window: its session goes on in its Claude tab")
 
 
-def check_task(bundle, body):
+def check_task(bundle, body, session=None):
     if "task" not in body:
         if "after" in body:
             raise ValueError("after: only with a task")
@@ -799,7 +801,7 @@ def check_task(bundle, body):
     if any(item["bundle"] == bundle for item in state["queue"]):
         raise Refused(f"{bundle} is already queued")
     if body.get("resume"):
-        if not (get_agent_folder(bundle) / "session").exists():
+        if not session and not (get_agent_folder(bundle) / "session").exists():
             raise Refused(f"{bundle} has no session to resume")
         container = get_bundle_container(bundle)
         if container and has_window(container):
@@ -821,10 +823,12 @@ def get_next_time(text):
     return (start if start > now else start + datetime.timedelta(days=1)).timestamp()
 
 
-def enqueue(caller, bundle, body, build=None):
+def enqueue(caller, bundle, body, build=None, session=None):
     """Queue the task of a bundle. `build` is the script that makes a bundle not made yet: the
     agent starts in its bare folder and runs it with `bctl build` once it needs the code. With no
-    priority, the task of an agent takes the one of the agent's own task."""
+    priority, the task of an agent takes the one of the agent's own task. `session` is the session
+    a resume goes on with, when it is not the last one of the agent: never taken from a request,
+    as the sessions of every bundle share one folder."""
     priority = body["priority"] if "priority" in body else get_task_priority(caller)
     after = get_next_time(body["after"]) if "after" in body else None
     effort, model = body.get("effort"), body.get("model")
@@ -849,6 +853,7 @@ def enqueue(caller, bundle, body, build=None):
                 "queued": time.time(),
                 "resume": bool(body.get("resume")),
                 "task": body["task"],
+                **({"session": session} if session else {}),
             },
         )
         state.get("relaunches", {}).pop(bundle, None)
@@ -911,6 +916,8 @@ def write_task(item):
         (folder / "queued").write_text(f"{item['queued']}\n")
     (folder / "priority").write_text(f"{item.get('priority', 0)}\n")
     (folder / "task.md").write_text(item["task"])
+    if item.get("session"):
+        (folder / "session").write_text(f"{item['session']}\n")
     for name in ("effort", "model"):
         if item.get(name):
             (folder / name).write_text(f"{item[name]}\n")
@@ -1402,6 +1409,176 @@ def hold_ops_task(caller, task):
     return 200, {"bundle": "ops", "held": f"{HELD_LETTER}{HELD.add(HELD_DIR, item)}"}
 
 
+def find_cut():
+    """The sessions a crash or a restart cut (cut.py), newest first: the last session of each
+    bundle whose container is down, and each session of the ops container that no claude runs."""
+    now = time.time()
+    live = cut.get_live_sessions(
+        [*pathlib.Path(CLAUDE_CONFIG_CONTAINER).glob("*/sessions"), PROJECTS.parent / "sessions"],
+    )
+    agents = {
+        read_text(path): path.parent.parent.name
+        for path in pathlib.Path(get_worktree_container_folder()).glob("*/*/.agent/session")
+    }
+    folders = [(PROJECTS / "-workspace", False)]
+    if HOST_FOLDER:
+        folders.append((PROJECTS / re.sub(r"[^A-Za-z0-9]", "-", CONFIG["REPO_ROOT"]), True))
+    newest = {}
+    for folder, ops in folders:
+        for path in folder.glob("*.jsonl"):
+            try:
+                stopped = path.lstat().st_mtime
+                if (
+                    path.is_symlink()
+                    or now - stopped > cut.WINDOW
+                    or not cut.SESSION_ID.fullmatch(path.stem)
+                ):
+                    continue
+                session = cut.read_session(path)
+                name = f"{OPS}{path.stem}" if ops else agents.get(path.stem) or session["title"]
+                if not ops and not (
+                    BUNDLE_NAME.fullmatch(name or "")
+                    and os.path.isdir(get_worktree_bundle_folder(name))
+                ):
+                    continue
+            except (IndexError, OSError):
+                continue
+            if stopped > newest.get(name, (0,))[0]:
+                newest[name] = (stopped, path, session)
+    running = get_open_windows()
+    rows = []
+    for name, (stopped, path, session) in newest.items():
+        why = cut.get_cut(session)
+        if (
+            not why
+            or path.stem in live
+            or (not name.startswith(OPS) and get_worktree_bundle_folder(name) in running)
+        ):
+            continue
+        if None in (session["call"], session["prompt"], session["title"]):
+            try:
+                whole = cut.read_session(path, path.stat().st_size)
+                session = {key: session[key] or whole[key] for key in session}
+            except OSError:
+                pass
+        rows.append(
+            {
+                "call": session["call"],
+                "name": name,
+                "prompt": cut.shorten(session["prompt"] or ""),
+                "session": path.stem,
+                "stopped": stopped,
+                "time": format_time(stopped),
+                "title": session["title"] or "",
+                "why": why,
+            },
+        )
+    return sorted(rows, key=lambda row: row["stopped"], reverse=True)
+
+
+def list_cut(caller, query, body):
+    """The sessions a crash or a restart cut. Only the host and the ops container read them: the
+    list shows the prompts of every bundle."""
+    if caller != HOST:
+        raise Refused("cut: only the host and the ops container list the cut sessions")
+    return 200, {"days": cut.WINDOW // 86400, "sessions": find_cut()}
+
+
+def hold_cut(caller, body):
+    """Hold the resume of every cut session for one yes of Seb in hok. The same request asked
+    again takes back the one that waits."""
+    if body != {"cut": True, "resume": True}:
+        raise ValueError("cut: only with resume, and no bundle nor task")
+    if caller != HOST:
+        raise Refused("cut: only the host and the ops container resume the cut sessions")
+    if HELD is None:
+        raise Refused("no gateway-core beside useful-things: hok cannot list the sessions")
+    rows = find_cut()
+    answer = {"days": cut.WINDOW // 86400, "sessions": rows}
+    if not rows:
+        return 200, answer
+    lines = []
+    for row in rows:
+        named = row["title"] not in ("", row["name"])
+        lines.append(row["name"] + (f": {row['title']}" if named else ""))
+        lines.append(f"  cut {row['time']}: {row['why']}")
+        lines += [f"  last call: {row['call']}"] if row["call"] else []
+        lines.append(f"  last prompt: {row['prompt']}")
+    lines += [
+        "",
+        f"What {rows[0]['name']} is told, the others with their own time and last call:",
+        *cut.get_prompt(rows[0]).splitlines(),
+    ]
+    item = {
+        "client": caller,
+        "key": "resume the cut sessions",
+        "lines": lines,
+        "send": {
+            "resume": [
+                {"name": row["name"], "prompt": cut.get_prompt(row), "session": row["session"]}
+                for row in rows
+            ],
+        },
+        "title": f"resume {len(rows)} session{'s' * (len(rows) != 1)} a crash or a restart cut",
+        "yes": (
+            "each ops session goes on at once in an ops agent window, and each bundle session in"
+            " its agent terminal through the queue, on the prompt below"
+        ),
+    }
+    answer["held"] = f"{HELD_LETTER}{HELD.add(HELD_DIR, item)}"
+    return 200, answer
+
+
+def resume_ops(name, prompt):
+    """Go on with a cut session of the ops container in an ops agent window, on this prompt."""
+    check_ops_session(name, {"bundle": name, "terminal": True})
+
+    def work(log):
+        get_agent_folder(name).mkdir(parents=True, exist_ok=True)
+        (get_agent_folder(name) / "task.md").write_text(prompt)
+        open_terminal(log, name)
+        return {"bundle": name}
+
+    return start_job(HOST, "open", work)
+
+
+def resume_bundle(name, session, prompt):
+    """Queue a cut session of a bundle to go on in its agent terminal, on this prompt, with the
+    priority, the model and the effort of the last task of its agent."""
+    body = {"priority": get_task_priority(name), "resume": True, "task": prompt}
+    for key in ("effort", "model"):
+        if value := read_text(get_agent_folder(name) / key):
+            body[key] = value
+    check_task(name, body, session)
+    return enqueue(HOST, name, body, session=session)
+
+
+def resume_cut(sessions):
+    """Seb's yes to the resume of the cut sessions. A session that runs again, or that a crash no
+    longer leaves cut, is left as it is. The answer is what hok shows."""
+    still = {row["session"] for row in find_cut()}
+    opened, queued, left = [], [], []
+    for wanted in sessions:
+        name = wanted["name"]
+        try:
+            if wanted["session"] not in still:
+                raise Refused("it runs again, or its turn ended since")
+            if name.startswith(OPS):
+                resume_ops(name, wanted["prompt"])
+                opened.append(name)
+            else:
+                resume_bundle(name, wanted["session"], wanted["prompt"])
+                queued.append(name)
+        except (Refused, ValueError) as error:
+            left.append(f"{name} ({error})")
+    parts = [
+        opened and f"ops agent windows open on {', '.join(opened)}",
+        queued and f"queued to go on in their agent terminal: {', '.join(queued)}",
+        left and f"left as they are: {', '.join(left)}",
+    ]
+    return "; ".join(filter(None, parts))
+
+
 def get_held(caller, query, body):
     """What became of a request this caller held for Seb: it waits, or what hok said."""
     if HELD is None:
@@ -1603,7 +1780,10 @@ def send_deletion(item):
 
 
 def send_held(item):
-    """Seb's yes to what a bundle held: its deletion, or its task for a new ops agent."""
+    """Seb's yes to what was held: the deletion of a bundle, the task a bundle sends to a new ops
+    agent, or the resume of the cut sessions."""
+    if "resume" in item["send"]:
+        return resume_cut(item["send"]["resume"])
     if "bundle" in item["send"]:
         return send_deletion(item)
     _code, answer = open_ops(HOST, "ops", {"task": item["send"]["task"]})
@@ -1786,6 +1966,8 @@ def open_ops(caller, bundle, body):
 
 def open_bundle(caller, query, body):
     bundle = body.get("bundle") or ""
+    if "cut" in body:
+        return hold_cut(caller, body)
     if bundle == "ops" or bundle.startswith(OPS):
         return open_ops(caller, bundle, body)
     if not BUNDLE_NAME.fullmatch(bundle) or not os.path.isdir(get_worktree_bundle_folder(bundle)):
@@ -1843,6 +2025,7 @@ def open_or_enqueue(log, caller, bundle, body):
 VERBS = {
     ("POST", "/add-repo"): add_repo,
     ("GET", "/branches"): branches,
+    ("GET", "/cut"): list_cut,
     ("GET", "/held"): get_held,
     ("GET", "/job"): get_job,
     ("GET", "/queue"): get_queue,

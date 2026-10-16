@@ -12,6 +12,7 @@
     bctl create BASE NAME [--branch-repo REPO]... [--no-open] [TASK]
     bctl fetch BUNDLE|PR_LINK|OWNER:BRANCH [--no-open] [TASK]
     bctl open BUNDLE [TASK] [--resume | --terminal] [--wait SECONDS]
+    bctl open --cut [--resume [--wait SECONDS]]
     bctl build
     bctl delete [BUNDLE] --reason TEXT [--drop COMMIT]... [--wait SECONDS]
     bctl run [--kind KIND] [--workers N] [-- COMMAND...]
@@ -61,6 +62,13 @@ ops window. open ops-SESSION alone closes the agent window of that session and g
 tab of the ops window. Only the host and the ops container may ask them, but for open ops with a
 task alone from a bundle: it waits for Seb in hok, whose yes opens the ops agent on it. --wait
 then works as for delete, and the same task sent again takes back the request that waits.
+
+open --cut lists the Claude sessions a crash or a restart cut in the last 3 days, bundles and ops:
+no claude runs them, and their last turn had not ended. With --resume it asks Seb in hok to resume
+them all, behind one yes: each ops session goes on in an ops agent window, each bundle session in
+its agent terminal through the queue, on a prompt that says what stopped it and what to check
+before its last call runs again. --wait then works as for delete. Only the host and the ops
+container may ask it.
 
 build makes the bundle of this container, whose agent started in its bare folder: the create or
 fetch its task was queued with runs now, and the worktrees appear in /workspace.
@@ -233,6 +241,23 @@ def print_deletion(answer):
 
 def print_ops_task(answer):
     print(f"waits for Seb: hok {answer['held']}. His yes opens an ops agent on this task.")
+
+
+def print_cut(answer):
+    for row in answer["sessions"]:
+        print(row["name"] + (f"  {row['title']}" if row["title"] not in ("", row["name"]) else ""))
+        print(f"  cut {row['time']}: {row['why']}")
+        if row["call"]:
+            print(f"  last call: {row['call']}")
+        print(f"  last prompt: {row['prompt']}")
+    count = len(answer["sessions"])
+    sessions = f"{count} session{'s' * (count != 1)}"
+    if answer.get("held"):
+        print(f"waits for Seb: hok {answer['held']}. His yes resumes these {sessions}.")
+    elif count:
+        print(f"{sessions} cut in the last {answer['days']} days: bctl open --cut --resume")
+    else:
+        print(f"no session was cut in the last {answer['days']} days")
 
 
 def print_table(answer):
@@ -455,8 +480,13 @@ def main():
     fetch.add_argument("--no-open", action="store_true")
     add_task_arguments(fetch)
     open_ = commands.add_parser("open", help="a VS Code window on a local bundle")
-    open_.add_argument("bundle")
+    open_.add_argument("bundle", nargs="?")
     add_task_arguments(open_)
+    open_.add_argument(
+        "--cut",
+        action="store_true",
+        help="no bundle: the sessions a crash or a restart cut, with --resume asked in hok",
+    )
     open_.add_argument(
         "--resume",
         action="store_true",
@@ -471,7 +501,7 @@ def main():
         "--wait",
         default=0,
         type=int,
-        help="ops with a task, from a bundle: seconds to wait for Seb's answer",
+        help="ops with a task from a bundle, or --cut: seconds to wait for Seb's answer",
     )
     commands.add_parser("build", help="make the bundle of this container, started bare")
     add_repo = commands.add_parser(
@@ -514,6 +544,10 @@ def main():
     unqueue = commands.add_parser("unqueue", help="drop the queued task of a bundle")
     unqueue.add_argument("bundle")
     args = parser.parse_args()
+    if args.command == "open" and (
+        bool(args.bundle) == args.cut or (args.cut and (args.terminal or read_task(args)))
+    ):
+        parser.error("open: a BUNDLE, or --cut with no task nor --terminal")
 
     printer = None
     if args.command == "run":
@@ -555,6 +589,16 @@ def main():
         printer = print_deletion
         if args.wait:
             print_deletion(answer)
+            sys.stdout.flush()
+            wait_held(answer["held"], args.wait)
+    elif args.command == "open" and args.cut:
+        if args.resume:
+            answer = request("POST", "/open", {"cut": True, "resume": True})
+        else:
+            answer = request("GET", "/cut")
+        printer = print_cut
+        if answer.get("held") and args.wait:
+            print_cut(answer)
             sys.stdout.flush()
             wait_held(answer["held"], args.wait)
     elif args.command == "branches" and args.json:

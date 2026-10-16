@@ -29,7 +29,7 @@ waits for the container to stop, and starts it again.
 An ops agent window runs a new Claude session in the ops container (BUNDLE_CTL_HOST_FOLDER), with
 its task as first prompt when the daemon left one. On a session that has a transcript, moved from a
 tab of the ops window, it resumes it in the mode of the tab, and tells it to go on when its turn
-was cut. Other sessions work in that container: neither quitting claude nor closing the terminal
+was cut, or gives it the task, the prompt of a session a crash cut. Other sessions work in that container: neither quitting claude nor closing the terminal
 stops it, and a closed terminal stops its own claude.
 """
 
@@ -424,14 +424,15 @@ def leave_window(agent, bundle):
 
 def get_ops_start(session, task):
     """The claude options of an ops window: a new session on its task, or the session of a tab
-    moved here, in the mode of the tab, told to go on when its turn was cut."""
+    moved here, in the mode of the tab, told to go on when its turn was cut, or a cut session on
+    the task that resumes it."""
     transcript = get_transcript(session)
     if not transcript:
         start = ["--session-id", session, "--permission-mode", "auto"]
         return start + (["--", task] if task else [])
     mode, cut = get_resume(transcript)
     start = ["--resume", session, "--permission-mode", mode if mode in MODES else "auto"]
-    return start + (["--", GO_ON] if cut else [])
+    return start + (["--", task or GO_ON] if task or cut else [])
 
 
 def space_start():

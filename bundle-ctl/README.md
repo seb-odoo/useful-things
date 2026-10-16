@@ -34,9 +34,10 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `POST /build` | the `gnb` or `pfb` a task was queued with, for the bundle whose agent started bare (see Bare start); the bundle itself or the host asks; refused when the disk is short |
 | `POST /create` | `gnb` with `--no-push`, then a window; with a task, only its queue entry, the bundle being made when its agent asks (see Bare start); refused when the bundle exists, a branch has unpushed commits or, with no task, the disk is short (see Disk) |
 | `POST /delete` | the deletion of a bundle, held for Seb's yes in `hok` (see Deletion); a container asks for its own, or for the one of a child |
-| `GET /held` | what became of a deletion or an ops task this caller asked (`?id=bN`): it waits, or what Seb said in `hok`; `?wait=S` long-polls it, 50 s at most |
+| `GET /cut` | the Claude sessions a crash or a restart cut, bundles and ops (see Cut sessions); the host and the ops container only |
+| `GET /held` | what became of a deletion, an ops task or a resume this caller asked (`?id=bN`): it waits, or what Seb said in `hok`; `?wait=S` long-polls it, 50 s at most |
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window; with a task, only its queue entry, as for `create`; refused when the bundle is here, a branch has unpushed commits or, with no task, the disk is short |
-| `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle, but for `resume` or `terminal` in a bare folder, whose session knows how to build it. On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window, and from a bundle a task alone, held as `bN` for Seb's yes in `hok`; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents) |
+| `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle, but for `resume` or `terminal` in a bare folder, whose session knows how to build it. On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window, and from a bundle a task alone, held as `bN` for Seb's yes in `hok`; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents). With `cut` and `resume` and no bundle, the resume of every cut session, held as `bN` for one yes of Seb (see Cut sessions) |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
 | `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, and the memory left on the host, `short` when a start would add to a host that already lacks it |
 | `POST /force-queue` | the tasks queued now may start over the cap, those that wait for their time (`--after`) or for a manual resume (`--paused`) aside, or with `bundle` the task of that bundle, its time and its pause too; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
@@ -384,8 +385,9 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   state of its agent and since when, from its `.agent/` files (`done 12 min ago`, `waiting for 5
   min`, `running for 3 min`, then `shown` when its terminal is not minimized). Each row has the
   close line of the picker in its last column, read again only when the transcript changed; a
-  bundle row with none has the first line of its `result.md`. Each row has its CPU and RAM (Seb, 2026-10-15), read every 5 seconds: those
-  of the container of a bundle, from its `libpod-ID.scope` cgroup under the user manager, the RAM
+  bundle row with none has the first line of its `result.md`. Each row has its CPU and RAM (Seb,
+  2026-10-15), read every 5 seconds: those of the container of a bundle, from its
+  `libpod-ID.scope` cgroup under the user manager, the RAM
   without the file cache as the run queue counts it; those of the claude of an ops window and its
   children, as the ops agents share one container. 100% is one core. The disk of a bundle is a
   `du` of its folder when its row comes, then every 10 minutes: its `node_modules` counts there,
@@ -517,6 +519,56 @@ answer as `bctl delete` does, and the same task sent again takes back the reques
 
 A window closed ends its session: the conversation goes on from the `/resume` list of a tab, in a
 tab with `bctl open ops-SESSION`, or in a window again with `bctl open ops-SESSION --terminal`.
+
+## Cut sessions
+
+A crash of the X server, a reboot or a restart of the ops container kills every claude at once, in
+the middle of its turn: Seb asked 22 times to restart such sessions, and typed "I restarted ops,
+continue" in 13 of them on 2026-10-09. `bctl open --cut` lists them, and `bctl open --cut --resume`
+asks Seb to resume them all behind one yes (Seb, 2026-10-16). Only the host and the ops container
+may ask: the list shows the prompts of every bundle.
+
+A session is cut (`cut.py`) when:
+
+- no claude runs it: no claude process of the host names it on its command line (`--resume`,
+  `--session-id`), and no record of a live claude names it in the sessions folder of a container,
+  whose pid and start are matched with the last `NSpid` and the start time of the processes of
+  the host. For a bundle, its container is down too;
+- its transcript was written in the last 3 days;
+- its last turn had not ended: its last message is a tool call with no result, or a tool result
+  or a prompt with no answer, or the turn ended on a short answer that only says where the work
+  is, while a background command or agent it started still ran. An interruption by Seb (Esc), a
+  command of his (`/model`), the summary of a compaction while idle, a report, a verdict and a
+  close line ("Nothing left", "Waiting for you") end a turn. A `claude -p` run is never cut.
+
+A bundle counts with its newest session only, found by the title its agent gives it (the bundle
+name) or by `.agent/session`: an older session cut there was followed by other work. A bundle whose
+folder is gone is left out. Every transcript of the project folder of `REPO_ROOT` is an ops
+session: a session of the host in `~/repo` too, which would go on in the ops container.
+A `stopped` agent whose last turn ended is not cut: on 2026-10-16 the 5 of the last 3 days had all
+ended on a report Seb had read, after a chat of his ("ready thanks", "send to ops").
+
+`bctl open --cut` prints for each its bundle or `ops-SESSION`, the title of the conversation, when
+it was cut and why, its last call and its last prompt, cut to 160 characters. With `--resume` the
+daemon holds one request, `bN`, that `hok` shows as "resume N sessions a crash or a restart cut",
+with these lines and the prompt of the first one. The same request asked again takes back the one
+that waits, and `--wait S` waits for his answer as for `delete`. His yes, for each session still
+cut:
+
+- an ops session goes on at once in an ops agent window, its prompt as the `task.md` that
+  `agent-terminal.py ops-SESSION` passes to `claude --resume`;
+- a bundle session is queued with `resume`, the session, and the priority, the model and the
+  effort of the last task of its agent: it goes on in its agent terminal when the queue lets it,
+  and the last run of its agent goes to `.agent/history/`;
+- a session that runs again or whose turn ended since, a bundle already queued or open in a
+  window, is left as it is, and the answer in `hok` says why.
+
+The prompt starts on `Continue from where you left off.`, says when the session was cut, that its
+claude stopped with its container or its window and nothing it did, that its background commands,
+servers and agents died with it, and to check what its last call already did (a commit, a push, a
+file written, a request held in hok) before running it again; then that last call. The restarts of
+2026-10-08 told one container the same. `python3 test_cut.py` runs each case on fake transcripts
+and a fake `/proc`, the request held for `hok`, the client, and the yes.
 
 ## Agent windows
 
