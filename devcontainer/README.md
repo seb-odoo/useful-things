@@ -110,6 +110,9 @@ before every start:
 - `settings.json`, a copy of the host's, where a model picked in a tab is kept. Claude saves it by
   rename, which fails on a mounted file, and then writes it in place. The copy has no `ask` rule:
   such a rule prompts even when a hook allowed the call, and in a container the hooks decide.
+  It also excludes the host path of `~/.claude/CLAUDE.md`: a container that mounts `~/.claude`
+  at that path too (the ops container) would load the file a second time, as the project file of
+  an ancestor of its workspace, 11 KB in every session and every subagent.
   The host binds its own `settings.json`, `CLAUDE.md` and every other file a container mounts
   over on themselves, once, with `sudo devcontainer/settings-bind.sh`. Without that bind a write
   of the file on the host is a rename (a save of Claude, an Edit of a session, a `git checkout`),
@@ -151,6 +154,28 @@ python3 devcontainer/extensions.py --remove <publisher.name>            # drops 
 
 [`extensions-update.timer`](extensions-update.timer) runs the update once a day. The bundled
 claude-autoopen is added the same way after a change of its `.vsix`.
+
+To look into a container and its store:
+
+- `podman exec -u vscode <container> ...`: as root (cap-drop ALL) `~/.vscode-server` is
+  Permission denied. Server logs: `~/.vscode-server/data/logs/<UTC start>/remoteagent.log`, times
+  in UTC. A terminal agent container has no log folder, it runs no VS Code server.
+- Which store a container mounts: `podman inspect <c> --format '{{range .Mounts}}{{if eq
+  .Destination "/home/vscode/.vscode-server/extensions"}}{{.Source}}{{end}}{{end}}'`.
+- Does VS Code read a store: `code --extensions-dir <store> --list-extensions --show-versions` on
+  the host (the same scanner as the server, opens no window). In a container with no window:
+  `/vscode/vscode-server/bin/linux-x64/*/bin/code-server --extensions-dir
+  ~/.vscode-server/extensions --list-extensions --show-versions`.
+- What a window activated: the `_doActivateExtension` lines of `exthost1/remoteexthost.log` in
+  the server logs (`Anthropic.claude-code` has a capital A there, grep -i).
+- The server watches `extensions.json` (`Extensions added from another source ...`), so a change
+  made from outside is picked up live. `extensions.json` is a real file per store, every other
+  file is the same inode in all stores. `delete_bundle` removes the bundle's store.
+
+Host user settings apply to dev container windows too, so a setting like
+`git.blame.editorDecoration.enabled` only needs to be set once in the host's
+`~/.config/Code/User/settings.json`. Per-extension state (`data/User/globalStorage`) is per
+container and lost on rebuild, except Claude's (a per-bundle mount).
 
 **The container config.** The tools name it at `WORKTREE_ROOT/.devcontainer/devcontainer.json`
 (`get_devcontainer_config` in `scripts/commands.py`), never through the bundle folder: its

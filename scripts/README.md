@@ -22,6 +22,62 @@ from a machine where they are `--seb` and `/home/seb/src/odoo`.
 A PR fetched by `fetch_bundle.py` keeps its branch name. When that name starts with another version
 than the PR target (or with none), its folder sits under the target, which is then its base.
 
+### The repos of a bundle
+
+A bundle gets a worktree of each repo of `folder_by_repo` in `config.py` (`design-themes` and
+`documentation` only when they have the branch). owl and sfu differ from the Odoo repos:
+
+- owl's dev remote is a fork, `OWL_DEV_REMOTE` in `config.env`. Its worktrees start with no
+  `node_modules` on purpose. The clone's own install predates the monorepo (npm workspaces,
+  vitest), so hard-linking it the way odoo and enterprise share theirs would seed a tree that does
+  not match `package-lock.json`. A build in a worktree pays for its own `npm ci`, and it writes
+  `packages/owl/dist/owl.iife.js`, which is what odoo vendors as
+  `addons/web/static/lib/owl/owl.js`.
+- sfu has one remote for both roles. `remote_by_repo["sfu"]` and `remote_dev_by_repo["sfu"]` are
+  both `origin` (`odoo/sfu`): the team pushes dev branches to the upstream repo itself, and there
+  is no fork. sfu is the only repo shaped this way, which is why `fetch_all.handle_repo`
+  deduplicates its remote loop with `dict.fromkeys`; without it the same namespace is fetched and
+  pruned twice.
+- A bundle named after a colleague's sfu branch is his branch: `pfb <his branch>` puts the
+  worktree on it, tracking `origin`, so a commit pushed from it lands on his open PR. owl cannot
+  do this, its dev remote being a personal fork. `delete_bundle --also-remote` likewise deletes
+  that branch on `odoo/sfu`, and that stays unguarded on purpose: the flag is only for when the
+  remote branch should go, so a check on who owns it would only be in the way.
+- No `node_modules` for sfu either: `_install_js_tooling` covers only odoo and enterprise.
+  mediasoup builds or downloads a native worker binary, and `npm ci` in a worktree leaves its
+  postinstall blocked by npm's allow-scripts policy, so the worker needs
+  `npm approve-scripts mediasoup` before the server will start. Tests run without it
+  (`tests/rtc.test.ts` asserts a CPU-count-dependent `NUM_WORKERS` and fails on some machines,
+  upstream, not a local breakage).
+
+### Shared node_modules
+
+The bundles of one base share one `node_modules` (`WORKTREE_ROOT/<base>/node_modules`, plus
+`<base>/package-lock.json`), hard-linked into the `odoo/` and `enterprise/` folders of each
+bundle by `_install_js_tooling` in `utils.py`.
+
+Hard links, not symlinks: `npm install` *deletes* a symlinked `node_modules` and rebuilds a real
+one per worktree (it logs `npm WARN reify Removing non-directory .../node_modules`), so a symlink
+never shares anything. A hard-linked folder is a *real* directory npm won't delete, while files
+share inodes so there's no extra disk cost (a file's `stat` link count is about 1 + 2 x the
+number of bundles).
+
+The first worktree of a base builds a real node_modules with `enable.sh`, then it is hard-linked
+into `<base>/node_modules`; later worktrees `cp -al` the base in and run `enable.sh` again, where
+`npm install` does nothing when the tree matches. A base with no `node_modules` yet takes the one
+of another bundle of that base.
+
+Do not patch `enable.sh` to guard its enterprise `cp -a`. That file is tracked upstream
+(`odoo/addons/web/tooling/enable.sh`), so a hand patch is gone in the next worktree, and the
+unguarded `cp -a "$community/node_modules" node_modules` nests a full copy inside the already
+hard-linked directory (`enterprise/node_modules/node_modules`, no inode shared, about 200M a
+bundle). `_install_js_tooling` drops that copy right after calling `enable.sh` instead. Same
+reasoning for any other tooling file of Odoo: the fix belongs in these scripts.
+
+A bundle can arrive with only some of its repos. A runbot batch still in preparation lists a
+commit only for the repos pushed so far, so `fetch_bundle` falls back to each missing repo's base
+branch, and the node_modules step skips a repo that has no worktree at all.
+
 ### create_bundle.py
 
 Creates a new bundle locally for a given base branch across all configured repos, but
@@ -55,14 +111,17 @@ Repositories
 └── upgrade
     ├── [0.02-2.38] /home/seb/repo/upgrade ✅️ git fetch odoo master -p
     └── [2.39-3.28] /home/seb/repo/upgrade ✅️ git worktree add /home/seb/src/odoo/master/master-test--seb/upgrade odoo/master
-[12.05-12.05] /home/seb/src/odoo/master/master-test--seb ✅️ mkdir -p /home/seb/src/odoo/master/odoo/node_modules
-[12.05-12.06] /home/seb/src/odoo/master/master-test--seb ✅️ ln -sfn /home/seb/src/odoo/master/odoo/node_modules /home/seb/src/odoo/master/master-test--seb/odoo/node_modules
-[12.06-12.06] /home/seb/src/odoo/master/master-test--seb ✅️ mkdir -p /home/seb/src/odoo/master/enterprise/node_modules
-[12.06-12.06] /home/seb/src/odoo/master/master-test--seb ✅️ ln -sfn /home/seb/src/odoo/master/enterprise/node_modules /home/seb/src/odoo/master/master-test--seb/enterprise/node_modules
-[12.06-19.58] /home/seb/src/odoo/master/master-test--seb ✅️ bash ./odoo/addons/web/tooling/enable.sh
+[12.05-12.05] /home/seb/src/odoo/master/master-test--seb ✅️ touch /home/seb/src/odoo/master/master-test--seb/.made
+[12.05-12.06] /home/seb/src/odoo/master/master-test--seb ✅️ rm -rf /home/seb/src/odoo/master/master-test--seb/odoo/node_modules
+[12.06-12.41] /home/seb/src/odoo/master/master-test--seb ✅️ cp -al /home/seb/src/odoo/master/node_modules /home/seb/src/odoo/master/master-test--seb/odoo/node_modules
+[12.41-12.42] /home/seb/src/odoo/master/master-test--seb ✅️ rm -rf /home/seb/src/odoo/master/master-test--seb/enterprise/node_modules
+[12.42-12.77] /home/seb/src/odoo/master/master-test--seb ✅️ cp -al /home/seb/src/odoo/master/node_modules /home/seb/src/odoo/master/master-test--seb/enterprise/node_modules
+[12.77-12.78] /home/seb/src/odoo/master/master-test--seb ✅️ cp /home/seb/src/odoo/master/package-lock.json /home/seb/src/odoo/master/master-test--seb/odoo/package-lock.json
+[12.78-19.58] /home/seb/src/odoo/master/master-test--seb ✅️ bash ./odoo/addons/web/tooling/enable.sh
 y
 
-[19.58-19.76] /home/seb/src/odoo/master/master-test--seb ✅️ code .
+[19.58-19.61] /home/seb/src/odoo/master/master-test--seb ✅️ rm -rf /home/seb/src/odoo/master/master-test--seb/enterprise/node_modules/node_modules
+[19.61-19.76] /home/seb/src/odoo/master/master-test--seb ✅️ code --folder-uri vscode-remote://dev-container+<hex>/workspace
 Done
 ```
 
@@ -73,6 +132,21 @@ Fetches bundle metadata from runbot and creates/updates local worktrees.
 Queries the runbot API, checks out each repo at the matching commit, links shared `node_modules`, runs web tooling setup, and opens the bundle in VS Code. `design-themes` and `documentation` get a worktree only when the bundle has a branch there.
 
 Also takes a PR link (`fetch_bundle.py https://github.com/odoo/odoo/pull/292267`), or the `owner:branch` label runbot shows for a fork PR: the bundle is the PR head. When the head is on a fork, the fork is added as a remote named after its owner and the branch tracks it, so pull and push go to the PR. Deleting the last bundle tracking that remote removes it.
+
+Runbot names the bundle of a fork PR with the full label `<owner>:<head>`, while an odoo-dev
+bundle has no prefix. Asked without the prefix, the API answers `"id": false` and pfb falls back
+to the base tip for the other repos.
+
+Runbot watches neither owl nor sfu, so a bundle's API answer never names them. For any repo runbot
+said nothing about, it asks the dev remote for a branch of the bundle's name. A bundle named after
+a base branch is excluded: the base clone has that branch checked out, so `worktree add -B` would
+fail against it. A branch pushed only to the owl fork or to `origin/sfu` has no runbot bundle at
+all: an answer with no id is read as an empty bundle, and the run only stops when neither runbot,
+a dev remote nor a local branch has the name, or when runbot does not answer.
+
+`pfb`, `ocode`, `delete_bundle`, `goto` and `opencode` take a bundle name under any dev remote
+prefix, not just `odoo-dev:` (owl's is the remote of the fork, `OWL_DEV_REMOTE`): an unstripped
+prefix in the runbot query made `get_base_from_bundle_name` read the fork owner as the base.
 
 ```bash
 $ python scripts/fetch_bundle.py master-test--seb
@@ -123,14 +197,17 @@ Commits
 └── upgrade-util
     ├── [0.19-1.59] /home/seb/repo/upgrade-util ✅️ git fetch odoo 8a61e891df29e0cc0fc7c4159f2139506471a8d8 -p
     └── [1.59-1.61] /home/seb/repo/upgrade-util ✅️ git worktree add /home/seb/src/odoo/master/master-test--seb/upgrade-util 8a61e891df29e0cc0fc7c4159f2139506471a8d8
-[5.27-5.27] /home/seb/src/odoo/master/master-test--seb ✅️ mkdir -p /home/seb/src/odoo/master/odoo/node_modules
-[5.27-5.28] /home/seb/src/odoo/master/master-test--seb ✅️ ln -sfn /home/seb/src/odoo/master/odoo/node_modules /home/seb/src/odoo/master/master-test--seb/odoo/node_modules
-[5.28-5.28] /home/seb/src/odoo/master/master-test--seb ✅️ mkdir -p /home/seb/src/odoo/master/enterprise/node_modules
-[5.28-5.28] /home/seb/src/odoo/master/master-test--seb ✅️ ln -sfn /home/seb/src/odoo/master/enterprise/node_modules /home/seb/src/odoo/master/master-test--seb/enterprise/node_modules
-[5.28-8.29] /home/seb/src/odoo/master/master-test--seb ✅️ bash ./odoo/addons/web/tooling/enable.sh
+[5.27-5.27] /home/seb/src/odoo/master/master-test--seb ✅️ touch /home/seb/src/odoo/master/master-test--seb/.made
+[5.27-5.28] /home/seb/src/odoo/master/master-test--seb ✅️ rm -rf /home/seb/src/odoo/master/master-test--seb/odoo/node_modules
+[5.28-5.63] /home/seb/src/odoo/master/master-test--seb ✅️ cp -al /home/seb/src/odoo/master/node_modules /home/seb/src/odoo/master/master-test--seb/odoo/node_modules
+[5.63-5.64] /home/seb/src/odoo/master/master-test--seb ✅️ rm -rf /home/seb/src/odoo/master/master-test--seb/enterprise/node_modules
+[5.64-5.99] /home/seb/src/odoo/master/master-test--seb ✅️ cp -al /home/seb/src/odoo/master/node_modules /home/seb/src/odoo/master/master-test--seb/enterprise/node_modules
+[5.99-6.00] /home/seb/src/odoo/master/master-test--seb ✅️ cp /home/seb/src/odoo/master/package-lock.json /home/seb/src/odoo/master/master-test--seb/odoo/package-lock.json
+[6.00-8.29] /home/seb/src/odoo/master/master-test--seb ✅️ bash ./odoo/addons/web/tooling/enable.sh
 y
 
-[8.29-8.48] /home/seb/src/odoo/master/master-test--seb ✅️ code .
+[8.29-8.32] /home/seb/src/odoo/master/master-test--seb ✅️ rm -rf /home/seb/src/odoo/master/master-test--seb/enterprise/node_modules/node_modules
+[8.32-8.48] /home/seb/src/odoo/master/master-test--seb ✅️ code --folder-uri vscode-remote://dev-container+<hex>/workspace
 Done
 ```
 
@@ -172,6 +249,8 @@ Removes a bundle from the local system (worktrees, branches, filestore, database
 - Leaves a bundle untouched, and exits 1, when one of its worktrees holds uncommitted files or its
   branch holds commits no remote has: they are listed, and the other bundles of the run are still
   deleted
+- Leaves a bundle whose dev container still runs, with a yellow line: delete it again once its
+  window is closed
 - `--force`: delete such a bundle anyway, unsaved work included
 - `--also-remote`: also deletes the remote dev branch. ⚠️ Do not use on branches of others!
 
@@ -225,13 +304,51 @@ Done
 
 Syncs git remotes: fetches locally checked-out branches + sticky bundles; prunes everything else.
 
-- Dev remote: fetches all locally checked-out branches, except those tracking a fork, fetched from that fork
+- Dev remote: fetches the local branches pushed there at least once, except those tracking a fork, fetched from that fork
 - Standard remote: fetches only sticky bundles (`STICKY_BUNDLES` in `config.py`)
 - Deletes the handled remote's own refs outside those two sets
 - Fetches again when another fetch moved a ref meanwhile (`cannot lock ref ... but expected`):
   the bundle agents share the `.git` of each repo
 - Asks before deleting a gone bundle of mine (`--seb`); `--keep-gone` keeps them all without
   asking, for a run with no keyboard (`hctl`) and for `gbs`
+- Creates the local branch of each open PR of mine and of each forward-port waiting on me
+- Deletes a never-pushed branch that the other repos of its bundle left out
+
+A branch is gone when it has a ref of the dev remote (`refs/remotes/<dev>/<branch>`, which any
+push writes, with or without `-u`) and the fetch no longer finds it there. Without the
+`BUNDLE_SUFFIX` it goes through `delete_bundle(force=True)` with no prompt (worktree, branch and
+uncommitted work, all lost); with the suffix it gets a "Gone ref ... Delete it? (Y/n)" prompt
+that defaults to yes. A never-pushed branch (`create_bundle --no-push`, tracking `odoo/<base>`; a
+hand-made `git fetch odoo pull/N/head:<x>`) is not fetched, so never gone. Limit: a branch whose
+tracking ref was pruned by hand (`git fetch -p odoo-dev`) is skipped too, so it is never
+deleted, never fetched, until the next push. The branch of a fork PR is gone the same way, so its
+bundle goes once the contributor deletes the branch. So a bundle branch lives on the dev remote of
+its repo: the fork of `OWL_DEV_REMOTE` for owl, `origin` itself for sfu.
+
+Before fetching, one GitHub search lists the open PRs of mine and the forward-ports fw-bot opened
+for me: `is:pr is:open author:fw-bot mentions:<login> repo:odoo/odoo repo:odoo/enterprise ...`.
+`org:odoo` returns 0 results for fw-bot, the `repo:` qualifiers are needed. A forward-port is kept
+when its head holds `<BUNDLE_SUFFIX>-` and ends with `-fw` (fw-bot pings reviewers too), and:
+
+- label `conflict`, or
+- head `statusCheckRollup.state` FAILURE/ERROR (pending is ignored), or
+- a fw-bot comment "is the last of the forward-port chain" without a later `@robodoo ... r+`.
+
+gfa then fetches it from the dev remote and runs `git branch --track` (no worktree; `pfb <head>`
+for a bundle). Cleanup: gbs deletes a merged hop it sees locally, dev branch included. Otherwise
+fw-bot deletes the dev branch 7 days after the merge, the fetch sees it gone, and a name without
+the suffix goes through `delete_bundle(force=True)` with no prompt.
+
+At the end, a bundle branch with no dev ref and commits over its base, while another repo of the
+bundle has an open PR of mine, is deleted with no prompt: pushing the other repos alone means it
+was left out. Skipped while the bundle's agent is queued, running or waiting, or its dev container
+runs; 0 commits over base is left alone (the empty checkout of a repo the bundle does not change).
+It goes through `delete_branch_and_remote_ref`, so the worktree stays detached on the commit, and
+gfa prints `Dropped <repo>/<branch> at <sha>`: `git branch <branch> <sha>` brings it back.
+
+To try a change of `handle_repo_remote`, exec `fetch_all.py` up to `runner.parallel_run(` with a
+fake runner (real `for-each-ref`/`branch -r`, recorded `git_fetch`), never by running gfa itself:
+it force-deletes.
 
 ```bash
 $ python scripts/fetch_all.py
@@ -303,6 +420,20 @@ Repositories
 Done
 ```
 
+#### A new release
+
+`STICKY_BUNDLES` in `config.py` is the list of releases the tooling tracks, newest first. A new
+release needs it there, plus a `grNN` alias in `container-rw/devcontainer.bashrc` (the host
+sources that file too). Two things that bite:
+
+- gfa fetches exactly this list from the upstream remote and deletes every upstream-tracking ref
+  outside it. A release missing from the list is pruned at every run, so it looks absent locally
+  while it exists upstream.
+- A name in the list that no repo has on the remote is gone, and gfa then calls
+  `delete_bundle(force=True)` on it with no prompt, dropping every database and filestore whose
+  name starts with it. Check with `git ls-remote --heads odoo refs/heads/<version>` in odoo,
+  enterprise, design-themes and documentation before adding it.
+
 ### branch_status.py (`gbs`)
 
 Lists the local branches of every repo like `git branch`, newest first: what is not pushed, how far
@@ -341,8 +472,10 @@ each case on scratch repos.
 `--json` prints the same data for a script: per bundle its group, issue, handled, open state and agent, per
 repo its head, push, behind, conflict and PR, and under `deleted` the PRs of each bundle it
 deleted. A dev container cannot run it (no `scripts/`, no
-podman): there `gbs` is `bctl branches`, and `bctl --json branches` gives the JSON, both run on
-the host.
+podman, and its `git` refuses the repos of `REPO_ROOT`, a mount point owned by root: dubious
+ownership): there `gbs` is `bctl branches`, and `bctl --json branches` gives the JSON, both run on
+the host. The daemon runs this script as a new process at each call, so a change here needs no
+restart of the daemon (a change of `daemon.py` does).
 
 #### Groups
 
@@ -419,6 +552,30 @@ branch made the table wait 5 s or more. A `gh` call that fails or a mergebot tha
 prints `PR state incomplete, <source>: <reason>` under the table, and `create PR` only shows when
 the PR queries worked.
 
+#### Before changing it
+
+- The conflict check is `git merge-tree --write-tree`, which needs git 2.38; on an older git it
+  is the legacy 3-argument `merge-tree` and a grep of the markers.
+- `gh pr list --search involves:@me` took 4 s per repo and missed the branches of colleagues;
+  `--author @me` misses the fw-bot hops. Hence GraphQL with one alias per branch. GitHub takes
+  about 0.1 s per PR of a query, by number as much as by branch name, so the wait follows the
+  largest query, not their number.
+- Not statusCheckRollup: `ci/codeowner` fails on most drafts, and an old enterprise codeowner
+  error kept a PR "running" forever, so that check is dropped first.
+- legal/cla is posted once by an old batch and never again: only the FAILURES of an older batch
+  are dropped, and only while a check is pending.
+- Wrapping inside a cell made rich drop words: only the last column wraps, every other one has
+  its longest cell as `min_width`.
+- The mergebot JSON has no field for a delegation: gbs reads the last 30 comments and reviews.
+- `state["building"]` of the bundle-ctl daemon covers the 2 minutes create_bundle.py takes before
+  an agent is queued. `agents.py` holds the agent reading, shared with the daemon, which imports
+  branch_status: gbs cannot import daemon.py.
+- `main()` deletes for real, `--json` too: to look at its data without that, call
+  `get_bundles()` then `get_merged_bundles()`.
+- A PR branch that only exists on the remote is made local by gfa, not listed by gbs. A
+  `no remote` row with commits next to an open PR in another repo of its bundle is deleted by the
+  next gfa.
+
 ### bundle_open.py
 
 Opens an `odoo-bundle://<bundle>` link: in its dev container when the worktree exists, like
@@ -436,6 +593,38 @@ $ xdg-mime default odoo-bundle.desktop x-scheme-handler/odoo-bundle
 
 and add `odoo-bundle` to `terminal.integrated.allowedLinkSchemes` in the VS Code settings, next to
 its default values.
+
+## A broken worktree
+
+**Never `git worktree prune` or `git gc`, on the host or in a container.** The base `.git` of each
+repo is shared with the containers at the same path, but a container does not see the bundle
+paths and the host does not see a container's `/tmp`: each side judges the other's worktrees
+missing and deletes their admin entry. Bundle worktrees are locked against it
+(`WORKTREE_LOCK_REASON` in `utils.py`); Claude's own worktrees are not. Remove one
+registration at a time: `git worktree remove --force <listed path>` works even when the directory
+is gone.
+
+| Symptom | Cause | Recipe, on the host |
+| --- | --- | --- |
+| `fatal: not a git repository: REPO_ROOT/<repo>/.git/worktrees/<id>` in every bundle of one repo | a prune or gc ran where the worktree paths do not exist, the admin dirs are gone, the files are intact | recreate `.git/worktrees/<id>/` like a healthy one: `commondir` = `../..`, `gitdir` = absolute path of the worktree's `.git` file, `HEAD` = `ref: refs/heads/<bundle>`; then `git -C <worktree> reset -q`, `git -C REPO_ROOT/<repo> worktree repair`, lock again. `cat <bundle>/<repo>/.git` gives the id. `worktree repair` alone is not enough |
+| pfb loops on `'<branch>' is already checked out at '<bundle path>'`, then `Unable to create ... index.lock` | a killed `git worktree add`: `locked` still says `initializing`, a 0-byte `index.lock`, NO `index` | `rm .git/worktrees/<id>/index.lock`, `git worktree unlock <path>`, `git worktree remove --force <path>`, run pfb again. Do not repair in place, do not retry first |
+| pfb dies on `already checked out at '/workspace/wsf-<repo><n>'` | a test-warden scratch worktree left registered; its files are in the bundle folder (`find WORKTREE_ROOT -maxdepth 4 -name 'wsf-*'`, 1.1 GB each) | write `<host path>/.git` into `.git/worktrees/<name>/gitdir`, then `git worktree remove <path>`. pfb drops such an entry itself, the files stay |
+| `git branch -D` or `delete_bundle` fails on a branch nobody uses; `git worktree list` shows `prunable` under `/tmp/claude-*` | a Claude worktree made in a container registered itself in the shared `.git` | `git worktree remove --force <listed path>`, one entry at a time: a live in-container worktree looks just as prunable |
+| a bundle is gone from one repo and alive in another (refs deleted, folder, filestore and DB still there) | a `delete_bundle` cut after the first repos (one from before 2026-09-02 crashed on a dirty worktree) | `delete_bundle <name> --force` (`--also-remote` for the dev branch), then check `git -C REPO_ROOT/odoo worktree list --porcelain` and `branch --list <name>` |
+| a `--no-push` bundle was deleted and no ref is left | nothing keeps it | the `create_bundle.py` command is in `STATE_ROOT/bundle-ctl/jobs/*.log`; the tip sha is in the agent transcripts (`~/.claude/projects/-workspace/*.jsonl`, any `git worktree list` or `bctl status` output, times in UTC); the scratchpad is in the old container: `podman exec -u vscode <name> tar -C <scratchpad> -cf - . \| tar -C <dest> -xf -` |
+
+Checks that mislead:
+- `podman exec` runs as root and prints `detected dubious ownership` for every repo: check as the
+  vscode user (`-u vscode`).
+- A recovered worktree prints the fsmonitor warning `Empty last update token` once. Harmless.
+- A bundle whose branch exists in no ref, reflog or remote cannot be restored.
+
+For a script that reads or deletes branches (both bugs aborted a whole `gfa` run):
+- List branches with `git for-each-ref --format='%(refname:short)' refs/heads/`. `git branch`
+  adds a pseudo-entry for a detached HEAD, `(no branch)` when the HEAD reflog is empty, and a
+  mangled name without the suffix reaches `delete_bundle(force=True)`: `rm -rf` and `dropdb`.
+- Before `git branch -D`, free the branch from every worktree of `git worktree list --porcelain`:
+  remove a `prunable` registration, `git -C <worktree> switch --detach` a live one.
 
 ## Support modules
 

@@ -10,6 +10,8 @@
     "dockerfile": "Dockerfile",
     // Where the image symlinks ~/.bash_aliases. Passed as an arg so the path lives here with the
     // other @KEY@ ones and the Dockerfile stays free of any absolute path of its own.
+    // Only python-ldap ties the host venv to the Ubuntu 22.04 base: psycopg2 vendors its libpq
+    // and lxml is a manylinux wheel.
     "args": {
       "BASE_IMAGE": "@CONTAINER_BASE_IMAGE@",
       "CONTAINER_BASHRC": "@USEFUL_THINGS@/container-rw/devcontainer.bashrc",
@@ -22,6 +24,9 @@
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,Z",
   "workspaceFolder": "/workspace",
   "mounts": [
+    // The .git file of a worktree holds an absolute `gitdir: @REPO_ROOT@/<repo>/.git/worktrees/<name>`
+    // shared with the host, so each base repo's .git is mounted at that same path, or git fails
+    // with "not a git repository". A new bundle repo needs its line here.
     "source=@REPO_ROOT@/odoo/.git,target=@REPO_ROOT@/odoo/.git,type=bind,Z",
     "source=@REPO_ROOT@/enterprise/.git,target=@REPO_ROOT@/enterprise/.git,type=bind,Z",
     "source=@REPO_ROOT@/design-themes/.git,target=@REPO_ROOT@/design-themes/.git,type=bind,Z",
@@ -63,6 +68,9 @@
     "source=@HOME@/.claude/skills,target=/home/vscode/.claude/skills,type=bind,readonly,z",
     "source=@HOME@/.claude/workflows,target=/home/vscode/.claude/workflows,type=bind,readonly,z",
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/settings.json,target=/home/vscode/.claude/settings.json,type=bind,z",
+    // A folder Claude writes in its config folder is a bind like this one, never a link into
+    // ~/.claude: Claude checks a write on the resolved path, and a path under a .claude folder that
+    // is not the plan or memory path it expects asks for approval, which no PreToolUse allow skips.
     // The state of Claude (.claude.json, where an MCP server is kept): a copy of the bundle, as a
     // file shared by every container would carry one container's MCP server into the others.
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/.claude.json,target=/home/vscode/.claude/.claude.json,type=bind,z",
@@ -152,6 +160,8 @@
       "settings": {
         // Upgrade folders like saas~19.5 match Claude's Windows short-name check (~<digit>), which
         // only bypass mode skips: the allow-all hook and dontAsk still prompt on every write.
+        // Machine-scoped, so it cannot go in the bundles' .vscode/settings.json. Should a new
+        // Claude version prompt again, grep its binary for tilde_digit and suspiciousWindowsPath.
         "claudeCode.allowDangerouslySkipPermissions": true,
         // Skip VS Code's protected-branch queries, as all containers share one GraphQL budget.
         "github.branchProtection": false,

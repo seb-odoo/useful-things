@@ -79,6 +79,7 @@ def write_settings(claude, own):
         settings["model"] = picked
     # An ask rule prompts even when a hook allowed the call, and in a container the hooks decide.
     settings.get("permissions", {}).pop("ask", None)
+    settings.setdefault("claudeMdExcludes", []).append(str(claude / "CLAUDE.md"))
     path.write_text(json.dumps(settings, indent=2) + "\n")
 
 

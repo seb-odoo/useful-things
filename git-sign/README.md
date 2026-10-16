@@ -13,7 +13,10 @@ boot into an ssh-agent that holds it in memory until reboot.
 - `gsign.desktop` opens a terminal running `gsign` at each login, so only the master password is
   left to type.
 - `bitwarden.desktop` opens the Bitwarden window at each login, for the github.com pushes. The
-  app's own "Start automatically on login" uses `--autostart`, which keeps it hidden in the tray.
+  app's own "Start automatically on login" uses `--autostart`, which keeps it hidden in the tray:
+  hardcoded in main.js (`const showWindow = !isAutostart`, a KWin bug workaround), no setting
+  changes it. That setting rewrites `~/snap/bitwarden/current/.config/autostart/bitwarden.desktop`
+  (`Exec=bitwarden --autostart`) at each app start, so a hand edit there does not stick.
 
 The key can sign but not push: GitHub knows it as a "Signing Key" only.
 
