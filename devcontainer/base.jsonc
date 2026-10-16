@@ -112,6 +112,10 @@
     // (config.json's whitelist is inlined into dist/ at build time). Lowercase z: shared relabel,
     // like TestWarden above.
     "source=@REPO_ROOT@/DiscussModelParser,target=@REPO_ROOT@/DiscussModelParser,type=bind,readonly,z",
+    // runbot-fix-agents (~/repo/runbot-fix-agents): the team's fix skills, rules and lessons,
+    // shared with the runbot fix server. Skills of ~/.claude link into it, so it sits at the same
+    // path. Read-only: a lesson or a skill change goes by a handoff proposal.
+    "source=@REPO_ROOT@/runbot-fix-agents,target=@REPO_ROOT@/runbot-fix-agents,type=bind,readonly,z",
     "source=@HOME@/.local/bin/gh,target=/usr/local/bin/gh,type=bind,readonly,z",
     // VS Code copies ~/.gitconfig into the container without the files it includes, and the git
     // identity lives in this one.
@@ -185,6 +189,8 @@
     // the ~/.bash_aliases symlink is there; that symlink is what ~/.bashrc, install-claude-path.sh
     // and the Bash( ... ) permission rules still reach it by.
     "BASH_ENV": "@USEFUL_THINGS@/container-rw/devcontainer.bashrc",
+    // The end of a branch name, in the skills of runbot-fix-agents (the bot's on the server).
+    "BRANCH_SUFFIX": "@BUNDLE_SUFFIX@",
     // Where claude-autoopen finds agent-run.sh, the mount above.
     "BUNDLE_CTL_CLIENT": "@USEFUL_THINGS@/bundle-ctl/client",
     // Like REPO_ROOT and VENV_ROOT below: host values the shell helpers and check-base.sh read, as
@@ -220,6 +226,10 @@
     // Without it, Claude Code runs its Bash tool in zsh, which reads neither BASH_ENV nor the
     // helpers. A container made before keeps its environment: agent-run.sh sets it too.
     "SHELL": "/bin/bash",
+    // The environment the skills of runbot-fix-agents expect, as on the fix server.
+    "TESTWARDEN": "@REPO_ROOT@/TestWarden",
+    "VENV_310": "@VENV_ROOT@/odoo17",
+    "VENV_312": "@VENV_ROOT@/odoo20",
     "VENV_ROOT": "@VENV_ROOT@",
     "VIRTUAL_ENV": "@VENV@"
   }

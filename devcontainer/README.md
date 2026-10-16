@@ -82,8 +82,8 @@ If a VS Code release changes that format, read the new one in its storage and ma
 The container runs as the host user (`--userns=keep-id`), so a file it can write is a file the host
 trusts. The rule: the host never runs, and never loads as config, a file a bundle container can
 write. So these are read-only in a bundle: the shell helpers (`container-rw/`), the venv, the VS
-Code user settings, TestWarden and DiscussModelParser (the cache of the test-warden engine comes
-back writable over it), and what the next paragraphs name.
+Code user settings, TestWarden, DiscussModelParser and runbot-fix-agents (the cache of the
+test-warden engine comes back writable over it), and what the next paragraphs name.
 
 **Claude.** A container uses the host's `~/.claude` as its config folder (`CLAUDE_CONFIG_DIR`), so
 it shares the host's login: a token refresh is locked and saved in that folder. Never give a

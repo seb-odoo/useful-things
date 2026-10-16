@@ -24,7 +24,9 @@ as it is: copy and adapt it rather than linking it.
    `enterprise`, `design-themes`, `documentation`, `upgrade` and `upgrade-util` with the remotes
    `odoo` and `odoo-dev`, `owl` with `origin` and your fork (`OWL_DEV_REMOTE`), and `sfu`. The
    container also mounts [TestWarden](https://github.com/tsm-odoo/TestWarden),
-   [DiscussModelParser](https://github.com/tsm-odoo/DiscussModelParser) and `~/.local/bin/gh`.
+   [DiscussModelParser](https://github.com/tsm-odoo/DiscussModelParser), `runbot-fix-agents` (the
+   team's fix skills, rules and lessons, which the skills of `~/.claude` link into) and
+   `~/.local/bin/gh`.
 2. Write `~/.config/odoo-dev/config.env` for whatever differs from the defaults, at least
    `BUNDLE_SUFFIX` if your login is not your GitHub handle. `python3 devcontainer/config.py` shows
    what each key resolves to.
