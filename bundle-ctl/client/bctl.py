@@ -6,6 +6,7 @@
     bctl queue [--json]
     bctl force-queue [BUNDLE]
     bctl move BUNDLE PLACE
+    bctl schedule BUNDLE spot|manual|HH:MM
     bctl unqueue BUNDLE
     bctl branches [--json]
     bctl create BASE NAME [--branch-repo REPO]... [--no-open] [TASK]
@@ -16,7 +17,8 @@
     bctl run [--kind KIND] [--workers N] [-- COMMAND...]
     bctl runs [--json]
 
-TASK is --task TEXT or --task-file FILE, with an optional --priority N and --after HH:MM.
+TASK is --task TEXT or --task-file FILE, with an optional --priority N, --after HH:MM and
+--paused.
 
 create, fetch and open run as a job on the host: bctl prints its log until it ends, which can take
 minutes for a new bundle. With a task, create and fetch only queue it, and no window opens: when
@@ -29,16 +31,20 @@ is queued behind it. The queue runs the highest priority first (-100 to 100; by 
 host, and from an agent the priority of its own task), then in arrival order: bctl status lists it
 in that order, with what each task waits for. One agent
 starts at a time: the next task waits until the run of the last one began. --after keeps a task
-in the queue until that time of the host comes, today or tomorrow.
+in the queue until that time of the host comes, today or tomorrow, and --paused until it is
+scheduled again: it waits for a manual resume.
 
 queue is that list alone, at once, with the memory left on the host. force-queue lets the tasks
-queued now start over the cap, those that wait for their time aside, or the one of BUNDLE, its
-time too, still one at a time; a task queued later waits for a slot again. Only the host may ask
-it: a container gets a 403.
+queued now start over the cap, those that wait for their time or for a manual resume aside, or
+the one of BUNDLE, its time and its pause too, still one at a time; a task queued later waits for
+a slot again. Only the host may ask it: a container gets a 403.
 
 move puts the queued task of a bundle at PLACE in the queue, from 1: it keeps its priority when
-that priority fits between the tasks around, else takes the nearest of theirs. unqueue drops the
-queued task of a bundle. The host, that bundle, or the bundle that queued the task may ask them.
+that priority fits between the tasks around, else takes the nearest of theirs. schedule sets when
+the queued task of a bundle may start: spot, as soon as a slot and the memory let it; manual, once
+it is scheduled again; HH:MM, once that time of the host came, today or tomorrow. It no longer goes
+over the cap. unqueue drops the queued task of a bundle. The host, that bundle, or the bundle that
+queued the task may ask them.
 
 open --resume gives the task to the last Claude session of the bundle as its next prompt, where a
 task alone starts a new session. Without a task, the session is told to go on.
@@ -368,6 +374,11 @@ def add_task_arguments(parser):
         help="with a task: it starts no sooner than this time of the host, today or tomorrow",
     )
     parser.add_argument(
+        "--paused",
+        action="store_true",
+        help="with a task: it waits in the queue until `bctl schedule BUNDLE spot`",
+    )
+    parser.add_argument(
         "--priority",
         type=int,
         help="with a task: higher leaves the queue first, from -100 to 100 (default: the priority"
@@ -493,6 +504,12 @@ def main():
     move = commands.add_parser("move", help="put the queued task of a bundle at another place")
     move.add_argument("bundle")
     move.add_argument("place", type=int, help="from 1, as bctl queue counts")
+    schedule = commands.add_parser("schedule", help="set when the queued task of a bundle starts")
+    schedule.add_argument("bundle")
+    schedule.add_argument(
+        "when",
+        help="spot: once a slot is free, manual: once scheduled again, HH:MM: at that time",
+    )
     commands.add_parser("runs", help="the heavy commands that run and the ones that wait")
     unqueue = commands.add_parser("unqueue", help="drop the queued task of a bundle")
     unqueue.add_argument("bundle")
@@ -517,6 +534,9 @@ def main():
         printer = print_queue
     elif args.command == "move":
         answer = request("POST", "/move", {"bundle": args.bundle, "place": args.place})
+        printer = print_queue
+    elif args.command == "schedule":
+        answer = request("POST", "/schedule", {"bundle": args.bundle, "when": args.when})
         printer = print_queue
     elif args.command == "unqueue":
         answer = request("POST", "/unqueue", {"bundle": args.bundle})
@@ -562,6 +582,8 @@ def main():
             body["task"] = task
         if args.after is not None:
             body["after"] = args.after
+        if args.paused:
+            body["paused"] = True
         if args.priority is not None:
             body["priority"] = args.priority
         if args.model is not None:

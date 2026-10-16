@@ -39,8 +39,9 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle, but for `resume` or `terminal` in a bare folder, whose session knows how to build it. On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window, and from a bundle a task alone, held as `bN` for Seb's yes in `hok`; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents) |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
 | `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, and the memory left on the host, `short` when a start would add to a host that already lacks it |
-| `POST /force-queue` | the tasks queued now may start over the cap, those that wait for their time (`--after`) aside, or with `bundle` the task of that bundle, its time too; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
+| `POST /force-queue` | the tasks queued now may start over the cap, those that wait for their time (`--after`) or for a manual resume (`--paused`) aside, or with `bundle` the task of that bundle, its time and its pause too; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
 | `POST /move` | the queued task of `bundle` put at `place` (from 1), where it keeps its priority when that priority fits between the tasks around it, else takes the nearest of theirs; then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
+| `POST /schedule` | when the queued task of `bundle` may start: `when` is `spot` (once a slot and the memory let it), `manual` (it waits for a manual resume, until it is scheduled again) or `HH:MM` (that time of the host, today or tomorrow); it no longer goes over the cap. Then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
 | `POST /unqueue` | the queued task of a bundle dropped; the host, that bundle or the one that queued the task asks |
 | `POST /run` | a heavy command waits for cores: one JSON line each time its place changes, then the CPUs it got (see Runs) |
 | `GET /runs` | the runs that hold cores and the ones that wait, the pool and the memory available |
@@ -317,7 +318,11 @@ focus (Seb, 2026-10-14), so that a first prompt goes to claude: the layout names
   which agents work, which are done and which wait for Seb: `⏳ 📝 master-action-panel-aku
   (review)`. It comes from the `status` Claude writes for each live session in
   `~/.claude/sessions/<pid>.json`, a folder of each container (`devcontainer/README.md`), and for
-  an idle one from the first line of its last answer. A session whose turn ended while a
+  an idle one from the close line of its last answer (Seb, 2026-10-16): the line a report ends on,
+  `Nothing left` or `Waiting for you`, with only `Separately:` lines after it, as the Stop hook
+  `~/.claude/hooks/guard-report-end.py` wants it, its variants included (`Nothing is left`,
+  `Waiting on you`, `Waits for you`). An answer with no close line, older or too short to be a
+  report, gives the mark by its first line, as before. A session whose turn ended while a
   background command runs is `shell`, and counts as idle: a review agent ends on `needs Seb:` and
   leaves `thread-watch.py` waiting for his review (Seb, 2026-10-14: they showed ⏳ while they
   waited for him). `client/window-title.py BUNDLE SESSION=STATUS...` picks it. With wmctrl, `agent-terminator.py`
@@ -339,8 +344,8 @@ focus (Seb, 2026-10-14), so that a first prompt goes to claude: the layout names
 | --- | --- |
 | 🚀 | an agent window whose claude did not start yet: its container starts |
 | ⏳ | one works: `busy` |
-| ✋ | one waits for a permission or an answer (`waiting`), or none works and one last answer is no `pushed:` nor `nothing to do:` (`ready to push`, `needs Seb:`, `blocked:`, a chat) |
-| ✅ | none works and all last answers are `pushed:` or `nothing to do:` |
+| ✋ | one waits for a permission or an answer (`waiting`), or none works and one last answer ends on `Waiting for you`, or has no close line and is no `pushed:` nor `nothing to do:` (`ready to push`, `needs Seb:`, `blocked:`, a chat) |
+| ✅ | none works and all last answers end on `Nothing left`, or have no close line and are `pushed:` or `nothing to do:` |
 | ❌ | the run of an agent window ended before its claude started (`.agent/done` is `failed`) |
 | none | no live session |
 
@@ -356,7 +361,12 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   task bar. Nor has a bundle or an ops agent whose terminal is not minimized (Seb, 2026-10-14): it
   is in the task bar too, and the applet does not count it. A
   terminal keeps its last mark once its claude ends, so a ✅, ✋ or ⏳ shows only while an
-  `agent-terminal.py BUNDLE` process runs. The search also
+  `agent-terminal.py BUNDLE` process runs. After the title, a row shows the close line of the last
+  answer of its session (Seb, 2026-10-16: he had asked "status?" 99 times and "can I close?" 147
+  times), `Waiting for you: hok g12 for the 19.0 hop` say, cut by rofi to the width of its window:
+  the session in `.agent/session` for a bundle, the one in the name of an ops window. The window
+  title does not hold it, as the close line often holds a link, and the picker and the list find
+  the kind at the end of the title. The search also
   takes the mark in words (`finished`, `waiting`, `failed`, `running`, `starting`), the kind is
   already in the title, and the line above the rows counts the bundles of each mark.
   `window-picker.py --show` opens it in rofi, where the row under the mouse is selected: a click on
@@ -372,8 +382,9 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   ask: "all of them"): the mark in the order of the picker, which a first start shows, the kind
   in its order, the times and the sizes as numbers. A bundle row also has the
   state of its agent and since when, from its `.agent/` files (`done 12 min ago`, `waiting for 5
-  min`, `running for 3 min`, then `shown` when its terminal is not minimized), and the first line
-  of its `result.md`. Each row has its CPU and RAM (Seb, 2026-10-15), read every 5 seconds: those
+  min`, `running for 3 min`, then `shown` when its terminal is not minimized). Each row has the
+  close line of the picker in its last column, read again only when the transcript changed; a
+  bundle row with none has the first line of its `result.md`. Each row has its CPU and RAM (Seb, 2026-10-15), read every 5 seconds: those
   of the container of a bundle, from its `libpod-ID.scope` cgroup under the user manager, the RAM
   without the file cache as the run queue counts it; those of the claude of an ops window and its
   children, as the ops agents share one container. 100% is one core. The disk of a bundle is a
@@ -383,15 +394,20 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   pressed, they keep the rows of one of the marks pressed and of one of the kinds pressed. Under
   the rows, behind a handle, the queue of `bctl queue`, read every 10 seconds, as `GET /queue`
   runs `podman ps`, in its order, which no header click changes. Under it, Force lets each
-  selected task start over the cap (`POST /force-queue` with its bundle), and Up and Down move the
-  first selected task one place (`POST /move`). Ctrl+click and Shift+click select several rows:
+  selected task start over the cap (`POST /force-queue` with its bundle), Up and Down move the
+  first selected task one place (`POST /move`), and Pause, Resume and Time set when each selected
+  task may start (`POST /schedule`): once resumed, once a slot is free, or at the time of the day
+  Time asks, its own by default (Seb, 2026-10-16: "controls on when it goes out of the queue").
+  Ctrl+click and Shift+click select several rows:
   Enter, a double click or Terminal brings up their terminals where they were, the first row in
   front (his pick: no tiling); VS Code opens the window of each selected bundle; Close closes the
   window of each after a question, as the daemon does (SIGUSR1 to its `agent-terminator.py`), so
   its claude stops. Back to queue, after a question too, queues the session of each selected
   bundle again (`open --resume`, at the lowest priority of the queue, so last), then closes its
   window: when its turn comes, a new terminal goes on with that session on `Continue from where
-  you left off.`. A right click on a row opens a menu with these four. New ops agent runs `bctl
+  you left off.`. Pause does the same with `paused`: the task waits in the queue until Resume or
+  Time there (Seb, 2026-10-16: "move agents from and to the queue easily, or pause them"). A
+  right click on a row opens a menu with these five. New ops agent runs `bctl
   open ops --terminal`. It runs on the system python of the host, which has GTK. A second start brings the
   open window up, and its size, its place and the height of the queue are kept in
   `~/.local/state/bundle-ctl/agent-list.json`.
@@ -471,9 +487,10 @@ answer as `bctl delete` does, and the same task sent again takes back the reques
 - No cap and no queue: the window opens at once, as a tab would. Opened with a task it opens
   minimized, as any agent window; with no task it shows in front, for the first prompt.
 - The title shows the title of the conversation in place of a name, with 🔧 and `(ops)`:
-  `⏳ 🔧 Ops list layout (ops)`. The marks are those of a bundle, but for an idle session: ✅ when
-  the last answer has a Done part and neither a Decide nor a Your action part, the parts of Seb's
-  reports, ✋ otherwise (Seb, 2026-10-14). The ops container has a sessions folder of its own, as
+  `⏳ 🔧 Ops list layout (ops)`. The marks are those of a bundle, the close line first (Seb,
+  2026-10-16), but for an idle session whose last answer has none: ✅ when that answer has a Done
+  part and neither a Decide nor a Your action part, the parts of Seb's reports, ✋ otherwise (Seb,
+  2026-10-14). The ops container has a sessions folder of its own, as
   a bundle container has: `agent-terminator.py` looks there by session id. It reads the title
   again every 10 seconds, and drops the mark once its claude ended.
 - `window-picker.py` lists the minimized ops windows with the bundles, by mark, and a click brings
@@ -559,9 +576,14 @@ priorities leave in arrival order. With none, a task from the host gets 0, and o
 the priority of the agent's own task, kept in `.agent/priority` (Seb, 2026-10-15: "same level as
 his, unless it thinks it should be higher"). `--after HH:MM` keeps the task in the queue until that
 time of the host comes, today or tomorrow, whatever its priority: the queue says it waits for `its
-time`, and the bundle of a review, queued, is not deleted meanwhile (Seb, 2026-10-15: close the
-review agents that wait for him in the evening, and have them check what came on their PR the next
-morning). `bctl force-queue BUNDLE` starts it at once; a force of the whole queue leaves it.
+time, HH:MM`, and the bundle of a review, queued, is not deleted meanwhile (Seb, 2026-10-15: close
+the review agents that wait for him in the evening, and have them check what came on their PR the
+next morning). `--paused` keeps it there until it is scheduled again: it waits for `a manual
+resume`, before anything else, and its bundle is kept too. That is how agents are parked for a
+reboot: on 2026-10-16 an emptied queue let the daemon delete 12 review bundles. `bctl schedule
+BUNDLE spot|manual|HH:MM` changes when a queued task may start: once a slot is free, once
+scheduled again, or at that time; a forced task no longer goes over the cap. `bctl force-queue
+BUNDLE` starts it at once, its time or its pause aside; a force of the whole queue leaves both.
 The answer is the task's place (`queued`) and what it waits for
 (`waits_for`), or `started` when a slot was free. `bctl status` lists the queue in that order with
 each priority, the bundle that queued it, since when and what it waits for, so a caller can pick

@@ -413,11 +413,12 @@ def check_after(root):
     state["queue"][0]["after"] = time.time() + 3600
     state["queue"][2]["after"] = time.time() - 1
     daemon.launch_queued()
+    later = f"its time, {daemon.format_time(state['queue'][0]['after'])}"
     checks = [
         (
             "it waits for its time, the next starts",
             (launched, [(item["bundle"], item["waits_for"]) for item in state["queue"]])
-            == (["fresh"], [("later", "its time"), ("past", "the agent of fresh to start")]),
+            == (["fresh"], [("later", later), ("past", "the agent of fresh to start")]),
         ),
     ]
     get_starting, daemon.get_starting = daemon.get_starting, lambda *_args: None
@@ -448,6 +449,93 @@ def check_after(root):
             found = str(refusal)
         checks.append((f"{body} is refused", found == error))
     return [f"after: {name}: {launched}" for name, passed in checks if not passed], len(checks)
+
+
+def check_pause(root):
+    """Real clients: a paused task waits for a manual resume, past the cap and other tasks, and a
+    force of the whole queue leaves it; schedule pauses a task, gives it a time, or lets it go
+    once a slot is free, and drops its force; a bundle schedules only its own task or a task it
+    queued."""
+    state, launched = prepare(root, {"paused": FRESH, "fresh": FRESH, "spare": FRESH}, 8)
+    spare = dict(state["queue"].pop(), parent="fresh")
+    state["queue"][0]["paused"] = True
+    get_starting, daemon.get_starting = daemon.get_starting, lambda *_args: None
+
+    def get_queue():
+        return [
+            (item["bundle"], item["waits_for"], item.get("forced", False))
+            for item in state["queue"]
+        ]
+
+    daemon.launch_queued()
+    queue = [("paused", "a manual resume", False)]
+    checks = [("it waits, the next starts", (launched, get_queue()) == (["fresh"], queue))]
+    daemon.force_queue(daemon.HOST, {}, {})
+    checks.append(("a force of the queue leaves it", (launched, get_queue()) == (["fresh"], queue)))
+    daemon.identify = lambda connection: daemon.HOST
+    daemon.is_in_container = lambda connection: False
+    path = root / "ctl.sock"
+    server = daemon.Server(str(path), daemon.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    state["queue"].append(spare)
+    daemon.MAX_AGENTS = 0
+    code, lines = run_client(path, "schedule", "spare", "manual")
+    queue = [queue[0], ("spare", "a manual resume", False)]
+    checks.append(("a task is paused", (code, get_queue()) == (0, queue)))
+    checks.append(("the queue is printed", "waits for a manual resume" in lines[2]))
+    spare["forced"] = True
+    code, _lines = run_client(path, "schedule", "spare", "7:05")
+    start = time.localtime(spare["after"])
+    queue = [queue[0], ("spare", f"its time, {daemon.format_time(spare['after'])}", False)]
+    checks.append(
+        (
+            "a task is given a time, its force dropped",
+            (code, get_queue(), start.tm_hour, start.tm_min) == (0, queue, 7, 5),
+        ),
+    )
+    code, _lines = run_client(path, "schedule", "spare", "spot")
+    queue = [queue[0], ("spare", "a slot", False)]
+    checks.append(("a task waits for a slot", (code, get_queue()) == (0, queue)))
+    daemon.MAX_AGENTS = 8
+    code, _lines = run_client(path, "schedule", "paused", "spot")
+    queue = [("spare", "the agent of paused to start", False)]
+    found = (code, launched, get_queue())
+    checks.append(("a paused task resumed starts", found == (0, ["fresh", "paused"], queue)))
+    daemon.identify = lambda connection: "other"
+    refused = ["bctl: 409 a bundle schedules its own task or a task it queued only"]
+    found = run_client(path, "schedule", "spare", "manual")
+    checks.append(("a bundle cannot schedule the task of another", found == (1, refused)))
+    daemon.identify = lambda connection: "fresh"
+    code, _lines = run_client(path, "schedule", "spare", "manual")
+    queue = [("spare", "a manual resume", False)]
+    checks.append(("the bundle that queued it schedules it", (code, get_queue()) == (0, queue)))
+    daemon.identify = lambda connection: daemon.HOST
+    for args, error in (
+        (("schedule", "gone", "spot"), "gone is not queued"),
+        (("schedule", "spare", "later"), "when: spot, manual or a time of the day, HH:MM"),
+    ):
+        found = run_client(path, *args)
+        checks.append((f"{' '.join(args)} is refused", found == (1, [f"bctl: 400 {error}"])))
+    server.shutdown()
+    server.server_close()
+    daemon.force_queue(daemon.HOST, {}, {"bundle": "spare"})
+    checks.append(("a force of its bundle starts it", launched == ["fresh", "paused", "spare"]))
+    daemon.get_starting = get_starting
+    daemon.enqueue(daemon.HOST, "fresh", {"paused": True, "task": TASK})
+    queue = [("fresh", "a manual resume", False)]
+    checks.append(("a task is queued paused", get_queue() == queue))
+    for body, error in (
+        ({"paused": "yes", "task": TASK}, "paused: true or false"),
+        ({"paused": True}, "paused: only with a task"),
+    ):
+        try:
+            daemon.check_task("spare", body)
+            found = None
+        except ValueError as refusal:
+            found = str(refusal)
+        checks.append((f"{body} is refused", found == error))
+    failed = [name for name, passed in checks if not passed]
+    return [f"pause: {name}: {get_queue()} {launched}" for name in failed], len(checks)
 
 
 def check_build(root):
@@ -549,6 +637,7 @@ def main():
         check_moves,
         check_disk,
         check_after,
+        check_pause,
         check_build,
         check_priority,
         check_ramp,

@@ -379,6 +379,7 @@ def describe_queue(state):
             forced=item.get("forced", False),
             model=item.get("model"),
             parent=item["parent"],
+            paused=item.get("paused", False),
             priority=item.get("priority", 0),
             built=not item.get("build"),
             queued=item.get("queued") and format_time(item["queued"]),
@@ -483,8 +484,9 @@ def get_queue(caller, query, body):
 
 
 def force_queue(caller, query, body):
-    """Let the tasks queued now start over the cap, those that wait for their time aside, or the
-    one of a bundle, its time too. The ones queued later wait for a slot."""
+    """Let the tasks queued now start over the cap, those that wait for their time or for a manual
+    resume aside, or the one of a bundle, its time and its pause too. The ones queued later wait
+    for a slot."""
     bundle = body.get("bundle")
     with state_lock:
         state = read_state()
@@ -492,13 +494,15 @@ def force_queue(caller, query, body):
         items = [
             item
             for item in state["queue"]
-            if item["bundle"] == bundle or (bundle is None and (item.get("after") or 0) <= now)
+            if item["bundle"] == bundle
+            or (bundle is None and (item.get("after") or 0) <= now and not item.get("paused"))
         ]
         if bundle is not None and not items:
             raise ValueError(f"{bundle} is not queued")
         for item in items:
             item["forced"] = True
             item.pop("after", None)
+            item.pop("paused", None)
         write_state(state)
     forced = [item["bundle"] for item in items]
     launch_queued()
@@ -547,6 +551,29 @@ def move_task(caller, query, body):
         if place < len(queue):
             priority = max(priority, queue[place].get("priority", 0))
         item["priority"] = priority
+        write_state(state)
+    launch_queued()
+    return get_queue(caller, query, body)
+
+
+def schedule_task(caller, query, body):
+    """Set when the queued task of a bundle may leave the queue: `spot`, once a slot and the
+    memory let it, `manual`, once it is scheduled again, or `HH:MM`, once that time of the host
+    came. It no longer goes over the cap. The host, that bundle or the one that queued the task
+    asks."""
+    bundle, when = body.get("bundle") or "", body.get("when")
+    if when not in ("manual", "spot") and not (isinstance(when, str) and AFTER.fullmatch(when)):
+        raise ValueError("when: spot, manual or a time of the day, HH:MM")
+    with state_lock:
+        state = read_state()
+        item = next((item for item in state["queue"] if item["bundle"] == bundle), None)
+        if item is None:
+            raise ValueError(f"{bundle} is not queued")
+        if caller not in (HOST, bundle, item["parent"]):
+            raise Refused("a bundle schedules its own task or a task it queued only")
+        item["after"] = None if when in ("manual", "spot") else get_next_time(when)
+        item["paused"] = when == "manual"
+        item.pop("forced", None)
         write_state(state)
     launch_queued()
     return get_queue(caller, query, body)
@@ -751,8 +778,12 @@ def check_task(bundle, body):
             raise ValueError("priority: only with a task")
         if body.get("resume"):
             raise ValueError("resume: only with a task")
+        if "paused" in body:
+            raise ValueError("paused: only with a task")
         return
     task, priority = body["task"], body.get("priority", 0)
+    if type(body.get("paused", False)) is not bool:
+        raise ValueError("paused: true or false")
     if not isinstance(task, str) or not task.strip() or len(task) > MAX_TASK:
         raise ValueError(f"task: a text of at most {MAX_TASK} characters")
     if "after" in body and not (isinstance(body["after"], str) and AFTER.fullmatch(body["after"])):
@@ -813,6 +844,7 @@ def enqueue(caller, bundle, body, build=None):
                 "effort": None if effort == DEFAULT_EFFORT else effort,
                 "model": None if model == DEFAULT_MODEL else model,
                 "parent": caller,
+                "paused": body.get("paused", False),
                 "priority": priority,
                 "queued": time.time(),
                 "resume": bool(body.get("resume")),
@@ -954,7 +986,9 @@ def launch_queued():
             has_room = item.get("forced") or (fits and not short)
             can_start = has_display and (is_running or has_room)
             in_terminal = (folder / "terminal").exists() and (container or is_held(folder))
-            if is_busy(bundle, is_running or bundle in state["launches"]):
+            if item.get("paused"):
+                item["waits_for"] = "a manual resume"
+            elif is_busy(bundle, is_running or bundle in state["launches"]):
                 item["waits_for"] = "its agent to end" + (
                     ", then its terminal to close" if in_terminal else ""
                 )
@@ -968,7 +1002,7 @@ def launch_queued():
                 write_task(item)
                 continue
             elif (item.get("after") or 0) > now:
-                item["waits_for"] = "its time"
+                item["waits_for"] = f"its time, {format_time(item['after'])}"
             elif can_start and starting:
                 item["waits_for"] = f"the agent of {starting} to start"
                 paced = True
@@ -1727,7 +1761,7 @@ def open_ops(caller, bundle, body):
         raise Refused("ops: only the host and the ops container open it, a bundle sends a task")
     if bundle != "ops":
         check_ops_session(bundle, body)
-    elif body.get("resume") or {"after", "effort", "model", "priority"} & set(body):
+    elif body.get("resume") or {"after", "effort", "model", "paused", "priority"} & set(body):
         raise ValueError("ops: only a task or terminal")
     name = bundle
     if bundle == "ops" and ("task" in body or body.get("terminal")):
@@ -1822,6 +1856,7 @@ VERBS = {
     ("POST", "/force-queue"): force_queue,
     ("POST", "/move"): move_task,
     ("POST", "/open"): open_bundle,
+    ("POST", "/schedule"): schedule_task,
     ("POST", "/unqueue"): unqueue,
 }
 
