@@ -930,6 +930,10 @@ def enqueue(caller, bundle, body, build=None, session=None):
             },
         )
         state.get("relaunches", {}).pop(bundle, None)
+        if bundle in state.get("deletions", []):
+            state["deletions"].remove(bundle)
+            state.get("drops", {}).pop(bundle, None)
+            print(f"{bundle} is kept: a task came after the yes to its deletion", flush=True)
         write_state(state)
     launch_queued()
     with state_lock:

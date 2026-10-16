@@ -221,7 +221,10 @@ branches again with the same commits, so a commit made after the request still k
 - A yes checks the branches again, then runs `delete_bundle.py BUNDLE` as a job, at once when the
   container of the bundle stopped, else when it stops: `deletions` in `state.json` holds the
   bundles that wait for that. It also drops a task queued for the bundle, which the stop of its
-  container would start.
+  container would start. A task queued after the yes drops the deletion instead: the bundle has
+  work again, and its agent asks again once done. On 2026-10-16 such a task started a new agent
+  while the deletion ran, which removed the worktrees under it. `delete_bundle.py` removes the
+  container before the worktrees: a container started meanwhile makes it fail before anything goes.
 - When the session of its agent window ended on the report of its verdict, nothing typed or
   answered after it, the request shows that report and the yes closes the window, so the bundle
   goes with no click (Seb, 2026-10-15: "yes if there is nothing useful for me there to read").

@@ -183,6 +183,9 @@ def delete_bundle(
             "window and delete the bundle again[/yellow]",
         )
         return {}
+    # Before the worktrees: a container started since the check above makes this fail first.
+    if states:
+        runner.run(["podman", "rm", *states])
 
     def handle_repo(runner: UtilsRunner, repo: str):
         # Every step below writes into the shared repository (worktree metadata, refs):
@@ -227,8 +230,6 @@ def delete_bundle(
                 )
 
     runner.parallel_run(Tree("Repositories"), get_repos(), handle_repo)
-    if states:
-        runner.run(["podman", "rm", *states])
     runner.run(["rm", "-rf", get_worktree_bundle_folder(bundle_name)])
     runner.run(["rm", "-rf", f"{CLAUDE_CONFIG_CONTAINER}/{bundle_name}"])
     runner.run(["rm", "-rf", f"{EXTENSIONS_CONTAINER}/{bundle_name}"])

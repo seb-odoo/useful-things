@@ -29,6 +29,7 @@ MERGED = "master-merged--seb"
 MINE = "master-mine--seb"
 OPENED = "master-opened-aku"
 PUSHED = "master-pushed--seb"
+QUEUED = "master-queued--seb"
 REBASED = "master-rebased-aku"
 REFUSED = "master-refused--seb"
 REPORT = "blocked: needs opus\n\n- measured"
@@ -78,6 +79,7 @@ def prepare(root):
         MINE,
         OPENED,
         PUSHED,
+        QUEUED,
         REBASED,
         REFUSED,
         REPORTED,
@@ -160,6 +162,7 @@ def prepare(root):
         root / "master" / bundle / repo_name,
     )
     daemon.identify = lambda connection: world["caller"]
+    daemon.launch_queued = lambda: None
     daemon.is_in_container = lambda connection: world["caller"] != daemon.HOST
     daemon.read_state = lambda: world["state"]
     daemon.run_script = lambda log, script, *args: world["calls"].append((script, *args))
@@ -481,6 +484,20 @@ def check(root):
             "the commits named still go at the stop of the container, with --force",
             (world["calls"][calls:], world["state"]["drops"])
             == ([("delete_bundle.py", "--force", DROPPED)], {}),
+        ),
+    )
+    world["running"].add(str(root / "master" / QUEUED))
+    code, lines = run_client(path, "delete", QUEUED, "--reason", "moved to 17.0")
+    answer_yes(int(lines[0].partition("hok b")[2].partition(".")[0]))
+    daemon.enqueue(CLEAN, QUEUED, {"task": "port the fix to 19.0"})
+    calls = len(world["calls"])
+    world["running"].discard(str(root / "master" / QUEUED))
+    daemon.delete_stopped()
+    wait_jobs()
+    checks.append(
+        (
+            "a task queued after the yes keeps the bundle at the stop of its container",
+            (world["calls"][calls:], QUEUED in world["state"]["deletions"]) == ([], False),
         ),
     )
     server.shutdown()
