@@ -88,7 +88,29 @@ function branchdb() {
 # invented per run outlives its bundle and nothing ever cleans it up.
 #   testdb       -> <branch>-claude       (python runs)
 #   testdb hoot  -> <branch>-claude-hoot  (JS/Hoot runs)
-function testdb() { echo "$(branchdb)-claude${1:+-${1}}"; }
+# Postgres cuts a name at 63 chars, and two cut names can be the same DB. Past 63, the name is
+# the bundle without its suffix and 4 to 8 chars of the md5 of the purpose: <bundle>-1a2b3c4d.
+function testdb() {
+	local branch name hash room
+	if [[ "${1}" == bug || "${1}" == fix ]]; then
+		echo "testdb: '${1}' is the purpose of bug-fix.sh, take another one" >&2
+		return 1
+	fi
+	branch="$(branchdb)"
+	name="${branch}-claude${1:+-${1}}"
+	if [ ${#name} -gt 63 ]; then
+		name="${branch%"${BUNDLE_SUFFIX:---$USER}"}"
+		room=$((62 - ${#name}))
+		[ ${room} -gt 8 ] && room=8
+		if [ ${room} -lt 4 ]; then
+			echo "testdb: ${name} leaves no room for a purpose in the 63 chars of postgres" >&2
+			return 1
+		fi
+		hash=$(printf '%s' "${1}" | md5sum)
+		name="${name}-${hash:0:${room}}"
+	fi
+	echo "${name}"
+}
 
 function bug-fix() { bash ~/.claude/skills/serve-for-seb/bug-fix.sh "$@"; }
 

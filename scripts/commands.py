@@ -43,8 +43,8 @@ def get_bundle_name_from_base_and_name(base, name):
 def get_filestore_bundle_prefix(bundle_name):
     """Get the path the filestores of a bundle start with, one per database.
 
-    Without the bundle suffix, which no database name carries: a test run on `master-x--seb`
-    builds `master-x-claude-hoot`, and a prefix keeping the suffix matches none of them.
+    Without the bundle suffix: past the 63 chars of postgres, `testdb` names a database
+    `<bundle without suffix>-<hash>`, and a prefix keeping the suffix does not match it.
     """
     return f"{FILESTORE_CONTAINER}/{bundle_name.removesuffix(BUNDLE_SUFFIX)}"
 
