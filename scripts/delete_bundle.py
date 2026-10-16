@@ -19,7 +19,7 @@ import argcomplete
 from command_runner import ignore_error
 from commands import (
     clean_bundle_name,
-    get_filestore_bundle_prefix,
+    get_database_bundle_prefixes,
     get_remote_dev_repo,
     get_repo_folder,
     get_repos,
@@ -102,17 +102,22 @@ def _bundle_databases(runner: UtilsRunner, bundle_name: str):
     leaves a database with no filestore, and a filestore whose database was dropped by hand stays
     on disk. The names are the bundle's own, minus the suffix a database name never carries.
     """
-    prefix = os.path.basename(get_filestore_bundle_prefix(bundle_name))
+    prefixes = get_database_bundle_prefixes(bundle_name)
     found = {
         os.path.basename(path)
-        for path in glob.glob(f"{get_filestore_bundle_prefix(bundle_name)}*")
+        for prefix in prefixes
+        for path in glob.glob(f"{FILESTORE_CONTAINER}/{prefix}*")
     }
     res = runner.run(
         ["psql", "-d", "postgres", "-tAc", "select datname from pg_database"],
         handle_exceptions={"could not connect to server": ignore_error},
     )
     found |= {line.strip() for line in (res.stdout if res else "").splitlines() if line.strip()}
-    return sorted(one for one in found if one == prefix or one.startswith(f"{prefix}-"))
+    return sorted(
+        one
+        for one in found
+        if any(one == prefix or one.startswith(f"{prefix}-") for prefix in prefixes)
+    )
 
 
 def _server_still_on_it(name: str):
@@ -230,7 +235,10 @@ def delete_bundle(
 
     def handle_database(runner: UtilsRunner, name: str):
         folder = f"{FILESTORE_CONTAINER}/{name}"
-        if not folder.startswith(get_filestore_bundle_prefix(bundle_name)):
+        if not any(
+            folder.startswith(f"{FILESTORE_CONTAINER}/{prefix}")
+            for prefix in get_database_bundle_prefixes(bundle_name)
+        ):
             print(f"[red]Skipping {name} as it doesn't match the expected pattern[/red]")
             return
         runner.run(["rm", "-rf", folder])

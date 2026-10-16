@@ -1,13 +1,13 @@
 """Various utility methods."""
 
 import glob
+import hashlib
 import os
 import subprocess
 import sys
 
 from config import (
     BUNDLE_SUFFIX,
-    FILESTORE_CONTAINER,
     HOST_FOLDER,
     MASTER_ONLY_REPOS,
     STICKY_BUNDLES,
@@ -40,13 +40,17 @@ def get_bundle_name_from_base_and_name(base, name):
     return f"{base}-{name}{BUNDLE_SUFFIX}"
 
 
-def get_filestore_bundle_prefix(bundle_name):
-    """Get the path the filestores of a bundle start with, one per database.
+def get_database_bundle_prefixes(bundle_name):
+    """Get the names the databases of a bundle start with, and their filestore folders.
 
     Without the bundle suffix: past the 63 chars of postgres, `testdb` names a database
-    `<bundle without suffix>-<hash>`, and a prefix keeping the suffix does not match it.
+    `<bundle without suffix>-<hash>`, and a prefix keeping the suffix does not match it. Over 58
+    chars, `testdb` puts the first 45 chars and the md5 of the name in place of the name.
     """
-    return f"{FILESTORE_CONTAINER}/{bundle_name.removesuffix(BUNDLE_SUFFIX)}"
+    name = bundle_name.removesuffix(BUNDLE_SUFFIX)
+    if len(name) <= 58:
+        return [name]
+    return [name, f"{name[:45]}-{hashlib.md5(name.encode()).hexdigest()[:8]}"]
 
 
 def get_remote_branch_name(bundle_name, repo):

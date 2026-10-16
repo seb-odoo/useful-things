@@ -90,6 +90,8 @@ function branchdb() {
 #   testdb hoot  -> <branch>-claude-hoot  (JS/Hoot runs)
 # Postgres cuts a name at 63 chars, and two cut names can be the same DB. Past 63, the name is
 # the bundle without its suffix and 4 to 8 chars of the md5 of the purpose: <bundle>-1a2b3c4d.
+# A bundle over 58 chars leaves no room for 4: its first 45 chars and its md5 stand for it, as in
+# get_database_bundle_prefixes of scripts/commands.py, which delete_bundle matches.
 function testdb() {
 	local branch name hash room
 	if [[ "${1}" == bug || "${1}" == fix ]]; then
@@ -100,12 +102,12 @@ function testdb() {
 	name="${branch}-claude${1:+-${1}}"
 	if [ ${#name} -gt 63 ]; then
 		name="${branch%"${BUNDLE_SUFFIX:---$USER}"}"
+		if [ ${#name} -gt 58 ]; then
+			hash=$(printf '%s' "${name}" | md5sum)
+			name="${name:0:45}-${hash:0:8}"
+		fi
 		room=$((62 - ${#name}))
 		[ ${room} -gt 8 ] && room=8
-		if [ ${room} -lt 4 ]; then
-			echo "testdb: ${name} leaves no room for a purpose in the 63 chars of postgres" >&2
-			return 1
-		fi
 		hash=$(printf '%s' "${1}" | md5sum)
 		name="${name}-${hash:0:${room}}"
 	fi
