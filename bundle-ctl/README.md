@@ -171,7 +171,8 @@ unless a file is not committed. `bctl fetch` brings a bundle back.
 `python3 test_delete.py` has the cases.
 
 A bare folder (an agent and the links of a bundle, no worktree: its agent never asked `build`) goes
-the same way, whatever its name: the daemon removes the folder.
+the same way, whatever its name: the daemon removes the folder. The `tasks` folder where its agent
+wrote the tasks it queued (bundle-ctl skill) keeps it bare.
 
 ## Bare start
 

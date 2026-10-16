@@ -498,6 +498,8 @@ def check_build(root):
     (bare / ".agent").mkdir(parents=True)
     (bare / ".claude").symlink_to(root)
     checks.append(("a folder of links and an agent is bare", daemon.is_bare(bare)))
+    (bare / "tasks").mkdir()
+    checks.append(("the tasks its agent queued keep it bare", daemon.is_bare(bare)))
     (bare / ".agent" / "session").write_text("s\n")
     daemon.get_worktree_bundle_folder = lambda bundle: str(root / bundle)
     daemon.get_agent_folder = lambda bundle: root / bundle / ".agent"
