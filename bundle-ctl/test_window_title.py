@@ -21,11 +21,25 @@ ANSWERS = {
     "bold": ["**Nothing to do:** merged since"],
     "chat": ["pushed: 1111111", "The tests pass."],
     "decide": ["The list shows it.\n\n**Done**\n- 18/18\n\n**Decide**\n- the icon"],
+    "left": ["The list shows it.\n\n**Done**\n- 18/18\n\nNothing left: the list shows it."],
     "pushed": ["pushed: c4d3b85\n\nDone"],
     "ready": ["ready to push"],
     "report": ["Which icon?", "The list shows it.\n\n## Done\n- 18/18 cases as expected"],
     "seb": ["needs Seb: which base?"],
+    "separately": [
+        "**Done**\n- 3/3\n\nNothing is left: pushed.\n\nSeparately: the tour is queued as master-t."
+    ],
+    "wait": ["pushed: c4d3b85\n\nWaiting for you: r+ on [odoo#5](https://github.com/odoo/odoo/pull/5)"],
+    "wait-bold": ["**Done**\n- 3/3\n\n**Waiting for you**: hok g12 for the 19.0 hop"],
 }
+CLOSE_LINES = [
+    ("left", "Nothing left: the list shows it."),
+    ("separately", "Nothing is left: pushed."),
+    ("wait", "Waiting for you: r+ on odoo#5"),
+    ("wait-bold", "Waiting for you: hok g12 for the 19.0 hop"),
+    ("report", ""),
+    ("seb", ""),
+]
 MARKS = [
     ([], TITLE),
     (["--failed"], f"❌ {TITLE}"),
@@ -42,6 +56,11 @@ MARKS = [
     (["ready=idle"], f"✋ {TITLE}"),
     (["pushed=idle", "seb=idle"], f"✋ {TITLE}"),
     (["missing="], f"✋ {TITLE}"),
+    (["left=idle"], f"✅ {TITLE}"),
+    (["separately=idle"], f"✅ {TITLE}"),
+    (["wait=idle"], f"✋ {TITLE}"),
+    (["wait-bold=idle"], f"✋ {TITLE}"),
+    (["left=idle", "wait=idle"], f"✋ {TITLE}"),
 ]
 OPS = "🔧 Ops windows in the list (ops)"
 OPS_MARKS = [
@@ -52,6 +71,10 @@ OPS_MARKS = [
     ("ops-decide", ["decide=idle"], "✋ 🔧 new session (ops)"),
     ("ops-chat", ["chat=idle"], "✋ 🔧 new session (ops)"),
     ("ops-seb", ["seb=idle"], "✋ 🔧 Pick a base (ops)"),
+    ("ops-left", ["left=idle"], "✅ 🔧 new session (ops)"),
+    ("ops-separately", ["separately=idle"], "✅ 🔧 new session (ops)"),
+    ("ops-wait", ["wait=idle"], "✋ 🔧 new session (ops)"),
+    ("ops-wait-bold", ["wait-bold=idle"], "✋ 🔧 new session (ops)"),
 ]
 TOPICS = {
     "report": [
@@ -99,8 +122,10 @@ def write_transcripts(home):
 
 
 def get_marks():
-    """The titles of a bundle, then of ops windows: the title of the conversation, finished on a
-    report that leaves nothing to Seb, the custom title over Claude's."""
+    """The titles of a bundle, then of ops windows: the close line of the last answer gives the
+    mark of an idle session, else its first line for a bundle and its parts for an ops window,
+    finished on a report that leaves nothing to Seb; the title of the conversation, the custom
+    title over Claude's."""
     failures = []
     for name, statuses, expected in [(BUNDLE, *case) for case in MARKS] + OPS_MARKS:
         found = subprocess.run(
@@ -111,6 +136,19 @@ def get_marks():
         ).stdout.strip()
         if found != expected:
             failures.append(f"{name} {statuses}: titled {found!r}, expected {expected!r}")
+    return failures
+
+
+def get_close_lines():
+    """The close line of each answer as a row shows it: without its bold, the text of its links in
+    place of the links, none when the answer does not end on it."""
+    spec = importlib.util.spec_from_file_location("title", HERE / "client" / "window-title.py")
+    title = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(title)
+    failures = []
+    for session, expected in CLOSE_LINES:
+        if (found := title.get_close_line(ANSWERS[session][-1])) != expected:
+            failures.append(f"close line of {session}: {found!r}, expected {expected!r}")
     return failures
 
 
@@ -282,6 +320,7 @@ def main():
         os.environ.update(HOME=root, USER="seb")
         write_transcripts(home)
         failures += get_marks()
+        failures += get_close_lines()
         failures += get_loaded()
         failures += get_configs(home)
         failures += get_running()
@@ -295,7 +334,7 @@ def main():
             failures.append(f"agent-terminator.py: a tab on its session left it on {taken}")
     for line in failures:
         print(line)
-    cases = len(MARKS) + len(OPS_MARKS) + len(CONFIGS) + len(FOLLOWED) + 6
+    cases = len(MARKS) + len(OPS_MARKS) + len(CLOSE_LINES) + len(CONFIGS) + len(FOLLOWED) + 6
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

@@ -17,7 +17,9 @@ row away: closed later, the window gives the row back without 🔄.
 A rofi script: it prints the rows when called with no argument, and rofi calls it again on a pick,
 with the bundle or the window id in ROFI_INFO. A bundle has one row, from the title of its terminal
 (client/window-title.py), and none once its VS Code window is open: Seb then works there. Nor
-has a bundle or an ops agent whose terminal is not minimized: it is in the task bar. The terminal
+has a bundle or an ops agent whose terminal is not minimized: it is in the task bar. After the
+title, a row shows the close line of the last answer of its session, `Nothing left` or `Waiting
+for you` (Seb, 2026-10-16), which rofi cuts to the width of its window. The terminal
 keeps its last mark once its claude ends, so a ✅, ✋ or ⏳ shows only while that claude runs. Each
 mark gets a word that the search matches but the row does not show, as the emoji are hard to type;
 the kind is already in words. The line above the rows counts the bundles of each mark. --counts
@@ -41,10 +43,14 @@ import subprocess
 import sys
 import time
 
+HERE = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent / "scripts"))
+
+from agents import OPS, get_agent_folder, read_text  # noqa: E402
+
 FAILED = "❌"
 FIRST_KINDS = ("fw", "mine", "ops", "runbot")
 FOR_SEB = ("✅", "✋")
-HERE = pathlib.Path(__file__).resolve().parent
 KINDS = ("ops", "fw", "runbot", "task", "mine", "analysis", "review")
 LIVE = ("✅", "✋", "⏳")
 LOADING = "🔄"
@@ -64,6 +70,8 @@ QUIET = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": su
 Row = collections.namedtuple("Row", "place rank title key window minimized")
 XCB_ATOM_ATOM = 4
 
+close_by_session = {}
+
 
 class AtomReply(ctypes.Structure):
     _fields_ = [
@@ -80,12 +88,18 @@ class Cookie(ctypes.Structure):
 SKIPPED = ("nemo-desktop.",)
 
 
-def get_title_patterns():
-    """The pattern of a bundle title, and the one of an ops title, whose conversation title can
-    hold any word."""
+@functools.cache
+def load_title():
     spec = importlib.util.spec_from_file_location("title", HERE / "client" / "window-title.py")
     title = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(title)
+    return title
+
+
+def get_title_patterns():
+    """The pattern of a bundle title, and the one of an ops title, whose conversation title can
+    hold any word."""
+    title = load_title()
     marks = "|".join(re.escape(mark) for mark, _ in MARKS)
     kinds = [(icon, kind) for icon, kind, _ in title.KINDS if kind != "ops"]
     icons = "|".join(re.escape(icon) for icon, _ in kinds)
@@ -254,6 +268,53 @@ def get_counts(rows):
     return [f"{mark} {word} {ranks.count(rank)}" for rank, (mark, word) in enumerate(MARKS)]
 
 
+def read_window_pids():
+    out = subprocess.run(["wmctrl", "-l", "-p"], capture_output=True, check=False, text=True)
+    return {line.split()[0]: line.split()[2] for line in out.stdout.splitlines()}
+
+
+def get_terminator(pid):
+    """The agent-terminator.py process whose terminator is pid, and the bundle of its window, None
+    for another window."""
+    try:
+        parent = pathlib.Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()[1]
+        args = pathlib.Path(f"/proc/{parent}/cmdline").read_text(errors="replace").split("\0")
+        script = next(at for at, arg in enumerate(args) if arg.endswith("agent-terminator.py"))
+        return int(parent), args[script + 1]
+    except (IndexError, OSError, StopIteration):
+        return None
+
+
+def get_session(row, pids):
+    """The session of a row: the one in the .agent/ folder of a bundle, the one an ops window is
+    named after."""
+    if row.key != row.window:
+        return read_text(get_agent_folder(row.key) / "session")
+    terminator = get_terminator(pids.get(row.window))
+    return terminator and terminator[1].removeprefix(OPS)
+
+
+def get_close_line(session):
+    """The close line of the last answer of a session, read again only once its transcript
+    changed, as agent-list.py asks every 2 seconds."""
+    title = load_title()
+    path = session and title.get_transcript(session)
+    try:
+        stat = path.stat()
+    except (AttributeError, OSError):
+        return ""
+    stamp = (stat.st_mtime_ns, stat.st_size)
+    if close_by_session.get(session, (None,))[0] != stamp:
+        close_by_session[session] = (stamp, title.get_close_line(title.get_last_answer(session)))
+    return close_by_session[session][1]
+
+
+def get_close_lines(rows):
+    """The close line of the session of each row, by key, "" when it has none."""
+    pids = read_window_pids() if any(row.key == row.window for row in rows) else {}
+    return {row.key: get_close_line(get_session(row, pids)) for row in rows}
+
+
 def pick(name, terminal):
     windows = get_windows()[0].get(name, {})
     window = (terminal and windows.get("terminal")) or windows.get("code")
@@ -299,9 +360,11 @@ def main():
     sys.stdout.write(f"\0message\x1f{'   '.join(counts)}   |   {hint}\n")
     sys.stdout.write("\0no-custom\x1ftrue\n\0use-hot-keys\x1ftrue\n")
     sys.stdout.write(f"{NEW_OPS}\0info\x1fnew-ops\n")
+    closes = get_close_lines(rows)
     for row in rows:
         word = MARKS[row.rank][1] if row.rank < len(MARKS) else ""
-        sys.stdout.write(f"{row.title}\0info\x1f{row.key}\x1fmeta\x1f{word}\n")
+        text = f"{row.title}   {closes[row.key]}".rstrip()
+        sys.stdout.write(f"{text}\0info\x1f{row.key}\x1fmeta\x1f{word}\n")
     for title, window in sorted(windows[2]):
         sys.stdout.write(f"{title}\0info\x1f{window}\x1fmeta\x1f\n")
 

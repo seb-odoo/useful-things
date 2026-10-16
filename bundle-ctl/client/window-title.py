@@ -14,9 +14,11 @@ agent-terminator.py names its window with it on the host, and claude-autoopen it
 the container. The kind comes from the name alone, so a window opened by hand gets it too. The own
 suffix is BUNDLE_SUFFIX, which the containers have, else `--$USER`, the default of config.py.
 
-An ops agent window (ops-SESSION) shows the title of its conversation in place of a name, and its
-idle session is finished when its last answer has a Done part and neither a Decide nor a Your
-action part, the parts of Seb's reports.
+An idle session is finished when the close line of its last answer, the line that ends Seb's
+reports, starts with "Nothing left", and waits for him when it starts with "Waiting for you". With
+no close line, a bundle guesses it from the verdict on the first line of that answer. An ops agent
+window (ops-SESSION) shows the title of its conversation in place of a name, and guesses it from
+the parts of the answer: finished with a Done part and neither a Decide nor a Your action part.
 """
 
 import json
@@ -25,6 +27,7 @@ import pathlib
 import re
 import sys
 
+CLOSE = re.compile(r"[*_\s]*(nothing (is )?left|(waiting|waits) (for|on) you)\b", re.IGNORECASE)
 FINISHED = re.compile(r"(pushed:|nothing to do:)", re.IGNORECASE)
 FLAGS = {"--failed": "❌", "--starting": "🚀"}
 KINDS = (
@@ -36,6 +39,8 @@ KINDS = (
     ("🧠", "analysis", lambda name, own: name.endswith("-code-analysis")),
     ("⭐", "mine", lambda name, own: True),
 )
+LEFT = re.compile(r"[*_\s]*nothing (is )?left\b", re.IGNORECASE)
+LINK = re.compile(r"\[([^\]]+)\]\([^)\s]+\)")
 NEW = "new session"
 OPS = "ops-"
 PARTS = re.compile(r"^[#*_ ]*(Done|Decide|Your action)\b", re.MULTILINE)
@@ -43,12 +48,17 @@ PROJECTS = (
     pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or pathlib.Path.home() / ".claude")
     / "projects"
 )
+SEPARATELY = re.compile(r"[*_\s]*Separately\s*:")
 TAIL = 256 * 1024
 TITLES = {"ai-title": "aiTitle", "custom-title": "customTitle"}
 
 
+def get_transcript(session):
+    return next(PROJECTS.glob(f"*/{session}.jsonl"), None)
+
+
 def read_tail(session):
-    path = next(PROJECTS.glob(f"*/{session}.jsonl"), None)
+    path = get_transcript(session)
     try:
         with path.open("rb") as file:
             file.seek(max(0, file.seek(0, os.SEEK_END) - TAIL))
@@ -83,15 +93,34 @@ def get_last_answer(session):
     return ""
 
 
-def is_finished(session):
-    """Whether the last answer starts on the verdict of an agent whose task needs nothing more."""
-    first = next((line for line in get_last_answer(session).splitlines() if line.strip()), "")
+def get_close_line(answer):
+    """The last line of an answer when it says whether Seb can close the session, as the Stop hook
+    guard-report-end.py wants a report to end: only Separately: lines may follow it. Without its
+    bold, and with the text of its links in place of the links, "" when it has none."""
+    lines = [line for line in answer.splitlines() if line.strip()]
+    while lines and SEPARATELY.match(lines[-1]):
+        lines.pop()
+    if not lines or not CLOSE.match(lines[-1]):
+        return ""
+    return LINK.sub(r"\1", lines[-1].replace("**", "")).strip()
+
+
+def is_finished(answer):
+    """Whether the answer starts on the verdict of an agent whose task needs nothing more."""
+    first = next((line for line in answer.splitlines() if line.strip()), "")
     return bool(FINISHED.match(first.strip().lstrip("#*_` ")))
 
 
-def is_reported(session):
-    """Whether the last answer reports work done and leaves nothing to Seb."""
-    return set(PARTS.findall(get_last_answer(session))) == {"Done"}
+def is_reported(answer):
+    """Whether the answer reports work done and leaves nothing to Seb."""
+    return set(PARTS.findall(answer)) == {"Done"}
+
+
+def is_closed(answer, finished):
+    """Whether Seb can close the session: its close line says nothing is left, else finished
+    guesses it from the rest of the answer."""
+    close = get_close_line(answer)
+    return bool(LEFT.match(close)) if close else finished(answer)
 
 
 def get_mark(status_by_session, finished=is_finished):
@@ -102,7 +131,8 @@ def get_mark(status_by_session, finished=is_finished):
         return "✋"
     if "busy" in statuses:
         return "⏳"
-    return "✅" if all(map(finished, status_by_session)) else "✋"
+    answers = map(get_last_answer, status_by_session)
+    return "✅" if all(is_closed(answer, finished) for answer in answers) else "✋"
 
 
 def get_title(bundle, status_by_session=None, flag=None):

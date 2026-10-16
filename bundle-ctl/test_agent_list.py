@@ -55,6 +55,14 @@ AGENTS = [
     ("waiting", {"waiting": ("", 300), "run.lock": ("", 900)}, False, "waiting for 5 min, shown", ""),
     ("running", {"run.lock": ("", 180)}, True, "running for 3 min", ""),
     ("starting", {}, True, "starting", ""),
+    ("closed", {"done": ("0", 120), "result.md": ("pushed: c4d3b85\n\nmore", 120)}, True,
+     "done 2 min ago", "Waiting for you: r+ on odoo#5"),
+]
+CLOSES = {"closed": "Waiting for you: r+ on odoo#5"}
+OPS_INFOS = [
+    (True, "", ("", "", 0.0)),
+    (False, "", ("shown", "", 0.0)),
+    (True, "Nothing left: merged", ("", "Nothing left: merged", 0.0)),
 ]
 PROCESSES = {
     1: (0, 1.0, 100, ["/sbin/init"]),
@@ -182,9 +190,9 @@ def check_reads(agent_list):
         process = subprocess.Popen(command, stdout=subprocess.PIPE, text=True)
         try:
             child = process.stdout.readline().strip()
-            if (found := agent_list.get_terminator(child)) != (process.pid, "ops-S1"):
+            if (found := agent_list.picker.get_terminator(child)) != (process.pid, "ops-S1"):
                 failures.append(f"terminator {found!r}, expected {(process.pid, 'ops-S1')!r}")
-            if (found := agent_list.get_terminator(os.getpid())) is not None:
+            if (found := agent_list.picker.get_terminator(os.getpid())) is not None:
                 failures.append(f"terminator of another window: {found!r}")
         finally:
             process.kill()
@@ -197,11 +205,11 @@ def check_usage(agent_list):
     disk of the bundle, measured once."""
     clock = [100.0]
     cgroups = [(10.0, 2 * 1024**3), (12.5, 2 * 1024**3)]
-    agent_list.get_terminator = lambda pid: (5, "ops-S1") if pid == "77" else None
+    agent_list.picker.get_terminator = lambda pid: (5, "ops-S1") if pid == "77" else None
     agent_list.get_worktree_bundle_folder = lambda name: f"/bundles/{name}"
     agent_list.read_cgroup = lambda path: cgroups.pop(0)
     agent_list.read_processes = lambda: PROCESSES
-    agent_list.read_window_pids = lambda: {"0x2": "77"}
+    agent_list.picker.read_window_pids = lambda: {"0x2": "77"}
     agent_list.time = types.SimpleNamespace(monotonic=lambda: clock[0], time=time.time)
     usage = agent_list.Usage()
     usage.get_containers = lambda: {"/bundles/master-x--seb": "cgroup"}
@@ -237,14 +245,14 @@ def main():
                 (folder / file).write_text(text)
                 os.utime(folder / file, (time.time() - age,) * 2)
             row = agent_list.picker.Row(None, None, name, name, "0x01", minimized)
-            found = agent_list.get_info(row)
+            found = agent_list.get_info(row, CLOSES.get(name, ""))
             ages = [files[file][1] for file in ("done", "waiting", "run.lock") if file in files]
             since = time.time() - ages[0] if ages else 0.0
             if found[:2] != (state, answer) or abs(found[2] - since) > 5:
                 failures.append(f"{name}: {found!r}, expected {(state, answer, since)!r}")
-    for minimized, expected in ((True, ("", "", 0.0)), (False, ("shown", "", 0.0))):
+    for minimized, close, expected in OPS_INFOS:
         row = agent_list.picker.Row(None, None, "🔧 Refactor (ops)", "0x0b", "0x0b", minimized)
-        if (found := agent_list.get_info(row)) != expected:
+        if (found := agent_list.get_info(row, close)) != expected:
             failures.append(f"ops row, minimized {minimized}: {found!r}, expected {expected!r}")
     queue = (
         "8/15 agents at work in a terminal, 1 queued",
@@ -264,7 +272,7 @@ def main():
     failures += check_ask(agent_list)
     for line in failures:
         print(line)
-    cases = len(AGENTS) + 6 + 1 + len(FACETS) + len(FILTERED) + 2 + 7 + 3 + 3
+    cases = len(AGENTS) + len(OPS_INFOS) + 4 + 1 + len(FACETS) + len(FILTERED) + 2 + 7 + 3 + 3
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

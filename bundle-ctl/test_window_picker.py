@@ -4,6 +4,7 @@ pick, with a fake rofi, wmctrl and xdg-open, and the windows of a file of its ow
 others minimized: python3 test_window_picker.py"""
 
 import importlib.util
+import json
 import os
 import pathlib
 import subprocess
@@ -38,7 +39,7 @@ ROWS = [
     OPS,
     "✅ 🤖 master-d-runbot-12--seb (runbot)\0info\x1fmaster-d-runbot-12--seb\x1fmeta\x1ffinished",
     REVIEW,
-    "⏳ ⭐ master-b--seb (mine)\0info\x1fmaster-b--seb\x1fmeta\x1frunning",
+    "⏳ ⭐ master-b--seb (mine)   Waiting for you: hok g12\0info\x1fmaster-b--seb\x1fmeta\x1frunning",
     "🔧 Refactor (ops)\0info\x1f0x0b\x1fmeta\x1f",
     "⏩ master-f-fw--seb (fw)\0info\x1fmaster-f-fw--seb\x1fmeta\x1f",
     "⭐ master-e--seb (mine)\0info\x1fmaster-e--seb\x1fmeta\x1f",
@@ -81,7 +82,9 @@ import pathlib, sys
 sys.path.insert(0, str(pathlib.Path(sys.argv[1]).parent))
 import test_window_picker
 picker = test_window_picker.load_picker()
-test_window_picker.hide(picker, pathlib.Path(sys.argv[2]))
+folder = pathlib.Path(sys.argv[2])
+test_window_picker.hide(picker, folder)
+picker.get_agent_folder = lambda name: folder / name / ".agent"
 sys.argv[1:] = sys.argv[3:]
 picker.main()
 """
@@ -109,6 +112,21 @@ SHOWN = [
     "[-kb-custom-1]",
     "[Shift+Return,MouseSecondary]",
 ]
+ANSWERS = [
+    ("S-b", "pushed: c4d3b85\n\n**Waiting for you**: hok g12", "master-b--seb"),
+    ("S-e", "pushed: c4d3b85", "master-e--seb"),
+    ("S-ops", "**Done**\n- 3/3\n\nNothing left: pushed.\n\nSeparately: the tour is queued.", None),
+]
+CLOSE_LINES = [
+    {
+        "master-b--seb": "Waiting for you: hok g12",
+        "master-e--seb": "",
+        "master-z--seb": "",
+        "0x0a": "Nothing left: pushed.",
+        "0x0b": "",
+    },
+    "Nothing left: merged.",
+]
 PICKS = [
     ("1", "0x03", "wmctrl -i -a 0x03"),
     ("1", "master-a--seb", "wmctrl -i -a 0x08"),
@@ -120,6 +138,7 @@ PICKS = [
 
 def run(folder, *args, **env):
     env = {**os.environ, "PATH": f"{folder}:{os.environ['PATH']}", "XDG_RUNTIME_DIR": str(folder), **env}
+    env["CLAUDE_CONFIG_DIR"] = str(folder)
     command = [sys.executable, "-c", RUN, str(HERE / "window-picker.py"), str(folder), *args]
     return subprocess.run(command, capture_output=True, check=True, env=env, text=True).stdout
 
@@ -175,6 +194,42 @@ def get_new_ops():
     return started
 
 
+def write_answer(folder, session, answer, bundle=None):
+    """A transcript whose last answer is answer, and the .agent/session of bundle that names it."""
+    if bundle:
+        (folder / bundle / ".agent").mkdir(parents=True, exist_ok=True)
+        (folder / bundle / ".agent" / "session").write_text(f"{session}\n")
+    path = folder / "projects" / "-workspace" / f"{session}.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    entry = {"type": "assistant", "message": {"content": [{"type": "text", "text": answer}]}}
+    path.write_text(f"{json.dumps(entry)}\n")
+
+
+def get_close_lines(folder):
+    """The close line of the session of each row: the session of the .agent/ folder of a bundle,
+    the one an ops window is named after; none with no session or no close line. Read again once
+    the transcript changed."""
+    picker = load_picker()
+    picker.get_agent_folder = lambda name: folder / name / ".agent"
+    picker.get_terminator = lambda pid: (5, "ops-S-ops") if pid == "77" else None
+    picker.load_title().PROJECTS = folder / "projects"
+    picker.read_window_pids = lambda: {"0x0a": "77", "0x0b": "78"}
+    rows = [
+        picker.Row(None, 0, "", key, window, True)
+        for key, window in (
+            ("master-b--seb", "0x02"),
+            ("master-e--seb", "0x09"),
+            ("master-z--seb", "0x0e"),
+            ("0x0a", "0x0a"),
+            ("0x0b", "0x0b"),
+        )
+    ]
+    found = [picker.get_close_lines(rows)]
+    write_answer(folder, "S-b", "pushed: c4d3b85\n\nNothing left: merged.")
+    found.append(picker.get_close_lines(rows)["master-b--seb"])
+    return found
+
+
 def write_fake(folder, name, script):
     path = folder / name
     path.write_text(f"#!/bin/sh\n{script}\n")
@@ -187,6 +242,8 @@ def main():
         folder = pathlib.Path(root)
         log = folder / "log"
         (folder / "windows").write_text(WINDOWS)
+        for session, answer, bundle in ANSWERS:
+            write_answer(folder, session, answer, bundle)
         write_fake(folder, "wmctrl", f'[ "$1" = -l ] && cat {folder}/windows || echo wmctrl "$@" >> {log}')
         write_fake(folder, "xdg-open", f'echo xdg-open "$@" >> {log}; echo code --folder-uri x')
         write_fake(folder, "rofi", f'for arg in "$@"; do echo "[$arg]"; done > {folder}/rofi.log')
@@ -272,12 +329,15 @@ def main():
         counts = run(folder, "--counts").splitlines()
         if counts[:1] != ["🪟"]:
             failures.append(f"counts once no claude runs {counts!r}, expected 🪟")
+        for found, expected in zip(get_close_lines(folder), CLOSE_LINES, strict=True):
+            if found != expected:
+                failures.append(f"close lines {found!r}, expected {expected!r}")
     new_ops = [str(HERE / "client" / "bctl.py"), "open", "ops", "--terminal"]
     if (started := get_new_ops()) != [new_ops]:
         failures.append(f"pick 1 new-ops: started {started!r}, expected {[new_ops]!r}")
     for line in failures:
         print(line)
-    cases = 18 + len(PICKS)
+    cases = 18 + len(PICKS) + len(CLOSE_LINES)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

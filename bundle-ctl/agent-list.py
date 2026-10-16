@@ -6,8 +6,8 @@ again every 2 seconds, the queue every 10.
 
 The rows are the ones of the picker, the terminals shown on screen included: each with its mark, its
 kind, its bundle or the title of its conversation, the state of its agent and since when, ", shown"
-when its terminal is not minimized, its CPU, RAM and disk, and the first line of its last answer.
-A click on a column header sorts the rows by that column: by mark in the order of the picker, by
+when its terminal is not minimized, its CPU, RAM and disk, and the close line of the last answer of
+its session (picker.get_close_lines), else the first line of the result.md of a bundle. A click on a column header sorts the rows by that column: by mark in the order of the picker, by
 kind in its order, by time, by number, or by text. CPU and RAM are those of the container of a
 bundle, its file cache aside, or of the claude of an ops window and its children, as the ops agents share
 one container; read every 5 seconds, 100% is one core. Disk is the folder of a bundle, measured
@@ -21,9 +21,12 @@ the window of each selected bundle, which takes its session over. Close closes t
 selected row after a question, as the daemon does: SIGUSR1 to its agent-terminator.py, and its
 claude stops. Back to queue queues the session of each selected bundle again, at the end of the
 queue (the lowest priority there), then closes its window: the queue starts it again with "Continue
-from where you left off." when its turn comes. A right click on a row opens a menu with these four.
-New ops agent runs bctl open ops --terminal. Under the queue, Force lets each selected task start
-over the cap, Up and Down move the first selected task one place. A second start brings the open
+from where you left off." when its turn comes. Pause does the same, and the task waits in the
+queue for a manual resume. A right click on a row opens a menu with these five. New ops agent runs
+bctl open ops --terminal. Under the queue, Force lets each selected task start over the cap, Up and
+Down move the first selected task one place, Pause makes each selected task wait for a manual
+resume, Resume for a slot, and Time for a time of the day it asks (bctl schedule). A second start
+brings the open
 window up. The size and the place of the window, and the height of the queue under its handle, are
 kept in agent-list.json, beside the state of the daemon.
 """
@@ -86,13 +89,13 @@ runs = load("runs", HERE / "runs.py")
 ICONS = {kind: icon for icon, kind, _ in load("title", HERE / "client" / "window-title.py").KINDS}
 
 
-def get_info(row):
+def get_info(row, close):
     """The state of the agent of a row and since when, from the .agent/ files of its bundle, the
-    first line of its last answer, and that since as a time, 0 when none. An ops row has its window
-    as key, and no such files."""
+    close line of its last answer, else the first line of its result.md, and that since as a time,
+    0 when none. An ops row has its window as key, and no such files."""
     shown = [] if row.minimized else ["shown"]
     if row.key == row.window:
-        return ", ".join(shown), "", 0.0
+        return ", ".join(shown), close, 0.0
     folder = get_agent_folder(row.key)
     now = time.time()
     if (since := get_mtime(folder / "done")) is not None:
@@ -104,13 +107,14 @@ def get_info(row):
         state = f"running for {bctl.format_span(now - since)}"
     else:
         state = "starting"
-    answer = (read_text(folder / "result.md") or "").partition("\n")[0]
+    answer = close or (read_text(folder / "result.md") or "").partition("\n")[0]
     return ", ".join([state, *shown]), answer, since or 0.0
 
 
 def read_agents():
     rows = picker.get_rows(picker.get_windows(), shown=True)
-    return [(row, get_info(row)) for row in rows]
+    closes = picker.get_close_lines(rows)
+    return [(row, get_info(row, closes[row.key])) for row in rows]
 
 
 def get_kind(row):
@@ -147,29 +151,12 @@ def format_size(size):
     return f"{size / runs.GIGABYTE:.1f} GB"
 
 
-def read_window_pids():
-    out = subprocess.run(["wmctrl", "-l", "-p"], capture_output=True, check=False, text=True)
-    return {line.split()[0]: line.split()[2] for line in out.stdout.splitlines()}
-
-
-def get_terminator(pid):
-    """The agent-terminator.py process whose terminator is pid, and the bundle of its window, None
-    for another window."""
-    try:
-        parent = pathlib.Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()[1]
-        args = pathlib.Path(f"/proc/{parent}/cmdline").read_text(errors="replace").split("\0")
-        script = next(at for at, arg in enumerate(args) if arg.endswith("agent-terminator.py"))
-        return int(parent), args[script + 1]
-    except (IndexError, OSError, StopIteration):
-        return None
-
-
 def close_windows(windows):
     """Close agent windows as the daemon does, so that their claude stops. Another window closes as
     by its close button."""
-    pids = read_window_pids()
+    pids = picker.read_window_pids()
     for window in windows:
-        if terminator := get_terminator(pids.get(window)):
+        if terminator := picker.get_terminator(pids.get(window)):
             with contextlib.suppress(ProcessLookupError):
                 os.kill(terminator[0], signal.SIGUSR1)
         else:
@@ -252,7 +239,7 @@ class Usage:
         each row."""
         now, rows = time.monotonic(), self.keys
         containers = self.get_containers()
-        pids = read_window_pids() if any(key == window for key, window in rows) else {}
+        pids = picker.read_window_pids() if any(key == window for key, window in rows) else {}
         processes = read_processes() if pids else {}
         samples, found = {}, {}
         for key, window in rows:
@@ -260,7 +247,7 @@ class Usage:
                 cgroup = containers.get(get_worktree_bundle_folder(key))
                 sample = cgroup and read_cgroup(cgroup)
             else:
-                terminator = get_terminator(pids.get(window))
+                terminator = picker.get_terminator(pids.get(window))
                 sample = terminator and read_tree(processes, terminator[1].removeprefix(OPS))
             if not sample:
                 continue
@@ -327,6 +314,15 @@ def describe_queue(answer):
         for item in answer["queue"]
     ]
     return head, lines
+
+
+def get_default_time(after, now):
+    """The time a task is scheduled at by default: its own, else the next 5 minutes after half an
+    hour from now."""
+    if after:
+        return after[-5:]
+    start = now + 1800 + 300
+    return time.strftime("%H:%M", time.localtime(start - start % 300))
 
 
 def fill(model, lines):
@@ -433,6 +429,9 @@ class AgentList(Gtk.Application):
             ("Force", self.force),
             ("Up", lambda _button: self.move(-1)),
             ("Down", lambda _button: self.move(1)),
+            ("Pause", lambda _button: self.schedule("manual")),
+            ("Resume", lambda _button: self.schedule("spot")),
+            ("Time", self.schedule_at),
         ):
             button = Gtk.Button(label=label)
             button.connect("clicked", action)
@@ -451,6 +450,7 @@ class AgentList(Gtk.Application):
             ("VS Code", self.open_code),
             ("Close", self.close),
             ("Back to queue", self.queue_again),
+            ("Pause", lambda *_args: self.queue_again(paused=True)),
         )
         self.menu = Gtk.Menu()
         for label, action in actions:
@@ -589,6 +589,36 @@ class AgentList(Gtk.Application):
         if paths and 1 <= (place := paths[0].get_indices()[0] + 1 + step) <= len(model):
             self.send("/move", {"bundle": model[paths[0]][0], "place": place})
 
+    def schedule(self, when):
+        for bundle in self.get_queued():
+            self.send("/schedule", {"bundle": bundle, "when": when})
+
+    def schedule_at(self, _button):
+        """Ask a time of the day, the one of the first selected task by default, and schedule
+        each selected task at it."""
+        bundles = self.get_queued()
+        if not bundles:
+            return
+        queue = (self.queue_answer or {}).get("queue", [])
+        after = next((item.get("after") for item in queue if item["bundle"] == bundles[0]), None)
+        dialog = Gtk.MessageDialog(
+            transient_for=self.window,
+            modal=True,
+            message_type=Gtk.MessageType.QUESTION,
+            text="Start at what time? HH:MM, today or tomorrow.",
+            secondary_text="\n".join(bundles),
+        )
+        dialog.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Schedule", Gtk.ResponseType.OK)
+        dialog.set_default_response(Gtk.ResponseType.OK)
+        entry = Gtk.Entry(text=get_default_time(after, time.time()), activates_default=True)
+        dialog.get_message_area().pack_start(entry, False, False, 0)
+        entry.show()
+        answer = dialog.run()
+        when = entry.get_text().strip()
+        dialog.destroy()
+        if answer == Gtk.ResponseType.OK:
+            self.schedule(when)
+
     def open_menu(self, view, event):
         """On a right click, select the row under the mouse unless it is selected, and open the
         menu of the selected rows."""
@@ -633,17 +663,25 @@ class AgentList(Gtk.Application):
         if rows and self.confirm(text, rows, "Close"):
             close_windows([row[WINDOW] for row in rows])
 
-    def queue_again(self, *_args):
+    def queue_again(self, *_args, paused=False):
         """Queue the session of each selected bundle again, last, then close its window: its
-        claude stops, and the queue starts it again when its turn comes."""
+        claude stops, and the queue starts it again when its turn comes, or once it is resumed
+        when paused."""
         rows = [row for row in self.get_selected() if row[KEY] != row[WINDOW]]
-        text = "Put these agents back at the end of the queue? Their window closes, claude stops."
-        if not rows or not self.confirm(text, rows, "Back to queue"):
+        text = "Their window closes, claude stops"
+        if paused:
+            text = f"Pause these agents? {text}, and they wait at the end of the queue until you"
+            text += " resume them."
+        else:
+            text = f"Put these agents back at the end of the queue? {text}."
+        if not rows or not self.confirm(text, rows, "Pause" if paused else "Back to queue"):
             return
         queue = (self.queue_answer or {}).get("queue", [])
         priority = min((item["priority"] for item in queue), default=0)
         for row in rows:
             body = {"bundle": row[KEY], "priority": priority, "resume": True, "task": bctl.GO_ON}
+            if paused:
+                body["paused"] = True
             if self.send("/open", body):
                 close_windows([row[WINDOW]])
 
