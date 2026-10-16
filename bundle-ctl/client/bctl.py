@@ -16,7 +16,7 @@
     bctl run [--kind KIND] [--workers N] [-- COMMAND...]
     bctl runs [--json]
 
-TASK is --task TEXT or --task-file FILE, with an optional --priority N.
+TASK is --task TEXT or --task-file FILE, with an optional --priority N and --after HH:MM.
 
 create, fetch and open run as a job on the host: bctl prints its log until it ends, which can take
 minutes for a new bundle. With a task, create and fetch only queue it, and no window opens: when
@@ -28,11 +28,13 @@ window is already open runs the task in that window. A task for a bundle whose a
 is queued behind it. The queue runs the highest priority first (-100 to 100; by default 0 from the
 host, and from an agent the priority of its own task), then in arrival order: bctl status lists it
 in that order, with what each task waits for. One agent
-starts at a time: the next task waits until the run of the last one began.
+starts at a time: the next task waits until the run of the last one began. --after keeps a task
+in the queue until that time of the host comes, today or tomorrow.
 
 queue is that list alone, at once, with the memory left on the host. force-queue lets the tasks
-queued now start over the cap, or the one of BUNDLE, still one at a time; a task queued later waits
-for a slot again. Only the host may ask it: a container gets a 403.
+queued now start over the cap, those that wait for their time aside, or the one of BUNDLE, its
+time too, still one at a time; a task queued later waits for a slot again. Only the host may ask
+it: a container gets a 403.
 
 move puts the queued task of a bundle at PLACE in the queue, from 1: it keeps its priority when
 that priority fits between the tasks around, else takes the nearest of theirs. unqueue drops the
@@ -176,7 +178,8 @@ def print_status(answer):
 
 def print_queued(queue):
     for position, item in enumerate(queue, 1):
-        asked = ", over the cap" if item.get("forced") else ""
+        asked = f", from {item['after']}" if item.get("after") else ""
+        asked += ", over the cap" if item.get("forced") else ""
         asked += f", on {item['model']}" if item.get("model") else ""
         asked += f", effort {item['effort']}" if item.get("effort") else ""
         asked += ", not built yet" if not item.get("built", True) else ""
@@ -359,6 +362,11 @@ def add_task_arguments(parser):
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--task", help="run this prompt in the bundle, with Claude")
     group.add_argument("--task-file", type=pathlib.Path, help="same, read from a file")
+    parser.add_argument(
+        "--after",
+        metavar="HH:MM",
+        help="with a task: it starts no sooner than this time of the host, today or tomorrow",
+    )
     parser.add_argument(
         "--priority",
         type=int,
@@ -552,6 +560,8 @@ def main():
             task = task or GO_ON
         if task is not None:
             body["task"] = task
+        if args.after is not None:
+            body["after"] = args.after
         if args.priority is not None:
             body["priority"] = args.priority
         if args.model is not None:

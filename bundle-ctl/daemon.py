@@ -10,6 +10,7 @@ kernel and never from the request.
 """
 
 from concurrent.futures import ThreadPoolExecutor
+import datetime
 import hashlib
 import http.server
 import importlib.util
@@ -108,6 +109,7 @@ def load_held():
 
 
 CONFIG = load_config()
+AFTER = re.compile(r"([01]?[0-9]|2[0-3]):[0-5][0-9]")
 AGENT_GIGABYTES = 2
 AGENT_RAMP = 10 * 60
 AGENT_TERMINAL = CONFIG.get("AGENT_TERMINAL") or "gnome-terminal --window --title {bundle} --"
@@ -371,6 +373,7 @@ def list_bundles():
 def describe_queue(state):
     return [
         dict(
+            after=item.get("after") and format_time(item["after"]),
             bundle=item["bundle"],
             effort=item.get("effort"),
             forced=item.get("forced", False),
@@ -480,16 +483,22 @@ def get_queue(caller, query, body):
 
 
 def force_queue(caller, query, body):
-    """Let the tasks queued now start over the cap, or the one of a bundle. The ones queued later
-    wait for a slot."""
+    """Let the tasks queued now start over the cap, those that wait for their time aside, or the
+    one of a bundle, its time too. The ones queued later wait for a slot."""
     bundle = body.get("bundle")
     with state_lock:
         state = read_state()
-        items = [item for item in state["queue"] if bundle in (None, item["bundle"])]
+        now = time.time()
+        items = [
+            item
+            for item in state["queue"]
+            if item["bundle"] == bundle or (bundle is None and (item.get("after") or 0) <= now)
+        ]
         if bundle is not None and not items:
             raise ValueError(f"{bundle} is not queued")
         for item in items:
             item["forced"] = True
+            item.pop("after", None)
         write_state(state)
     forced = [item["bundle"] for item in items]
     launch_queued()
@@ -732,6 +741,8 @@ def check_terminal(caller, bundle, body):
 
 def check_task(bundle, body):
     if "task" not in body:
+        if "after" in body:
+            raise ValueError("after: only with a task")
         if "effort" in body:
             raise ValueError("effort: only with a task")
         if "model" in body:
@@ -744,6 +755,8 @@ def check_task(bundle, body):
     task, priority = body["task"], body.get("priority", 0)
     if not isinstance(task, str) or not task.strip() or len(task) > MAX_TASK:
         raise ValueError(f"task: a text of at most {MAX_TASK} characters")
+    if "after" in body and not (isinstance(body["after"], str) and AFTER.fullmatch(body["after"])):
+        raise ValueError("after: a time of the day, HH:MM")
     if type(priority) is not int or abs(priority) > MAX_PRIORITY:
         raise ValueError(f"priority: an integer from -{MAX_PRIORITY} to {MAX_PRIORITY}")
     if body.get("effort", DEFAULT_EFFORT) not in EFFORTS:
@@ -769,11 +782,20 @@ def get_task_priority(bundle):
     return int(text) if re.fullmatch(r"-?\d+", text) else 0
 
 
+def get_next_time(text):
+    """The next HH:MM of the host, today or tomorrow."""
+    hour, minute = map(int, text.split(":"))
+    now = datetime.datetime.now()
+    start = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return (start if start > now else start + datetime.timedelta(days=1)).timestamp()
+
+
 def enqueue(caller, bundle, body, build=None):
     """Queue the task of a bundle. `build` is the script that makes a bundle not made yet: the
     agent starts in its bare folder and runs it with `bctl build` once it needs the code. With no
     priority, the task of an agent takes the one of the agent's own task."""
     priority = body["priority"] if "priority" in body else get_task_priority(caller)
+    after = get_next_time(body["after"]) if "after" in body else None
     effort, model = body.get("effort"), body.get("model")
     with state_lock:
         state = read_state()
@@ -785,6 +807,7 @@ def enqueue(caller, bundle, body, build=None):
         queue.insert(
             position,
             {
+                "after": after,
                 "build": build,
                 "bundle": bundle,
                 "effort": None if effort == DEFAULT_EFFORT else effort,
@@ -944,6 +967,8 @@ def launch_queued():
                 # The claude-autoopen extension of the window starts it.
                 write_task(item)
                 continue
+            elif (item.get("after") or 0) > now:
+                item["waits_for"] = "its time"
             elif can_start and starting:
                 item["waits_for"] = f"the agent of {starting} to start"
                 paced = True
@@ -1702,7 +1727,7 @@ def open_ops(caller, bundle, body):
         raise Refused("ops: only the host and the ops container open it, a bundle sends a task")
     if bundle != "ops":
         check_ops_session(bundle, body)
-    elif body.get("resume") or {"effort", "model", "priority"} & set(body):
+    elif body.get("resume") or {"after", "effort", "model", "priority"} & set(body):
         raise ValueError("ops: only a task or terminal")
     name = bundle
     if bundle == "ops" and ("task" in body or body.get("terminal")):
@@ -1731,7 +1756,9 @@ def open_bundle(caller, query, body):
         return open_ops(caller, bundle, body)
     if not BUNDLE_NAME.fullmatch(bundle) or not os.path.isdir(get_worktree_bundle_folder(bundle)):
         raise ValueError(f"no bundle folder for {bundle}")
-    if not is_made(get_worktree_bundle_folder(bundle)):
+    folder = get_worktree_bundle_folder(bundle)
+    goes_on = body.get("resume") or body.get("terminal")
+    if not is_made(folder) and not (goes_on and is_bare(pathlib.Path(folder))):
         raise Refused(f"{bundle} is half-made (its create or fetch failed): do it again")
     if body.get("terminal"):
         check_terminal(caller, bundle, body)

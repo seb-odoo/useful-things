@@ -406,6 +406,50 @@ def check_priority(root):
     return [f"priority: {name}" for name, passed in checks if not passed], len(checks)
 
 
+def check_after(root):
+    """A task given a time waits for it, past the cap and other tasks, and starts once it came; a
+    force of the whole queue leaves it, a force of its bundle starts it."""
+    state, launched = prepare(root, {"later": FRESH, "fresh": FRESH, "past": FRESH}, 8)
+    state["queue"][0]["after"] = time.time() + 3600
+    state["queue"][2]["after"] = time.time() - 1
+    daemon.launch_queued()
+    checks = [
+        (
+            "it waits for its time, the next starts",
+            (launched, [(item["bundle"], item["waits_for"]) for item in state["queue"]])
+            == (["fresh"], [("later", "its time"), ("past", "the agent of fresh to start")]),
+        ),
+    ]
+    get_starting, daemon.get_starting = daemon.get_starting, lambda *_args: None
+    daemon.force_queue(daemon.HOST, {}, {})
+    checks.append(("a force of the queue leaves it", launched == ["fresh", "past"]))
+    daemon.force_queue(daemon.HOST, {}, {"bundle": "later"})
+    checks.append(("a force of its bundle starts it", launched == ["fresh", "past", "later"]))
+    daemon.get_starting = get_starting
+    state["queue"] = []
+    answer = daemon.enqueue(daemon.HOST, "later", {"after": "7:05", "task": TASK})
+    start = time.localtime(state["queue"][0]["after"])
+    checks.append(
+        (
+            "the next 7:05 of the host",
+            (answer["queued"], start.tm_hour, start.tm_min)
+            == (1, 7, 5)
+            and 0 < state["queue"][0]["after"] - time.time() <= 24 * 3600,
+        ),
+    )
+    for body, error in (
+        ({"after": "24:00", "task": TASK}, "after: a time of the day, HH:MM"),
+        ({"after": "08:00"}, "after: only with a task"),
+    ):
+        try:
+            daemon.check_task("fresh", body)
+            found = None
+        except ValueError as refusal:
+            found = str(refusal)
+        checks.append((f"{body} is refused", found == error))
+    return [f"after: {name}: {launched}" for name, passed in checks if not passed], len(checks)
+
+
 def check_build(root):
     """A task queued with its build starts in the bare folder, told so, and only its own bundle
     builds it; under the disk floor such a task is still queued."""
@@ -454,6 +498,17 @@ def check_build(root):
     (bare / ".agent").mkdir(parents=True)
     (bare / ".claude").symlink_to(root)
     checks.append(("a folder of links and an agent is bare", daemon.is_bare(bare)))
+    (bare / ".agent" / "session").write_text("s\n")
+    daemon.get_worktree_bundle_folder = lambda bundle: str(root / bundle)
+    daemon.get_agent_folder = lambda bundle: root / bundle / ".agent"
+    daemon.get_bundle_container = lambda bundle: None
+    for name, resume, expected in (("a new task", False, "refused"), ("a resume", True, 202)):
+        state["queue"] = []
+        try:
+            found = daemon.open_bundle(daemon.HOST, {}, {"bundle": "bare", "resume": resume, "task": TASK})[0]
+        except daemon.Refused:
+            found = "refused"
+        checks.append((f"{name} in a bare folder: {expected}", found == expected))
     (bare / "odoo").mkdir()
     checks.append(("a worktree makes it no longer bare", not daemon.is_bare(bare)))
     return [f"build: {name}" for name, passed in checks if not passed], len(checks)
@@ -487,7 +542,15 @@ def main():
         if found != (launched, queue):
             failures.append(f"{list(bundles)}: {found}, expected {(launched, queue)}")
     total = len(CASES)
-    for check in (check_clients, check_moves, check_disk, check_build, check_priority, check_ramp):
+    for check in (
+        check_clients,
+        check_moves,
+        check_disk,
+        check_after,
+        check_build,
+        check_priority,
+        check_ramp,
+    ):
         with tempfile.TemporaryDirectory() as root:
             failed, count = check(pathlib.Path(root))
         failures += failed

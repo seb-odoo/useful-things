@@ -36,10 +36,10 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `POST /delete` | the deletion of a bundle, held for Seb's yes in `hok` (see Deletion); a container asks for its own, or for the one of a child |
 | `GET /held` | what became of a deletion or an ops task this caller asked (`?id=bN`): it waits, or what Seb said in `hok`; `?wait=S` long-polls it, 50 s at most |
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window; with a task, only its queue entry, as for `create`; refused when the bundle is here, a branch has unpushed commits or, with no task, the disk is short |
-| `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle. On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window, and from a bundle a task alone, held as `bN` for Seb's yes in `hok`; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents) |
+| `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle, but for `resume` or `terminal` in a bare folder, whose session knows how to build it. On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window, and from a bundle a task alone, held as `bN` for Seb's yes in `hok`; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents) |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
 | `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, and the memory left on the host, `short` when a start would add to a host that already lacks it |
-| `POST /force-queue` | the tasks queued now may start over the cap, or with `bundle` the task of that bundle; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
+| `POST /force-queue` | the tasks queued now may start over the cap, those that wait for their time (`--after`) aside, or with `bundle` the task of that bundle, its time too; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
 | `POST /move` | the queued task of `bundle` put at `place` (from 1), where it keeps its priority when that priority fits between the tasks around it, else takes the nearest of theirs; then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
 | `POST /unqueue` | the queued task of a bundle dropped; the host, that bundle or the one that queued the task asks |
 | `POST /run` | a heavy command waits for cores: one JSON line each time its place changes, then the CPUs it got (see Runs) |
@@ -556,7 +556,12 @@ any other name, `max` included, and `client/agent-run.sh` runs on `opus` at `med
 `--priority N` (-100 to 100) puts the task ahead of the ones with a lower priority; equal
 priorities leave in arrival order. With none, a task from the host gets 0, and one an agent queues
 the priority of the agent's own task, kept in `.agent/priority` (Seb, 2026-10-15: "same level as
-his, unless it thinks it should be higher"). The answer is the task's place (`queued`) and what it waits for
+his, unless it thinks it should be higher"). `--after HH:MM` keeps the task in the queue until that
+time of the host comes, today or tomorrow, whatever its priority: the queue says it waits for `its
+time`, and the bundle of a review, queued, is not deleted meanwhile (Seb, 2026-10-15: close the
+review agents that wait for him in the evening, and have them check what came on their PR the next
+morning). `bctl force-queue BUNDLE` starts it at once; a force of the whole queue leaves it.
+The answer is the task's place (`queued`) and what it waits for
 (`waits_for`), or `started` when a slot was free. `bctl status` lists the queue in that order with
 each priority, the bundle that queued it, since when and what it waits for, so a caller can pick
 where it goes.
