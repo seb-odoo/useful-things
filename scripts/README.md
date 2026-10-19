@@ -240,8 +240,10 @@ than its packs plus 10 GB, as the new pack is written before the old ones go.
 Removes a bundle from the local system (worktrees, branches, filestore, databases).
 
 - Deletes git worktrees and local branches for each repo
-- Drops matching PostgreSQL databases
-- Removes filestore entries under `~/.local/share/Odoo/filestore/`
+- Removes `~/.local/share/bundle-db/<bundle>`: the postgres server and the filestore of the
+  bundle (devcontainer/README.md, "How it runs Odoo")
+- For a bundle made before its own server: drops the matching databases of the host's server and
+  removes their filestore entries under `~/.local/share/Odoo/filestore/`
 - Completes the bundle names having a worktree folder (needs `argcomplete`'s global completion,
   see `activate-global-python-argcomplete`)
 - Accepts several bundles at once, deleted in parallel (one thread per bundle)

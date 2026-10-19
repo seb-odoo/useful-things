@@ -37,18 +37,37 @@ with pip inside. The rest follows from that choice.
 - **The base stays Ubuntu 22.04.** The `python-ldap` of the venv is linked against OpenLDAP 2.5,
   which Jammy ships. A newer base has 2.6 and breaks it.
 - **System packages go in the [`Dockerfile`](../Dockerfile), at build time**: Python 3.12, the LDAP
-  and SASL libraries, the postgres client, fonts, wkhtmltopdf, Chrome from Google's own package
-  (Jammy's `chromium` is a snap stub that does not run in a container) and Node 22 (Jammy's is too
-  old for Odoo's JS tooling). The container runs with `no-new-privileges` as a non-root user, so
+  and SASL libraries, the postgres client and the server of the bundle (below), fonts,
+  wkhtmltopdf, Chrome from Google's own package (Jammy's `chromium` is a snap stub that does not
+  run in a container) and Node 22 (Jammy's is too old for Odoo's JS tooling). The container runs with `no-new-privileges` as a non-root user, so
   nothing can be installed once it is up.
 - **The venv is first in `PATH` for every process**, through `containerEnv`, with the standard
   directories written out: `${containerEnv:PATH}` is not expanded there and would replace the whole
   `PATH`. The `python3` of the image is 3.10, and `odoo-bin` or a test started outside an
   interactive shell would pick it.
-- **The database is the host's**, over its unix socket: `/var/run/postgresql` is mounted, with
-  `PGHOST` and `PGUSER` set. `--userns=keep-id` gives the container the uid of the host user, so
-  peer authentication sees the same role as on the host. The host's postgres only listens on
-  localhost, so TCP from the container would be refused.
+- **Each bundle has its own postgres server**, in its container, since 2026-10-19: a bundle can
+  neither read nor drop the databases of another, and its databases go with it (Seb's choice).
+  The image carries PGDG's postgres 16 with pgvector, and a ready cluster in `/opt/bundle-pg/16`
+  made at build time, `template_vector` included. `SHARE_ROOT/bundle-db/<bundle>` holds `pg` (the
+  cluster, in `pg/16`), `run` (its socket, mounted at `/var/run/postgresql`, so `PGHOST` stays)
+  and `odoo` (the filestore, at `~/.local/share/Odoo`). The creation of the bundle makes them, and
+  `delete_bundle` removes them.
+  - [`container-rw/bundle-pg.sh`](../container-rw/bundle-pg.sh) copies the cluster of the image
+    at the first start, and starts the server at each one: from `postStartCommand`, and from
+    `agent-run.sh`, as `devcontainer up --skip-post-create` skips it. The server runs as `vscode`,
+    so the host user owns its files. A stop of the container kills it, and the next start replays
+    its WAL: `fsync` stays on, and `synchronous_commit = off` loses the last commits at most.
+  - The role is `PGUSER`, superuser of its own server with `trust` on the socket, so Odoo creates
+    the `vector` extension itself.
+  - Sized for test databases (measured 2026-10-16): 22 MB of memory when idle, about 80 MB during
+    an install of `mail`, about 33 MB of disk beside the databases, thanks to `wal_recycle = off`
+    and WAL segments of 1 MB. `max_parallel_workers_per_gather = 0`, as the `/dev/shm` of a
+    container is 63 MB.
+  - A bundle made before keeps the host's server and filestore. At its next start,
+    [`bundle-db.py`](bundle-db.py) finds no folder and makes `run` and `odoo` links to them, with
+    an empty `pg`, so `bundle-pg.sh` starts nothing. Over that socket, `--userns=keep-id` gives
+    the container the uid of the host user, so peer authentication sees the same role as on the
+    host.
 - **Browser tests run inside.** Odoo starts Chrome with `--no-sandbox --disable-dev-shm-usage`,
   which is enough under `--cap-drop=ALL` and the small `/dev/shm`.
 - **Commits are not signed in a container.** The `.git/config` shared with the host asks for a

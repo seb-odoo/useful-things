@@ -21,6 +21,8 @@ agent=/workspace/.agent
 cd /workspace || exit 1
 # To remove once every container has the SHELL of base.jsonc: Claude Code picks zsh without it.
 export SHELL=/bin/bash
+# The postgres server of the bundle: `devcontainer up --skip-post-create` skips its postStartCommand.
+bash "$(dirname "$(readlink -f "$0")")/../../container-rw/bundle-pg.sh"
 
 # Run on opus at medium effort unless the task asked otherwise: the bundle can write the files.
 case $(cat "$agent/model" 2>/dev/null) in

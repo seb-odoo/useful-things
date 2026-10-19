@@ -15,6 +15,7 @@
     "args": {
       "BASE_IMAGE": "@CONTAINER_BASE_IMAGE@",
       "CONTAINER_BASHRC": "@USEFUL_THINGS@/container-rw/devcontainer.bashrc",
+      "PG_USER": "@PG_USER@",
       "VENV": "@VENV@"
     }
   },
@@ -94,7 +95,11 @@
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/extension-storage,target=/home/vscode/.vscode-server/data/User/globalStorage/anthropic.claude-code,type=bind,z",
     "source=@CONFIG_ROOT@/Code/User,target=/home/vscode/.config/Code/User,type=bind,readonly,Z",
     "source=@VENV_ROOT@,target=@VENV_ROOT@,type=bind,readonly,Z",
-    "source=@SHARE_ROOT@/Odoo,target=/home/vscode/.local/share/Odoo,type=bind,z",
+    // The databases of the bundle: its postgres server, its socket at PGHOST, its filestore. A
+    // bundle made before its own server has links to the host's there (bundle-db.py).
+    "source=@SHARE_ROOT@/bundle-db/${localWorkspaceFolderBasename}/pg,target=/home/vscode/.local/share/postgresql,type=bind,z",
+    "source=@SHARE_ROOT@/bundle-db/${localWorkspaceFolderBasename}/run,target=/var/run/postgresql,type=bind",
+    "source=@SHARE_ROOT@/bundle-db/${localWorkspaceFolderBasename}/odoo,target=/home/vscode/.local/share/Odoo,type=bind,z",
     // test-warden (parallel JS/Hoot test runner, ~/repo/TestWarden): reuse the host-built engine
     // binary + bundled client at the same path (like the venv above). Read-only, as the host runs
     // it too; the engine writes only its engine/.cache, which comes back writable over it. It
@@ -139,12 +144,14 @@
     // bundle-ctl: the folder of the host daemon's socket, and its client at the host path so `bctl`
     // works on both sides. Read-only, so a container replaces neither the socket nor the client.
     "source=@STATE_ROOT@/bundle-ctl/sock,target=/run/bundle-ctl,type=bind,readonly,z",
-    "source=@USEFUL_THINGS@/bundle-ctl/client,target=@USEFUL_THINGS@/bundle-ctl/client,type=bind,readonly,z",
-    "source=/var/run/postgresql,target=/var/run/postgresql,type=bind"
+    "source=@USEFUL_THINGS@/bundle-ctl/client,target=@USEFUL_THINGS@/bundle-ctl/client,type=bind,readonly,z"
   ],
   // Runs on the host before each start: a missing mount source stops the container from starting.
   // claude-autoopen closes the "Press any key" terminal Dev Containers opens for initializeCommand.
-  "initializeCommand": "mkdir -p @REPO_ROOT@/TestWarden/engine/.cache @STATE_ROOT@/bundle-ctl/sock @STATE_ROOT@/ssh-github-mux/request @STATE_ROOT@/ssh-github-mux/sock && python3 @USEFUL_THINGS@/devcontainer/claude-config.py ${localWorkspaceFolderBasename} && python3 @USEFUL_THINGS@/devcontainer/extensions.py ${localWorkspaceFolderBasename} ${localWorkspaceFolder}",
+  "initializeCommand": "mkdir -p @REPO_ROOT@/TestWarden/engine/.cache @STATE_ROOT@/bundle-ctl/sock @STATE_ROOT@/ssh-github-mux/request @STATE_ROOT@/ssh-github-mux/sock && python3 @USEFUL_THINGS@/devcontainer/claude-config.py ${localWorkspaceFolderBasename} && python3 @USEFUL_THINGS@/devcontainer/extensions.py ${localWorkspaceFolderBasename} ${localWorkspaceFolder} && python3 @USEFUL_THINGS@/devcontainer/bundle-db.py ${localWorkspaceFolderBasename}",
+  // The postgres server of the bundle, when it has one. An agent terminal starts it too
+  // (agent-run.sh): `devcontainer up --skip-post-create` skips this.
+  "postStartCommand": "bash @USEFUL_THINGS@/container-rw/bundle-pg.sh",
   // Reached via the host nginx proxy (~/repo/useful-things/proxy) by bundle name, so don't let
   // every window forward Odoo to the same host port and collide.
   "portsAttributes": {

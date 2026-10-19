@@ -26,7 +26,7 @@ from commands import (
     get_worktree_bundle_repo_folder,
     get_worktree_container_folder,
 )
-from config import HOST_BOX
+from config import BUNDLE_DB_CONTAINER, HOST_BOX
 
 WORKSPACE_FOLDER = "/workspace"
 
@@ -309,6 +309,9 @@ class UtilsRunner(Runner):
         bundle_folder = get_worktree_bundle_folder(bundle_name)
         base_folder = get_worktree_base_folder(get_base_from_bundle_name(bundle_name))
         runner = self.with_params(cwd=bundle_folder)
+        # A bundle made before its own postgres server keeps the host's (devcontainer/bundle-db.py).
+        if not os.path.exists(db_folder := f"{BUNDLE_DB_CONTAINER}/{bundle_name}"):
+            runner.run(["mkdir", "-p", f"{db_folder}/pg/16", f"{db_folder}/run", f"{db_folder}/odoo"])
         runner.run(["touch", f"{bundle_folder}/{MADE}"])
         self._install_js_tooling(runner, bundle_name=bundle_name, base_folder=base_folder)
         if open_window:

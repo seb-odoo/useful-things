@@ -35,6 +35,47 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
 
+# The postgres server of a bundle, which runs in its container (devcontainer/README.md, "How it
+# runs Odoo"). PGDG for the 16 of the host and pgvector. No cluster of the package: a bundle starts
+# from a copy of /opt/bundle-pg/16, made here once, so its first start runs no initdb.
+# template_vector is the one the team skills create enterprise DBs from. Readable by all: the -uid
+# image gives vscode the uid of the host user, which makes the copy.
+ARG PG_USER
+RUN install -d /usr/share/postgresql-common/pgdg /etc/postgresql-common && \
+    curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+        https://www.postgresql.org/media/keys/ACCC4CF8.asc && \
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc]" \
+        "https://apt.postgresql.org/pub/repos/apt jammy-pgdg main" > /etc/apt/sources.list.d/pgdg.list && \
+    echo "create_main_cluster = false" > /etc/postgresql-common/createcluster.conf && \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        postgresql-16 postgresql-16-pgvector && \
+    rm -rf /var/lib/apt/lists/* && \
+    test -n "$PG_USER" && \
+    install -d -o vscode /opt/bundle-pg && \
+    runuser -u vscode -- /usr/lib/postgresql/16/bin/initdb -D /opt/bundle-pg/16 -U "$PG_USER" \
+        -E UTF8 --locale=C.UTF-8 --lc-collate=C --wal-segsize=1 --auth=trust -N && \
+    printf '%s\n' \
+        "listen_addresses = ''" \
+        "unix_socket_directories = '/var/run/postgresql'" \
+        "shared_buffers = 64MB" \
+        "synchronous_commit = off" \
+        "wal_level = minimal" \
+        "max_wal_senders = 0" \
+        "min_wal_size = 4MB" \
+        "max_wal_size = 128MB" \
+        "wal_recycle = off" \
+        "jit = off" \
+        "max_parallel_workers_per_gather = 0" \
+        "log_min_messages = warning" \
+        >> /opt/bundle-pg/16/postgresql.conf && \
+    runuser -u vscode -- /usr/lib/postgresql/16/bin/pg_ctl -D /opt/bundle-pg/16 -o "-k /tmp" -w start && \
+    runuser -u vscode -- psql -h /tmp -U "$PG_USER" -d postgres \
+        -c "CREATE DATABASE template_vector IS_TEMPLATE true" && \
+    runuser -u vscode -- psql -h /tmp -U "$PG_USER" -d template_vector -c "CREATE EXTENSION vector" && \
+    runuser -u vscode -- /usr/lib/postgresql/16/bin/pg_ctl -D /opt/bundle-pg/16 -m fast -w stop && \
+    chmod -R a+rX /opt/bundle-pg
+
 # Persist VS Code's extensions and the Claude extension's storage: devcontainer.json bind-mounts
 # host dirs at ~/.vscode-server/extensions and in ~/.vscode-server/data/User/globalStorage.
 # Pre-create the parents here owned by vscode so podman mounts the subdirs into existing dirs

@@ -27,6 +27,7 @@ from commands import (
     get_worktree_bundle_repo_folder,
 )
 from config import (
+    BUNDLE_DB_CONTAINER,
     CLAUDE_CONFIG_CONTAINER,
     EXTENSIONS_CONTAINER,
     FILESTORE_CONTAINER,
@@ -232,6 +233,7 @@ def delete_bundle(
     runner.parallel_run(Tree("Repositories"), get_repos(), handle_repo)
     runner.run(["rm", "-rf", get_worktree_bundle_folder(bundle_name)])
     runner.run(["rm", "-rf", f"{CLAUDE_CONFIG_CONTAINER}/{bundle_name}"])
+    runner.run(["rm", "-rf", f"{BUNDLE_DB_CONTAINER}/{bundle_name}"])
     runner.run(["rm", "-rf", f"{EXTENSIONS_CONTAINER}/{bundle_name}"])
 
     def handle_database(runner: UtilsRunner, name: str):

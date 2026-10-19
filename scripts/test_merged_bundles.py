@@ -32,6 +32,7 @@ def main():
         commands.folder_by_repo.clear()
         commands.folder_by_repo.update({repo: f"{root}/{repo}" for repo in REPOS})
         commands.WORKTREE_CONTAINER = f"{root}/src"
+        delete_bundle.BUNDLE_DB_CONTAINER = f"{root}/bundle-db"
         delete_bundle.CLAUDE_CONFIG_CONTAINER = f"{root}/claude-config"
         delete_bundle.EXTENSIONS_CONTAINER = f"{root}/extensions"
         delete_bundle._bundle_databases = lambda runner, bundle_name: []
