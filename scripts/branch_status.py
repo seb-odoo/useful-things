@@ -104,6 +104,7 @@ def git(repo, *args):
         capture_output=True,
         check=False,
         cwd=get_repo_folder(repo),
+        errors="replace",
         text=True,
     )
     return res.stdout.strip() if res.returncode == 0 else None
