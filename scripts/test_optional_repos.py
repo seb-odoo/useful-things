@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """A new bundle without design-themes and documentation, and add_repo.py bringing one back, on
-scratch repos: python3 test_optional_repos.py
+scratch repos, and which bundles get their own postgres folders: python3 test_optional_repos.py
 """
 
 import os
@@ -13,6 +13,7 @@ from config import MASTER_ONLY_REPOS, folder_by_repo, remote_by_repo
 
 GIT = ["git", "-c", "user.name=me", "-c", "user.email=me@localhost", "-c", "commit.gpgsign=false"]
 HERE = pathlib.Path(__file__).resolve().parent
+PREPARE = "import sys, utils; utils.UtilsRunner().prepare_worktree_bundle_folder(bundle_name=sys.argv[1])"
 
 
 def git(cwd, *args):
@@ -44,6 +45,7 @@ def prepare(root):
         HOST_BOX="",
         OWL_DEV_REMOTE="origin",
         REPO_ROOT=str(root / "repo"),
+        SHARE_ROOT=str(root / "share"),
         WORKTREE_ROOT=str(root / "src"),
     )
 
@@ -109,6 +111,14 @@ def check(root):
     checks.append(
         ("no bundle, no worktree", (code, out.strip()) == (1, "No bundle master-z--me here")),
     )
+    for bundle, folder in (("master-d--me", None), ("master-e--me", root / "src" / "master" / "master-e--me")):
+        if folder:
+            folder.mkdir()
+        run(env, "-c", PREPARE, bundle)
+    db = root / "share" / "bundle-db"
+    checks.append(("a new bundle gets its own postgres folders", (db / "master-a--me" / "pg" / "16").is_dir()))
+    checks.append(("a bare one too, before its worktrees", (db / "master-d--me" / "pg" / "16").is_dir()))
+    checks.append(("a bundle made before gets none", not (db / "master-e--me").exists()))
     return [name for name, passed in checks if not passed], len(checks)
 
 

@@ -309,9 +309,6 @@ class UtilsRunner(Runner):
         bundle_folder = get_worktree_bundle_folder(bundle_name)
         base_folder = get_worktree_base_folder(get_base_from_bundle_name(bundle_name))
         runner = self.with_params(cwd=bundle_folder)
-        # A bundle made before its own postgres server keeps the host's (devcontainer/bundle-db.py).
-        if not os.path.exists(db_folder := f"{BUNDLE_DB_CONTAINER}/{bundle_name}"):
-            runner.run(["mkdir", "-p", f"{db_folder}/pg/16", f"{db_folder}/run", f"{db_folder}/odoo"])
         runner.run(["touch", f"{bundle_folder}/{MADE}"])
         self._install_js_tooling(runner, bundle_name=bundle_name, base_folder=base_folder)
         if open_window:
@@ -381,6 +378,10 @@ class UtilsRunner(Runner):
             if base
             else get_worktree_bundle_folder(bundle_name)
         )
+        db_folder = f"{BUNDLE_DB_CONTAINER}/{bundle_name}"
+        # A bundle made before its own postgres server keeps the host's (devcontainer/bundle-db.py).
+        if not os.path.exists(worktree_bundle_folder) and not os.path.exists(db_folder):
+            self.run(["mkdir", "-p", f"{db_folder}/pg/16", f"{db_folder}/run", f"{db_folder}/odoo"])
         self.run(["mkdir", "-p", worktree_bundle_folder])
         self.run(
             [

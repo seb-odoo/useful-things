@@ -50,7 +50,8 @@ with pip inside. The rest follows from that choice.
   The image carries PGDG's postgres 16 with pgvector, and a ready cluster in `/opt/bundle-pg/16`
   made at build time, `template_vector` included. `SHARE_ROOT/bundle-db/<bundle>` holds `pg` (the
   cluster, in `pg/16`), `run` (its socket, mounted at `/var/run/postgresql`, so `PGHOST` stays)
-  and `odoo` (the filestore, at `~/.local/share/Odoo`). The creation of the bundle makes them, and
+  and `odoo` (the filestore, at `~/.local/share/Odoo`). The creation of the bundle makes them
+  before any worktree, so a bare start of its agent has them too (`test_optional_repos.py`), and
   `delete_bundle` removes them.
   - [`container-rw/bundle-pg.sh`](../container-rw/bundle-pg.sh) copies the cluster of the image
     at the first start, and starts the server at each one: from `postStartCommand`, and from
