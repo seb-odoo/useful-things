@@ -5,7 +5,8 @@ again every 2 seconds, the queue every 10.
     agent-list.py
 
 The rows are the ones of the picker, the terminals shown on screen included: each with its mark, its
-kind, its bundle or the title of its conversation, the state of its agent and since when, ", shown"
+kind, its bundle or the title of its conversation, the state of its agent and since when, or the
+error its window shows once its claude ended on it (❌ for the picker), ", shown"
 when its terminal is not minimized, its CPU, RAM and disk, and the close line of the last answer of
 its session (picker.get_close_lines), else the first line of the result.md of a bundle. A click on a column header sorts the rows by that column: by mark in the order of the picker, by
 kind in its order, by time, by number, or by text. CPU and RAM are those of the container of a
@@ -112,10 +113,11 @@ sessions = {}
 def get_info(row, close):
     """The state of the agent of a row and since when, from the .agent/ files of its bundle, the
     close line of its last answer, else the first line of its result.md, and that since as a time,
-    0 when none. An ops row has its window as key, and no such files."""
+    0 when none. An ops row has its window as key, and no such files. A window whose claude ended
+    and that waits for Enter has the error it shows as state."""
     shown = [] if row.minimized else ["shown"]
     if row.key == row.window:
-        return ", ".join(shown), close, 0.0
+        return ", ".join(filter(None, [row.ended, *shown])), close, 0.0
     folder = get_agent_folder(row.key)
     now = time.time()
     if (since := get_mtime(folder / "done")) is not None:
@@ -128,7 +130,7 @@ def get_info(row, close):
     else:
         state = "starting"
     answer = close or (read_text(folder / "result.md") or "").partition("\n")[0]
-    return ", ".join([state, *shown]), answer, since or 0.0
+    return ", ".join([row.ended or state, *shown]), answer, since or 0.0
 
 
 def read_agents():

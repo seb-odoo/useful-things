@@ -59,6 +59,7 @@ AGENTS = [
      "done 2 min ago", "Waiting for you: r+ on odoo#5"),
 ]
 CLOSES = {"closed": "Waiting for you: r+ on odoo#5"}
+ENDED = "claude ended with code 137"
 OPS_INFOS = [
     (True, "", ("", "", 0.0)),
     (False, "", ("shown", "", 0.0)),
@@ -319,6 +320,12 @@ def main():
             since = time.time() - ages[0] if ages else 0.0
             if found[:2] != (state, answer) or abs(found[2] - since) > 5:
                 failures.append(f"{name}: {found!r}, expected {(state, answer, since)!r}")
+        row = agent_list.picker.Row(None, 0, "running", "running", "0x01", True, ENDED)
+        if (found := agent_list.get_info(row, "")[0]) != ENDED:
+            failures.append(f"bundle whose claude ended on an error: {found!r}")
+    row = agent_list.picker.Row(None, 0, "🔧 Refactor (ops)", "0x0b", "0x0b", False, ENDED)
+    if (found := agent_list.get_info(row, "")[0]) != f"{ENDED}, shown":
+        failures.append(f"ops row whose claude ended on an error: {found!r}")
     for minimized, close, expected in OPS_INFOS:
         row = agent_list.picker.Row(None, None, "🔧 Refactor (ops)", "0x0b", "0x0b", minimized)
         if (found := agent_list.get_info(row, close)) != expected:
@@ -342,7 +349,7 @@ def main():
     for line in failures:
         print(line)
     cases = len(AGENTS) + len(OPS_INFOS) + 4 + 1 + len(FACETS) + len(FILTERED) + 2 + 7 + 3 + 3
-    cases += len(QUEUED_LINES) + 1
+    cases += len(QUEUED_LINES) + 1 + 2
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

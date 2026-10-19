@@ -70,6 +70,13 @@ WAITING_ROWS = [
     REVIEW,
 ]
 OPENING = [f"🔄 {row}" if row == REVIEW else row for row in ROWS]
+DEAD = [
+    ROWS[0].replace("❌ failed 0", "❌ failed 1"),
+    *ROWS[1:4],
+    "❌ ⭐ master-e--seb (mine)\0info\x1fmaster-e--seb\x1fmeta\x1ffailed",
+    *[row for row in ROWS[4:] if "master-e--seb" not in row],
+]
+WAIT = 'printf "\\033]0;%s\\007\\n%s\\nPress Enter to close.\\n" "$0" "$0"; read -r _'
 ENDED = [
     ROWS[0].replace("✋ waiting 2", "✋ waiting 1"),
     *ROWS[1:6],
@@ -244,7 +251,9 @@ def main():
         (folder / "windows").write_text(WINDOWS)
         for session, answer, bundle in ANSWERS:
             write_answer(folder, session, answer, bundle)
-        write_fake(folder, "wmctrl", f'[ "$1" = -l ] && cat {folder}/windows || echo wmctrl "$@" >> {log}')
+        (folder / "pids").write_text("")
+        listed = f'{{ [ "$2" = -p ] && cat {folder}/pids || cat {folder}/windows; }}'
+        write_fake(folder, "wmctrl", f'[ "$1" = -l ] && {listed} || echo wmctrl "$@" >> {log}')
         write_fake(folder, "xdg-open", f'echo xdg-open "$@" >> {log}; echo code --folder-uri x')
         write_fake(folder, "rofi", f'for arg in "$@"; do echo "[$arg]"; done > {folder}/rofi.log')
         (folder / "shown").write_text("")
@@ -260,6 +269,19 @@ def main():
         counts = run(folder, "--counts").splitlines()
         if counts != ["✋ 2", COUNTS]:
             failures.append(f"counts {counts!r}, expected {['✋ 2', COUNTS]!r}")
+        (folder / "pids").write_text(f"0x09 0 {os.getpid()} box ⭐ master-e--seb (mine)\n")
+        ending = "master-e--seb: claude ended with code 137"
+        dead = subprocess.Popen(["sh", "-c", WAIT, ending], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL)
+        try:
+            rows = run(folder).splitlines()
+            counts = run(folder, "--counts").splitlines()
+        finally:
+            dead.kill()
+            dead.wait()
+        if rows != DEAD:
+            failures.append(f"rows once a claude ended on an error {rows!r}, expected {DEAD!r}")
+        if counts[:1] != ["❌ 1"]:
+            failures.append(f"counts once a claude ended on an error {counts!r}, expected ❌ 1")
         (folder / "windows").write_text(WINDOWS.replace("⭐ master-e", "🚀 ⭐ master-e"))
         counts = run(folder, "--counts").splitlines()
         if counts[:1] != ["✋ 2"]:
@@ -337,7 +359,7 @@ def main():
         failures.append(f"pick 1 new-ops: started {started!r}, expected {[new_ops]!r}")
     for line in failures:
         print(line)
-    cases = 18 + len(PICKS) + len(CLOSE_LINES)
+    cases = 20 + len(PICKS) + len(CLOSE_LINES)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

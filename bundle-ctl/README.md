@@ -375,7 +375,10 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   task bar. Nor has a bundle or an ops agent whose terminal is not minimized (Seb, 2026-10-14): it
   is in the task bar too, and the applet does not count it. A
   terminal keeps its last mark once its claude ends, so a ✅, ✋ or ⏳ shows only while an
-  `agent-terminal.py BUNDLE` process runs. After the title, a row shows the close line of the last
+  `agent-terminal.py BUNDLE` process runs. A claude that ends on an error leaves its window on
+  that error until Enter (`keep_open` in `agent-terminal.py`): the row then shows ❌ in place of
+  the mark of the title (Seb, 2026-10-19: such ops windows looked like agents at rest). The picker
+  finds the `sh` that waits in the pane, a child of the terminator of the window. After the title, a row shows the close line of the last
   answer of its session (Seb, 2026-10-16: he had asked "status?" 99 times and "can I close?" 147
   times), `Waiting for you: hok g12 for the 19.0 hop` say, cut by rofi to the width of its window:
   the session in `.agent/session` for a bundle, the one in the name of an ops window. The window
@@ -396,7 +399,9 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   ask: "all of them"): the mark in the order of the picker, which a first start shows, the kind
   in its order, the times and the sizes as numbers. A bundle row also has the
   state of its agent and since when, from its `.agent/` files (`done 12 min ago`, `waiting for 5
-  min`, `running for 3 min`, then `shown` when its terminal is not minimized). Each row has the
+  min`, `running for 3 min`, then `shown` when its terminal is not minimized). A row whose claude
+  ended on an error, a bundle or an ops one, has that error there: `claude ended with code 137`.
+  Each row has the
   close line of the picker in its last column, read again only when the transcript changed; a
   bundle row with none has the first line of its `result.md`. Each row has its CPU and RAM (Seb,
   2026-10-15), read every 5 seconds: those of the container of a bundle, from its

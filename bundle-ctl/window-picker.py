@@ -20,7 +20,9 @@ with the bundle or the window id in ROFI_INFO. A bundle has one row, from the ti
 has a bundle or an ops agent whose terminal is not minimized: it is in the task bar. After the
 title, a row shows the close line of the last answer of its session, `Nothing left` or `Waiting
 for you` (Seb, 2026-10-16), which rofi cuts to the width of its window. The terminal
-keeps its last mark once its claude ends, so a ✅, ✋ or ⏳ shows only while that claude runs. Each
+keeps its last mark once its claude ends, so a ✅, ✋ or ⏳ shows only while that claude runs. A
+claude that ends on an error leaves its window on that error until Enter: its row then shows ❌
+in place of its mark (Seb, 2026-10-19), and the agent list that error. Each
 mark gets a word that the search matches but the row does not show, as the emoji are hard to type;
 the kind is already in words. The line above the rows counts the bundles of each mark. --counts
 prints the mark that needs Seb most with its count (PRIORITY), or 🪟 when no bundle has a mark,
@@ -67,7 +69,8 @@ OPENING = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "bundle-ct
 OPENING_TIME = 300
 PRIORITY = (FAILED, "✋", "✅", "🚀", "⏳")
 QUIET = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
-Row = collections.namedtuple("Row", "place rank title key window minimized")
+Row = collections.namedtuple("Row", "place rank title key window minimized ended", defaults=[""])
+WAIT = b"Press Enter to close."
 XCB_ATOM_ATOM = 4
 
 close_by_session = {}
@@ -132,13 +135,23 @@ def get_agent_bundles():
     """The bundles whose claude runs in a terminal: agent-terminal.py BUNDLE ends with it. The
     agent-terminator.py of the window holds the same words as COMMAND for as long as the window
     lives. The command lines are read as bytes and most are left at once: a thousand processes
-    read as text took 70 ms, every 2 seconds."""
-    bundles = set()
+    read as text took 70 ms, every 2 seconds.
+
+    Also the end each agent window shows once its claude ended, by the pid of its terminator: the
+    keep_open of agent-terminal.py then runs `sh -c WAIT ENDING` in the pane, until Enter."""
+    bundles, ended = set(), {}
     for pid in os.listdir("/proc"):
         try:
             with open(f"/proc/{pid}/cmdline", "rb") as file:
                 data = file.read()
         except OSError:
+            continue
+        if data.startswith(b"sh\0-c\0") and WAIT in data:
+            try:
+                stat = pathlib.Path(f"/proc/{pid}/stat").read_text()
+            except OSError:
+                continue
+            ended[stat.rpartition(")")[2].split()[1]] = data.decode(errors="replace").split("\0")[3]
             continue
         if b"agent-terminal.py" not in data:
             continue
@@ -146,7 +159,7 @@ def get_agent_bundles():
         scripts = [at for at, arg in enumerate(args) if arg.endswith("agent-terminal.py")]
         if scripts and not any(arg.endswith("agent-terminator.py") for arg in args):
             bundles.add(args[scripts[0] + 1])
-    return bundles
+    return bundles, ended
 
 
 def get_loading(name):
@@ -248,19 +261,28 @@ def get_rows(windows, shown=False):
     for name in [name for name, bundle in bundles.items() if "code" in bundle]:
         (OPENING / name).unlink(missing_ok=True)
         del bundles[name]
-    agents = get_agent_bundles()
+    agents, ended = get_agent_bundles()
+    pids = read_window_pids() if ended else {}
     hidden = get_hidden([bundle["terminal"] for bundle in bundles.values()] + [w for _, w in ops])
     rows = []
     for name, bundle in bundles.items():
         title, window = bundle["title"], bundle["terminal"]
         if title.startswith(LIVE) and name not in agents:
             title = title.split(" ", 1)[1]
-        place, rank = get_place(title), get_rank(title)
-        rows.append(Row(place, rank, get_loading(name) + title, name, window, window in hidden))
+        ending = ended.get(pids.get(window))
+        rows.append(get_row(title, name, window, window in hidden, ending, get_loading(name)))
     for title, window in ops:
-        place, rank = get_place(title), get_rank(title)
-        rows.append(Row(place, rank, title, window, window, window in hidden))
+        rows.append(get_row(title, window, window, window in hidden, ended.get(pids.get(window))))
     return sorted(row for row in rows if shown or row.minimized)
+
+
+def get_row(title, key, window, minimized, ending=None, loading=""):
+    """The row of a window. One whose claude ended and that waits for Enter is failed, and keeps
+    the end it shows without the name before it."""
+    if ending:
+        title = f"{FAILED} {title.split(' ', 1)[1] if get_rank(title) < len(MARKS) else title}"
+    ended = ending.partition(": ")[2] if ending else ""
+    return Row(get_place(title), get_rank(title), loading + title, key, window, minimized, ended)
 
 
 def get_counts(rows):
