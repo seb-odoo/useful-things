@@ -637,11 +637,67 @@ def check_reviews(root):
     return [name for name, passed in checks if not passed], len(checks)
 
 
+def check_parked(root):
+    """A review bundle whose session waits paused in the queue loses its checkout once its
+    container stopped, and its task gets the script that fetches it again; a bare one stays, and
+    a refused deletion leaves the task as it was."""
+    closed = time.time() - 20 * 60
+    calls, queue, world_closed = [], [], {}
+    bundles = ("master-bare-aku", "master-parked-aku", "master-refused-aku")
+    for bundle in bundles:
+        folder = root / "master" / bundle
+        (folder / ".agent").mkdir(parents=True)
+        (folder / ".agent" / "session").write_text(f"{bundle}-session\n")
+        paths = [folder / ".agent" / "session"]
+        if bundle != "master-bare-aku":
+            paths.append(folder / daemon.MADE)
+            paths[-1].touch()
+        for path in paths:
+            os.utime(path, (closed - 60, closed - 60))
+        world_closed[str(folder)] = closed
+        queue.append({"bundle": bundle, "paused": True, "resume": True, "task": daemon.GO_ON})
+
+    def run_script(log, script, *args):
+        calls.append(args[-1])
+        if args[-1] == "master-refused-aku":
+            raise daemon.Refused("delete_bundle.py exited with 1")
+        shutil.rmtree(root / "master" / args[-1])
+
+    daemon.CLAUDE_CONFIG_CONTAINER = str(root / "claude-config")
+    daemon.get_agent_folder = lambda bundle: root / "master" / bundle / ".agent"
+    daemon.get_closed_windows = lambda: dict(world_closed)
+    daemon.get_open_windows = set
+    daemon.get_repos = list
+    daemon.get_worktree_bundle_folder = lambda bundle: str(root / "master" / bundle)
+    daemon.get_worktree_container_folder = lambda: str(root)
+    daemon.local_branches = lambda bundle: []
+    daemon.read_state = lambda: {"building": [], "queue": queue}
+    daemon.run_script = run_script
+    daemon.write_state = lambda state: None
+    daemon.drop_idle_reviews()
+    wait_jobs()
+    items = {item["bundle"]: item for item in queue}
+    checks = [
+        ("a made bundle parked in the queue goes, not a bare one", sorted(calls) == list(bundles[1:])),
+        (
+            "its task keeps the session and fetches the bundle again",
+            (items["master-parked-aku"].get("build"), items["master-parked-aku"].get("session"))
+            == (["fetch_bundle.py", "master-parked-aku", "--no-open"], "master-parked-aku-session"),
+        ),
+        ("a refused deletion leaves the task to its bundle", "build" not in items["master-refused-aku"]),
+        ("the bare one keeps its folder", (root / "master" / "master-bare-aku" / ".agent").is_dir()),
+    ]
+    return [name for name, passed in checks if not passed], len(checks)
+
+
 def main():
     with tempfile.TemporaryDirectory() as root:
         failures, total = check(pathlib.Path(root))
     with tempfile.TemporaryDirectory() as root:
         more, count = check_reviews(pathlib.Path(root))
+        failures, total = failures + more, total + count
+    with tempfile.TemporaryDirectory() as root:
+        more, count = check_parked(pathlib.Path(root))
         failures, total = failures + more, total + count
     for name in failures:
         print(f"failed: {name}")

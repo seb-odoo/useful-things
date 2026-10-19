@@ -173,6 +173,15 @@ head of a PR its author rebased since) and commits whose change the base has go 
 unless a file is not committed. `bctl fetch` brings a bundle back.
 `python3 test_delete.py` has the cases.
 
+A task that is the session of its agent waiting for a manual resume or for its time (`bctl
+requeue`, Pause in the agent list, `bctl open --resume` with `--paused` or `--after`) does not keep
+such a bundle: its checkout goes the same way, and the task keeps its session and `fetch_bundle.py
+BUNDLE --no-open` as its build (Seb, 2026-10-19: close the review agents that wait for him, "in a
+way where they free their disk"). When it leaves the queue, the agent goes on with that session in
+a bare folder (see Bare start) and fetches the bundle with `bctl build` if it needs the code. A
+resume waits while the deletion runs. A bare folder with such a task is kept, as its `.agent/`
+holds the session. `python3 test_delete.py` and `python3 test_queue.py` have the cases.
+
 A bare folder (an agent and the links of a bundle, no worktree: its agent never asked `build`) goes
 the same way, whatever its name: the daemon removes the folder. The `tasks` folder where its agent
 wrote the tasks it queued (bundle-ctl skill) keeps it bare.
@@ -411,7 +420,8 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   its claude stops. Back to queue, after a question too, queues the session of each selected
   bundle again (`POST /requeue`, at the lowest priority of the queue, so last), and the daemon
   closes its window once its turn ended, 2 minutes at most: when its turn comes, a new terminal
-  goes on with that session on `Continue from where you left off.`. Pause does the same with
+  goes on with that session, told that its window closed and to check what changed since its last
+  turn (`RESUMED` in `daemon.py`). Pause does the same with
   `paused`: the task waits in the queue until Resume or
   Time there (Seb, 2026-10-16: "move agents from and to the queue easily, or pause them"). A
   right click on a row opens a menu with these five. New ops agent runs `bctl
@@ -640,7 +650,9 @@ time, HH:MM`, and the bundle of a review, queued, is not deleted meanwhile (Seb,
 the review agents that wait for him in the evening, and have them check what came on their PR the
 next morning). `--paused` keeps it there until it is scheduled again: it waits for `a manual
 resume`, before anything else, and its bundle is kept too. That is how agents are parked for a
-reboot: on 2026-10-16 an emptied queue let the daemon delete 12 review bundles. `bctl schedule
+reboot: on 2026-10-16 an emptied queue let the daemon delete 12 review bundles. When the task is
+the session of the agent, a review bundle loses its checkout all the same, and the task keeps what
+brings it back (see Disk). `bctl schedule
 BUNDLE spot|manual|HH:MM` changes when a queued task may start: once a slot is free, once
 scheduled again, or at that time; a forced task no longer goes over the cap. `bctl force-queue
 BUNDLE` starts it at once, its time or its pause aside; a force of the whole queue leaves both.
@@ -682,14 +694,16 @@ minute of its verdict. A launched task nothing took (no
 `.agent/session` once the launch is 15 minutes old and no container is up) goes back at the head
 of the queue, 3 times at most: a terminal asked for while the desktop session ends never starts.
 A task queued behind it meanwhile replaces it, as it replaces a stopped agent.
-A queued task whose bundle folder is gone is dropped, and so is one its agent already runs (a pass
+A queued task whose bundle folder is gone is dropped, unless it holds the script that makes the
+bundle, and so is one its agent already runs (a pass
 that dies after a launch saves no state): `python3 test_queue.py` runs a pass on each case, and
 real clients that read and force the queue.
 A new task moves the previous
 `.agent/` files of the bundle into `.agent/history/`, unless it is the same task relaunched before
 any run started. `bctl open BUNDLE --resume` leaves `session` in place: the terminal goes on with
 that session (`agent-run.sh` resumes a session that has a transcript), and the task is its next
-prompt, `Continue from where you left off.` when none is given. This is how an agent cut before its
+prompt. When none is given, `Continue from where you left off.` and, at the launch, that its window
+closed and what to check since its last turn. This is how an agent cut before its
 verdict (`stopped`) starts again with what it knew. It is refused when the bundle has no session,
 or is open in a window, where the session goes on in its Claude tab.
 Closing the terminal or the window of an agent is Seb's call, and nothing deletes a bundle

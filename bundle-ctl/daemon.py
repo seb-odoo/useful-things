@@ -159,6 +159,13 @@ NOT_BUILT = (
 OPS_OPEN = "ops-window-open"
 OPS_TASK = "The agent of the bundle {bundle} sends this task, and Seb said yes to it in hok:\n\n"
 PAUSE_WAIT = 120
+RESUMED = (
+    f"{GO_ON}\n\nSeb closed your window and queued this session again at {{time}}: what you left"
+    " running in the background (a PR watch, a server, a test) stopped with it. Before anything"
+    " else, read again the skill files your task named, as they may have changed, and check what"
+    " changed since your last turn where your work depends on it (a PR: its threads, its head, its"
+    " CI; its base), as they say for a resume."
+)
 REVIEW_CHECK = 60
 REVIEW_CLOSED = 60 * float(
     os.environ.get("BUNDLE_CTL_REVIEW_CLOSED_MINUTES")
@@ -976,6 +983,21 @@ def get_starting(launches, open_windows, now):
     return None
 
 
+def get_resumed(item):
+    """The prompt of a task: a session queued again with no prompt of its own learns that its
+    window closed meanwhile, with what it ran in the background."""
+    if item.get("resume") and item["task"] == GO_ON:
+        return RESUMED.format(time=format_time(item["queued"]))
+    return item["task"]
+
+
+def is_deleting(bundle):
+    return any(
+        job["verb"] == f"delete {bundle}" and job["state"] in ("waiting", "running")
+        for job in jobs.values()
+    )
+
+
 def write_task(item):
     folder = get_agent_folder(item["bundle"])
     if folder.exists() and (
@@ -1072,6 +1094,8 @@ def launch_queued():
             in_terminal = (folder / "terminal").exists() and (container or is_held(folder))
             if item.get("paused"):
                 item["waits_for"] = "a manual resume"
+            elif is_deleting(bundle):
+                item["waits_for"] = "the deletion of its checkout"
             elif is_busy(bundle, is_running or bundle in state["launches"]):
                 item["waits_for"] = "its agent to end" + (
                     ", then its terminal to close" if in_terminal else ""
@@ -1083,6 +1107,7 @@ def launch_queued():
                 item["waits_for"] = "its terminal to close"
             elif container and has_window(container):
                 # The claude-autoopen extension of the window starts it.
+                item["task"] = get_resumed(item)
                 write_task(item)
                 continue
             elif (item.get("after") or 0) > now:
@@ -1091,6 +1116,7 @@ def launch_queued():
                 item["waits_for"] = f"the agent of {starting} to start"
                 paced = True
             elif can_start:
+                item["task"] = get_resumed(item)
                 if item.get("build"):
                     prepare_folder(bundle)
                     state.setdefault("builds", {})[bundle] = item.pop("build")
@@ -1756,6 +1782,32 @@ def is_bare(folder):
     )
 
 
+def is_parked(item):
+    """Whether a queued task is the session of a bundle's agent that waits for Seb's resume or for
+    a time of the day: its checkout may go meanwhile."""
+    return bool(item.get("resume")) and bool(
+        item.get("paused") or (item.get("after") or 0) > time.time(),
+    )
+
+
+def set_rebuild(bundle, session):
+    """Let the parked session of a bundle go on bare once its checkout is deleted, and fetch it
+    again when its agent asks: False when it is no longer parked. With no session, take that back,
+    as the bundle is kept."""
+    with state_lock:
+        state = read_state()
+        item = next((item for item in state["queue"] if item["bundle"] == bundle), None)
+        if item and session and is_parked(item):
+            item["build"] = ["fetch_bundle.py", bundle, "--no-open"]
+            item.setdefault("session", session)
+        elif item and not session:
+            item.pop("build", None)
+        else:
+            return False
+        write_state(state)
+    return True
+
+
 def drop_idle_reviews():
     """Delete the bundles of the PRs of others that nobody used for REVIEW_CLOSED since their
     container stopped, or for REVIEW_IDLE when none ever ran: `bctl fetch` brings one back. One
@@ -1765,7 +1817,9 @@ def drop_idle_reviews():
     closed = get_closed_windows()
     open_windows = get_open_windows()
     state = read_state()
-    busy = {item["bundle"] for item in state.get("queue", [])} | set(state.get("building", []))
+    queue = state.get("queue", [])
+    parked = {item["bundle"] for item in queue if is_parked(item)}
+    busy = ({item["bundle"] for item in queue} - parked) | set(state.get("building", []))
     busy |= {
         job["verb"].removeprefix("delete ")
         for job in jobs.values()
@@ -1779,6 +1833,7 @@ def drop_idle_reviews():
             (BUNDLE_SUFFIX in bundle and not bare)
             or bundle in STICKY_BUNDLES
             or bundle in busy
+            or (bare and bundle in parked)
             or not BUNDLE_NAME.fullmatch(bundle)
             or not (bare or is_made(folder))
             or str(folder) in open_windows
@@ -1790,12 +1845,15 @@ def drop_idle_reviews():
         if time.time() - since < idle or kept_reviews.get(bundle) == since:
             continue
 
-        def work(log, bundle=bundle, since=since, bare=bare):
+        def work(log, bundle=bundle, since=since, bare=bare, parked=bundle in parked):
             if (
                 get_worktree_bundle_folder(bundle) in get_open_windows()
                 or get_unused_since(bundle, get_closed_windows()) != since
             ):
                 log.write(f"{bundle} was used since {format_time(since)}\n")
+                return {}
+            if parked and not set_rebuild(bundle, read_text(get_agent_folder(bundle) / "session")):
+                log.write(f"{bundle} is kept: its session left the queue\n")
                 return {}
             if bare:
                 if not is_bare(pathlib.Path(get_worktree_bundle_folder(bundle))):
@@ -1814,6 +1872,8 @@ def drop_idle_reviews():
                 run_script(log, "delete_bundle.py", *(["--force"] if force else []), bundle)
             except Refused:
                 kept_reviews[bundle] = since
+                if parked:
+                    set_rebuild(bundle, None)
                 raise
 
         print(f"delete {bundle}: unused since {format_time(since)}", flush=True)

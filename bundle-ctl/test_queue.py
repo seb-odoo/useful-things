@@ -712,6 +712,31 @@ def check_build(root):
     return [f"build: {name}" for name, passed in checks if not passed], len(checks)
 
 
+def check_parked(root):
+    """A parked session whose checkout went starts bare on that session, told that its window
+    closed, and a resume waits while the checkout of its bundle is deleted."""
+    state, launched = prepare(root, {"deleting": GONE, "parked": GONE}, 8)
+    for item in state["queue"]:
+        item["build"] = ["fetch_bundle.py", item["bundle"], "--no-open"]
+        item.update(resume=True, session=f"{item['bundle']}-session", task=daemon.GO_ON)
+    daemon.prepare_folder = lambda bundle: os.makedirs(daemon.get_worktree_bundle_folder(bundle))
+    daemon.jobs["deleting"] = {"state": "running", "verb": "delete deleting"}
+    try:
+        daemon.launch_queued()
+    finally:
+        daemon.jobs.pop("deleting")
+    agent = root / "master" / "parked" / ".agent"
+    told = f"{daemon.NOT_BUILT}\n\n{daemon.RESUMED.format(time=daemon.format_time(QUEUED))}"
+    waits = [(item["bundle"], item["waits_for"]) for item in state["queue"]]
+    checks = [
+        ("the parked session starts", launched == ["parked"]),
+        ("on its own session", daemon.read_text(agent / "session") == "parked-session"),
+        ("told it is bare and its window closed", daemon.read_text(agent / "task.md") == told),
+        ("a resume waits for its checkout to go", waits == [("deleting", "the deletion of its checkout")]),
+    ]
+    return [f"parked: {name}" for name, passed in checks if not passed], len(checks)
+
+
 def check_ramp(root):
     """Only an agent that began its run in the last AGENT_RAMP seconds and gave no verdict counts
     for the memory it takes soon.
@@ -748,6 +773,7 @@ def main():
         check_pause,
         check_requeue,
         check_build,
+        check_parked,
         check_priority,
         check_ramp,
     ):
