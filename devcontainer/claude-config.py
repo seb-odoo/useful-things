@@ -13,8 +13,10 @@ where the Claude tab keeps the permission mode of each session: in the container
 it and the tab resumes in plan. So is .claude.json, the state of Claude, where an MCP server is
 kept: one file for every container would carry a server added in one into the others. It starts
 as a copy of the host's, with the workspace (/workspace unless given) marked trusted, or
-`claude -p` ignores the permissions of the bundle's .claude, and the onboarding marked done, or
-the interactive claude of an agent terminal stops on its theme picker.
+`claude -p` ignores the permissions of the bundle's .claude, its imports from outside allowed, or
+an agent stops on the question for the runbot-fix-agents CLAUDE.md that the bundle CLAUDE.md
+imports, and the onboarding marked done, or the interactive claude of an agent terminal stops on
+its theme picker.
 
 What a session takes as orders is mounted read-only in a bundle (see README.md), so what a tab has
 to write gets a file of the bundle: settings.json, a copy of the host's where a model picked in a
@@ -135,6 +137,8 @@ def main():
     folder = sys.argv[2] if len(sys.argv) > 2 else "/workspace"
     workspace = state.setdefault("projects", {}).setdefault(folder, {})
     workspace["hasTrustDialogAccepted"] = True
+    workspace["hasClaudeMdExternalIncludesApproved"] = True
+    workspace["hasClaudeMdExternalIncludesWarningShown"] = True
     state["hasCompletedOnboarding"] = True
     # In place: the file is bound into a running container, and a rename would leave it behind.
     state_path.write_text(json.dumps(state, indent=2) + "\n")
