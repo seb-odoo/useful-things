@@ -23,7 +23,12 @@ claude stops. Back to queue queues the session of each selected bundle again, at
 queue (the lowest priority there), and the daemon closes its window once its turn ended, 2 minutes
 at most (bctl requeue): the queue starts it again with "Continue from where you left off." when its
 turn comes. Pause does the same, and the task waits in the queue for a manual resume. A right
-click on a row opens a menu with these five. New ops agent runs bctl open ops --terminal. Under
+click on a row opens a menu with these five. New ops agent runs bctl open ops --terminal.
+
+A task of the queue has the mark and the kind of its bundle: those of its row when it has one, else
+those its window would show once the session it goes on with is idle. Its last message is its own
+text, or the last prompt of that session for a session queued again as it was, and its last answer
+the close line of the last answer of that session, else its first line. Under
 the queue, Force lets each selected task start over the cap, Up and Down move the first selected
 task one place, Pause makes each selected task wait for a manual resume, Resume for a slot, and
 Time for a time of the day it asks (bctl schedule). A second start brings the open window up. The
@@ -59,6 +64,7 @@ from commands import get_worktree_bundle_folder  # noqa: E402
 
 AGENTS_CHECK = 2
 APPEARANCE = ("org.freedesktop.appearance", "color-scheme")
+BUNDLE = 2
 COLUMNS = ("State", "Type", "Agent", "Since", "CPU", "RAM", "Disk", "Last answer")
 CONTAINERS = pathlib.Path(
     f"/sys/fs/cgroup/user.slice/user-{os.getuid()}.slice/user@{os.getuid()}.service/user.slice"
@@ -66,6 +72,7 @@ CONTAINERS = pathlib.Path(
 DISK_AGE = 600
 DISK_CHECK = 60
 KEY, WINDOW, TITLE = 8, 9, 10
+NOT_BUILT = "Nothing of this bundle is checked out yet"
 SORTS = (11, 12, 2, 13, 14, 15, 16, 7)
 PLACE = (
     pathlib.Path(os.environ.get("XDG_STATE_HOME") or pathlib.Path.home() / ".local/state")
@@ -73,6 +80,16 @@ PLACE = (
     / "agent-list.json"
 )
 QUEUE_CHECK = 10
+QUEUE_COLUMNS = (
+    "State",
+    "Type",
+    "Queued",
+    "Priority",
+    "Since",
+    "Waits for",
+    "Last message",
+    "Last answer",
+)
 SCOPE = re.compile(r"libpod-([0-9a-f]{64})\.scope")
 USAGE_CHECK = 5
 
@@ -88,6 +105,8 @@ bctl = load("bctl", HERE / "client" / "bctl.py")
 picker = load("picker", HERE / "window-picker.py")
 runs = load("runs", HERE / "runs.py")
 ICONS = {kind: icon for icon, kind, _ in load("title", HERE / "client" / "window-title.py").KINDS}
+
+sessions = {}
 
 
 def get_info(row, close):
@@ -121,6 +140,15 @@ def read_agents():
 def get_kind(row):
     order = picker.get_order(row.title)
     return picker.KINDS[order] if order < len(picker.KINDS) else None
+
+
+def get_mark_and_kind(row):
+    """The State and Type columns of a row."""
+    kind = get_kind(row)
+    return [
+        " ".join(picker.MARKS[row.rank]) if row.rank < len(picker.MARKS) else "",
+        f"{ICONS[kind]} {kind}" if kind else "",
+    ]
 
 
 def get_name(row):
@@ -292,28 +320,101 @@ def ask(method, path, body=None):
     return answer
 
 
+def get_last_prompt(path):
+    """The last prompt someone wrote in a transcript, a resume of the daemon aside, on one line and
+    without the note of a bundle not built yet."""
+    prompt = ""
+    with path.open("rb") as file:
+        for line in file:
+            if b'"type":"user"' not in line:
+                continue
+            try:
+                entry = json.loads(line)
+                content = entry["message"]["content"]
+                if isinstance(content, list):
+                    content = "\n".join(part["text"] for part in content if part["type"] == "text")
+                origin = (entry.get("origin") or {}).get("kind", "human")
+            except (KeyError, TypeError, ValueError):
+                continue
+            text = content.strip()
+            if entry.get("isMeta") or origin != "human" or not text:
+                continue
+            if text.startswith((bctl.GO_ON, "<", "[Request interrupted")):
+                continue
+            if text.startswith(NOT_BUILT):
+                text = text.partition("\n\n")[2]
+            prompt = " ".join(text.split())
+    return prompt
+
+
+def read_session(bundle, session):
+    """The title the window of a bundle shows once its session is idle, the last prompt of that
+    session, and the close line of its last answer, else its first line. Read again only once
+    the transcript changed, as the queue is read every 10 seconds."""
+    title = picker.load_title()
+    path = session and title.get_transcript(session)
+    try:
+        stat = path.stat()
+    except (AttributeError, OSError):
+        return title.get_title(bundle), "", ""
+    stamp = (stat.st_mtime_ns, stat.st_size)
+    if sessions.get(session, (None,))[0] != stamp:
+        last = title.get_last_answer(session)
+        first = next((line.strip() for line in last.splitlines() if line.strip()), "")
+        found = (
+            title.get_title(bundle, {session: "idle"}),
+            get_last_prompt(path),
+            title.get_close_line(last) or first,
+        )
+        sessions[session] = (stamp, found)
+    return sessions[session][1]
+
+
 def read_queue():
-    """The answer of GET /queue, None when the daemon does not answer."""
+    """The answer of GET /queue, None when the daemon does not answer. Each task gets the title,
+    the last message and the last answer of the session it goes on with: the one it names, else
+    the one of its bundle when it resumes it. A new task has its own text as last message."""
     answer = ask("GET", "/queue")
-    return None if "error" in answer else answer
+    if "error" in answer:
+        return None
+    for item in answer["queue"]:
+        session = item.get("session") or (
+            item.get("resume") and read_text(get_agent_folder(item["bundle"]) / "session")
+        )
+        title, prompt, last = read_session(item["bundle"], session)
+        task = item.get("task") or ""
+        message = prompt if task == bctl.GO_ON else " ".join(task.split())
+        item.update(title=title, message=message, answer=last)
+    return answer
 
 
-def describe_queue(answer):
+def describe_queue(answer, rows=()):
+    """The head and the lines of the queue. A task whose bundle has a row takes its mark and kind
+    from it, else from the title read with the queue."""
     if answer is None:
         return "bundle-ctl does not answer", []
     head = f"{answer['agents']}/{answer['max_agents']} agents at work in a terminal"
     head += f", {len(answer['queue'])} queued"
     if answer["memory"]["short"]:
         head += f"; {bctl.format_memory(answer['memory'])}"
-    lines = [
-        [
-            item["bundle"],
-            str(item["priority"]),
-            item.get("queued") or "",
-            ", ".join(filter(None, [item.get("waits_for"), item.get("forced") and "over the cap"])),
-        ]
-        for item in answer["queue"]
-    ]
+    found = {row.key: row for row in rows}
+    lines = []
+    for item in answer["queue"]:
+        title = item.get("title") or ""
+        row = found.get(item["bundle"])
+        row = row or picker.Row(None, picker.get_rank(title), title, item["bundle"], None, True)
+        waits_for = [item.get("waits_for"), item.get("forced") and "over the cap"]
+        lines.append(
+            [
+                *get_mark_and_kind(row),
+                item["bundle"],
+                str(item["priority"]),
+                item.get("queued") or "",
+                ", ".join(filter(None, waits_for)),
+                item.get("message") or "",
+                item.get("answer") or "",
+            ],
+        )
     return head, lines
 
 
@@ -362,14 +463,15 @@ def follow(seconds, read, show):
 
 def make_view(model, titles, expand, sorts=()):
     """A view of model with a column per title, each sorted on a click by the model column of the
-    same place in sorts, when given."""
+    same place in sorts, when given. The columns from expand on share the width left, and their
+    text is cut to it."""
     view = Gtk.TreeView(model=model)
     for at, title in enumerate(titles):
         cell = Gtk.CellRendererText()
-        if at == expand:
+        if at >= expand:
             cell.props.ellipsize = Pango.EllipsizeMode.END
         column = Gtk.TreeViewColumn(title, cell, text=at)
-        column.set_expand(at == expand)
+        column.set_expand(at >= expand)
         column.set_resizable(True)
         if sorts:
             column.set_sort_column_id(sorts[at])
@@ -460,9 +562,8 @@ class AgentList(Gtk.Application):
         self.agents_view.connect("button-press-event", self.open_menu)
         self.agents_view.connect("row-activated", self.bring_up)
         self.queue_head = Gtk.Label(xalign=0)
-        self.queue = Gtk.ListStore(str, str, str, str)
-        titles = ("Queued", "Priority", "Since", "Waits for")
-        self.queue_view, queue = make_view(self.queue, titles, 3)
+        self.queue = Gtk.ListStore(*[str] * len(QUEUE_COLUMNS))
+        self.queue_view, queue = make_view(self.queue, QUEUE_COLUMNS, 6)
         self.queue_view.get_selection().set_mode(Gtk.SelectionMode.MULTIPLE)
         queue.set_min_content_height(100)
         queue_buttons = Gtk.Box(spacing=6)
@@ -547,10 +648,8 @@ class AgentList(Gtk.Application):
         state, answer, since = info
         cpu, ram = self.usage.get(row.key, (None, None))
         disk = self.disks.get(row.key)
-        kind = get_kind(row)
         return [
-            " ".join(picker.MARKS[row.rank]) if row.rank < len(picker.MARKS) else "",
-            f"{ICONS[kind]} {kind}" if kind else "",
+            *get_mark_and_kind(row),
             get_name(row),
             state,
             "" if cpu is None else f"{cpu:.0f}%",
@@ -587,19 +686,19 @@ class AgentList(Gtk.Application):
 
     def show_queue(self, answer):
         self.queue_answer = answer
-        head, lines = describe_queue(answer)
+        head, lines = describe_queue(answer, [row for row, _info in self.agents_read])
         self.queue_head.set_text(head)
         selection = self.queue_view.get_selection()
         bundles = set(self.get_queued())
         fill(self.queue, lines)
         selection.unselect_all()
         for row in self.queue:
-            if row[0] in bundles:
+            if row[BUNDLE] in bundles:
                 selection.select_iter(row.iter)
 
     def get_queued(self):
         model, paths = self.queue_view.get_selection().get_selected_rows()
-        return [model[path][0] for path in paths]
+        return [model[path][BUNDLE] for path in paths]
 
     def send(self, path, body):
         """Ask the daemon, say its error if it gives one, and read the queue again."""
@@ -628,7 +727,7 @@ class AgentList(Gtk.Application):
         """Move the first selected task one place up or down the queue."""
         model, paths = self.queue_view.get_selection().get_selected_rows()
         if paths and 1 <= (place := paths[0].get_indices()[0] + 1 + step) <= len(model):
-            self.send("/move", {"bundle": model[paths[0]][0], "place": place})
+            self.send("/move", {"bundle": model[paths[0]][BUNDLE], "place": place})
 
     def schedule(self, when):
         for bundle in self.get_queued():

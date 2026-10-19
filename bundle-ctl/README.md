@@ -39,7 +39,7 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window; with a task, only its queue entry, as for `create`; refused when the bundle is here, a branch has unpushed commits or, with no task, the disk is short |
 | `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle, but for `resume` or `terminal` in a bare folder, whose session knows how to build it. On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window, and from a bundle a task alone, held as `bN` for Seb's yes in `hok`; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents). With `cut` and `resume` and no bundle, the resume of every cut session, held as `bN` for one yes of Seb (see Cut sessions) |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
-| `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, and the memory left on the host, `short` when a start would add to a host that already lacks it |
+| `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, its text, whether it resumes the session of its bundle and the session it names, and the memory left on the host, `short` when a start would add to a host that already lacks it |
 | `POST /force-queue` | the tasks queued now may start over the cap, those that wait for their time (`--after`) or for a manual resume (`--paused`) aside, or with `bundle` the task of that bundle, its time and its pause too; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
 | `POST /move` | the queued task of `bundle` put at `place` (from 1), where it keeps its priority when that priority fits between the tasks around it, else takes the nearest of theirs; then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
 | `POST /requeue` | the session of the agent of `bundle` queued again, last, paused with `paused`, and its agent window closed once its turn ended, 2 minutes at most: meanwhile `client/run-hook.py` refuses its Bash calls, on a reason that tells it to end its turn, and a turn still running at the end goes on told it was cut (see Cut sessions). The host or the ops container asks |
@@ -408,7 +408,12 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   pressed, and each kind among the marks pressed (his ask: the counts followed no other filter);
   pressed, they keep the rows of one of the marks pressed and of one of the kinds pressed. Under
   the rows, behind a handle, the queue of `bctl queue`, read every 10 seconds, as `GET /queue`
-  runs `podman ps`, in its order, which no header click changes. Under it, Force lets each
+  runs `podman ps`, in its order, which no header click changes. A task there has the mark and
+  the kind of its bundle (Seb, 2026-10-19), those of its row when it has one, else those its
+  window would show once the session it goes on with is idle; its last message, its own text or,
+  for a session queued again as it was, the last prompt of that session; and its last answer,
+  the close line of the last answer of that session, else its first line. A new task has no
+  session yet, so no answer. Under it, Force lets each
   selected task start over the cap (`POST /force-queue` with its bundle), Up and Down move the
   first selected task one place (`POST /move`), and Pause, Resume and Time set when each selected
   task may start (`POST /schedule`): once resumed, once a slot is free, or at the time of the day

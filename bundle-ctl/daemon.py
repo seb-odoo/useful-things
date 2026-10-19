@@ -393,6 +393,9 @@ def describe_queue(state):
             priority=item.get("priority", 0),
             built=not item.get("build"),
             queued=item.get("queued") and format_time(item["queued"]),
+            resume=item.get("resume", False),
+            session=item.get("session"),
+            task=item["task"],
             waits_for=item.get("waits_for"),
         )
         for item in state["queue"]

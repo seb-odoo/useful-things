@@ -72,6 +72,45 @@ PROCESSES = {
     20: (1, 4.0, 3000, ["claude", "--resume", "S2"]),
     30: (1, 1.0, 10, ["podman", "exec", "ops", "claude", "--session-id", "S1"]),
 }
+QUEUED = [
+    {"bundle": "master-r--seb", "resume": True, "task": "Continue from where you left off."},
+    {"bundle": "master-n--seb", "resume": False, "task": "Fix the\n  test"},
+    {"bundle": "master-c-fw--seb", "resume": True, "session": "S8", "task": "Go on with it"},
+]
+QUEUED_LINES = [
+    ["✋ waiting", "⭐ mine", "master-r--seb", "0", "13:00", "a slot", "yes, go on",
+     "Waiting for you: r+ on odoo#7"],
+    ["⏳ running", "⭐ mine", "master-n--seb", "0", "13:00", "a slot", "Fix the test", ""],
+    ["✅ finished", "⏩ fw", "master-c-fw--seb", "0", "13:00", "a slot", "Go on with it",
+     "pushed: abc"],
+]
+TRANSCRIPTS = {
+    "S9": [
+        {"type": "user", "origin": {"kind": "human"}, "message": {"content": (
+            "Nothing of this bundle is checked out yet: /workspace holds no worktree.\n\n"
+            "Rebase on master"
+        )}},
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "Force push?"}]}},
+        {"type": "user", "message": {"content": [{"type": "tool_result", "content": "ok"}]}},
+        {"type": "user", "origin": {"kind": "human"}, "message": {"content": [
+            {"type": "text", "text": "yes, go\n on"},
+        ]}},
+        {"type": "user", "isMeta": True, "message": {"content": "Stop hook feedback: x"}},
+        {"type": "user", "origin": {"kind": "task-notification"}, "message": {"content": "<t>"}},
+        {"type": "user", "message": {"content": "[Request interrupted by user]"}},
+        {"type": "user", "origin": {"kind": "human"}, "message": {"content": (
+            "Continue from where you left off.\n\nSeb closed your window"
+        )}},
+        {"type": "assistant", "message": {"content": [
+            {"type": "text", "text": "Rebased.\n\n**Waiting for you:** r+ on odoo#7"},
+        ]}},
+    ],
+    "S8": [
+        {"type": "assistant", "message": {"content": [
+            {"type": "text", "text": "pushed: abc\n\nmore"},
+        ]}},
+    ],
+}
 TERMINATOR = """\
 import subprocess
 child = subprocess.Popen(["sleep", "30"])
@@ -168,6 +207,36 @@ def check_ask(agent_list):
     return failures
 
 
+def check_queue(agent_list):
+    """The columns of queued tasks: a session queued again as it was, a new task whose bundle has
+    a row, a session named by its task; then the last prompt of a bundle not built yet."""
+    failures = []
+    os.environ["BUNDLE_SUFFIX"] = "--seb"
+    with tempfile.TemporaryDirectory() as root:
+        projects = pathlib.Path(root, "projects")
+        (projects / "-workspace").mkdir(parents=True)
+        for session, entries in TRANSCRIPTS.items():
+            lines = [json.dumps(entry, separators=(",", ":")) for entry in entries]
+            (projects / "-workspace" / f"{session}.jsonl").write_text("\n".join(lines) + "\n")
+        agent_list.picker.load_title().PROJECTS = projects
+        agent_list.get_agent_folder = lambda name: pathlib.Path(root, name, ".agent")
+        pathlib.Path(root, "master-r--seb", ".agent").mkdir(parents=True)
+        pathlib.Path(root, "master-r--seb", ".agent", "session").write_text("S9\n")
+        queue = [dict(item, priority=0, queued="13:00", waits_for="a slot") for item in QUEUED]
+        agent_list.ask = lambda method, path: dict(QUEUE, queue=queue)
+        title = "⏳ ⭐ master-n--seb (mine)"
+        rows = [agent_list.picker.Row(None, 3, title, "master-n--seb", "0x5", True)]
+        lines = agent_list.describe_queue(agent_list.read_queue(), rows)[1]
+        for found, expected in zip(lines, QUEUED_LINES):
+            if found != expected:
+                failures.append(f"queued {found!r}, expected {expected!r}")
+        path = projects / "-workspace" / "S7.jsonl"
+        path.write_text(json.dumps(TRANSCRIPTS["S9"][0], separators=(",", ":")) + "\n")
+        if (found := agent_list.get_last_prompt(path)) != "Rebase on master":
+            failures.append(f"prompt of a bundle not built yet: {found!r}")
+    return failures
+
+
 def check_reads(agent_list):
     """What a cgroup, a process tree and the parent of a terminator read as, on files and
     processes of their own."""
@@ -256,7 +325,7 @@ def main():
             failures.append(f"ops row, minimized {minimized}: {found!r}, expected {expected!r}")
     queue = (
         "8/15 agents at work in a terminal, 1 queued",
-        [["master-x--seb", "5", "14:02", "a slot"]],
+        [["", "", "master-x--seb", "5", "14:02", "a slot", "", ""]],
     )
     if (found := agent_list.describe_queue(QUEUE)) != queue:
         failures.append(f"queue {found!r}, expected {queue!r}")
@@ -266,13 +335,14 @@ def main():
     if (found := agent_list.describe_queue(None)) != ("bundle-ctl does not answer", []):
         failures.append(f"queue with no daemon: {found!r}")
     forced = dict(QUEUE, queue=[dict(QUEUE["queue"][0], forced=True)])
-    if (found := agent_list.describe_queue(forced)[1][0][3]) != "a slot, over the cap":
+    if (found := agent_list.describe_queue(forced)[1][0][5]) != "a slot, over the cap":
         failures.append(f"forced task waits for {found!r}")
     failures += check_filters(agent_list) + check_reads(agent_list) + check_usage(agent_list)
-    failures += check_ask(agent_list)
+    failures += check_ask(agent_list) + check_queue(agent_list)
     for line in failures:
         print(line)
     cases = len(AGENTS) + len(OPS_INFOS) + 4 + 1 + len(FACETS) + len(FILTERED) + 2 + 7 + 3 + 3
+    cases += len(QUEUED_LINES) + 1
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 
