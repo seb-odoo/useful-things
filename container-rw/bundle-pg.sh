@@ -16,4 +16,5 @@ fi
 chmod 700 "$data"
 # Killed with its container: the pid in its files may be another process of this container now.
 rm -f "$data/postmaster.pid" /var/run/postgresql/.s.PGSQL.5432 /var/run/postgresql/.s.PGSQL.5432.lock
+# 9>&-: the server would inherit the lock, and the next start would wait on it forever.
 /usr/lib/postgresql/16/bin/pg_ctl -D "$data" -l "$pg/server.log" -w start >/dev/null 9>&-

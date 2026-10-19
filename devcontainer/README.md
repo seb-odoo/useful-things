@@ -54,7 +54,9 @@ with pip inside. The rest follows from that choice.
   `delete_bundle` removes them.
   - [`container-rw/bundle-pg.sh`](../container-rw/bundle-pg.sh) copies the cluster of the image
     at the first start, and starts the server at each one: from `postStartCommand`, and from
-    `agent-run.sh`, as `devcontainer up --skip-post-create` skips it. The server runs as `vscode`,
+    `agent-run.sh`, as `devcontainer up --skip-post-create` skips it. When the server runs
+    already, as in an agent terminal of an open window, `bundle-pg.sh` returns at once
+    (`test_bundle_pg.py`). The server runs as `vscode`,
     so the host user owns its files. A stop of the container kills it, and the next start replays
     its WAL: `fsync` stays on, and `synchronous_commit = off` loses the last commits at most.
   - The role is `PGUSER`, superuser of its own server with `trust` on the socket, so Odoo creates
