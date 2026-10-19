@@ -160,6 +160,9 @@ def check_filters(agent_list):
             failures.append(f"rows kept by {ranks} and {kinds}: {found!r}, expected {expected!r}")
     if (found := [agent_list.get_name(row) for row in rows]) != NAMES:
         failures.append(f"names {found!r}, expected {NAMES!r}")
+    titles = [agent_list.get_window_title(rows), agent_list.get_window_title(rows[1:])]
+    if titles != ["Agent list (1)", "Agent list"]:
+        failures.append(f"window titles {titles!r}, expected the finished one counted")
     title = f"{picker.LOADING} {TITLES[0][0]}"
     row = picker.Row(None, picker.get_rank(TITLES[0][0]), title, "master-x--seb", "0x1", True)
     if (found := agent_list.get_name(row)) != f"{picker.LOADING} master-x--seb":

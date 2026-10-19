@@ -440,7 +440,10 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   each change of it (Seb, 2026-10-16: "should follow os color theme"). Dark is the dark Adwaita
   of GTK, as the GTK theme the desktop names may have no dark variant. A second start brings the
   open window up, and its size, its place and the height of the queue are kept in
-  `~/.local/state/bundle-ctl/agent-list.json`.
+  `~/.local/state/bundle-ctl/agent-list.json`. Its title says how many agents wait for Seb,
+  failed, finished or waiting, `Agent list (3)`, for the window list of the panel, and its icon is
+  `agent-list.svg` (Seb, 2026-10-19: "the counter of pending ... as well as the same for agent
+  list", "a specific icon for each app").
 - `window-applet/`, a Cinnamon applet, shows the mark that needs Seb most and how many bundles
   have it, in the order ❌ ✋ ✅ 🚀 ⏳ (Seb, 2026-10-15: a failed agent is an error to fix, a
   waiting or finished one waits for him, one stuck on starting comes after, one in progress does

@@ -65,6 +65,7 @@ from commands import get_worktree_bundle_folder  # noqa: E402
 
 AGENTS_CHECK = 2
 APPEARANCE = ("org.freedesktop.appearance", "color-scheme")
+ASKS_SEB = ("failed", "finished", "waiting")
 BUNDLE = 2
 COLUMNS = ("State", "Type", "Agent", "Since", "CPU", "RAM", "Disk", "Last answer")
 CONTAINERS = pathlib.Path(
@@ -72,6 +73,7 @@ CONTAINERS = pathlib.Path(
 )
 DISK_AGE = 600
 DISK_CHECK = 60
+ICON = HERE / "agent-list.svg"
 KEY, WINDOW, TITLE = 8, 9, 10
 NOT_BUILT = "Nothing of this bundle is checked out yet"
 SORTS = (11, 12, 2, 13, 14, 15, 16, 7)
@@ -176,6 +178,14 @@ def get_filters(rows, ranks, kinds):
 def is_kept(row, ranks, kinds):
     """Whether a row has one of the marks of ranks and one of the kinds, an empty set keeps all."""
     return (not ranks or row.rank in ranks) and (not kinds or get_kind(row) in kinds)
+
+
+def get_window_title(rows):
+    """The title of the window, with how many agents wait for Seb, failed, finished or waiting:
+    the window list of the panel shows it."""
+    words = [picker.MARKS[row.rank][1] for row in rows if row.rank < len(picker.MARKS)]
+    count = sum(word in ASKS_SEB for word in words)
+    return f"Agent list ({count})" if count else "Agent list"
 
 
 def format_size(size):
@@ -538,7 +548,9 @@ class AgentList(Gtk.Application):
             subprocess.run(["wmctrl", "-i", "-a", hex(xid)], check=False)
             return
         self.portal = follow_color_scheme()
-        self.window = Gtk.ApplicationWindow(application=self, title="Agent list")
+        with contextlib.suppress(GLib.Error):
+            Gtk.Window.set_default_icon_from_file(str(ICON))
+        self.window = Gtk.ApplicationWindow(application=self, title=get_window_title([]))
         self.window.connect("delete-event", self.save_place)
         try:
             place = json.loads(PLACE.read_text())
@@ -675,6 +687,9 @@ class AgentList(Gtk.Application):
         self.usage_reader.keys = keys
         self.agents_read = agents
         self.show()
+        title = get_window_title([row for row, _info in agents])
+        if self.window.get_title() != title:
+            self.window.set_title(title)
         if new:
             self.measure_disks()
 
