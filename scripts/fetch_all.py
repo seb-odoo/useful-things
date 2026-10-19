@@ -175,6 +175,16 @@ def handle_repo_remote(runner: UtilsRunner, repo, remote, branch_r):
         to_fetch = [branch for branch in to_fetch if branch in remote_branches] + new_branches
     else:
         to_fetch = sticky_bundles
+        refspecs = [f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}" for branch in to_fetch]
+        res = subprocess.run(
+            ["git", "config", "--get-all", f"remote.{remote}.fetch"],
+            capture_output=True,
+            check=False,
+            cwd=runner.cwd,
+            text=True,
+        )
+        if res.stdout.split() != refspecs:
+            runner.run(["git", "remote", "set-branches", remote, *to_fetch])
     # Prune this remote's namespace only: seb-odoo also has a `master`, origin/master must survive.
     get_ref = get_remote_dev_ref if dev else get_remote_ref
     if refs_to_delete := [
