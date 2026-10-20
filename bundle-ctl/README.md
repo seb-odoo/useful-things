@@ -434,7 +434,9 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   that I can keep open and that updates live"), has the rows of the picker, read again every 2
   seconds, the terminals shown on screen included, and no other window. The mark and the kind of
   a row have columns of their own (Seb, 2026-10-15), and the title keeps the bundle, or the title
-  of the conversation of an ops window. A click on any column header sorts the rows by it (his
+  of the conversation of an ops window, cut at 40 characters, as any column but the last ones
+  (Seb, 2026-10-20: "the agent column is too long [...] I don't see the others after"); a drag
+  of its edge widens it. A click on any column header sorts the rows by it (his
   ask: "all of them"): the mark in the order of the picker, which a first start shows, the kind
   in its order, the times and the sizes as numbers. A bundle row also has the
   state of its agent and since when, from its `.agent/` files (`done 12 min ago`, `waiting for 5

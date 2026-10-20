@@ -115,6 +115,7 @@ QUEUE_COLUMNS = (
 SCOPE = re.compile(r"libpod-([0-9a-f]{64})\.scope")
 START = 3
 USAGE_CHECK = 5
+WIDTH = 40
 
 
 def load(name, path):
@@ -601,12 +602,13 @@ def follow(seconds, read, show):
 def make_view(model, titles, expand, sorts=()):
     """A view of model with a column per title, each sorted on a click by the model column of the
     same place in sorts, when given. The columns from expand on share the width left, and their
-    text is cut to it."""
+    text is cut to it. The others are cut at WIDTH characters, so a long name keeps the columns
+    after it on screen."""
     view = Gtk.TreeView(model=model)
     for at, title in enumerate(titles):
-        cell = Gtk.CellRendererText()
-        if at >= expand:
-            cell.props.ellipsize = Pango.EllipsizeMode.END
+        cell = Gtk.CellRendererText(ellipsize=Pango.EllipsizeMode.END)
+        if at < expand:
+            cell.props.max_width_chars = WIDTH
         column = Gtk.TreeViewColumn(title, cell, text=at)
         column.set_expand(at >= expand)
         column.set_resizable(True)
