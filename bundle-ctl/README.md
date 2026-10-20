@@ -296,7 +296,8 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   script they load changed since, the daemon opens a new terminal on that bundle, which takes the
   session over in the same container, and the old window closes (Seb, 2026-10-20: "can we somehow
   restart them gracefully"). Only when its session is `idle`: not in a turn, nor in a background
-  command a turn left (`shell`, a PR watch), which would end with its claude. Only while its window
+  command a turn left (`shell`, a PR watch), which would end with its claude, nor the reset of the
+  usage limit, which its claude goes on from by itself and a new one does not. Only while its window
   is minimized, so that Seb sees no window go, as the new one opens minimized; and not under
   `.agent/pause`. One terminal per pass of the daemon (10 to 60 seconds), each bundle once an hour
   at most; the journal says `BUNDLE: its terminal restarts on the code of HH:MM`. Ops windows stay
@@ -383,7 +384,7 @@ is the contained terminal of the VS Code window.
 | mark | the sessions of the window |
 | --- | --- |
 | 🚀 | an agent window whose claude did not start yet: its container starts |
-| ⏳ | one works: `busy` |
+| ⏳ | one works: `busy`, or waits for the reset of the usage limit, as Claude then goes on by itself (its last notice is `Usage limit reached · continuing automatically at 4pm`, not cancelled by Esc, for 5 hours at most: a claude started later on that session does not go on by itself) |
 | ✋ | one waits for a permission or an answer (`waiting`), or none works and one last answer ends on `Waiting for you`, or has no close line and is no `pushed:` nor `nothing to do:` (`ready to push`, `needs Seb:`, `blocked:`, a chat) |
 | ✅ | none works and all last answers end on `Nothing left`, or have no close line and are `pushed:` or `nothing to do:` |
 | ❌ | the run of an agent window ended before its claude started (`.agent/done` is `failed`) |

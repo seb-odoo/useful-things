@@ -24,6 +24,9 @@ ANSWERS = {
     "left": ["The list shows it.\n\n**Done**\n- 18/18\n\nNothing left: the list shows it."],
     "pushed": ["pushed: c4d3b85\n\nDone"],
     "ready": ["ready to push"],
+    "resuming": ["You've hit your session limit · resets 4pm (UTC)"],
+    "cancelled": ["You've hit your session limit · resets 4pm (UTC)"],
+    "resumed": ["You've hit your session limit · resets 4pm (UTC)"],
     "report": ["Which icon?", "The list shows it.\n\n## Done\n- 18/18 cases as expected"],
     "seb": ["needs Seb: which base?"],
     "separately": [
@@ -61,7 +64,17 @@ MARKS = [
     (["wait=idle"], f"✋ {TITLE}"),
     (["wait-bold=idle"], f"✋ {TITLE}"),
     (["left=idle", "wait=idle"], f"✋ {TITLE}"),
+    (["resuming=idle"], f"⏳ {TITLE}"),
+    (["left=idle", "resuming=idle"], f"⏳ {TITLE}"),
+    (["cancelled=idle"], f"✋ {TITLE}"),
+    (["resumed=idle"], f"✋ {TITLE}"),
 ]
+LIMIT = "Usage limit reached · continuing automatically at 4pm · esc to cancel"
+NOTICES = {
+    "resuming": [(LIMIT, 60)],
+    "cancelled": [(LIMIT, 60), ("Automatic continue cancelled · /rate-limit-options", 50)],
+    "resumed": [(LIMIT, 6 * 3600)],
+}
 OPS = "🔧 Ops windows in the list (ops)"
 OPS_MARKS = [
     ("ops-report", [], OPS),
@@ -115,6 +128,12 @@ def write_transcripts(home):
             text = {"type": "text", "text": answer}
             entries.append({"type": "assistant", "message": {"content": [text]}})
             entries.append({"type": "system", "subtype": "turn_duration"})
+        for notice, age in NOTICES.get(session, []):
+            stamp = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(time.time() - age))
+            entries.append(
+                {"type": "system", "subtype": "informational", "content": notice, "timestamp": stamp}
+            )
+            entries.append({"type": "queue-operation"})
         for kind, key, topic in TOPICS.get(session, []):
             entries.append({"type": kind, key: topic, "sessionId": session})
         lines = "".join(f"{json.dumps(entry)}\n" for entry in entries)

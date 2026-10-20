@@ -111,6 +111,14 @@ def load_held():
     return module
 
 
+def load_title():
+    """client/window-title.py, whose file name is no module name."""
+    spec = importlib.util.spec_from_file_location("title", HERE / "client" / "window-title.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 CONFIG = load_config()
 AFTER = re.compile(r"([01]?[0-9]|2[0-3]):[0-5][0-9]")
 AGENT_GIGABYTES = 2
@@ -209,6 +217,7 @@ TERMINAL_CODE = [
     HERE / "shift_enter_newline.py",
     *(SCRIPTS / f"{name}.py" for name in ("agents", "commands", "config", "tab_groups")),
 ]
+TITLE = load_title()
 WINDOW_CLOSE_WAIT = 30
 
 bundle_rows = {"read": float("-inf"), "rows": []}
@@ -1617,8 +1626,9 @@ def restart_old_terminal():
     """Open a new terminal on the agent of a bundle whose terminal started before the last change
     of TERMINAL_CODE, which it does not load again: the new one takes the session over and the old
     window closes. Only when its session is idle, as a background command a turn left (a PR watch)
-    would end with its claude, and while its window is minimized, as Seb sees no window go and the
-    new one opens minimized. One per call, each bundle once an hour at most."""
+    would end with its claude, nor the reset of the usage limit, that its claude goes on with by
+    itself, and while its window is minimized, as Seb sees no window go and the new one opens
+    minimized. One per call, each bundle once an hour at most."""
     changed = max(get_mtime(path) or 0 for path in TERMINAL_CODE)
     env = None
     for bundle, pid in get_terminals().items():
@@ -1634,6 +1644,7 @@ def restart_old_terminal():
             or (agent / "pause").exists()
             or is_deleting(bundle)
             or get_session_status(bundle, read_text(agent / "session")) != "idle"
+            or TITLE.is_resuming(read_text(agent / "session"))
         ):
             continue
         env = env or session_env()

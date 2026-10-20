@@ -15,7 +15,14 @@ sys.path.insert(0, str(HERE))
 
 import daemon
 
-BASE = {"started": 100, "held": True, "pause": False, "status": "idle", "minimized": True}
+BASE = {
+    "started": 100,
+    "held": True,
+    "pause": False,
+    "status": "idle",
+    "resuming": False,
+    "minimized": True,
+}
 # What differs from BASE, and whether the terminal restarts. The code changed at 200.
 CASES = [
     ({}, True),
@@ -25,6 +32,7 @@ CASES = [
     ({"status": "busy"}, False),
     ({"status": "shell"}, False),
     ({"status": None}, False),
+    ({"resuming": True}, False),
     ({"minimized": False}, False),
 ]
 
@@ -46,6 +54,9 @@ def restart(root, terminals):
     daemon.get_terminals = lambda: pids
     daemon.read_stat = lambda pid: (pid, by_pid[pid]["started"])
     daemon.get_session_status = lambda bundle, session: terminals[bundle]["status"]
+    daemon.TITLE.is_resuming = lambda session: any(
+        case["resuming"] for case in terminals.values()
+    )
     daemon.is_minimized = lambda pid, env: by_pid[pid]["minimized"]
     daemon.session_env = dict
     daemon.open_terminal = lambda log, bundle: opened.append(bundle)

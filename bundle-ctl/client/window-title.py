@@ -19,6 +19,9 @@ reports, starts with "Nothing left", and waits for him when it starts with "Wait
 no close line, a bundle guesses it from the verdict on the first line of that answer. An ops agent
 window (ops-SESSION) shows the title of its conversation in place of a name, and guesses it from
 the parts of the answer: finished with a Done part and neither a Decide nor a Your action part.
+An idle session that waits for the reset of the usage limit works, as Claude goes on with it by
+itself ("Usage limit reached · continuing automatically at 4pm"), until Esc cancels that, for 5
+hours at most.
 """
 
 import json
@@ -26,6 +29,7 @@ import os
 import pathlib
 import re
 import sys
+import time
 
 CLOSE = re.compile(r"[*_\s]*(nothing (is )?left|(waiting|waits) (for|on) you)\b", re.IGNORECASE)
 FINISHED = re.compile(r"(pushed:|nothing to do:)", re.IGNORECASE)
@@ -48,6 +52,8 @@ PROJECTS = (
     pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or pathlib.Path.home() / ".claude")
     / "projects"
 )
+RESUMING = "continuing automatically at"
+RESUMING_FOR = 5 * 3600
 SEPARATELY = re.compile(r"[*_\s]*Separately\s*:")
 TAIL = 256 * 1024
 TITLES = {"ai-title": "aiTitle", "custom-title": "customTitle"}
@@ -93,6 +99,22 @@ def get_last_answer(session):
     return ""
 
 
+def is_resuming(session):
+    """Whether a session waits for the reset of the usage limit, that Claude then goes on with by
+    itself: its last notice says so, and no message nor other notice came after it. Not past
+    RESUMING_FOR, the longest wait of a session limit: a claude that ended while it waited leaves
+    that notice last, and one started later on the session does not go on by itself."""
+    since = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - RESUMING_FOR))
+    for line in reversed(read_tail(session)):
+        try:
+            entry = json.loads(line)
+            if entry["type"] in ("user", "assistant") or entry.get("subtype") == "informational":
+                return RESUMING in str(entry.get("content")) and entry["timestamp"] > since
+        except (AttributeError, KeyError, TypeError, ValueError):
+            continue
+    return False
+
+
 def get_close_line(answer):
     """The last line of an answer when it says whether Seb can close the session, as the Stop hook
     guard-report-end.py wants a report to end: only Separately: lines may follow it. Without its
@@ -129,7 +151,7 @@ def get_mark(status_by_session, finished=is_finished):
         return ""
     if "waiting" in statuses:
         return "✋"
-    if "busy" in statuses:
+    if "busy" in statuses or any(map(is_resuming, status_by_session)):
         return "⏳"
     answers = map(get_last_answer, status_by_session)
     return "✅" if all(is_closed(answer, finished) for answer in answers) else "✋"
