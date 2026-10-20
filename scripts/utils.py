@@ -6,6 +6,8 @@ import glob
 import json
 import os
 import re
+import subprocess
+import sys
 
 from agents import mark_handled
 from command_runner import Runner, ignore_error
@@ -366,6 +368,16 @@ class UtilsRunner(Runner):
         """Open VS Code attached to an existing bundle's dev container (no worktree/npm setup)."""
         mark_handled(bundle_name)
         self.open_devcontainer_folder(folder=get_worktree_bundle_folder(bundle_name))
+
+    def open_agent_terminal(self, *, bundle_name):
+        """Open the terminator window of a bundle's agent, a new one when it has none, through bctl.
+        False when bctl refused it."""
+        bctl = f"{_USEFUL_THINGS_FOLDER}/bundle-ctl/client/bctl.py"
+        command = [sys.executable, bctl, "open", bundle_name, "--terminal"]
+        if subprocess.run(command, check=False).returncode:
+            return False
+        mark_handled(bundle_name)
+        return True
 
     def open_devcontainer_folder(self, *, folder):
         """Same, for any folder holding a .devcontainer, bundle or not."""

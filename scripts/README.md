@@ -131,6 +131,10 @@ Fetches bundle metadata from runbot and creates/updates local worktrees.
 
 Queries the runbot API, checks out each repo at the matching commit, links shared `node_modules`, runs web tooling setup, and opens the bundle in VS Code. `design-themes` and `documentation` get a worktree only when the bundle has a branch there.
 
+`pfb -t BUNDLE` opens the terminator window of its agent instead, as `ocode -t` does, for a bundle
+that is not local yet or was deleted: a deleted bundle lost its `.agent`, so its agent is a new one
+with no prompt.
+
 Also takes a PR link (`fetch_bundle.py https://github.com/odoo/odoo/pull/292267`), or the `owner:branch` label runbot shows for a fork PR: the bundle is the PR head. When the head is on a fork, the fork is added as a remote named after its owner and the branch tracks it, so pull and push go to the PR. Deleting the last bundle tracking that remote removes it.
 
 Runbot names the bundle of a fork PR with the full label `<owner>:<head>`, while an odoo-dev
@@ -586,7 +590,7 @@ the PR queries worked.
 Opens a local bundle in VS Code, in its dev container, and marks it handled (gbs above).
 `ocode -t BUNDLE` opens the terminator window of its agent instead, on its last session, and marks
 it handled too: `bctl open BUNDLE --terminal`, which starts a new agent with no prompt on a bundle
-that has none.
+that has none. A bundle that is not local is `pfb -t BUNDLE`.
 
 ### bundle_open.py
 

@@ -33,6 +33,12 @@ runner = UtilsRunner()
 parser = argparse.ArgumentParser()
 parser.add_argument("name", help="Name of the bundle to fetch, or a PR link", type=str)
 parser.add_argument("--no-open", action="store_true", help="Do not open the bundle in VS Code")
+parser.add_argument(
+    "-t",
+    "--terminal",
+    action="store_true",
+    help="then the terminator window of its agent, a new one when it has none, rather than VS Code",
+)
 args = parser.parse_args()
 fork_remote_by_repo = {}
 
@@ -200,5 +206,9 @@ runner.parallel_run(
     handle_commit,
     lambda c: c["repo"],
 )
-runner.finish_worktree_bundle_folder(bundle_name=bundle_name, open_window=not args.no_open)
+runner.finish_worktree_bundle_folder(
+    bundle_name=bundle_name, open_window=not args.no_open and not args.terminal
+)
+if args.terminal and not runner.open_agent_terminal(bundle_name=bundle_name):
+    raise SystemExit(1)
 print("[green]Done[/green]")

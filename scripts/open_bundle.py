@@ -8,16 +8,12 @@ Example:
 
 import argparse
 import os
-import subprocess
 import sys
 
-from agents import mark_handled
 from branch_status import get_bundles
 from commands import clean_bundle_name, get_worktree_bundle_folder
 from rich import print
 from utils import UtilsRunner
-
-BCTL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bundle-ctl/client/bctl.py")
 
 runner = UtilsRunner()
 
@@ -37,10 +33,8 @@ if not os.path.isdir(get_worktree_bundle_folder(bundle_name)):
     exit(1)
 
 if args.terminal:
-    command = [sys.executable, BCTL, "open", bundle_name, "--terminal"]
-    if subprocess.run(command, check=False).returncode:
+    if not runner.open_agent_terminal(bundle_name=bundle_name):
         sys.exit(1)
-    mark_handled(bundle_name)
 else:
     runner.open_devcontainer(bundle_name=bundle_name)
 get_bundles()
