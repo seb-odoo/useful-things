@@ -40,8 +40,9 @@ The terminal icon of the Claude tab ("Move the agent to a terminal", also in the
 sends a session of the window to a terminal of the host: the one that works, else the only one,
 else the agent's. A session that is not the agent's becomes it (`.agent/session`), as a new
 conversation in the tab is what Seb wants to move. The extension then asks `bctl open BUNDLE
---terminal`, and closes the window when the terminal writes `.agent/close-window`. It shows only in
-a window whose bundle has an agent session, and refuses while two sessions of the window work: the
+--terminal`, and closes the window when the terminal writes `.agent/close-window`. It shows in
+every bundle window: in a window bundle-ctl did not open, the moved session becomes an agent with
+an empty task, as the one `ocode -t` starts. It refuses while two sessions of the window work: the
 closing would cut one.
 
 ## Install

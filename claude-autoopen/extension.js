@@ -14,7 +14,7 @@ const OPEN_COMMAND = "claude-vscode.editor.open";
 // bundle-ctl writes the task of an agent window there (bundle-ctl/README.md).
 const AGENT_FOLDER = ".agent";
 const AGENT_TERMINAL = "agent";
-const AGENT_WINDOW_KEY = "claudeAutoOpen.agentWindow";
+const BUNDLE_WINDOW_KEY = "claudeAutoOpen.bundleWindow";
 // agent-terminal.py waits that long for the window to close (bundle-ctl/README.md).
 const CLOSE_WAIT = 120000;
 const MOVE_COMMAND = "claudeAutoOpen.moveToTerminal";
@@ -143,11 +143,6 @@ async function writeAgentFile(root, name, text) {
 async function moveToTerminal(root) {
   const client = process.env.BUNDLE_CTL_CLIENT;
   const bundle = process.env.ODOO_PROXY_HOST;
-  const agentSession = root && (await readAgentFile(root, "session"));
-  if (!client || !bundle || !agentSession) {
-    vscode.window.showWarningMessage("This window has no agent session to move to a terminal.");
-    return;
-  }
   const sessions = getLiveSessions();
   const busy = sessions.filter((record) => record.status !== "idle");
   if (busy.length > 1) {
@@ -156,10 +151,20 @@ async function moveToTerminal(root) {
     );
     return;
   }
+  const agentSession = root && (await readAgentFile(root, "session"));
   const moved = busy[0] ?? (sessions.length === 1 ? sessions[0] : undefined);
   const session = moved?.sessionId ?? agentSession;
+  if (!client || !bundle || !root || !session) {
+    vscode.window.showWarningMessage("This window has no Claude session to move to a terminal.");
+    return;
+  }
+  // Session first: pollAgent starts a run on a task that has no session.
   if (session !== agentSession) {
     await writeAgentFile(root, "session", session);
+  }
+  // The daemon opens a terminal only on a task: an empty one, as for the agent `ocode -t` starts.
+  if ((await readAgentFile(root, "task.md")) === undefined) {
+    await writeAgentFile(root, "task.md", "");
   }
   vscode.window.setStatusBarMessage("Moving the agent to a terminal...", 30000);
   const args = [`${client}/bctl.py`, "open", bundle, "--terminal"];
@@ -301,6 +306,8 @@ async function activate(context) {
   context.subscriptions.push(
     vscode.commands.registerCommand(MOVE_COMMAND, () => moveToTerminal(root)),
   );
+  const isBundle = Boolean(root && process.env.BUNDLE_CTL_CLIENT && process.env.ODOO_PROXY_HOST);
+  vscode.commands.executeCommand("setContext", BUNDLE_WINDOW_KEY, isBundle);
   setWindowTitle();
   const titleTimer = setInterval(setWindowTitle, 1000);
   context.subscriptions.push({ dispose: () => clearInterval(titleTimer) });
@@ -345,9 +352,7 @@ async function pollAgent(context, root) {
       return;
     }
   }
-  const hasTask = (await readAgentFile(root, "task.md")) !== undefined;
   const hasSession = (await readAgentFile(root, "session")) !== undefined;
-  await vscode.commands.executeCommand("setContext", AGENT_WINDOW_KEY, hasTask && hasSession);
   if (!hasSession) {
     await runAgent(root);
   } else if ((await readAgentFile(root, "tab-opened")) === undefined) {

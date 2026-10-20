@@ -27,14 +27,14 @@
       "commandPalette": [
         {
           "command": "claudeAutoOpen.moveToTerminal",
-          "when": "claudeAutoOpen.agentWindow"
+          "when": "claudeAutoOpen.bundleWindow"
         }
       ],
       "editor/title": [
         {
           "command": "claudeAutoOpen.moveToTerminal",
           "group": "navigation",
-          "when": "activeWebviewPanelId == 'claudeVSCodePanel' && claudeAutoOpen.agentWindow"
+          "when": "activeWebviewPanelId == 'claudeVSCodePanel' && claudeAutoOpen.bundleWindow"
         }
       ]
     }
