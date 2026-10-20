@@ -30,6 +30,7 @@ WINDOWS = """\
 0x0d 0 terminator.Terminator box ⏩ master-f-fw--seb (fw)
 """
 OPS = "✋ 🔧 Ops list layout (ops)\0info\x1f0x0a\x1fmeta\x1fwaiting"
+OPS_SESSION = "ops-46845e7b-9553-44d6-af97-e6addeaeaac3"
 COUNTS = "❌ failed 0   ✅ finished 1   ✋ waiting 2   ⏳ running 1   🚀 starting 0"
 REVIEW = "✋ 📝 master-c-aku (review)\0info\x1fmaster-c-aku\x1fmeta\x1fwaiting"
 ROWS = [
@@ -224,6 +225,32 @@ def get_started_agents():
     return found
 
 
+def get_ops_agents():
+    """What --agent runs for an ops session: with its agent window, then with none while a tab of
+    the ops window runs it, then with neither, when bctl starts it: the commands, and the sessions
+    folders the live claudes are read from."""
+    found = []
+    refactor, other = ("🔧 Refactor (ops)", "0x0b"), ("✋ 🔧 Ops list layout (ops)", "0x0a")
+    for windows, live in (([other, refactor], set()), ([], {OPS_SESSION[4:]}), ([other], set())):
+        picker = load_picker()
+        shown = iter([windows, [other], [other, refactor]])
+        picker.get_windows = lambda shown=shown: ({}, next(shown), [])
+        picker.read_window_pids = lambda: {"0x0a": "10", "0x0b": "11"}
+        picker.get_terminator = lambda pid: (1, {"10": "ops-other", "11": OPS_SESSION}[pid])
+        picker.HOST_FOLDER = "/home/seb/repo"
+        records, ran, done = [], [], types.SimpleNamespace(returncode=0)
+        picker.get_live_sessions = lambda folders, live=live, records=records: (
+            records.extend(map(str, folders)) or live
+        )
+        picker.subprocess = types.SimpleNamespace(
+            run=lambda command, ran=ran, done=done, **_: ran.append(command) or done,
+            Popen=lambda command, ran=ran, **_: ran.append(command),
+        )
+        picker.time = types.SimpleNamespace(monotonic=time.monotonic, sleep=lambda _seconds: None)
+        found.append((picker.bring_up_agent(OPS_SESSION), ran, records))
+    return found, f"{picker.CLAUDE_CONFIG_CONTAINER}/repo/sessions"
+
+
 def write_answer(folder, session, answer, bundle=None):
     """A transcript whose last answer is answer, and the .agent/session of bundle that names it."""
     if bundle:
@@ -385,9 +412,18 @@ def main():
     started = [(0, [bctl, ["wmctrl", "-i", "-a", "0x99"]]), (1, [bctl])]
     if (found := get_started_agents()) != started:
         failures.append(f"--agent with no window: {found!r}, expected {started!r}")
+    found, records = get_ops_agents()
+    bctl[3] = OPS_SESSION
+    started = [
+        (0, [["wmctrl", "-i", "-a", "0x0b"]], []),
+        (0, [["xdg-open", "odoo-bundle://ops"]], [records]),
+        (0, [bctl, ["wmctrl", "-i", "-a", "0x0b"]], [records]),
+    ]
+    if found != started:
+        failures.append(f"--agent {OPS_SESSION}: {found!r}, expected {started!r}")
     for line in failures:
         print(line)
-    cases = 21 + len(PICKS) + len(BRING_UPS) + len(CLOSE_LINES)
+    cases = 22 + len(PICKS) + len(BRING_UPS) + len(CLOSE_LINES)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

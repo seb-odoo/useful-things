@@ -37,7 +37,10 @@ mark once its claude ended. The first row, `➕ new ops agent`, opens a new one:
 
 --agent brings up the terminal of the agent of a bundle, else its VS Code window, which then holds
 its session, else starts that agent again in a terminal on its last session (bctl open
---terminal), and brings the window up once it shows, as it opens minimized. --code brings up its
+--terminal), and brings the window up once it shows, as it opens minimized. For an ops session,
+--agent ops-SESSION brings up its ops agent window, else the ops window when a tab of it runs the
+session, else goes on with the session in a new agent window: hok links the caller of a request
+there. --code brings up its
 VS Code window, else opens it through its `odoo-bundle://` link. The helper of firefox-gateway runs
 them from a tab of the Firefox group of the bundle.
 """
@@ -57,6 +60,9 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
 from agents import OPS, get_agent_folder, read_text  # noqa: E402
+from config import CLAUDE_CONFIG_CONTAINER, HOST_FOLDER  # noqa: E402
+
+from cut import get_live_sessions  # noqa: E402
 
 AGENT_WAIT = 60
 FAILED = "❌"
@@ -362,15 +368,42 @@ def open_ops():
     subprocess.Popen(command, start_new_session=True, **QUIET)
 
 
+def get_terminal(name):
+    """The agent window of a bundle, or of an ops session (ops-SESSION), None when it has none."""
+    if not name.startswith(OPS):
+        return get_windows()[0].get(name, {}).get("terminal")
+    pids = read_window_pids()
+    for _title, window in get_windows()[1]:
+        terminator = get_terminator(pids.get(window))
+        if terminator and terminator[1] == name:
+            return window
+    return None
+
+
+def is_in_tab(name):
+    """Whether a claude of the ops container runs the session of name out of an agent window: in
+    a tab of the ops window."""
+    if not HOST_FOLDER:
+        return False
+    records = pathlib.Path(CLAUDE_CONFIG_CONTAINER) / os.path.basename(HOST_FOLDER) / "sessions"
+    return name.removeprefix(OPS) in get_live_sessions([records])
+
+
 def bring_up_agent(name):
-    windows = get_windows()[0].get(name, {})
-    window = windows.get("terminal") or windows.get("code")
+    if name.startswith(OPS):
+        window = get_terminal(name)
+        if not window and is_in_tab(name):
+            subprocess.Popen(["xdg-open", "odoo-bundle://ops"], start_new_session=True, **QUIET)
+            return 0
+    else:
+        windows = get_windows()[0].get(name, {})
+        window = windows.get("terminal") or windows.get("code")
     if not window:
         command = [sys.executable, str(HERE / "client" / "bctl.py"), "open", name, "--terminal"]
         if code := subprocess.run(command, check=False).returncode:
             return code
         deadline = time.monotonic() + AGENT_WAIT
-        while not (window := get_windows()[0].get(name, {}).get("terminal")):
+        while not (window := get_terminal(name)):
             if time.monotonic() > deadline:
                 return 0
             time.sleep(1)

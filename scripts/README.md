@@ -592,9 +592,12 @@ that has none.
 
 Opens an `odoo-bundle://<bundle>` link: in its dev container when the worktree exists, like
 `ocode`, otherwise through `pfb` in a terminal, which opens the dev container at the end.
-`odoo-bundle://ops` opens the ops container, like `orepo`: `hok` puts these links on the name of
-the caller of a request. `odoo-bundle://ops-SESSION`, which a shell of an ops agent window
-prints, also moves that session to a tab there (`bctl open ops-SESSION`).
+`odoo-bundle://ops` opens the ops container, like `orepo`. `odoo-bundle://ops-SESSION`, which a
+shell of an ops agent window prints, also moves that session to a tab there (`bctl open
+ops-SESSION`). `odoo-bundle://agent/NAME` brings up the agent of a bundle, or of an ops session
+when NAME is `ops-SESSION`, as `window-picker.py --agent NAME` does (bundle-ctl README): `hok`
+puts it on the name of the caller of a request, and `odoo-bundle://ops` when an ops request
+carries no session.
 
 One-time setup, so that a click on a `gbs` branch name reaches it:
 
