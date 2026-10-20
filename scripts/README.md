@@ -581,6 +581,14 @@ the PR queries worked.
   `no remote` row with commits next to an open PR in another repo of its bundle is deleted by the
   next gfa.
 
+### open_bundle.py (`ocode`)
+
+Opens a local bundle in VS Code, in its dev container, and marks it handled (gbs above).
+`ocode -t BUNDLE` opens a bash of that container in this terminal instead, in `/workspace`, and
+marks it handled too. A stopped container starts as for an agent terminal (`up` of
+`bundle-ctl/agent-terminal.py`), with its postgres server and the git identity, and stops when the
+shell ends, unless a VS Code window or an agent uses it by then.
+
 ### bundle_open.py
 
 Opens an `odoo-bundle://<bundle>` link: in its dev container when the worktree exists, like
