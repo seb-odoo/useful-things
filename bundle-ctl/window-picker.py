@@ -7,6 +7,8 @@ after a ✅ fw, before a ✅ runbot.
 
     window-picker.py --show
     window-picker.py --counts
+    window-picker.py --agent BUNDLE
+    window-picker.py --code BUNDLE
 
 --show opens rofi on this script, where the row under the mouse is selected. A click on a bundle
 brings its VS Code window up, or opens it through the `odoo-bundle://` link of gbs; a right click
@@ -32,6 +34,12 @@ A minimized ops agent window has a row of its own, ranked by its mark, and a cli
 its title shows the title of its conversation in place of a name, and agent-terminator.py drops its
 mark once its claude ended. The first row, `➕ new ops agent`, opens a new one: bctl open ops
 --terminal.
+
+--agent brings up the terminal of the agent of a bundle, else its VS Code window, which then holds
+its session, else starts that agent again in a terminal on its last session (bctl open
+--terminal), and brings the window up once it shows, as it opens minimized. --code brings up its
+VS Code window, else opens it through its `odoo-bundle://` link. The helper of firefox-gateway runs
+them from a tab of the Firefox group of the bundle.
 """
 
 import collections
@@ -50,6 +58,7 @@ sys.path.insert(0, str(HERE.parent / "scripts"))
 
 from agents import OPS, get_agent_folder, read_text  # noqa: E402
 
+AGENT_WAIT = 60
 FAILED = "❌"
 FIRST_KINDS = ("fw", "mine", "ops", "runbot")
 FOR_SEB = ("✅", "✋")
@@ -353,7 +362,27 @@ def open_ops():
     subprocess.Popen(command, start_new_session=True, **QUIET)
 
 
+def bring_up_agent(name):
+    windows = get_windows()[0].get(name, {})
+    window = windows.get("terminal") or windows.get("code")
+    if not window:
+        command = [sys.executable, str(HERE / "client" / "bctl.py"), "open", name, "--terminal"]
+        if code := subprocess.run(command, check=False).returncode:
+            return code
+        deadline = time.monotonic() + AGENT_WAIT
+        while not (window := get_windows()[0].get(name, {}).get("terminal")):
+            if time.monotonic() > deadline:
+                return 0
+            time.sleep(1)
+    subprocess.run(["wmctrl", "-i", "-a", window], check=False)
+    return 0
+
+
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "--agent":
+        return bring_up_agent(sys.argv[2])
+    if len(sys.argv) == 3 and sys.argv[1] == "--code":
+        return pick(sys.argv[2], terminal=False)
     if sys.argv[1:] == ["--show"]:
         mode = f"windows:{pathlib.Path(__file__).resolve()}"
         click = ["-hover-select", "-me-select-entry", "", "-me-accept-entry", "MousePrimary"]
@@ -392,4 +421,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

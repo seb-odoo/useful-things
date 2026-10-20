@@ -140,6 +140,28 @@ TITLES = [
     ("⭐ master-y--seb (mine)", "mine"),
 ]
 NAMES = ["master-x--seb", "Refactor", "master-y--seb"]
+TABS = [
+    ([], ""),
+    ([{"title": "🚀 master-x--seb", "finished": None}], "🚀"),
+    (
+        [
+            {"title": "🚀 master-x--seb", "finished": "PR opened"},
+            {"title": "👀 master-x--seb", "finished": "PR merged"},
+        ],
+        "🚀👀 PR merged, PR opened",
+    ),
+    (
+        [
+            {"title": "🚀 master-x--seb", "finished": "PR opened"},
+            {"title": "💬 master-x--seb", "finished": None},
+        ],
+        "🚀💬",
+    ),
+]
+HELPER_GROUPS = [
+    {"bundle": "master-x--seb", "finished": None, "title": "🚀 master-x--seb"},
+    {"bundle": None, "finished": None, "title": "Reading"},
+]
 USAGE_FIRST = {"master-x--seb": (None, 2 * 1024**3), "0x2": (None, 1250)}
 USAGE_NEXT = {"master-x--seb": (50.0, 2 * 1024**3), "0x2": (0.0, 1250)}
 
@@ -229,6 +251,38 @@ def check_ask(agent_list):
     agent_list.bctl.SOCKETS = (pathlib.Path(root, "gone.sock"),)
     if (found := agent_list.ask("GET", "/queue")) != {"error": "bundle-ctl does not answer"}:
         failures.append(f"ask with no daemon: {found!r}")
+    return failures
+
+
+def check_tabs(agent_list):
+    """The Tabs column, then the groups by bundle and an answer of a helper on a socket of its
+    own, and none once it is gone."""
+    failures = []
+    for groups, expected in TABS:
+        if (found := agent_list.get_tabs(groups)) != expected:
+            failures.append(f"tabs of {groups!r}: {found!r}, expected {expected!r}")
+
+    class Handler(socketserver.StreamRequestHandler):
+        def handle(self):
+            request = json.loads(self.rfile.readline())
+            answer = {"groups": HELPER_GROUPS} if request["op"] == "groups" else {"got": request}
+            self.wfile.write(json.dumps(answer).encode() + b"\n")
+
+    tab_groups = agent_list.tab_groups
+    with tempfile.TemporaryDirectory() as root:
+        tab_groups.SOCKET = pathlib.Path(root, "host.sock")
+        server = socketserver.ThreadingUnixStreamServer(str(tab_groups.SOCKET), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        close = {"op": "close", "bundle": "master-x--seb"}
+        found = [tab_groups.get_groups(), tab_groups.ask(close)]
+        expected = [{"master-x--seb": HELPER_GROUPS[:1]}, {"got": close}]
+        if found != expected:
+            failures.append(f"helper answers {found!r}, expected {expected!r}")
+        server.shutdown()
+        server.server_close()
+        tab_groups.SOCKET.unlink()
+        if (found := [tab_groups.get_groups(), tab_groups.ask({"op": "show"})]) != [{}, None]:
+            failures.append(f"with no helper: {found!r}")
     return failures
 
 
@@ -376,11 +430,11 @@ def main():
         if (found := agent_list.get_move(answer, bundles, at, step)) != expected:
             failures.append(f"move {step} of {bundles[at]} in {bundles}: {found!r}")
     failures += check_filters(agent_list) + check_reads(agent_list) + check_usage(agent_list)
-    failures += check_ask(agent_list) + check_queue(agent_list)
+    failures += check_ask(agent_list) + check_queue(agent_list) + check_tabs(agent_list)
     for line in failures:
         print(line)
     cases = len(AGENTS) + len(OPS_INFOS) + 4 + 1 + len(FACETS) + len(FILTERED) + 2 + 7 + 3 + 3
-    cases += len(QUEUED_LINES) + 1 + 2 + len(SEARCHED) + 1 + len(MOVES)
+    cases += len(QUEUED_LINES) + 1 + 2 + len(SEARCHED) + 1 + len(MOVES) + len(TABS) + 2
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 
 HERE = pathlib.Path(__file__).resolve().parent
 WINDOWS = """\
@@ -141,6 +142,11 @@ PICKS = [
     ("1", "master-c-aku", "xdg-open odoo-bundle://master-c-aku"),
     ("10", "master-c-aku", "wmctrl -i -a 0x04"),
 ]
+BRING_UPS = [
+    (("--agent", "master-a--seb"), "wmctrl -i -a 0x06"),
+    (("--agent", "master-c-aku"), "wmctrl -i -a 0x04"),
+    (("--code", "master-a--seb"), "wmctrl -i -a 0x08"),
+]
 
 
 def run(folder, *args, **env):
@@ -199,6 +205,23 @@ def get_new_ops():
     os.environ.update(ROFI_RETV="1", ROFI_INFO="new-ops")
     picker.main()
     return started
+
+
+def get_started_agents():
+    """What --agent runs for a bundle with no window, when bctl starts its agent, then when bctl
+    refuses: the code it ends on and the commands, with no wait for the window."""
+    found = []
+    for code in (0, 1):
+        picker = load_picker()
+        shown = iter([{}, {}, {"master-z--seb": {"terminal": "0x99"}}])
+        picker.get_windows = lambda shown=shown: (next(shown), [], [])
+        ran, done = [], types.SimpleNamespace(returncode=code)
+        picker.subprocess = types.SimpleNamespace(
+            run=lambda command, ran=ran, done=done, **_: ran.append(command) or done,
+        )
+        picker.time = types.SimpleNamespace(monotonic=time.monotonic, sleep=lambda _seconds: None)
+        found.append((picker.bring_up_agent("master-z--seb"), ran))
+    return found
 
 
 def write_answer(folder, session, answer, bundle=None):
@@ -304,16 +327,17 @@ def main():
         if (found := get_shown_rows(folder)) != SHOWN_ROWS:
             failures.append(f"rows of agent-list.py {found!r}, expected {SHOWN_ROWS!r}")
         (folder / "shown").write_text("")
-        for retv, info, expected in PICKS:
+        picks = [((), {"ROFI_RETV": retv, "ROFI_INFO": info}, ran) for retv, info, ran in PICKS]
+        for args, env, expected in picks + [(args, {}, ran) for args, ran in BRING_UPS]:
             log.write_text("")
-            found = run(folder, ROFI_RETV=retv, ROFI_INFO=info)
+            found = run(folder, *args, **env)
             for _ in range(50):
                 if log.read_text():
                     break
                 subprocess.run(["sleep", "0.02"], check=True)
             ran = log.read_text().splitlines()
             if found or ran != [expected]:
-                failures.append(f"pick {retv} {info}: printed {found!r}, ran {ran!r}")
+                failures.append(f"pick {args} {env}: printed {found!r}, ran {ran!r}")
         old = folder / "bundle-ctl" / "opening" / "master-b--seb"
         old.parent.mkdir(parents=True, exist_ok=True)
         old.touch()
@@ -357,9 +381,13 @@ def main():
     new_ops = [str(HERE / "client" / "bctl.py"), "open", "ops", "--terminal"]
     if (started := get_new_ops()) != [new_ops]:
         failures.append(f"pick 1 new-ops: started {started!r}, expected {[new_ops]!r}")
+    bctl = [sys.executable, str(HERE / "client" / "bctl.py"), "open", "master-z--seb", "--terminal"]
+    started = [(0, [bctl, ["wmctrl", "-i", "-a", "0x99"]]), (1, [bctl])]
+    if (found := get_started_agents()) != started:
+        failures.append(f"--agent with no window: {found!r}, expected {started!r}")
     for line in failures:
         print(line)
-    cases = 20 + len(PICKS) + len(CLOSE_LINES)
+    cases = 21 + len(PICKS) + len(BRING_UPS) + len(CLOSE_LINES)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

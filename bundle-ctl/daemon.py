@@ -88,6 +88,7 @@ from utils import UtilsRunner  # noqa: E402
 
 import cut  # noqa: E402
 import runs  # noqa: E402
+import tab_groups  # noqa: E402
 
 
 def load_config():
@@ -1484,6 +1485,7 @@ def delete(caller, query, body):
     with state_lock:
         queued = next((item for item in read_state()["queue"] if item["bundle"] == bundle), None)
     report = get_report(bundle) if get_window_pids(bundle) else None
+    groups = [group["title"] for group in tab_groups.get_groups().get(bundle, [])]
     item = {
         "client": caller,
         "key": f"delete {bundle}",
@@ -1497,6 +1499,7 @@ def delete(caller, query, body):
             ),
             "its container, and the databases named after it",
             *([f"its queued task, from {queued['parent']}"] if queued else []),
+            *([f"its tab groups in Firefox: {', '.join(groups)}"] if groups else []),
             *(
                 ["its agent window, which ends on this report:"]
                 + [f"  {line}".rstrip() for line in report.splitlines()]
@@ -1947,6 +1950,7 @@ def send_deletion(item):
             state.get("drops", {}).pop(bundle, None)
         state["queue"] = [queued for queued in state["queue"] if queued["bundle"] != bundle]
         write_state(state)
+    tab_groups.ask({"op": "close", "bundle": bundle})
     closes = item["send"].get("report") and get_report(bundle) == item["send"]["report"]
     if closes:
         close_window(bundle)

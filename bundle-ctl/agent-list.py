@@ -7,8 +7,10 @@ again every 2 seconds, the queue every 10.
 The rows are the ones of the picker, the terminals shown on screen included: each with its mark, its
 kind, its bundle or the title of its conversation, the state of its agent and since when, or the
 error its window shows once its claude ended on it (❌ for the picker), ", shown"
-when its terminal is not minimized, its CPU, RAM and disk, and the close line of the last answer of
-its session (picker.get_close_lines), else the first line of the result.md of a bundle. A click on a column header sorts the rows by that column: by mark in the order of the picker, by
+when its terminal is not minimized, its CPU, RAM and disk, the icon of each Firefox tab group of a
+bundle, then why they look finished when they all do (tab_groups.py), and the close line of the
+last answer of its session (picker.get_close_lines), else the first line of the result.md of a
+bundle. A click on a column header sorts the rows by that column: by mark in the order of the picker, by
 kind in its order, by time, by number, or by text. CPU and RAM are those of the container of a
 bundle, its file cache aside, or of the claude of an ops window and its children, as the ops agents share
 one container; read every 5 seconds, 100% is one core. Disk is the folder of a bundle, measured
@@ -21,13 +23,15 @@ tasks of the queue whose bundle has it, case and a dev remote prefix aside; the 
 only the rows it keeps, and Up and Down move a task past the one shown above or below it. Enter,
 a double click or Terminal brings up the terminal of each selected row (Ctrl+click, Shift+click)
 where it was, the first row last, so that it ends in front. VS Code opens the window of each
-selected bundle, which takes its session over. Close closes the window of each selected row
-after a question, as the daemon does: SIGUSR1 to its agent-terminator.py, and its claude stops.
+selected bundle, which takes its session over. Show tabs brings up the Firefox tab group of the
+first selected bundle, and Close tabs closes the groups of each, at once. Close closes the window
+of each selected row after a question, as the daemon does: SIGUSR1 to its agent-terminator.py,
+and its claude stops.
 Back to queue queues the session of each selected bundle again, at the end of the queue (the lowest
 priority there), and the daemon closes its window once its turn ended, 2 minutes
 at most (bctl requeue): the queue starts it again with "Continue from where you left off." when its
 turn comes. Pause does the same, and the task waits in the queue for a manual resume. A right
-click on a row opens a menu with these five. New ops agent runs bctl open ops --terminal.
+click on a row opens a menu with these seven. New ops agent runs bctl open ops --terminal.
 
 A task of the queue has the mark and the kind of its bundle: those of its row when it has one, else
 those its window would show once the session it goes on with is idle. Its last message is its own
@@ -70,16 +74,16 @@ AGENTS_CHECK = 2
 APPEARANCE = ("org.freedesktop.appearance", "color-scheme")
 ASKS_SEB = ("failed", "finished", "waiting")
 BUNDLE = 2
-COLUMNS = ("State", "Type", "Agent", "Since", "CPU", "RAM", "Disk", "Last answer")
+COLUMNS = ("State", "Type", "Agent", "Since", "CPU", "RAM", "Disk", "Tabs", "Last answer")
 CONTAINERS = pathlib.Path(
     f"/sys/fs/cgroup/user.slice/user-{os.getuid()}.slice/user@{os.getuid()}.service/user.slice"
 )
 DISK_AGE = 600
 DISK_CHECK = 60
 ICON = HERE / "agent-list.svg"
-KEY, WINDOW, TITLE = 8, 9, 10
+KEY, WINDOW, TITLE = 9, 10, 11
 NOT_BUILT = "Nothing of this bundle is checked out yet"
-SORTS = (11, 12, 2, 13, 14, 15, 16, 7)
+SORTS = (12, 13, 2, 14, 15, 16, 17, 7, 8)
 PLACE = (
     pathlib.Path(os.environ.get("XDG_STATE_HOME") or pathlib.Path.home() / ".local/state")
     / "bundle-ctl"
@@ -110,6 +114,7 @@ def load(name, path):
 bctl = load("bctl", HERE / "client" / "bctl.py")
 picker = load("picker", HERE / "window-picker.py")
 runs = load("runs", HERE / "runs.py")
+tab_groups = load("tab_groups", HERE / "tab_groups.py")
 ICONS = {kind: icon for icon, kind, _ in load("title", HERE / "client" / "window-title.py").KINDS}
 
 sessions = {}
@@ -138,10 +143,22 @@ def get_info(row, close):
     return ", ".join([row.ended or state, *shown]), answer, since or 0.0
 
 
+def get_tabs(groups):
+    """The icon of each Firefox tab group of a bundle, then why they look finished when they all
+    do."""
+    icons = "".join(group["title"].partition(" ")[0] for group in groups)
+    reasons = sorted({group.get("finished") or "" for group in groups})
+    return f"{icons} {', '.join(reasons)}" if groups and all(reasons) else icons
+
+
 def read_agents():
     rows = picker.get_rows(picker.get_windows(), shown=True)
     closes = picker.get_close_lines(rows)
-    return [(row, get_info(row, closes[row.key])) for row in rows]
+    groups = tab_groups.get_groups()
+    return [
+        (row, (*get_info(row, closes[row.key]), get_tabs(groups.get(row.key, []))))
+        for row in rows
+    ]
 
 
 def get_kind(row):
@@ -594,9 +611,9 @@ class AgentList(Gtk.Application):
         self.search = Gtk.SearchEntry(placeholder_text="Branch")
         self.search.connect("search-changed", self.search_changed)
         line.pack_end(self.search, False, False, 0)
-        self.agents = Gtk.ListStore(*[str] * 11, int, int, float, float, float, float)
+        self.agents = Gtk.ListStore(*[str] * 12, int, int, float, float, float, float)
         self.sorted_agents = Gtk.TreeModelSort(model=self.agents)
-        self.agents_view, agents = make_view(self.sorted_agents, COLUMNS, 7, SORTS)
+        self.agents_view, agents = make_view(self.sorted_agents, COLUMNS, 8, SORTS)
         self.agents_view.get_selection().set_mode(Gtk.SelectionMode.MULTIPLE)
         self.agents_view.connect("button-press-event", self.open_menu)
         self.agents_view.connect("row-activated", self.bring_up)
@@ -629,6 +646,8 @@ class AgentList(Gtk.Application):
         actions = (
             ("Terminal", self.bring_up),
             ("VS Code", self.open_code),
+            ("Show tabs", lambda *_args: self.ask_tabs("show", first=True)),
+            ("Close tabs", lambda *_args: self.ask_tabs("close")),
             ("Close", self.close),
             ("Back to queue", self.queue_again),
             ("Pause", lambda *_args: self.queue_again(paused=True)),
@@ -689,7 +708,7 @@ class AgentList(Gtk.Application):
         """The columns of a row, then its key, window and title, then the values its columns sort
         by: its place in the picker for its mark, the order of its kind, the time of its state, its
         CPU, RAM and disk, -1 when not read."""
-        state, answer, since = info
+        state, answer, since, tabs = info
         cpu, ram = self.usage.get(row.key, (None, None))
         disk = self.disks.get(row.key)
         return [
@@ -699,6 +718,7 @@ class AgentList(Gtk.Application):
             "" if cpu is None else f"{cpu:.0f}%",
             "" if ram is None else format_size(ram),
             "" if disk is None else format_size(disk),
+            tabs,
             answer,
             row.key,
             row.window,
@@ -832,6 +852,15 @@ class AgentList(Gtk.Application):
         for row in self.get_selected():
             if row[KEY] != row[WINDOW]:
                 picker.pick(row[KEY], terminal=False)
+
+    def ask_tabs(self, op, first=False):
+        """Bring up the Firefox tab group of the first selected bundle, or close the groups of
+        each, at once: a closed tab comes back with Ctrl+Shift+T."""
+        rows = [row for row in self.get_selected() if row[KEY] != row[WINDOW]]
+        for row in rows[:1] if first else rows:
+            answer = tab_groups.ask({"op": op, "bundle": row[KEY]})
+            if answer and "error" in answer:
+                self.say(answer["error"])
 
     def confirm(self, text, rows, action):
         dialog = Gtk.MessageDialog(

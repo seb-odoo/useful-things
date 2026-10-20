@@ -145,6 +145,7 @@ def prepare(root):
         },
         "closed": [],
         "running": {str(root / "master" / CLEAN)},
+        "tabs": [],
         "state": {"queue": [{"bundle": REPORTED, "parent": CLEAN}]},
     }
     daemon.HELD_DIR = root / "held"
@@ -167,6 +168,9 @@ def prepare(root):
     daemon.read_state = lambda: world["state"]
     daemon.run_script = lambda log, script, *args: world["calls"].append((script, *args))
     daemon.write_state = lambda state: None
+    daemon.tab_groups.ask = lambda request: world["tabs"].append(request) or {
+        "groups": [{"bundle": REPORTED, "title": f"🚀 {REPORTED}"}],
+    }
     return world
 
 
@@ -396,6 +400,7 @@ def check(root):
                 ],
                 [
                     f"its queued task, from {CLEAN}",
+                    f"its tab groups in Firefox: 🚀 {REPORTED}",
                     "its agent window, which ends on this report:",
                     "  blocked: needs opus",
                     "",
@@ -405,12 +410,19 @@ def check(root):
             ),
         ),
     )
+    world["tabs"].clear()
     result = answer_yes(number)
     checks.append(
         (
             "the yes closes the window and drops the queued task",
             (result["text"], world["closed"], world["state"]["queue"], world["state"]["deletions"])
             == (f"{REPORTED} is deleted once its agent window closed", [REPORTED], [], [REPORTED]),
+        ),
+    )
+    checks.append(
+        (
+            "the yes closes its tab groups in Firefox",
+            world["tabs"] == [{"op": "close", "bundle": REPORTED}],
         ),
     )
     code, lines = run_client(path, "delete", TYPED, "--reason", "r")

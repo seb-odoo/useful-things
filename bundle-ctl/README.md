@@ -238,6 +238,9 @@ branches again with the same commits, so a commit made after the request still k
   answered after it, the request shows that report and the yes closes the window, so the bundle
   goes with no click (Seb, 2026-10-15: "yes if there is nothing useful for me there to read").
   Else closing the window or the terminal stays Seb's call.
+- The yes also closes the Firefox tab groups of the bundle (Seb, 2026-10-20), which the request
+  lists: the helper of firefox-gateway answers on `$XDG_RUNTIME_DIR/firefox-gateway/host.sock`
+  (`tab_groups.py`). With no helper, Firefox closed say, there is nothing to close.
 - `--wait S` waits that long for his answer and prints it, as `hctl --wait` does: exit 0 on his
   yes, 126 when he refused, 75 when it still waits. The same delete asked again replaces the
   request that waits, under the same `bN`, and waits for it.
@@ -388,7 +391,11 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   a bundle brings its VS Code window up, or opens it through its `odoo-bundle://` link, and a right
   click or Shift+Enter brings its terminal up. Until that VS Code window is up, the row of the
   bundle shows 🔄 (a file per bundle in `$XDG_RUNTIME_DIR/bundle-ctl/opening`, 5 minutes at most,
-  dropped once the window is up). A Cinnamon shortcut runs it.
+  dropped once the window is up). A Cinnamon shortcut runs it. `window-picker.py --agent BUNDLE`
+  brings up the terminal of its agent, else its VS Code window, which then holds the session,
+  else starts that agent again in a terminal (`bctl open BUNDLE --terminal`) and brings the window
+  up once it shows; `--code BUNDLE` is the click on its row. The helper of firefox-gateway runs
+  them from a tab of the Firefox group of the bundle.
 - `agent-list.py`, a GTK window that stays open (Seb, 2026-10-15: "a new display for agents list
   that I can keep open and that updates live"), has the rows of the picker, read again every 2
   seconds, the terminals shown on screen included, and no other window. The mark and the kind of
@@ -407,7 +414,10 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   without the file cache as the run queue counts it; those of the claude of an ops window and its
   children, as the ops agents share one container. 100% is one core. The disk of a bundle is a
   `du` of its folder when its row comes, then every 10 minutes: its `node_modules` counts there,
-  though they are hard links of the base. Buttons above the rows count each mark among the kinds
+  though they are hard links of the base. The Tabs column of a bundle has the icon of each of its
+  Firefox tab groups (Seb, 2026-10-20), read with the rows from the helper of firefox-gateway
+  (`tab_groups.py`), then, when they all look finished, why: `🚀👀 PR merged, PR opened`.
+  Buttons above the rows count each mark among the kinds
   pressed, and each kind among the marks pressed (his ask: the counts followed no other filter);
   pressed, they keep the rows of one of the marks pressed and of one of the kinds pressed. The
   Branch search beside them (Seb, 2026-10-20: "to look for a branch name (both now and queue)")
@@ -427,7 +437,9 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   Time asks, its own by default (Seb, 2026-10-16: "controls on when it goes out of the queue").
   Ctrl+click and Shift+click select several rows:
   Enter, a double click or Terminal brings up their terminals where they were, the first row in
-  front (his pick: no tiling); VS Code opens the window of each selected bundle; Close closes the
+  front (his pick: no tiling); VS Code opens the window of each selected bundle; Show tabs brings
+  up the Firefox tab group of the first selected bundle, and Close tabs closes the groups of each,
+  at once (Seb, 2026-10-20: a closed tab comes back with Ctrl+Shift+T); Close closes the
   window of each after a question, as the daemon does (SIGUSR1 to its `agent-terminator.py`), so
   its claude stops. Back to queue, after a question too, queues the session of each selected
   bundle again (`POST /requeue`, at the lowest priority of the queue, so last), and the daemon
@@ -436,7 +448,7 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   turn (`RESUMED` in `daemon.py`). Pause does the same with
   `paused`: the task waits in the queue until Resume or
   Time there (Seb, 2026-10-16: "move agents from and to the queue easily, or pause them"). A
-  right click on a row opens a menu with these five. New ops agent runs `bctl
+  right click on a row opens a menu with these seven. New ops agent runs `bctl
   open ops --terminal`. It runs on the system python of the host, which has GTK. It is dark when the
   `color-scheme` of the desktop portal asks for it, as VS Code and the browsers are, and follows
   each change of it (Seb, 2026-10-16: "should follow os color theme"). Dark is the dark Adwaita
