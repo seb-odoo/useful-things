@@ -9,7 +9,7 @@ kind, its bundle or the title of its conversation, the state of its agent and si
 error its window shows once its claude ended on it (❌ for the picker), ", shown"
 when its terminal is not minimized, its CPU, RAM and disk, the icon of each Firefox tab group of a
 bundle, then why they look finished when they all do (tab_groups.py), and the close line of the
-last answer of its session (picker.get_close_lines), else the first line of the result.md of a
+last answer of its session (picker.get_close_line), else the first line of the result.md of a
 bundle. A click on a column header sorts the rows by that column: by mark in the order of the picker, by
 kind in its order, by time, by number, or by text. CPU and RAM are those of the container of a
 bundle, its file cache aside, or of the claude of an ops window and its children, as the ops agents share
@@ -42,6 +42,11 @@ task one place, Pause makes each selected task wait for a manual resume, Resume 
 Time for a time of the day it asks (bctl schedule). A second start brings the open window up. The
 size and the place of the window, and the height of the queue under its handle, are kept in
 agent-list.json, beside the state of the daemon.
+
+These parts are Agents, which another window can show with rows of its own under each agent (a
+Child each) and rows of its own at the end. When host-ctl is on this machine, a start opens the
+window of hok (hokwin.py), which shows them with the requests of each agent under its row; this
+window opens alone when hok ends with an error within START seconds.
 """
 
 import collections
@@ -69,17 +74,20 @@ sys.path.insert(0, str(HERE.parent / "scripts"))
 
 from agents import OPS, get_agent_folder, get_mtime, read_text  # noqa: E402
 from commands import clean_bundle_name, get_worktree_bundle_folder  # noqa: E402
+from config import REPO_ROOT  # noqa: E402
 
 AGENTS_CHECK = 2
 APPEARANCE = ("org.freedesktop.appearance", "color-scheme")
 ASKS_SEB = ("failed", "finished", "waiting")
 BUNDLE = 2
+Child = collections.namedtuple("Child", "key state kind name since answer age")
 COLUMNS = ("State", "Type", "Agent", "Since", "CPU", "RAM", "Disk", "Tabs", "Last answer")
 CONTAINERS = pathlib.Path(
     f"/sys/fs/cgroup/user.slice/user-{os.getuid()}.slice/user@{os.getuid()}.service/user.slice"
 )
 DISK_AGE = 600
 DISK_CHECK = 60
+HOK = pathlib.Path(REPO_ROOT) / "host-ctl" / "hokwin.py"
 ICON = HERE / "agent-list.svg"
 KEY, WINDOW, TITLE = 9, 10, 11
 NOT_BUILT = "Nothing of this bundle is checked out yet"
@@ -101,6 +109,7 @@ QUEUE_COLUMNS = (
     "Last answer",
 )
 SCOPE = re.compile(r"libpod-([0-9a-f]{64})\.scope")
+START = 3
 USAGE_CHECK = 5
 
 
@@ -152,11 +161,20 @@ def get_tabs(groups):
 
 
 def read_agents():
+    """Each row of the picker with its state, its close line, its tabs and its session."""
     rows = picker.get_rows(picker.get_windows(), shown=True)
-    closes = picker.get_close_lines(rows)
+    pids = picker.read_window_pids() if any(row.key == row.window for row in rows) else {}
+    found = {row.key: picker.get_session(row, pids) for row in rows}
     groups = tab_groups.get_groups()
     return [
-        (row, (*get_info(row, closes[row.key]), get_tabs(groups.get(row.key, []))))
+        (
+            row,
+            (
+                *get_info(row, picker.get_close_line(found[row.key])),
+                get_tabs(groups.get(row.key, [])),
+                found[row.key],
+            ),
+        )
         for row in rows
     ]
 
@@ -490,6 +508,63 @@ def fill(model, lines):
         model.remove(model.get_iter(len(lines)))
 
 
+def get_child_line(child, place=0):
+    """The columns of a row another window adds: no window, no usage, and its age to sort by
+    Since."""
+    columns = [child.state, child.kind, child.name, child.since, "", "", "", "", child.answer]
+    keys = [child.key, "", child.name, place, len(picker.KINDS), child.age]
+    return [*columns, *keys, -1.0, -1.0, -1.0]
+
+
+def get_tree(lines, children, groups):
+    """The lines of the agents, each with the lines of the children another window gives it, then
+    the groups of that window, each with its children, after every agent: (line, [(line, [])])
+    pairs."""
+    tree = [(line, get_leaves(children.get(line[KEY], []))) for line in lines]
+    for place, (group, kids) in enumerate(groups, len(lines)):
+        tree.append((get_child_line(group, place), get_leaves(kids)))
+    return tree
+
+
+def get_leaves(children):
+    return [(get_child_line(child), []) for child in children]
+
+
+def fill_tree(model, tree, parent=None):
+    """fill for a tree: the lines of tree written over the rows under parent, then the lines under
+    each over the rows under it."""
+    for at, (line, children) in enumerate(tree):
+        found = model.iter_nth_child(parent, at)
+        if found is None:
+            found = model.append(parent, line)
+        elif list(model[found]) != line:
+            model[found] = line
+        fill_tree(model, children, found)
+    while model.iter_n_children(parent) > len(tree):
+        model.remove(model.iter_nth_child(parent, len(tree)))
+
+
+def get_all(rows):
+    """Each row of a tree, the rows under each one after it."""
+    for row in rows:
+        yield row
+        yield from get_all(row.iterchildren())
+
+
+def open_hok():
+    """Start the window of hok, which shows the agents with the requests of each: whether it
+    runs, or brought up the one open. False when host-ctl is not on this machine, or when hok ends
+    with an error within START seconds."""
+    if not HOK.is_file():
+        return False
+    command = [sys.executable, str(HOK)]
+    started = subprocess.Popen(command, start_new_session=True, stdin=subprocess.DEVNULL)
+    try:
+        return started.wait(START) == 0
+    except subprocess.TimeoutExpired:
+        return True
+
+
 def follow(seconds, read, show):
     """Run read in a thread now and every few seconds, one at a time, and show its result in the
     main loop. The function returned runs it once more, unless it runs."""
@@ -571,33 +646,41 @@ def follow_color_scheme():
     return portal
 
 
-class AgentList(Gtk.Application):
-    def __init__(self):
-        super().__init__(application_id="org.bundle_ctl.AgentList")
+class Alone:
+    """What the window of the agent list adds to the agents: no rows, and the title."""
+
+    def __init__(self, window):
+        self.window = window
+
+    def get_children(self, _agents):
+        return {}, []
+
+    def select_child(self, _key):
+        pass
+
+    def set_title(self, title):
+        if self.window.get_title() != title:
+            self.window.set_title(title)
+
+
+class Agents:
+    """The filters, the rows, the queue under them and the buttons, in window. Its owner, Alone
+    by default, gives the rows under each agent from its key and its session, then its groups
+    (get_children), hears which row of its own is selected (select_child), and sets the title."""
+
+    def __init__(self, window, owner=None):
         self.agents_read = []
+        self.children = set()
         self.disks = {}
+        self.owner = owner or Alone(window)
         self.queue_answer = None
+        self.updating = False
         self.usage = {}
         self.usage_reader = Usage()
-        self.window = None
+        self.window = window
 
-    def do_activate(self):
-        if self.window:
-            xid = self.window.get_window().get_xid()
-            subprocess.run(["wmctrl", "-i", "-a", hex(xid)], check=False)
-            return
-        self.portal = follow_color_scheme()
-        with contextlib.suppress(GLib.Error):
-            Gtk.Window.set_default_icon_from_file(str(ICON))
-        self.window = Gtk.ApplicationWindow(application=self, title=get_window_title([]))
-        self.window.connect("delete-event", self.save_place)
-        try:
-            place = json.loads(PLACE.read_text())
-            self.window.set_default_size(place["width"], place["height"])
-            self.window.move(place["x"], place["y"])
-        except (OSError, ValueError, KeyError):
-            place = {}
-            self.window.set_default_size(900, 500)
+    def build(self, split=None):
+        """The widgets, in one box, the queue under its handle at split when given."""
         labels = get_filters([], set(), set())
         self.marks = [Gtk.ToggleButton(label=label) for label in labels[: len(picker.MARKS)]]
         self.kinds = [Gtk.ToggleButton(label=label) for label in labels[len(picker.MARKS) :]]
@@ -611,10 +694,11 @@ class AgentList(Gtk.Application):
         self.search = Gtk.SearchEntry(placeholder_text="Branch")
         self.search.connect("search-changed", self.search_changed)
         line.pack_end(self.search, False, False, 0)
-        self.agents = Gtk.ListStore(*[str] * 12, int, int, float, float, float, float)
+        self.agents = Gtk.TreeStore(*[str] * 12, int, int, float, float, float, float)
         self.sorted_agents = Gtk.TreeModelSort(model=self.agents)
         self.agents_view, agents = make_view(self.sorted_agents, COLUMNS, 8, SORTS)
         self.agents_view.get_selection().set_mode(Gtk.SelectionMode.MULTIPLE)
+        self.agents_view.get_selection().connect("changed", self.selected)
         self.agents_view.connect("button-press-event", self.open_menu)
         self.agents_view.connect("row-activated", self.bring_up)
         self.queue_head = Gtk.Label(xalign=0)
@@ -641,8 +725,8 @@ class AgentList(Gtk.Application):
         self.panes = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL, wide_handle=True)
         self.panes.pack1(agents, True, False)
         self.panes.pack2(queue_box, False, False)
-        if "split" in place:
-            self.panes.set_position(place["split"])
+        if split is not None:
+            self.panes.set_position(split)
         actions = (
             ("Terminal", self.bring_up),
             ("VS Code", self.open_code),
@@ -667,23 +751,46 @@ class AgentList(Gtk.Application):
         box.pack_start(filters, False, False, 0)
         box.pack_start(self.panes, True, True, 0)
         box.pack_start(buttons, False, False, 0)
-        self.window.add(box)
-        self.window.show_all()
+        return box
+
+    def start(self):
+        """Read the agents, the queue, the usage and the disks, each in a thread, from now on."""
         follow(AGENTS_CHECK, read_agents, self.show_agents)
         self.read_queue = follow(QUEUE_CHECK, read_queue, self.show_queue)
         follow(USAGE_CHECK, self.usage_reader.read, self.show_usage)
         self.measure_disks = follow(DISK_CHECK, self.usage_reader.read_disks, self.show_disks)
 
-    def get_selected(self):
+    def get_selected(self, every=False):
+        """The selected agents, or with every all the selected rows, those of the owner too."""
         model, paths = self.agents_view.get_selection().get_selected_rows()
-        return [list(model[path]) for path in paths]
+        rows = [list(model[path]) for path in paths]
+        return rows if every else [row for row in rows if row[WINDOW]]
+
+    def selected(self, _selection):
+        if not self.updating:
+            found = (row[KEY] for row in self.get_selected(every=True) if not row[WINDOW])
+            self.owner.select_child(next(found, None))
+
+    def select(self, key):
+        """Select the row of key alone, open the rows above it and scroll to it: whether there
+        is one."""
+        row = next((row for row in get_all(self.sorted_agents) if row[KEY] == key), None)
+        if row is None:
+            return False
+        self.agents_view.expand_to_path(row.path)
+        selection = self.agents_view.get_selection()
+        selection.unselect_all()
+        selection.select_path(row.path)
+        self.agents_view.scroll_to_cell(row.path, None, False, 0, 0)
+        return True
 
     def search_changed(self, _entry):
         self.show()
         self.show_queue(self.queue_answer)
 
     def show(self, *_args):
-        """Write the rows the filters keep, with what was read last, and keep their selection."""
+        """Write the rows the filters keep, with what was read last and the rows of the owner
+        under them, and keep their selection. A row of the owner that is new opens the rows."""
         ranks = {rank for rank, button in enumerate(self.marks) if button.get_active()}
         kinds = {kind for kind, button in zip(picker.KINDS, self.kinds) if button.get_active()}
         search = self.search.get_text()
@@ -696,19 +803,29 @@ class AgentList(Gtk.Application):
             for place, (row, info) in enumerate(self.agents_read)
             if is_kept(row, ranks, kinds, search)
         ]
+        agents = [(row.key, info[-1]) for row, info in self.agents_read]
+        tree = get_tree(lines, *self.owner.get_children(agents))
         selection = self.agents_view.get_selection()
-        keys = {row[KEY] for row in self.get_selected()}
-        fill(self.agents, lines)
+        keys = {row[KEY] for row in self.get_selected(every=True)}
+        self.updating = True
+        fill_tree(self.agents, tree)
         selection.unselect_all()
-        for row in self.sorted_agents:
+        for row in get_all(self.sorted_agents):
             if row[KEY] in keys:
                 selection.select_iter(row.iter)
+        self.updating = False
+        children = {kid[KEY] for _line, kids in tree for kid, _none in kids}
+        if children - self.children:
+            self.agents_view.expand_all()
+        if bool(children) != self.agents_view.get_show_expanders():
+            self.agents_view.set_show_expanders(bool(children))
+        self.children = children
 
     def get_line(self, place, row, info):
         """The columns of a row, then its key, window and title, then the values its columns sort
         by: its place in the picker for its mark, the order of its kind, the time of its state, its
         CPU, RAM and disk, -1 when not read."""
-        state, answer, since, tabs = info
+        state, answer, since, tabs, _session = info
         cpu, ram = self.usage.get(row.key, (None, None))
         disk = self.disks.get(row.key)
         return [
@@ -737,9 +854,7 @@ class AgentList(Gtk.Application):
         self.usage_reader.keys = keys
         self.agents_read = agents
         self.show()
-        title = get_window_title([row for row, _info in agents])
-        if self.window.get_title() != title:
-            self.window.set_title(title)
+        self.owner.set_title(get_window_title([row for row, _info in agents]))
         if new:
             self.measure_disks()
 
@@ -898,14 +1013,43 @@ class AgentList(Gtk.Application):
         for row in rows:
             self.send("/requeue", {"bundle": row[KEY], "paused": paused})
 
+
+class AgentList(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id="org.bundle_ctl.AgentList")
+        self.agents = self.window = None
+
+    def do_activate(self):
+        if self.window:
+            xid = self.window.get_window().get_xid()
+            subprocess.run(["wmctrl", "-i", "-a", hex(xid)], check=False)
+            return
+        self.portal = follow_color_scheme()
+        with contextlib.suppress(GLib.Error):
+            Gtk.Window.set_default_icon_from_file(str(ICON))
+        self.window = Gtk.ApplicationWindow(application=self, title=get_window_title([]))
+        self.window.connect("delete-event", self.save_place)
+        try:
+            place = json.loads(PLACE.read_text())
+            self.window.set_default_size(place["width"], place["height"])
+            self.window.move(place["x"], place["y"])
+        except (OSError, ValueError, KeyError):
+            place = {}
+            self.window.set_default_size(900, 500)
+        self.agents = Agents(self.window)
+        self.window.add(self.agents.build(place.get("split")))
+        self.window.show_all()
+        self.agents.start()
+
     def save_place(self, window, _event):
         x, y = window.get_position()
         width, height = window.get_size()
-        split = self.panes.get_position()
+        split = self.agents.panes.get_position()
         place = {"height": height, "split": split, "width": width, "x": x, "y": y}
         PLACE.parent.mkdir(parents=True, exist_ok=True)
         PLACE.write_text(json.dumps(place))
 
 
 if __name__ == "__main__":
-    AgentList().run()
+    if not open_hok():
+        AgentList().run()

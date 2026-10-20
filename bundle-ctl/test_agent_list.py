@@ -381,6 +381,55 @@ def check_usage(agent_list):
     return failures
 
 
+def check_tree(agent_list):
+    """The rows another window adds under the agents and after them, the session of each agent,
+    and the start of hok, with scripts that stand for it."""
+    failures = []
+    child = agent_list.Child("hok:7", "🔑 waits", "HOST", "7  deploy", "2 min", "", 50.0)
+    line = agent_list.get_child_line(child)
+    columns = ["🔑 waits", "HOST", "7  deploy", "2 min", "", "", "", "", ""]
+    if line[:12] != [*columns, "hok:7", "", "7  deploy"] or line[14:] != [50.0, -1.0, -1.0, -1.0]:
+        failures.append(f"child line {line!r}")
+    lines = [["a"] * 9 + ["master-x--seb"], ["b"] * 9 + ["0x4"]]
+    group = child._replace(key="hok group:host", state="", name="the host")
+    tree = agent_list.get_tree(lines, {"0x4": [child]}, [(group, [child])])
+    key = agent_list.KEY
+    shape = [(line[key], [kid[key] for kid, _none in kids]) for line, kids in tree]
+    if shape != [("master-x--seb", []), ("0x4", ["hok:7"]), ("hok group:host", ["hok:7"])]:
+        failures.append(f"tree {shape!r}")
+    if tree[2][0][12] != 2 or tree[1][1][0][1] != []:
+        failures.append(f"a group sorts after the agents, a child has no rows: {tree!r}")
+    picker = agent_list.picker
+    rows = [
+        picker.Row(0, 0, "x", "master-x--seb", "0x1", True),
+        picker.Row(1, 0, "y", "0x4", "0x4", True),
+    ]
+    read = (picker.get_rows, picker.get_windows, picker.read_window_pids, picker.get_session)
+    picker.get_rows, picker.get_windows = lambda windows, shown: rows, lambda: None
+    picker.read_window_pids = lambda: {"0x4": "40"}
+    picker.get_session = lambda row, pids: f"S-{row.key}-{pids.get(row.window, '')}"
+    groups, agent_list.tab_groups.get_groups = agent_list.tab_groups.get_groups, dict
+    try:
+        sessions = [info[-1] for _row, info in agent_list.read_agents()]
+    finally:
+        picker.get_rows, picker.get_windows, picker.read_window_pids, picker.get_session = read
+        agent_list.tab_groups.get_groups = groups
+    if sessions != ["S-master-x--seb-", "S-0x4-40"]:
+        failures.append(f"sessions {sessions!r}")
+    kept = (agent_list.HOK, agent_list.START, agent_list.subprocess)
+    starts = ((None, False), ("exit(1)", False), ("", True), ("import time; time.sleep(2)", True))
+    with tempfile.TemporaryDirectory() as root:
+        agent_list.HOK, agent_list.START = pathlib.Path(root, "hokwin.py"), 0.5
+        agent_list.subprocess = subprocess
+        for script, expected in starts:
+            if script is not None:
+                agent_list.HOK.write_text(script)
+            if (found := agent_list.open_hok()) != expected:
+                failures.append(f"hok that runs {script!r}: {found!r}, expected {expected!r}")
+    agent_list.HOK, agent_list.START, agent_list.subprocess = kept
+    return failures
+
+
 def main():
     failures = []
     agent_list = load_list()
@@ -431,10 +480,11 @@ def main():
             failures.append(f"move {step} of {bundles[at]} in {bundles}: {found!r}")
     failures += check_filters(agent_list) + check_reads(agent_list) + check_usage(agent_list)
     failures += check_ask(agent_list) + check_queue(agent_list) + check_tabs(agent_list)
+    failures += check_tree(agent_list)
     for line in failures:
         print(line)
     cases = len(AGENTS) + len(OPS_INFOS) + 4 + 1 + len(FACETS) + len(FILTERED) + 2 + 7 + 3 + 3
-    cases += len(QUEUED_LINES) + 1 + 2 + len(SEARCHED) + 1 + len(MOVES) + len(TABS) + 2
+    cases += len(QUEUED_LINES) + 1 + 2 + len(SEARCHED) + 1 + len(MOVES) + len(TABS) + 2 + 8
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

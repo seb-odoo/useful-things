@@ -465,6 +465,16 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   failed, finished or waiting, `Agent list (3)`, for the window list of the panel, and its icon is
   `agent-list.svg` (Seb, 2026-10-19: "the counter of pending ... as well as the same for agent
   list", "a specific icon for each app").
+  These parts are `Agents`, which the window of `hok` shows too (Seb, 2026-10-20: "merge agent
+  list and hok list windows, with clear relations between all items"): when host-ctl is on the
+  machine, a start runs its `hokwin.py`, which loads `agent-list.py` and puts each request under
+  the row of the agent that asked, the others in groups after the agents (the host-ctl README
+  has the rest). This window opens alone when `hokwin.py` is missing or ends with an error within
+  3 seconds. Its owner, the window that shows `Agents`, gives the rows under each agent from its
+  key and its session (a `Child` each, read with the rows: the `.agent/session` of a bundle, the
+  session an ops window is named after), hears which of its rows is selected, and sets the
+  title. A row of the owner has no window: the buttons and the menu leave it out. The rows hide
+  their expanders while none has rows under it.
 - `window-applet/`, a Cinnamon applet, shows the mark that needs Seb most and how many bundles
   have it, in the order ❌ ✋ ✅ 🚀 ⏳ (Seb, 2026-10-15: a failed agent is an error to fix, a
   waiting or finished one waits for him, one stuck on starting comes after, one in progress does
