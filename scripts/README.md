@@ -584,10 +584,8 @@ the PR queries worked.
 ### open_bundle.py (`ocode`)
 
 Opens a local bundle in VS Code, in its dev container, and marks it handled (gbs above).
-`ocode -t BUNDLE` opens a bash of that container in this terminal instead, in `/workspace`, and
-marks it handled too. A stopped container starts as for an agent terminal (`up` of
-`bundle-ctl/agent-terminal.py`), with its postgres server and the git identity, and stops when the
-shell ends, unless a VS Code window or an agent uses it by then.
+`ocode -t BUNDLE` opens the terminator window of its agent instead, on its last session, and marks
+it handled too: `bctl open BUNDLE --terminal`, so a bundle with no agent session is refused.
 
 ### bundle_open.py
 
