@@ -17,14 +17,14 @@ with du when its row comes, then every 10 minutes.
 The buttons above the rows count the rows of each mark among the kinds pressed, and of each kind
 among the marks pressed. Pressed, they keep the rows of one of the marks pressed and of one of the
 kinds pressed. The Branch search beside them keeps the rows whose name has its text, and the
-tasks of the queue whose bundle has it, case aside; the buttons count only the rows it keeps, and
-Up and Down move a task past the one shown above or below it. Enter, a double click or Terminal
-brings up the terminal of each selected row (Ctrl+click, Shift+click) where it was, the first row
-last, so that it ends in front. VS Code opens the window of each selected bundle, which takes its
-session over. Close closes the window of each
-selected row after a question, as the daemon does: SIGUSR1 to its agent-terminator.py, and its
-claude stops. Back to queue queues the session of each selected bundle again, at the end of the
-queue (the lowest priority there), and the daemon closes its window once its turn ended, 2 minutes
+tasks of the queue whose bundle has it, case and a dev remote prefix aside; the buttons count
+only the rows it keeps, and Up and Down move a task past the one shown above or below it. Enter,
+a double click or Terminal brings up the terminal of each selected row (Ctrl+click, Shift+click)
+where it was, the first row last, so that it ends in front. VS Code opens the window of each
+selected bundle, which takes its session over. Close closes the window of each selected row
+after a question, as the daemon does: SIGUSR1 to its agent-terminator.py, and its claude stops.
+Back to queue queues the session of each selected bundle again, at the end of the queue (the lowest
+priority there), and the daemon closes its window once its turn ended, 2 minutes
 at most (bctl requeue): the queue starts it again with "Continue from where you left off." when its
 turn comes. Pause does the same, and the task waits in the queue for a manual resume. A right
 click on a row opens a menu with these five. New ops agent runs bctl open ops --terminal.
@@ -64,7 +64,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
 from agents import OPS, get_agent_folder, get_mtime, read_text  # noqa: E402
-from commands import get_worktree_bundle_folder  # noqa: E402
+from commands import clean_bundle_name, get_worktree_bundle_folder  # noqa: E402
 
 AGENTS_CHECK = 2
 APPEARANCE = ("org.freedesktop.appearance", "color-scheme")
@@ -180,7 +180,7 @@ def get_filters(rows, ranks, kinds, search=""):
 
 
 def is_found(text, search):
-    return search.strip().casefold() in text.casefold()
+    return clean_bundle_name(search).strip().casefold() in text.casefold()
 
 
 def is_kept(row, ranks, kinds, search=""):

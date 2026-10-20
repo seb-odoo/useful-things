@@ -42,6 +42,7 @@ FILTERED = [
 SEARCHED = [
     ("", set(), ["fw", "ops", "mine"], "✅ finished 1"),
     ("  Master-Y ", set(), ["mine"], "✅ finished 0"),
+    ("odoo-dev: master-y", set(), ["mine"], "✅ finished 0"),
     ("master", {"fw"}, ["fw"], "✅ finished 1"),
     ("refac", set(), ["ops"], "⏳ running 1"),
     ("none", set(), [], "⭐ mine 0"),

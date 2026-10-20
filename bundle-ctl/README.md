@@ -416,7 +416,8 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   pressed, they keep the rows of one of the marks pressed and of one of the kinds pressed. The
   Branch search beside them (Seb, 2026-10-20: "to look for a branch name (both now and queue)")
   keeps the rows whose name has its text, and the tasks of the queue whose bundle has it, case
-  aside; the buttons count only the rows it keeps, and Up and Down move a task past the one shown
+  aside. Its text loses a dev remote prefix (`odoo-dev:`), as for `ocode` (Seb, same day); the
+  buttons count only the rows it keeps, and Up and Down move a task past the one shown
   above or below it. Under the rows, behind a handle, the queue of `bctl queue`, read every 10 seconds, as `GET /queue`
   runs `podman ps`, in its order, which no header click changes. A task there has the mark and
   the kind of its bundle (Seb, 2026-10-19), those of its row when it has one, else those its
