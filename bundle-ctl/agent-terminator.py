@@ -1,26 +1,28 @@
 #!/usr/bin/env python3
-"""Open a terminator window split in two: the agent of a bundle, and a host shell in its folder.
+"""Open a terminator window on the agent of a bundle.
 
     agent-terminator.py BUNDLE COMMAND...
 
 For AGENT_TERMINAL of the bundle-ctl daemon, which appends COMMAND, the one that runs the agent
-(agent-terminal.py BUNDLE). The same command with --shell runs the shell.
+(agent-terminal.py BUNDLE). The window holds that command alone, maximized. A pane split by hand is
+a host shell: the host .bashrc says so in any shell that holds BUNDLE_CTL_AGENT_WINDOW, the bundle
+name.
 
-Terminator takes the commands of a split from a layout of its config only. So the window runs on a
-copy of the user's config with that layout added: preferences saved from it go to the copy.
+The command comes from a layout added to a copy of the user's config, not from -x: the command
+line of terminator would hold agent-terminal.py BUNDLE, which the process scans of
+scripts/agents.py and window-picker.py take for the agent itself.
 
-The title of the window says what the work is about (client/window-title.py), the title of each
-pane where it runs. The agent pane has the focus: the window's last_active_term names its uuid. A pane split by hand has no title: the host .bashrc prints the same in any shell
-that holds BUNDLE_CTL_AGENT_WINDOW, the bundle name. With wmctrl, the title of the window also
+The title of the window says what the work is about (client/window-title.py). With wmctrl, it also
 follows the status of the agent's session, in the sessions folder of the bundle's container, until
 the window closes: it says the agent starts until its claude does, and that it failed when the
 run ends before (.agent/done written since the window opened). Once its claude ends, the last mark
 stays. When a VS Code window or another terminal takes the session over, agent-terminal.py closes
-the window, its shell too: SIGUSR1 to BUNDLE_CTL_WINDOW_PID, this process. The window opens
-minimized, so that a new agent does not take the screen: it waits in the window list
-(window-picker.py). Terminator maps it minimized with --hidden, only when its hide_window key is
-not bound: the copy of the config unbinds it. The copy also enables shift_enter_newline.py, linked
-into the plugins folder of the user's config: Shift+Enter starts a new line in claude.
+the window: SIGUSR1 to BUNDLE_CTL_WINDOW_PID, this process. The window opens minimized, so that a
+new agent does not take the screen: it waits in the window list (window-picker.py). Terminator maps
+it minimized with --hidden, only when its hide_window key is not bound: the copy of the config
+unbinds it, and preferences saved from the window go to the copy. The copy also enables
+shift_enter_newline.py, linked into the plugins folder of the user's config: Shift+Enter
+starts a new line in claude.
 
 An ops agent window (ops-SESSION) follows the record of that session in the sessions folder of
 the ops container, and the title of its conversation, which changes with no change of status. Its mark goes once its claude ended, as the window list cannot tell which ops
@@ -62,47 +64,33 @@ HIDE_KEY = "hide_window"
 KEYBINDINGS = "[keybindings]"
 LAYOUT = "bundle-ctl agent"
 LAYOUTS = "[layouts]"
-PANES = """\
+PLUGIN = "ShiftEnterNewline"
+PLUGIN_FILE = HERE / "shift_enter_newline.py"
+PLUGINS_KEY = "enabled_plugins"
+REFRESH = 10
+RUNTIME = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR") or pathlib.Path.home() / ".cache")
+WINDOW = """\
   [[{layout}]]
     [[[window]]]
       type = Window
       parent = ""
       order = 0
       maximised = True
-      last_active_term = a2d4c27d-3437-4895-8cd3-f9c632104a4e
-    [[[panes]]]
-      type = HPaned
-      parent = window
-      order = 0
-      ratio = 0.6
     [[[agent]]]
       type = Terminal
-      parent = panes
+      parent = window
       order = 0
       profile = default
       title = "in the container: claude"
       command = "{agent}"
-      uuid = a2d4c27d-3437-4895-8cd3-f9c632104a4e
-    [[[shell]]]
-      type = Terminal
-      parent = panes
-      order = 1
-      profile = default
-      title = "on the host: shell"
-      command = "{shell}"
 """
-PLUGIN = "ShiftEnterNewline"
-PLUGIN_FILE = HERE / "shift_enter_newline.py"
-PLUGINS_KEY = "enabled_plugins"
-REFRESH = 10
-RUNTIME = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR") or pathlib.Path.home() / ".cache")
 WMCTRL = shutil.which("wmctrl")
 
 
 def get_config(command):
-    agent, shell = shlex.join(command), shlex.join([*command, "--shell"])
-    if '"' in shell:
-        sys.exit(f"a double quote cannot go in a terminator layout: {shell}")
+    agent = shlex.join(command)
+    if '"' in agent:
+        sys.exit(f"a double quote cannot go in a terminator layout: {agent}")
     try:
         lines = (CONFIG_ROOT / "terminator" / "config").read_text().splitlines(keepends=True)
     except OSError:
@@ -115,7 +103,7 @@ def get_config(command):
     lines = [line for line in lines if line.split("=")[0].strip() not in (HIDE_KEY, PLUGINS_KEY)]
     insert(lines, GLOBAL_CONFIG, f"  {PLUGINS_KEY} = {', '.join(dict.fromkeys([*plugins, PLUGIN]))}\n")
     insert(lines, KEYBINDINGS, f"  {HIDE_KEY} = None\n")
-    insert(lines, LAYOUTS, PANES.format(layout=LAYOUT, agent=agent, shell=shell))
+    insert(lines, LAYOUTS, WINDOW.format(layout=LAYOUT, agent=agent))
     return "".join(lines)
 
 

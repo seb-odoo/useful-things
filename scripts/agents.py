@@ -78,15 +78,14 @@ def get_last_text(transcript):
 
 
 def is_agent_running(bundle):
-    """Whether the agent of a bundle or an ops window runs: agent-terminal.py BUNDLE, its shell
-    aside. The agent-terminator.py of the window holds the same words as COMMAND, and does not
-    count."""
+    """Whether the agent of a bundle or an ops window runs: agent-terminal.py BUNDLE. The
+    agent-terminator.py of the window holds the same words as COMMAND, and does not count."""
     for path in pathlib.Path("/proc").glob("[0-9]*/cmdline"):
         try:
             args = path.read_bytes().split(b"\0")
         except OSError:
             continue
-        if bundle.encode() not in args or b"--shell" in args:
+        if bundle.encode() not in args:
             continue
         if any(arg.endswith(b"agent-terminator.py") for arg in args):
             continue

@@ -293,22 +293,24 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   wrapper writes it to `result.md` with `done` as `failed`: `bctl status` shows it to the bundle
   that queued the task, and the launch gives its slot back at the next check of the queue.
 
-With `AGENT_TERMINAL` set to `agent-terminator.py {bundle}`, the window is a terminator split in
-two: the agent on the left, and on the right `agent-terminal.py BUNDLE --shell`, a shell of the
-host in the `odoo` folder of the bundle. That shell is for Seb to type in, so nothing of it runs
-in the container: the contained terminal is the one of the VS Code window. The agent pane has the
-focus (Seb, 2026-10-14), so that a first prompt goes to claude: the layout names its `uuid` as the
-`last_active_term` of the window.
+With `AGENT_TERMINAL` set to `agent-terminator.py {bundle}`, the window is a terminator window
+that holds the agent alone, maximized, in a pane titled `in the container: claude` (Seb,
+2026-10-20: the host shell next to it, there since 2026-10-09, went unused). The shell to type in
+is the contained terminal of the VS Code window.
 
 - A pane split by hand (Ctrl+Shift+O, Ctrl+Shift+E) and a new tab (Ctrl+Shift+T) are shells of
-  the host too, as in any terminator window.
-- Terminator takes the commands of a split from a layout of its config only. So the launcher runs
-  it on a copy of `~/.config/terminator/config` with that layout added, in
-  `$XDG_RUNTIME_DIR/bundle-ctl/`: preferences saved from an agent window go to the copy.
-- The shell outlives the agent: when claude quits, the agent's pane closes, its container stops
-  and the window stays on the shell. A takeover by a VS Code window or another terminal closes the
-  whole window instead (Seb, 2026-10-13): the wrapper sends SIGUSR1 to `agent-terminator.py`
-  (`BUNDLE_CTL_WINDOW_PID`), which ends its terminator.
+  the host, as in any terminator window. Such a shell starts on `On the host, outside the
+  container of BUNDLE.` and on `ocode BUNDLE opens its VS Code window.`, which carries the same
+  link as `gbs`: the launcher exports `BUNDLE_CTL_AGENT_WINDOW`, and `.bashrc` prints the two
+  lines in an interactive shell that holds it.
+- The launcher runs terminator on a copy of `~/.config/terminator/config`, in
+  `$XDG_RUNTIME_DIR/bundle-ctl/`, with a layout added that runs the agent: preferences saved from
+  an agent window go to the copy. Not with `-x`: the command line of terminator would then hold
+  `agent-terminal.py BUNDLE`, which the process scans take for the agent itself.
+- When claude quits, its container stops and the window closes, unless a pane split by hand still
+  runs. A takeover by a VS Code window or another terminal closes the whole window (Seb,
+  2026-10-13): the wrapper sends SIGUSR1 to `agent-terminator.py` (`BUNDLE_CTL_WINDOW_PID`), which
+  ends its terminator.
 - With wmctrl, the window opens minimized (Seb, 2026-10-14), so that a new agent does not take
   the screen: it waits in the window list (below). Terminator maps it minimized with `--hidden`,
   so that it never shows first. It does so only while its `hide_window` key is not bound (with the
@@ -319,12 +321,6 @@ focus (Seb, 2026-10-14), so that a first prompt goes to claude: the layout names
   terminator plugin that sends a line feed (Ctrl+J) instead: a shell runs the line on it, as on
   Enter. The launcher links it into `~/.config/terminator/plugins/`, where terminator looks for
   plugins; the other terminator windows of Seb do not enable it.
-- Each pane says where it runs. The two panes of the layout carry a title, `in the container:
-  claude` and `on the host: shell`. A shell of the window, one split by hand included, also
-  starts on `On the host, outside the container of BUNDLE.` and on `ocode BUNDLE opens its VS
-  Code window.`, which carries the same link as `gbs`: the launcher exports
-  `BUNDLE_CTL_AGENT_WINDOW`, and `.bashrc` prints the two lines in an interactive shell that
-  holds it.
 - The window title tells the windows apart in the task bar: an icon of what the work is about,
   the bundle, then that kind in words, as `📝 master-action-panel-aku (review)`. The word comes
   last, so that a narrow task bar button still shows the bundle. `client/window-title.py BUNDLE`
@@ -480,9 +476,9 @@ a tool call is in flight or the session is idle, else at the first of the two, a
 `handoff`. A turn that ended on a background command (`shell`, the PR watch of a review) counts as
 idle: that command ends with the terminal's claude. A session with no record counts as idle once its last turn ended 2 minutes ago: two
 containers whose claude has the same pid write the same `sessions/<pid>.json`. `python3
-test_takeover.py` runs each case. The terminal window closes, its shell too, and from
-there on the bundle has an agent window (below): the tab opens on the session and, for a stopped
-tool call, reruns the turn after one reload. The container then lives as long as that window.
+test_takeover.py` runs each case. The terminal window closes, and from there on the bundle has an
+agent window (below): the tab opens on the session and, for a stopped tool call, reruns the turn
+after one reload. The container then lives as long as that window.
 
 The way back is the terminal icon of the Claude tab ("Move the agent to a terminal", shown in a
 window whose bundle has an agent session), at once, mid-turn too. The claude of the tab cannot
@@ -522,7 +518,7 @@ answer as `bctl delete` does, and the same task sent again takes back the reques
 - `agent-terminal.py` runs `claude --session-id SESSION --model opus --permission-mode auto` in
   the ops container, in the repos, started first when it is not up. Other sessions work in that
   container: quitting claude or closing the window never stops it, and a closed window stops its
-  own claude (`pkill`). The shell on the right is a host shell in the repos.
+  own claude (`pkill`).
 - No cap and no queue: the window opens at once, as a tab would. Opened with a task it opens
   minimized, as any agent window; with no task it shows in front, for the first prompt.
 - The title shows the title of the conversation in place of a name, with 🔧 and `(ops)`:
@@ -542,10 +538,10 @@ answer as `bctl delete` does, and the same task sent again takes back the reques
   container, on a session that has a transcript and no `agent-terminal.py` running it. The window
   resumes the session in the mode of the tab, with `Continue from where you left off.` when the tab
   cut a turn, and opens minimized, as any agent window that takes a session.
-- The way back is the `orepo` link that the shell of the window prints, `odoo-bundle://ops-SESSION`
-  (Seb, 2026-10-14: "should automatically close the existing terminal on that agent"): `bctl open
-  ops-SESSION`. The daemon closes the window (SIGUSR1 to its `agent-terminator.py`), waits up to
-  30 s for its claude to end, writes the mode of the session and `ops-window-open/SESSION` in the
+- The way back is the `orepo` link that a pane of the window split by hand prints,
+  `odoo-bundle://ops-SESSION` (Seb, 2026-10-14: "should automatically close the existing terminal
+  on that agent"): `bctl open ops-SESSION`. The daemon closes the window (SIGUSR1 to its
+  `agent-terminator.py`), waits up to 30 s for its claude to end, writes the mode of the session and `ops-window-open/SESSION` in the
   storage of the Claude extension of the ops container, and opens the ops window. The ops-window
   extension of host-ctl opens the tab within 2 s, with `Continue from where you left off.` in its
   input when the window cut a turn. Opening the ops window by hand moves no session: the ops agent

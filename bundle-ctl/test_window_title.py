@@ -263,28 +263,26 @@ def get_followed(home):
 def get_configs(home):
     """The copy of the terminator config of an agent window: the user's, its hide_window key
     unbound, as terminator maps a --hidden window minimized only then, the Shift+Enter plugin
-    enabled next to the user's, and the layout added."""
+    enabled next to the user's, and the layout of the agent's pane added."""
     spec = importlib.util.spec_from_file_location("terminator", HERE / "agent-terminator.py")
     terminator = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(terminator)
     terminator.CONFIG_ROOT = home / "config"
     (home / "config" / "terminator").mkdir(parents=True)
     command = ["agent-terminal.py", BUNDLE]
-    panes = terminator.PANES.format(
-        layout=terminator.LAYOUT, agent=" ".join(command), shell=" ".join([*command, "--shell"])
-    )
+    window = terminator.WINDOW.format(layout=terminator.LAYOUT, agent=" ".join(command))
     failures = []
     for config, expected in CONFIGS:
         (home / "config" / "terminator" / "config").write_text(config)
         found = terminator.get_config(command)
-        if found.count(panes) != 1 or found.replace(panes, "") != expected:
+        if found.count(window) != 1 or found.replace(window, "") != expected:
             failures.append(f"agent-terminator.py: config {found!r}, expected {expected!r}")
     return failures
 
 
 def get_running():
-    """Whether an ops window has its agent left: an agent-terminal.py process of its name, not its
-    shell, and not agent-terminator.py, which holds it as COMMAND."""
+    """Whether an ops window has its agent left: an agent-terminal.py process of its name, and not
+    agent-terminator.py, which holds it as COMMAND."""
     script = str(HERE / "agent-terminal.py")
     sleep = [sys.executable, "-c", "import time; time.sleep(60)"]
     check = (
@@ -295,7 +293,6 @@ def get_running():
     )
     cases = [
         ([*sleep, script, "ops-a"], "ops-a", "True"),
-        ([*sleep, script, "ops-b", "--shell"], "ops-b", "False"),
         (None, "ops-c", "False"),
     ]
     failures = []
@@ -334,7 +331,7 @@ def main():
             failures.append(f"agent-terminator.py: a tab on its session left it on {taken}")
     for line in failures:
         print(line)
-    cases = len(MARKS) + len(OPS_MARKS) + len(CLOSE_LINES) + len(CONFIGS) + len(FOLLOWED) + 6
+    cases = len(MARKS) + len(OPS_MARKS) + len(CLOSE_LINES) + len(CONFIGS) + len(FOLLOWED) + 5
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

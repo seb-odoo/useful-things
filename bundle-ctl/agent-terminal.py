@@ -2,7 +2,6 @@
 """Run the task of a bundle with Claude Code in this terminal, in the bundle's dev container.
 
     agent-terminal.py BUNDLE
-    agent-terminal.py BUNDLE --shell    a host shell in the bundle, for a pane next to the agent
 
 The bundle-ctl daemon starts it in a terminal window for a queued task, so that an agent costs no
 VS Code window. The container is the one VS Code would make: `up` of the devcontainer CLI that the
@@ -12,7 +11,7 @@ devcontainer.json. So the sandbox has one definition, and a window opened later 
 The claude session stays open in the terminal after its verdict (.agent/done, written by
 client/agent-stop.py), for Seb to read and to type in. Quitting claude or closing the terminal
 stops the container. A VS Code window opened on the bundle takes the session over instead
-(client/agent-takeover.py): the terminal window closes, its shell too, and the container lives
+(client/agent-takeover.py): the terminal window closes, and the container lives
 as long as that window.
 A terminal closed while such a window is attached hands its session to that window the same way.
 The claude runs in a pty of the wrapper, which hands its clipboard escapes (OSC 52), ignored by
@@ -24,7 +23,6 @@ same container. When a VS Code window holds it, it has that window close (.agent
 waits for the container to stop, and starts it again.
 
     agent-terminal.py ops-SESSION
-    agent-terminal.py ops-SESSION --shell    a host shell in the repos
 
 An ops agent window runs a new Claude session in the ops container (BUNDLE_CTL_HOST_FOLDER), with
 its task as first prompt when the daemon left one. On a session that has a transcript, moved from a
@@ -189,18 +187,6 @@ def keep_open(ending, session=None):
         return
     wait = 'printf "\\033]0;%s\\007\\n%s\\nPress Enter to close.\\n" "$0" "$0"; read -r _'
     os.execvp("sh", ["sh", "-c", wait, ending])
-
-
-def shell(bundle):
-    """Run a shell of the host in the folder of the bundle, or in the repos for an ops window, for
-    Seb to type in."""
-    if bundle.startswith(OPS):
-        os.chdir(REPO_ROOT)
-    else:
-        folder = pathlib.Path(get_worktree_bundle_folder(bundle))
-        os.chdir(folder / "odoo" if (folder / "odoo").is_dir() else folder)
-    program = os.environ.get("SHELL") or "bash"
-    os.execvp(program, [program])
 
 
 def run_tty(command):
@@ -484,9 +470,6 @@ def run_ops(name):
 
 def main():
     bundle = sys.argv[1]
-    if sys.argv[2:] == ["--shell"]:
-        shell(bundle)
-        return
     if bundle.startswith(OPS):
         run_ops(bundle)
         return
