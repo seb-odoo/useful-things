@@ -38,9 +38,11 @@ with pip inside. The rest follows from that choice.
   which Jammy ships. A newer base has 2.6 and breaks it.
 - **System packages go in the [`Dockerfile`](../Dockerfile), at build time**: Python 3.12, the LDAP
   and SASL libraries, the postgres client and the server of the bundle (below), fonts,
-  wkhtmltopdf, Chrome from Google's own package (Jammy's `chromium` is a snap stub that does not
-  run in a container) and Node 22 (Jammy's is too old for Odoo's JS tooling). The container runs with `no-new-privileges` as a non-root user, so
-  nothing can be installed once it is up.
+  wkhtmltopdf 0.12.6.1 with patched qt from wkhtmltopdf/packaging, the one of Odoo's own image
+  (Jammy's has no header nor footer, and the PDF report tests fail with it), Chrome from Google's
+  own package (Jammy's `chromium` is a snap stub that does not run in a container) and Node 22
+  (Jammy's is too old for Odoo's JS tooling). The container runs with `no-new-privileges` as a
+  non-root user, so nothing can be installed once it is up.
 - **The venv is first in `PATH` for every process**, through `containerEnv`, with the standard
   directories written out: `${containerEnv:PATH}` is not expanded there and would replace the whole
   `PATH`. The `python3` of the image is 3.10, and `odoo-bin` or a test started outside an

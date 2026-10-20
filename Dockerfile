@@ -15,8 +15,17 @@ RUN apt-get update && \
         libsasl2-2 \
         postgresql-client \
         fonts-dejavu-core \
-        fonts-liberation \
-        wkhtmltopdf && \
+        fonts-liberation && \
+    rm -rf /var/lib/apt/lists/*
+
+# wkhtmltopdf with patched qt, the build of Odoo's own image. Jammy's has no --header-html nor
+# --footer-html, and fails every PDF report test with "Exit with code 1, due to unknown error".
+RUN curl -fsSL https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.jammy_amd64.deb \
+        -o /tmp/wkhtmltox.deb && \
+    echo "4f723b2691ad8638a9df960e0421d346d7315083e3583a334f33362280ddba15  /tmp/wkhtmltox.deb" | sha256sum -c - && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends /tmp/wkhtmltox.deb && \
+    rm -f /tmp/wkhtmltox.deb && \
     rm -rf /var/lib/apt/lists/*
 
 # Chrome for HttpCase/tour (browser_js) + websocket tests. Odoo's ChromeBrowser runs it headless
