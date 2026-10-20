@@ -605,12 +605,13 @@ def make_view(model, titles, expand, sorts=()):
     """A view of model with a column per title, each sorted on a click by the model column of the
     same place in sorts, when given. The columns from expand on share the width left, and their
     text is cut to it. The others are cut at WIDTH characters, so a long name keeps the columns
-    after it on screen."""
+    after it on screen, and are as wide as their text up to there: an ellipsized cell with no
+    width_chars asks for 3 characters, and the tree view gives a column what its cells ask for."""
     view = Gtk.TreeView(model=model)
     for at, title in enumerate(titles):
         cell = Gtk.CellRendererText(ellipsize=Pango.EllipsizeMode.END)
         if at < expand:
-            cell.props.max_width_chars = WIDTH
+            cell.props.width_chars = cell.props.max_width_chars = WIDTH
         column = Gtk.TreeViewColumn(title, cell, text=at)
         column.set_expand(at >= expand)
         column.set_resizable(True)
