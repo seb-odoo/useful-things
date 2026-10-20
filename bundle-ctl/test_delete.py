@@ -36,6 +36,13 @@ REPORT = "blocked: needs opus\n\n- measured"
 REPORTED = "master-reported--seb"
 STOPPED = "master-stopped--seb"
 TYPED = "master-typed--seb"
+PENDING = (
+    "is deleted once its agent ended its turn: its window closes and its container stops then"
+)
+
+
+def waits(bundle):
+    return f"His yes closes the window of {bundle} once its agent ended its turn, then deletes it."
 
 
 def git(cwd, *args):
@@ -143,16 +150,28 @@ def prepare(root):
             OPENED: {"odoo/odoo#3": "open"},
             REBASED: {"odoo/odoo#2": "closed"},
         },
+        "busy": {QUEUED},
         "closed": [],
         "running": {str(root / "master" / CLEAN)},
+        "stopped": [],
         "tabs": [],
+        "vscode": {CLEAN},
+        "windows": {REPORTED, TYPED},
         "state": {"queue": [{"bundle": REPORTED, "parent": CLEAN}]},
     }
     daemon.HELD_DIR = root / "held"
     daemon.STATE = root
     daemon.close_window = world["closed"].append
+    daemon.get_bundle_container = lambda bundle: (
+        bundle if str(root / "master" / bundle) in world["running"] else None
+    )
     daemon.get_transcript = lambda session: root / "transcripts" / f"{session}.jsonl"
-    daemon.get_window_pids = lambda bundle: [1] if bundle in (REPORTED, TYPED) else []
+    daemon.get_window_pids = lambda bundle: [1] if bundle in world["windows"] else []
+    daemon.has_window = lambda container: container in world["vscode"]
+    daemon.is_in_turn = lambda bundle: bundle in world["busy"]
+    daemon.stop_container = lambda container: (
+        world["stopped"].append(container) or world["running"].discard(str(root / "master" / container))
+    )
     daemon.get_agent_folder = lambda bundle: root / "master" / bundle / ".agent"
     daemon.get_branch_prs = lambda repo_name, branch: world["prs"].get(branch, {})
     daemon.get_open_windows = lambda: set(world["running"])
@@ -221,7 +240,7 @@ def check(root):
         (
             "a bundle asks for its own deletion",
             (code, lines)
-            == (0, [f"waits for Seb: hok b1. His yes deletes {CLEAN} once its container stopped."]),
+            == (0, [f"waits for Seb: hok b1. {waits(CLEAN)}"]),
         ),
     )
     item = daemon.HELD.read_json(daemon.HELD_DIR / "1.json")
@@ -260,7 +279,7 @@ def check(root):
         (
             "a bundle asks for the deletion of a bundle whose last task it queued",
             (code, lines)
-            == (0, [f"waits for Seb: hok b2. His yes deletes {CHILD} once its container stopped."]),
+            == (0, [f"waits for Seb: hok b2. {waits(CHILD)}"]),
         ),
     )
     world["caller"] = daemon.HOST
@@ -306,14 +325,15 @@ def check(root):
     result = answer_yes(1)
     checks.append(
         (
-            "a yes while the container runs waits for its stop",
-            (result["code"], result["text"], world["calls"], world["state"]["deletions"])
-            == (
-                0,
-                f"{CLEAN} is deleted once its container stops: close its window or its terminal",
-                [],
-                [CLEAN],
-            ),
+            "a yes asks the VS Code window of an idle bundle to close, and waits for its stop",
+            (
+                result["code"],
+                result["text"],
+                world["calls"],
+                world["state"]["deletions"],
+                (root / "master" / CLEAN / ".agent" / "close-window").exists(),
+            )
+            == (0, f"{CLEAN} {PENDING}", [], [CLEAN], True),
         ),
     )
     world["running"].clear()
@@ -391,13 +411,10 @@ def check(root):
     item = daemon.HELD.read_json(daemon.HELD_DIR / f"{number}.json")
     checks.append(
         (
-            "the request shows the report its session ended on, and its yes closes the window",
+            "the request shows the report its session ended on",
             (lines, item["lines"][3:], item["yes"])
             == (
-                [
-                    f"waits for Seb: hok b{number}. His yes deletes {REPORTED} once its agent"
-                    " window closed.",
-                ],
+                [f"waits for Seb: hok b{number}. {waits(REPORTED)}"],
                 [
                     f"its queued task, from {CLEAN}",
                     f"its tab groups in Firefox: 🚀 {REPORTED}",
@@ -406,17 +423,25 @@ def check(root):
                     "",
                     "  - measured",
                 ],
-                "its agent window closes, then delete_bundle deletes it",
+                "once its agent ended its turn, its window closes and its container stops, then"
+                " delete_bundle deletes it",
             ),
         ),
     )
     world["tabs"].clear()
     result = answer_yes(number)
+    kept = root / "deleted" / f"{REPORTED}.md"
     checks.append(
         (
-            "the yes closes the window and drops the queued task",
+            "the yes closes the window of an idle agent, names where its answer is kept, and drops"
+            " the queued task",
             (result["text"], world["closed"], world["state"]["queue"], world["state"]["deletions"])
-            == (f"{REPORTED} is deleted once its agent window closed", [REPORTED], [], [REPORTED]),
+            == (
+                f"{REPORTED} {PENDING}, its last answer is kept in {kept}",
+                [REPORTED],
+                [],
+                [REPORTED],
+            ),
         ),
     )
     checks.append(
@@ -425,20 +450,37 @@ def check(root):
             world["tabs"] == [{"op": "close", "bundle": REPORTED}],
         ),
     )
+    world["running"].discard(str(root / "master" / REPORTED))
+    daemon.delete_stopped()
+    wait_jobs()
+    checks.append(
+        (
+            "the stop of its container deletes it, and its report stays on the host",
+            (world["calls"][-1], kept.read_text()) == (("delete_bundle.py", REPORTED), f"{REPORT}\n"),
+        ),
+    )
+    world["busy"].add(TYPED)
     code, lines = run_client(path, "delete", TYPED, "--reason", "r")
     number = int(lines[0].partition("hok b")[2].partition(".")[0])
     item = daemon.HELD.read_json(daemon.HELD_DIR / f"{number}.json")
-    result = answer_yes(number)
+    answer_yes(number)
     checks.append(
         (
-            "a session that went on after its report keeps its window for Seb",
-            (lines[0].endswith("once its container stopped."), len(item["lines"]), result["text"])
-            == (
-                True,
-                3,
-                f"{TYPED} is deleted once its container stops: close its window or its terminal",
-            )
-            and world["closed"] == [REPORTED],
+            "a session that went on after its report is not shown, and its turn keeps its window",
+            (len(item["lines"]), world["closed"]) == (3, [REPORTED]),
+        ),
+    )
+    world["busy"].discard(TYPED)
+    daemon.close_deleted()
+    checks.append(("its window closes once its turn ended", world["closed"] == [REPORTED, TYPED]))
+    world["windows"].discard(TYPED)
+    daemon.delete_safely()
+    wait_jobs()
+    checks.append(
+        (
+            "a container left with no window is stopped, and its last answer kept",
+            (world["stopped"], world["calls"][-1], (root / "deleted" / f"{TYPED}.md").read_text())
+            == ([TYPED], ("delete_bundle.py", TYPED), "because\n"),
         ),
     )
     first = sha(root / "odoo", DROPPED)

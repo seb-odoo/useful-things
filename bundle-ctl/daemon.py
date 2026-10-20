@@ -1245,6 +1245,7 @@ def keep_launching():
         checked = float("-inf")
         while True:
             warn_disk()
+            delete_safely()
             if time.monotonic() - checked > REVIEW_CHECK:
                 checked = time.monotonic()
                 drop_reviews_safely()
@@ -1265,6 +1266,7 @@ def launch_safely():
 
 def delete_safely():
     try:
+        close_deleted()
         delete_stopped()
     except Exception:
         traceback.print_exc()
@@ -1508,20 +1510,15 @@ def delete(caller, query, body):
             ),
         ],
         "reason": str(body.get("reason") or ""),
-        "send": {
-            "bundle": bundle,
-            **({"drop": drop} if drop else {}),
-            **({"report": report} if report else {}),
-        },
+        "send": {"bundle": bundle, **({"drop": drop} if drop else {})},
         "title": f"delete the bundle {bundle}",
         "yes": (
-            "its agent window closes, then delete_bundle deletes it"
-            if report
-            else "delete_bundle deletes it, once its container stopped"
+            "once its agent ended its turn, its window closes and its container stops, then"
+            " delete_bundle deletes it"
         ),
     }
     held = f"{HELD_LETTER}{HELD.add(HELD_DIR, item)}"
-    return 200, {"bundle": bundle, "closes": bool(report), "held": held}
+    return 200, {"bundle": bundle, "held": held}
 
 
 def get_report(bundle):
@@ -1785,11 +1782,60 @@ def delete_stopped():
 
         def work(log, bundle=bundle, drop=drops[bundle]):
             _branches, force = check_deletion(bundle, drop)
+            keep_last_answer(bundle)
             run_script(log, "delete_bundle.py", *(["--force"] if force else []), bundle)
 
         _code, answer = start_job(HOST, f"delete {bundle}", work)
         started[bundle] = jobs[answer["job"]]
     return started
+
+
+def close_deleted():
+    """Close the agent window of each bundle Seb said yes to delete, once no turn of its sessions
+    runs, as he would: its container stops, which starts the deletion. A VS Code window is asked to
+    close, and a container no window holds any more is stopped."""
+    with state_lock:
+        bundles = list(read_state().get("deletions", []))
+    for bundle in bundles:
+        if is_in_turn(bundle):
+            continue
+        if get_window_pids(bundle):
+            close_window(bundle)
+        elif not (container := get_bundle_container(bundle)):
+            continue
+        elif has_window(container):
+            get_agent_folder(bundle).mkdir(exist_ok=True)
+            (get_agent_folder(bundle) / "close-window").touch()
+        else:
+            stop_container(container)
+
+
+def stop_container(container):
+    subprocess.run(["podman", "stop", container], capture_output=True, check=False)
+
+
+def is_in_turn(bundle):
+    """Whether a claude of the bundle runs a turn, or waits for an answer in one, as the newest
+    record of each session a claude runs says."""
+    live = cut.get_live_sessions([pathlib.Path(CLAUDE_CONFIG_CONTAINER, bundle, "sessions")])
+    return any(get_session_status(bundle, session) not in (None, "idle", "shell") for session in live)
+
+
+def get_kept(bundle):
+    """Where the last answer of a bundle's agent is kept once the bundle is deleted."""
+    return STATE / "deleted" / f"{bundle}.md"
+
+
+def keep_last_answer(bundle):
+    """Copy the last answer of a bundle's agent out of the folder its deletion removes: the last
+    text of its session, else the report its Stop hook wrote."""
+    agent = get_agent_folder(bundle)
+    session = read_text(agent / "session")
+    transcript = session and get_transcript(session)
+    answer = (transcript and get_last_text(transcript)) or read_text(agent / "result.md")
+    if answer:
+        get_kept(bundle).parent.mkdir(parents=True, exist_ok=True)
+        get_kept(bundle).write_text(f"{answer.strip()}\n")
 
 
 def get_last_use(bundle):
@@ -1969,17 +2015,18 @@ def send_deletion(item):
         state["queue"] = [queued for queued in state["queue"] if queued["bundle"] != bundle]
         write_state(state)
     tab_groups.ask({"op": "close", "bundle": bundle})
-    closes = item["send"].get("report") and get_report(bundle) == item["send"]["report"]
-    if closes:
-        close_window(bundle)
+    close_deleted()
+    has_agent = (get_agent_folder(bundle) / "session").exists()
+    kept = f", its last answer is kept in {get_kept(bundle)}" if has_agent else ""
     job = delete_stopped().get(bundle)
-    if job is None and closes:
-        return f"{bundle} is deleted once its agent window closed"
     if job is None:
-        return f"{bundle} is deleted once its container stops: close its window or its terminal"
+        return (
+            f"{bundle} is deleted once its agent ended its turn: its window closes and its"
+            f" container stops then{kept}"
+        )
     wait_job(job)
     if job["state"] == "done":
-        return f"{bundle} deleted"
+        return f"{bundle} deleted{kept}"
     return f"{bundle} is being deleted, see {job['log']}"
 
 

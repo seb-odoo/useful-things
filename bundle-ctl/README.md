@@ -234,10 +234,19 @@ branches again with the same commits, so a commit made after the request still k
   work again, and its agent asks again once done. On 2026-10-16 such a task started a new agent
   while the deletion ran, which removed the worktrees under it. `delete_bundle.py` removes the
   container before the worktrees: a container started meanwhile makes it fail before anything goes.
-- When the session of its agent window ended on the report of its verdict, nothing typed or
-  answered after it, the request shows that report and the yes closes the window, so the bundle
-  goes with no click (Seb, 2026-10-15: "yes if there is nothing useful for me there to read").
-  Else closing the window or the terminal stays Seb's call.
+- The yes closes the agent window of the bundle once no claude of the bundle is in a turn, as
+  the newest record of each live session says (not `idle` nor `shell`: busy, or waiting for an
+  answer), so the bundle goes with no click (Seb, 2026-10-20: "shouldn't this terminal close
+  automatically when the bundle is deleted?"). An agent that asked its deletion in its turn ends
+  that turn on its report first. The check runs at the yes, at each stop of a container and at
+  each pass of the queue (every minute at most). A VS Code window on the bundle gets
+  `.agent/close-window`, and a container that runs with no window left is stopped: the stop
+  starts `delete_bundle.py` while the folder is still there, which the shutdown monitor of VS
+  Code needs. When the session of its agent window already ended on the report of its verdict,
+  the request shows that report.
+- The last answer of the agent (the last text of its session, else its `result.md`) is copied
+  to `deleted/BUNDLE.md` beside `state.json` before `delete_bundle.py` runs, and the answer of
+  the yes names that file.
 - The yes also closes the Firefox tab groups of the bundle (Seb, 2026-10-20), which the request
   lists: the helper of firefox-gateway answers on `$XDG_RUNTIME_DIR/firefox-gateway/host.sock`
   (`scripts/tab_groups.py`). `delete_bundle.py` closes them too, so a bundle deleted by gbs, gfa
