@@ -12,6 +12,11 @@ The command comes from a layout added to a copy of the user's config, not from -
 line of terminator would hold agent-terminal.py BUNDLE, which the process scans of
 scripts/agents.py and window-picker.py take for the agent itself.
 
+The size in the layout, larger than any screen, makes terminator resize the window right after
+creating it. That resize has Cinnamon place the window at once, so the maximize applies while the
+window is minimized. Without it, a window started minimized shows small, and maximizing that
+window minimizes it again.
+
 The title of the window says what the work is about (client/window-title.py). With wmctrl, it also
 follows the status of the agent's session, in the sessions folder of the bundle's container, until
 the window closes: it says the agent starts until its claude does, and that it failed when the
@@ -76,6 +81,7 @@ WINDOW = """\
       parent = ""
       order = 0
       maximised = True
+      size = 3000, 3000
     [[[agent]]]
       type = Terminal
       parent = window
