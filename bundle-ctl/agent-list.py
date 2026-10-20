@@ -46,7 +46,9 @@ agent-list.json, beside the state of the daemon.
 These parts are Agents, which another window can show with rows of its own under each agent (a
 Child each) and rows of its own at the end. When host-ctl is on this machine, a start opens the
 window of hok (hokwin.py), which shows them with the requests of each agent under its row; this
-window opens alone when hok ends with an error within START seconds.
+window opens alone when hok ends with an error within START seconds. There, the 🔑 hok button
+before the marks keeps the agents with a request under them and the groups of requests, and
+counts those requests.
 """
 
 import collections
@@ -91,6 +93,7 @@ HOK = pathlib.Path(REPO_ROOT) / "host-ctl" / "hokwin.py"
 ICON = HERE / "agent-list.svg"
 KEY, WINDOW, TITLE = 9, 10, 11
 NOT_BUILT = "Nothing of this bundle is checked out yet"
+OWNED = "🔑 hok"
 SORTS = (12, 13, 2, 14, 15, 16, 17, 7, 8)
 PLACE = (
     pathlib.Path(os.environ.get("XDG_STATE_HOME") or pathlib.Path.home() / ".local/state")
@@ -530,6 +533,14 @@ def get_leaves(children):
     return [(get_child_line(child), []) for child in children]
 
 
+def keep_owned(lines, children, groups, owned):
+    """The lines with rows of the owner under them, all of them when owned is False, and how many
+    rows of the owner the tree has with them and its groups: the number on its button."""
+    count = sum(len(children.get(line[KEY], [])) for line in lines)
+    count += sum(len(kids) for _group, kids in groups)
+    return [line for line in lines if not owned or line[KEY] in children], count
+
+
 def fill_tree(model, tree, parent=None):
     """fill for a tree: the lines of tree written over the rows under parent, then the lines under
     each over the rows under it."""
@@ -684,13 +695,16 @@ class Agents:
         labels = get_filters([], set(), set())
         self.marks = [Gtk.ToggleButton(label=label) for label in labels[: len(picker.MARKS)]]
         self.kinds = [Gtk.ToggleButton(label=label) for label in labels[len(picker.MARKS) :]]
+        self.owned = Gtk.ToggleButton(label=OWNED)
+        self.owned.set_no_show_all(isinstance(self.owner, Alone))
         filters = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        for buttons in (self.marks, self.kinds):
+        for buttons in ([self.owned, *self.marks], self.kinds):
             line = Gtk.Box(spacing=6)
             for button in buttons:
                 button.connect("toggled", self.show)
                 line.pack_start(button, False, False, 0)
             filters.pack_start(line, False, False, 0)
+        self.owned.connect("toggled", lambda _button: self.agents_view.expand_all())
         self.search = Gtk.SearchEntry(placeholder_text="Branch")
         self.search.connect("search-changed", self.search_changed)
         line.pack_end(self.search, False, False, 0)
@@ -804,7 +818,11 @@ class Agents:
             if is_kept(row, ranks, kinds, search)
         ]
         agents = [(row.key, info[-1]) for row, info in self.agents_read]
-        tree = get_tree(lines, *self.owner.get_children(agents))
+        children, groups = self.owner.get_children(agents)
+        lines, count = keep_owned(lines, children, groups, self.owned.get_active())
+        if self.owned.get_label() != f"{OWNED} {count}":
+            self.owned.set_label(f"{OWNED} {count}")
+        tree = get_tree(lines, children, groups)
         selection = self.agents_view.get_selection()
         keys = {row[KEY] for row in self.get_selected(every=True)}
         self.updating = True

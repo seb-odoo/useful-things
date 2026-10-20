@@ -399,6 +399,13 @@ def check_tree(agent_list):
         failures.append(f"tree {shape!r}")
     if tree[2][0][12] != 2 or tree[1][1][0][1] != []:
         failures.append(f"a group sorts after the agents, a child has no rows: {tree!r}")
+    owned = [
+        agent_list.keep_owned(lines, {"0x4": [child]}, [(group, [child])], pressed)
+        for pressed in (False, True)
+    ]
+    shape = [([line[key] for line in kept], count) for kept, count in owned]
+    if shape != [(["master-x--seb", "0x4"], 2), (["0x4"], 2)]:
+        failures.append(f"agents kept by the button of hok, and its number: {shape!r}")
     picker = agent_list.picker
     rows = [
         picker.Row(0, 0, "x", "master-x--seb", "0x1", True),
@@ -484,7 +491,7 @@ def main():
     for line in failures:
         print(line)
     cases = len(AGENTS) + len(OPS_INFOS) + 4 + 1 + len(FACETS) + len(FILTERED) + 2 + 7 + 3 + 3
-    cases += len(QUEUED_LINES) + 1 + 2 + len(SEARCHED) + 1 + len(MOVES) + len(TABS) + 2 + 8
+    cases += len(QUEUED_LINES) + 1 + 2 + len(SEARCHED) + 1 + len(MOVES) + len(TABS) + 2 + 9
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

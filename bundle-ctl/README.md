@@ -474,7 +474,11 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   key and its session (a `Child` each, read with the rows: the `.agent/session` of a bundle, the
   session an ops window is named after), hears which of its rows is selected, and sets the
   title. A row of the owner has no window: the buttons and the menu leave it out. The rows hide
-  their expanders while none has rows under it.
+  their expanders while none has rows under it. In the window of `hok`, a `🔑 hok` button before
+  the marks keeps only the agents with a request under them, then the groups, all opened, and
+  counts those requests among the rows the other buttons and the search keep (Seb, 2026-10-20: "I
+  lack a way to easily see what is waiting for hok like before"). The agent list alone does not
+  show it.
 - `window-applet/`, a Cinnamon applet, shows the mark that needs Seb most and how many bundles
   have it, in the order ❌ ✋ ✅ 🚀 ⏳ (Seb, 2026-10-15: a failed agent is an error to fix, a
   waiting or finished one waits for him, one stuck on starting comes after, one in progress does
