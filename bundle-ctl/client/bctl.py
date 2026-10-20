@@ -6,7 +6,7 @@
     bctl queue [--json]
     bctl force-queue [BUNDLE]
     bctl move BUNDLE PLACE
-    bctl requeue BUNDLE [--paused]
+    bctl requeue BUNDLE [--paused | --github]
     bctl schedule BUNDLE spot|manual|HH:MM
     bctl unqueue BUNDLE
     bctl branches [--json]
@@ -51,7 +51,8 @@ queued the task may ask them.
 requeue queues the session of a bundle's agent again, last, and closes its agent window once its
 turn ended, 2 minutes at most: meanwhile its Bash calls are refused, on a reason that tells it to
 end its turn. A turn cut there goes on told so. With --paused, it waits for a manual resume. Only
-the host may ask it.
+the host may ask it, but for --github: an agent that GitHub cannot reach asks it for itself, its
+session waits until the GitHub connection of the host is up, and goes on told so.
 
 open --resume gives the task to the last Claude session of the bundle as its next prompt, where a
 task alone starts a new session. Without a task, the session is told to go on.
@@ -552,10 +553,16 @@ def main():
         help="queue the session of a bundle's agent again, and close its window after its turn",
     )
     requeue.add_argument("bundle")
-    requeue.add_argument(
+    waits = requeue.add_mutually_exclusive_group()
+    waits.add_argument(
         "--paused",
         action="store_true",
         help="it waits in the queue until `bctl schedule BUNDLE spot`",
+    )
+    waits.add_argument(
+        "--github",
+        action="store_true",
+        help="it waits in the queue until the GitHub connection of the host is up",
     )
     schedule = commands.add_parser("schedule", help="set when the queued task of a bundle starts")
     schedule.add_argument("bundle")
@@ -593,7 +600,8 @@ def main():
         answer = request("POST", "/move", {"bundle": args.bundle, "place": args.place})
         printer = print_queue
     elif args.command == "requeue":
-        answer = request("POST", "/requeue", {"bundle": args.bundle, "paused": args.paused})
+        body = {"bundle": args.bundle, "paused": args.paused}
+        answer = request("POST", "/requeue", {**body, "github": True} if args.github else body)
         printer = print_requeued
     elif args.command == "schedule":
         answer = request("POST", "/schedule", {"bundle": args.bundle, "when": args.when})

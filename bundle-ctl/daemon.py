@@ -129,6 +129,8 @@ DISK_WARN = float(
     os.environ.get("BUNDLE_CTL_DISK_WARN_GB") or CONFIG.get("BUNDLE_CTL_DISK_WARN_GB") or 60,
 )
 EFFORTS = ("low", "medium", "high", "xhigh")
+GITHUB_ASK = 600
+GITHUB_MUX = pathlib.Path.home() / ".local" / "state" / "ssh-github-mux"
 GITHUB_OWNER = re.compile(r"[A-Za-z0-9-]{1,39}")
 GO_ON = "Continue from where you left off."
 HELD = load_held()
@@ -159,6 +161,11 @@ NOT_BUILT = (
 OPS_OPEN = "ops-window-open"
 OPS_TASK = "The agent of the bundle {bundle} sends this task, and Seb said yes to it in hok:\n\n"
 PAUSE_WAIT = 120
+RECONNECTED = (
+    f"{GO_ON}\n\nThe GitHub connection of the host is back: this session waited for it in the"
+    " queue since {time}. Go on with what its outage stopped, and first check what changed"
+    " meanwhile where your work depends on it (a PR: its threads, its head, its CI; its base)."
+)
 RESUMED = (
     f"{GO_ON}\n\nSeb closed your window and queued this session again at {{time}}: what you left"
     " running in the background (a PR watch, a server, a test) stopped with it. Before anything"
@@ -497,9 +504,9 @@ def get_queue(caller, query, body):
 
 
 def force_queue(caller, query, body):
-    """Let the tasks queued now start over the cap, those that wait for their time or for a manual
-    resume aside, or the one of a bundle, its time and its pause too. The ones queued later wait
-    for a slot."""
+    """Let the tasks queued now start over the cap, those that wait for their time, for a manual
+    resume or for GitHub aside, or the one of a bundle, its time, its pause and its wait for GitHub
+    too. The ones queued later wait for a slot."""
     bundle = body.get("bundle")
     with state_lock:
         state = read_state()
@@ -508,13 +515,19 @@ def force_queue(caller, query, body):
             item
             for item in state["queue"]
             if item["bundle"] == bundle
-            or (bundle is None and (item.get("after") or 0) <= now and not item.get("paused"))
+            or (
+                bundle is None
+                and (item.get("after") or 0) <= now
+                and not item.get("paused")
+                and not item.get("github")
+            )
         ]
         if bundle is not None and not items:
             raise ValueError(f"{bundle} is not queued")
         for item in items:
             item["forced"] = True
             item.pop("after", None)
+            item.pop("github", None)
             item.pop("paused", None)
         write_state(state)
     forced = [item["bundle"] for item in items]
@@ -572,8 +585,8 @@ def move_task(caller, query, body):
 def schedule_task(caller, query, body):
     """Set when the queued task of a bundle may leave the queue: `spot`, once a slot and the
     memory let it, `manual`, once it is scheduled again, or `HH:MM`, once that time of the host
-    came. It no longer goes over the cap. The host, that bundle or the one that queued the task
-    asks."""
+    came. It no longer goes over the cap nor waits for GitHub. The host, that bundle or the one
+    that queued the task asks."""
     bundle, when = body.get("bundle") or "", body.get("when")
     if when not in ("manual", "spot") and not (isinstance(when, str) and AFTER.fullmatch(when)):
         raise ValueError("when: spot, manual or a time of the day, HH:MM")
@@ -587,6 +600,7 @@ def schedule_task(caller, query, body):
         item["after"] = None if when in ("manual", "spot") else get_next_time(when)
         item["paused"] = when == "manual"
         item.pop("forced", None)
+        item.pop("github", None)
         write_state(state)
     launch_queued()
     return get_queue(caller, query, body)
@@ -595,24 +609,35 @@ def schedule_task(caller, query, body):
 def requeue_agent(caller, query, body):
     """Queue the session of a bundle's agent again, last, paused with `paused`, and close its
     window once its turn ended, PAUSE_WAIT seconds at most. Meanwhile its Bash calls are refused on
-    a reason that tells it to end its turn (client/run-hook.py). The host asks."""
+    a reason that tells it to end its turn (client/run-hook.py). The host asks, or with `github`
+    the agent itself: its session then waits for the GitHub connection of the host."""
     bundle = body.get("bundle") or ""
-    if caller != HOST:
-        raise Refused("requeue: only the host and the ops container stop an agent")
-    if set(body) - {"bundle", "paused"} or type(body.get("paused", False)) is not bool:
-        raise ValueError("requeue: a bundle, and paused true or false")
+    if caller != HOST and not (caller == bundle and body.get("github") is True):
+        raise Refused(
+            "requeue: only the host and the ops container stop an agent, and an agent itself"
+            " with github",
+        )
+    if set(body) - {"bundle", "github", "paused"} or any(
+        type(body.get(key, False)) is not bool for key in ("github", "paused")
+    ):
+        raise ValueError("requeue: a bundle, and github or paused true or false")
     if not BUNDLE_NAME.fullmatch(bundle) or not os.path.isdir(get_worktree_bundle_folder(bundle)):
         raise ValueError(f"no bundle folder for {bundle}")
     session = read_text(get_agent_folder(bundle) / "session")
     if not session or not get_window_pids(bundle):
         raise ValueError(f"{bundle} has no agent window")
-    paused = body.get("paused", False)
+    paused, github = body.get("paused", False), body.get("github", False)
     with state_lock:
         priority = min((item.get("priority", 0) for item in read_state()["queue"]), default=0)
-    task = {"paused": paused, "priority": priority, "resume": True, "task": GO_ON}
+    task = {"github": github, "paused": paused, "priority": priority, "resume": True, "task": GO_ON}
     check_task(bundle, task)
     answer = enqueue(caller, bundle, task)
-    threading.Thread(target=stop_after_turn, args=(bundle, session, paused), daemon=True).start()
+    why = "when Seb put it back in the queue"
+    if paused:
+        why = "when Seb paused it"
+    elif github:
+        why = "when it went back to the queue to wait for the GitHub connection of the host"
+    threading.Thread(target=stop_after_turn, args=(bundle, session, why), daemon=True).start()
     return 202, {**answer, "wait": PAUSE_WAIT}
 
 
@@ -631,9 +656,10 @@ def get_session_status(bundle, session):
     return newest.get("status")
 
 
-def stop_after_turn(bundle, session, paused):
+def stop_after_turn(bundle, session, why):
     """Close the agent window of a bundle once the turn of its session ended, or at PAUSE_WAIT.
-    When that cut the turn, the queued task tells the session so, as for a session a crash cut."""
+    When that cut the turn, the queued task tells the session so and why, as for a session a crash
+    cut."""
     pause = get_agent_folder(bundle) / "pause"
     deadline = time.time() + PAUSE_WAIT
     pause.write_text(f"{deadline}\n")
@@ -648,7 +674,6 @@ def stop_after_turn(bundle, session, paused):
         except OSError:
             row = None
         if row and (busy or cut.get_cut(row)):
-            why = "when Seb paused it" if paused else "when Seb put it back in the queue"
             prompt = cut.get_prompt({"call": row["call"], "stopped": time.time()}, why)
             with state_lock:
                 state = read_state()
@@ -936,6 +961,7 @@ def enqueue(caller, bundle, body, build=None, session=None):
                 "queued": time.time(),
                 "resume": bool(body.get("resume")),
                 "task": body["task"],
+                **({"github": True} if body.get("github") else {}),
                 **({"session": session} if session else {}),
             },
         )
@@ -990,8 +1016,18 @@ def get_resumed(item):
     """The prompt of a task: a session queued again with no prompt of its own learns that its
     window closed meanwhile, with what it ran in the background."""
     if item.get("resume") and item["task"] == GO_ON:
-        return RESUMED.format(time=format_time(item["queued"]))
+        text = RECONNECTED if item.get("github") else RESUMED
+        return text.format(time=format_time(item["queued"]))
     return item["task"]
+
+
+def ask_github():
+    """Have the host open its GitHub connection again, which Bitwarden asks Seb: GITHUB_ASK
+    seconds apart at most, while a task waits for it."""
+    start = GITHUB_MUX / "request" / "start"
+    if time.time() - (get_mtime(start) or 0) >= GITHUB_ASK:
+        start.parent.mkdir(parents=True, exist_ok=True)
+        start.write_text(f"{time.time()}\n")
 
 
 def is_deleting(bundle):
@@ -1115,6 +1151,9 @@ def launch_queued():
                 continue
             elif (item.get("after") or 0) > now:
                 item["waits_for"] = f"its time, {format_time(item['after'])}"
+            elif item.get("github") and not (GITHUB_MUX / "sock" / "github").is_socket():
+                item["waits_for"] = "the GitHub connection of the host"
+                ask_github()
             elif can_start and starting:
                 item["waits_for"] = f"the agent of {starting} to start"
                 paced = True

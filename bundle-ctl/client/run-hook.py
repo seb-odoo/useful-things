@@ -243,9 +243,9 @@ def main():
     left = get_pause()
     if left is not None:
         reason = (
-            f"Seb stops this agent: its window closes in {left} seconds, and the session goes on"
-            " later from here. Run no new command, and end your turn now on where the work is and"
-            " what comes next. Your files and this conversation stay as they are."
+            f"This agent goes back to the queue: its window closes in {left} seconds, and the"
+            " session goes on later from here. Run no new command, and end your turn now on where"
+            " the work is and what comes next. Your files and this conversation stay as they are."
         )
         output = {"hookEventName": "PreToolUse", "permissionDecision": "deny"}
         print(json.dumps({"hookSpecificOutput": {**output, "permissionDecisionReason": reason}}))

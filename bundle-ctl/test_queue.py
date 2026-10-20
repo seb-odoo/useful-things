@@ -7,6 +7,7 @@ import io
 import json
 import os
 import pathlib
+import socket
 import subprocess
 import sys
 import tempfile
@@ -545,15 +546,18 @@ def check_pause(root):
 def check_requeue(root):
     """Real clients: requeue queues the session of an agent again, last, and closes its window once
     its turn ended, or at PAUSE_WAIT; meanwhile the hook refuses its commands, and a turn cut there
-    goes on told so. Only the host asks, for an agent window."""
-    agents = {"idle": RUNS_IT, "busy": RUNS_IT, "slow": RUNS_IT, "other": FRESH}
+    goes on told so. Only the host asks, for an agent window, or an agent for itself to wait for
+    GitHub."""
+    agents = {"idle": RUNS_IT, "busy": RUNS_IT, "slow": RUNS_IT, "offline": RUNS_IT, "other": FRESH}
     state, _launched = prepare(root, agents, 8)
     state["queue"] = [{**state["queue"][-1], "paused": True, "priority": -5}]
-    windows, statuses = {"idle", "busy", "slow"}, {"idle": "idle", "busy": "busy", "slow": "busy"}
+    windows = {"idle", "busy", "slow", "offline"}
+    statuses = {"idle": "idle", "busy": "busy", "slow": "busy", "offline": "idle"}
     last = {
         "idle": {"type": "text", "text": "Nothing left: done."},
         "busy": {"type": "text", "text": "Nothing left: done."},
         "slow": {"type": "tool_use", "name": "Bash", "input": {"command": "sleep 600"}},
+        "offline": {"type": "text", "text": "Waiting for GitHub."},
     }
     for bundle in windows:
         (daemon.get_agent_folder(bundle) / "session").write_text(f"{bundle}\n")
@@ -624,8 +628,14 @@ def check_requeue(root):
     checks.append(("a turn that goes on closes at the wait", found[:2] == (True, True)))
     told = "when Seb paused it, nothing you did" in found[2] and "Bash sleep 600" in found[2]
     checks.append(("and goes on told it was cut", told))
+    daemon.identify = lambda connection: "offline"
+    code, _lines = run_client(path, "requeue", "offline", "--github")
+    item = next(item for item in state["queue"] if item["bundle"] == "offline")
+    found = code, wait_closed("offline"), item["task"], item.get("github")
+    checks.append(("an agent queues itself for GitHub", found == (0, True, daemon.GO_ON, True)))
     for caller, args, error in (
         ("idle", ("requeue", "busy"), "409 requeue: only the host and the ops container stop an"),
+        ("idle", ("requeue", "other", "--github"), "409 requeue: only the host and the ops"),
         (daemon.HOST, ("requeue", "other"), "400 other has no agent window"),
         (daemon.HOST, ("requeue", "../x"), "400 no bundle folder for ../x"),
     ):
@@ -640,10 +650,48 @@ def check_requeue(root):
         found = None
     except ValueError as refusal:
         found = str(refusal)
-    refused = found == "requeue: a bundle, and paused true or false"
+    refused = found == "requeue: a bundle, and github or paused true or false"
     checks.append(("paused is true or false", refused))
     failed = [name for name, passed in checks if not passed]
     return [f"requeue: {name}: {state['queue']}" for name in failed], len(checks)
+
+
+def check_github(root):
+    """A task that waits for the GitHub connection of the host asks for it, GITHUB_ASK seconds
+    apart at most, and starts once its socket is there, told so; a force of the queue leaves it,
+    a force or a schedule of its bundle lets it go."""
+    checks = []
+    state, launched = prepare(root, {"offline": FRESH}, 8)
+    state["queue"][0].update(github=True, resume=True, task=daemon.GO_ON)
+    daemon.GITHUB_MUX = root / "mux"
+    start = root / "mux" / "request" / "start"
+    daemon.launch_queued()
+    asked = start.read_text()
+    daemon.force_queue(daemon.HOST, {}, {})
+    found = launched, state["queue"][0]["waits_for"], start.read_text() == asked
+    waits = ([], "the GitHub connection of the host", True)
+    checks.append(("it waits and asks once, a force of the queue aside", found == waits))
+    os.utime(start, (0, 0))
+    daemon.launch_queued()
+    checks.append(("it asks again later", start.read_text() != asked))
+    (root / "mux" / "sock").mkdir()
+    with socket.socket(socket.AF_UNIX) as listener:
+        listener.bind(str(root / "mux" / "sock" / "github"))
+        daemon.launch_queued()
+    task = (daemon.get_agent_folder("offline") / "task.md").read_text()
+    back = task.startswith(daemon.GO_ON) and "GitHub connection of the host is back" in task
+    found = launched, back
+    checks.append(("it starts once the connection is up, told so", found == (["offline"], True)))
+    for name, action, body in (
+        ("a force of its bundle", daemon.force_queue, {"bundle": "later"}),
+        ("a schedule", daemon.schedule_task, {"bundle": "later", "when": "spot"}),
+    ):
+        state, launched = prepare(root / name.replace(" ", "-"), {"later": FRESH}, 8)
+        state["queue"][0]["github"] = True
+        action(daemon.HOST, {}, body)
+        checks.append((f"{name} lets it go", launched == ["later"]))
+    failed = [name for name, passed in checks if not passed]
+    return [f"github: {name}: {state['queue']}" for name in failed], len(checks)
 
 
 def check_build(root):
@@ -772,6 +820,7 @@ def main():
         check_after,
         check_pause,
         check_requeue,
+        check_github,
         check_build,
         check_parked,
         check_priority,

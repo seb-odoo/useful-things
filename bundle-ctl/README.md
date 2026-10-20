@@ -42,7 +42,7 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, its text, whether it resumes the session of its bundle and the session it names, and the memory left on the host, `short` when a start would add to a host that already lacks it |
 | `POST /force-queue` | the tasks queued now may start over the cap, those that wait for their time (`--after`) or for a manual resume (`--paused`) aside, or with `bundle` the task of that bundle, its time and its pause too; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
 | `POST /move` | the queued task of `bundle` put at `place` (from 1), where it keeps its priority when that priority fits between the tasks around it, else takes the nearest of theirs; then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
-| `POST /requeue` | the session of the agent of `bundle` queued again, last, paused with `paused`, and its agent window closed once its turn ended, 2 minutes at most: meanwhile `client/run-hook.py` refuses its Bash calls, on a reason that tells it to end its turn, and a turn still running at the end goes on told it was cut (see Cut sessions). The host or the ops container asks |
+| `POST /requeue` | the session of the agent of `bundle` queued again, last, paused with `paused`, and its agent window closed once its turn ended, 2 minutes at most: meanwhile `client/run-hook.py` refuses its Bash calls, on a reason that tells it to end its turn, and a turn still running at the end goes on told it was cut (see Cut sessions). With `github`, it waits for the GitHub connection of the host. The host or the ops container asks, or with `github` the bundle itself |
 | `POST /schedule` | when the queued task of `bundle` may start: `when` is `spot` (once a slot and the memory let it), `manual` (it waits for a manual resume, until it is scheduled again) or `HH:MM` (that time of the host, today or tomorrow); it no longer goes over the cap. Then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
 | `POST /unqueue` | the queued task of a bundle dropped; the host, that bundle or the one that queued the task asks |
 | `POST /run` | a heavy command waits for cores: one JSON line each time its place changes, then the CPUs it got (see Runs) |
@@ -681,6 +681,15 @@ work is (his "can we prompt the agent to finish quickly"). A turn still running 
 run for one, is cut: its task becomes the prompt of a cut session, which says that Seb stopped it
 and what to check before its last call runs again. The agent is not asked to save its work: its
 files and its transcript stay as they are, and a resume reads both.
+`bctl requeue BUNDLE --github` is the same, asked by the agent of BUNDLE itself when its work
+cannot go on without GitHub: git-gate tells it to when the GitHub connection of the host is down.
+That connection comes back only on Seb's yes in Bitwarden: on 2026-10-19 it was down from 18:45
+to the next morning, and 13 agents ended "blocked" with their work ready and not pushed, until
+someone resumed them (Seb, 2026-10-20: "ok for resume"). The task waits for `the GitHub
+connection of the host`, its socket in `~/.local/state/ssh-github-mux/sock/`, and meanwhile the
+daemon asks for the connection every 10 minutes (`request/start`), so that Bitwarden asks Seb
+again. Once it is up, the session goes on, told that it is back. `bctl schedule BUNDLE spot` and
+`bctl force-queue BUNDLE` let it go before; a force of the whole queue leaves it.
 The answer is the task's place (`queued`) and what it waits for
 (`waits_for`), or `started` when a slot was free. `bctl status` lists the queue in that order with
 each priority, the bundle that queued it, since when and what it waits for, so a caller can pick
