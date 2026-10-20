@@ -39,7 +39,8 @@ text, or the last prompt of that session for a session queued again as it was, a
 the close line of the last answer of that session, else its first line. Under
 the queue, Force lets each selected task start over the cap, Up and Down move the first selected
 task one place, Pause makes each selected task wait for a manual resume, Resume for a slot, and
-Time for a time of the day it asks (bctl schedule). A second start brings the open window up. The
+Time for a time of the day it asks (bctl schedule); a right click on a task opens a menu with these
+six. A second start brings the open window up. The
 size and the place of the window, and the height of the queue under its handle, are kept in
 agent-list.json, beside the state of the daemon.
 
@@ -644,6 +645,16 @@ def make_flow(widgets):
     return flow
 
 
+def make_menu(actions):
+    menu = Gtk.Menu()
+    for label, action in actions:
+        item = Gtk.MenuItem(label=label)
+        item.connect("activate", action)
+        menu.append(item)
+    menu.show_all()
+    return menu
+
+
 def follow_color_scheme():
     """Dark when the desktop asks for it, as VS Code and the browsers are, then at each change of
     the color-scheme of the portal. Dark is the dark Adwaita, which GTK always has: the theme of
@@ -738,22 +749,23 @@ class Agents:
         self.agents_view, agents = make_view(self.sorted_agents, COLUMNS, 8, SORTS)
         self.agents_view.get_selection().set_mode(Gtk.SelectionMode.MULTIPLE)
         self.agents_view.get_selection().connect("changed", self.selected)
-        self.agents_view.connect("button-press-event", self.open_menu)
         self.agents_view.connect("row-activated", self.bring_up)
         self.queue_head = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
         self.queue = Gtk.ListStore(*[str] * len(QUEUE_COLUMNS))
         self.queue_view, queue = make_view(self.queue, QUEUE_COLUMNS, 6)
         self.queue_view.get_selection().set_mode(Gtk.SelectionMode.MULTIPLE)
         queue.set_min_content_height(100)
-        queue_buttons = Gtk.Box(spacing=6)
-        for label, action in (
+        queue_actions = (
             ("Force", self.force),
             ("Up", lambda _button: self.move(-1)),
             ("Down", lambda _button: self.move(1)),
             ("Pause", lambda _button: self.schedule("manual")),
             ("Resume", lambda _button: self.schedule("spot")),
             ("Time", self.schedule_at),
-        ):
+        )
+        self.queue_view.connect("button-press-event", self.open_menu, make_menu(queue_actions))
+        queue_buttons = Gtk.Box(spacing=6)
+        for label, action in queue_actions:
             button = Gtk.Button(label=label)
             button.connect("clicked", action)
             queue_buttons.pack_start(button, False, False, 0)
@@ -775,12 +787,7 @@ class Agents:
             ("Back to queue", self.queue_again),
             ("Pause", lambda *_args: self.queue_again(paused=True)),
         )
-        self.menu = Gtk.Menu()
-        for label, action in actions:
-            item = Gtk.MenuItem(label=label)
-            item.connect("activate", action)
-            self.menu.append(item)
-        self.menu.show_all()
+        self.agents_view.connect("button-press-event", self.open_menu, make_menu(actions))
         buttons = []
         for label, action in (*actions, ("New ops agent", lambda _button: picker.open_ops())):
             button = Gtk.Button(label=label)
@@ -989,9 +996,9 @@ class Agents:
         if answer == Gtk.ResponseType.OK:
             self.schedule(when)
 
-    def open_menu(self, view, event):
-        """On a right click, select the row under the mouse unless it is selected, and open the
-        menu of the selected rows."""
+    def open_menu(self, view, event, menu):
+        """On a right click, select the row under the mouse unless it is selected, and open menu,
+        that of the selected rows."""
         if event.type != Gdk.EventType.BUTTON_PRESS or event.button != Gdk.BUTTON_SECONDARY:
             return False
         found = view.get_path_at_pos(int(event.x), int(event.y))
@@ -1001,7 +1008,7 @@ class Agents:
         if not selection.path_is_selected(found[0]):
             selection.unselect_all()
             selection.select_path(found[0])
-        self.menu.popup_at_pointer(event)
+        menu.popup_at_pointer(event)
         return True
 
     def bring_up(self, *_args):

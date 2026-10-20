@@ -477,6 +477,7 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   first selected task one place (`POST /move`), and Pause, Resume and Time set when each selected
   task may start (`POST /schedule`): once resumed, once a slot is free, or at the time of the day
   Time asks, its own by default (Seb, 2026-10-16: "controls on when it goes out of the queue").
+  A right click on a task opens a menu with these six (Seb, 2026-10-20).
   Ctrl+click and Shift+click select several rows:
   Enter, a double click or Terminal brings up their terminals where they were, the first row in
   front (his pick: no tiling); VS Code opens the window of each selected bundle; Show tabs brings
