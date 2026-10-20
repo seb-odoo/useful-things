@@ -39,6 +39,21 @@ FILTERED = [
     (set(), {"mine", "ops"}, ["ops", "mine"]),
     ({1, 3}, {"ops"}, ["ops"]),
 ]
+SEARCHED = [
+    ("", set(), ["fw", "ops", "mine"], "✅ finished 1"),
+    ("  Master-Y ", set(), ["mine"], "✅ finished 0"),
+    ("master", {"fw"}, ["fw"], "✅ finished 1"),
+    ("refac", set(), ["ops"], "⏳ running 1"),
+    ("none", set(), [], "⭐ mine 0"),
+]
+MOVES = [
+    (["a", "b", "c", "d"], 1, -1, ("b", 1)),
+    (["a", "b", "c", "d"], 1, 1, ("b", 3)),
+    (["b", "d"], 1, -1, ("d", 2)),
+    (["b", "d"], 0, 1, ("b", 4)),
+    (["b", "d"], 0, -1, None),
+    (["b", "d"], 1, 1, None),
+]
 HERE = pathlib.Path(__file__).resolve().parent
 MEMORY = {"available": 3.1, "room": 0.4, "short": True, "stall": 7, "swap": 9.0}
 QUEUE = {
@@ -158,6 +173,11 @@ def check_filters(agent_list):
         found = [row.key for row in rows if agent_list.is_kept(row, ranks, kinds)]
         if found != expected:
             failures.append(f"rows kept by {ranks} and {kinds}: {found!r}, expected {expected!r}")
+    for search, kinds, expected, label in SEARCHED:
+        found = [row.key for row in rows if agent_list.is_kept(row, set(), kinds, search)]
+        labels = agent_list.get_filters(rows, set(), kinds, search)
+        if found != expected or label not in labels:
+            failures.append(f"search {search!r}, {kinds}: {found!r} and {labels!r}")
     if (found := [agent_list.get_name(row) for row in rows]) != NAMES:
         failures.append(f"names {found!r}, expected {NAMES!r}")
     titles = [agent_list.get_window_title(rows), agent_list.get_window_title(rows[1:])]
@@ -347,12 +367,19 @@ def main():
     forced = dict(QUEUE, queue=[dict(QUEUE["queue"][0], forced=True)])
     if (found := agent_list.describe_queue(forced)[1][0][5]) != "a slot, over the cap":
         failures.append(f"forced task waits for {found!r}")
+    searched = [agent_list.describe_queue(QUEUE, search=text) for text in ("X--S", "master-y")]
+    if searched != [queue, (queue[0], [])]:
+        failures.append(f"queue searched {searched!r}, expected the task of master-x--seb alone")
+    answer = {"queue": [{"bundle": bundle} for bundle in "abcd"]}
+    for bundles, at, step, expected in MOVES:
+        if (found := agent_list.get_move(answer, bundles, at, step)) != expected:
+            failures.append(f"move {step} of {bundles[at]} in {bundles}: {found!r}")
     failures += check_filters(agent_list) + check_reads(agent_list) + check_usage(agent_list)
     failures += check_ask(agent_list) + check_queue(agent_list)
     for line in failures:
         print(line)
     cases = len(AGENTS) + len(OPS_INFOS) + 4 + 1 + len(FACETS) + len(FILTERED) + 2 + 7 + 3 + 3
-    cases += len(QUEUED_LINES) + 1 + 2
+    cases += len(QUEUED_LINES) + 1 + 2 + len(SEARCHED) + 1 + len(MOVES)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

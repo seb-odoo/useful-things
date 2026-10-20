@@ -16,9 +16,12 @@ with du when its row comes, then every 10 minutes.
 
 The buttons above the rows count the rows of each mark among the kinds pressed, and of each kind
 among the marks pressed. Pressed, they keep the rows of one of the marks pressed and of one of the
-kinds pressed. Enter, a double click or Terminal brings up the terminal of each selected row
-(Ctrl+click, Shift+click) where it was, the first row last, so that it ends in front. VS Code opens
-the window of each selected bundle, which takes its session over. Close closes the window of each
+kinds pressed. The Branch search beside them keeps the rows whose name has its text, and the
+tasks of the queue whose bundle has it, case aside; the buttons count only the rows it keeps, and
+Up and Down move a task past the one shown above or below it. Enter, a double click or Terminal
+brings up the terminal of each selected row (Ctrl+click, Shift+click) where it was, the first row
+last, so that it ends in front. VS Code opens the window of each selected bundle, which takes its
+session over. Close closes the window of each
 selected row after a question, as the daemon does: SIGUSR1 to its agent-terminator.py, and its
 claude stops. Back to queue queues the session of each selected bundle again, at the end of the
 queue (the lowest priority there), and the daemon closes its window once its turn ended, 2 minutes
@@ -167,16 +170,24 @@ def get_name(row):
     return f"{picker.LOADING} {title}" if loading else title
 
 
-def get_filters(rows, ranks, kinds):
+def get_filters(rows, ranks, kinds, search=""):
     """The label of each filter button: each mark, then each kind, with its number of rows among
-    the ones the pressed buttons of the other line keep."""
-    found = [get_kind(row) for row in rows if is_kept(row, ranks, set())]
+    the ones the search and the pressed buttons of the other line keep."""
+    found = [get_kind(row) for row in rows if is_kept(row, ranks, set(), search)]
     labels = [f"{ICONS[kind]} {kind} {found.count(kind)}" for kind in picker.KINDS]
-    return [*picker.get_counts([row for row in rows if is_kept(row, set(), kinds)]), *labels]
+    kept = [row for row in rows if is_kept(row, set(), kinds, search)]
+    return [*picker.get_counts(kept), *labels]
 
 
-def is_kept(row, ranks, kinds):
-    """Whether a row has one of the marks of ranks and one of the kinds, an empty set keeps all."""
+def is_found(text, search):
+    return search.strip().casefold() in text.casefold()
+
+
+def is_kept(row, ranks, kinds, search=""):
+    """Whether a row has one of the marks of ranks and one of the kinds, an empty set keeps all,
+    and the search in its name."""
+    if not is_found(get_name(row), search):
+        return False
     return (not ranks or row.rank in ranks) and (not kinds or get_kind(row) in kinds)
 
 
@@ -400,9 +411,9 @@ def read_queue():
     return answer
 
 
-def describe_queue(answer, rows=()):
-    """The head and the lines of the queue. A task whose bundle has a row takes its mark and kind
-    from it, else from the title read with the queue."""
+def describe_queue(answer, rows=(), search=""):
+    """The head and the lines of the queue, those of the bundles the search is in. A task whose
+    bundle has a row takes its mark and kind from it, else from the title read with the queue."""
     if answer is None:
         return "bundle-ctl does not answer", []
     head = f"{answer['agents']}/{answer['max_agents']} agents at work in a terminal"
@@ -412,6 +423,8 @@ def describe_queue(answer, rows=()):
     found = {row.key: row for row in rows}
     lines = []
     for item in answer["queue"]:
+        if not is_found(item["bundle"], search):
+            continue
         title = item.get("title") or ""
         row = found.get(item["bundle"])
         row = row or picker.Row(None, picker.get_rank(title), title, item["bundle"], None, True)
@@ -428,6 +441,15 @@ def describe_queue(answer, rows=()):
             ],
         )
     return head, lines
+
+
+def get_move(answer, bundles, at, step):
+    """The bundle of the task shown at, and the place of the queue, from 1, that puts it past the
+    task shown one step away, which the search may keep far from it; None at an end."""
+    if not 0 <= at + step < len(bundles):
+        return None
+    queue = [item["bundle"] for item in answer["queue"]]
+    return bundles[at], queue.index(bundles[at + step]) + 1
 
 
 def get_default_time(after, now):
@@ -569,6 +591,9 @@ class AgentList(Gtk.Application):
                 button.connect("toggled", self.show)
                 line.pack_start(button, False, False, 0)
             filters.pack_start(line, False, False, 0)
+        self.search = Gtk.SearchEntry(placeholder_text="Branch")
+        self.search.connect("search-changed", self.search_changed)
+        line.pack_end(self.search, False, False, 0)
         self.agents = Gtk.ListStore(*[str] * 11, int, int, float, float, float, float)
         self.sorted_agents = Gtk.TreeModelSort(model=self.agents)
         self.agents_view, agents = make_view(self.sorted_agents, COLUMNS, 7, SORTS)
@@ -634,18 +659,23 @@ class AgentList(Gtk.Application):
         model, paths = self.agents_view.get_selection().get_selected_rows()
         return [list(model[path]) for path in paths]
 
+    def search_changed(self, _entry):
+        self.show()
+        self.show_queue(self.queue_answer)
+
     def show(self, *_args):
         """Write the rows the filters keep, with what was read last, and keep their selection."""
         ranks = {rank for rank, button in enumerate(self.marks) if button.get_active()}
         kinds = {kind for kind, button in zip(picker.KINDS, self.kinds) if button.get_active()}
-        labels = get_filters([row for row, _info in self.agents_read], ranks, kinds)
+        search = self.search.get_text()
+        labels = get_filters([row for row, _info in self.agents_read], ranks, kinds, search)
         for button, label in zip(self.marks + self.kinds, labels):
             if button.get_label() != label:
                 button.set_label(label)
         lines = [
             self.get_line(place, row, info)
             for place, (row, info) in enumerate(self.agents_read)
-            if is_kept(row, ranks, kinds)
+            if is_kept(row, ranks, kinds, search)
         ]
         selection = self.agents_view.get_selection()
         keys = {row[KEY] for row in self.get_selected()}
@@ -703,7 +733,8 @@ class AgentList(Gtk.Application):
 
     def show_queue(self, answer):
         self.queue_answer = answer
-        head, lines = describe_queue(answer, [row for row, _info in self.agents_read])
+        rows = [row for row, _info in self.agents_read]
+        head, lines = describe_queue(answer, rows, self.search.get_text())
         self.queue_head.set_text(head)
         selection = self.queue_view.get_selection()
         bundles = set(self.get_queued())
@@ -741,10 +772,12 @@ class AgentList(Gtk.Application):
             self.send("/force-queue", {"bundle": bundle})
 
     def move(self, step):
-        """Move the first selected task one place up or down the queue."""
+        """Move the first selected task past the one shown above or below it."""
         model, paths = self.queue_view.get_selection().get_selected_rows()
-        if paths and 1 <= (place := paths[0].get_indices()[0] + 1 + step) <= len(model):
-            self.send("/move", {"bundle": model[paths[0]][BUNDLE], "place": place})
+        bundles = [row[BUNDLE] for row in model]
+        at = paths and paths[0].get_indices()[0]
+        if paths and (found := get_move(self.queue_answer, bundles, at, step)):
+            self.send("/move", {"bundle": found[0], "place": found[1]})
 
     def schedule(self, when):
         for bundle in self.get_queued():

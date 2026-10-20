@@ -411,8 +411,11 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   `du` of its folder when its row comes, then every 10 minutes: its `node_modules` counts there,
   though they are hard links of the base. Buttons above the rows count each mark among the kinds
   pressed, and each kind among the marks pressed (his ask: the counts followed no other filter);
-  pressed, they keep the rows of one of the marks pressed and of one of the kinds pressed. Under
-  the rows, behind a handle, the queue of `bctl queue`, read every 10 seconds, as `GET /queue`
+  pressed, they keep the rows of one of the marks pressed and of one of the kinds pressed. The
+  Branch search beside them (Seb, 2026-10-20: "to look for a branch name (both now and queue)")
+  keeps the rows whose name has its text, and the tasks of the queue whose bundle has it, case
+  aside; the buttons count only the rows it keeps, and Up and Down move a task past the one shown
+  above or below it. Under the rows, behind a handle, the queue of `bctl queue`, read every 10 seconds, as `GET /queue`
   runs `podman ps`, in its order, which no header click changes. A task there has the mark and
   the kind of its bundle (Seb, 2026-10-19), those of its row when it has one, else those its
   window would show once the session it goes on with is idle; its last message, its own text or,
