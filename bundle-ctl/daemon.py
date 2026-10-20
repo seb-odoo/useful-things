@@ -1544,6 +1544,20 @@ def close_window(bundle):
             pass
 
 
+def close_dead_window(bundle):
+    """Close the agent windows a bundle or an ops session left on "Press Enter to close" once its
+    claude ended, and wait for them to end: an ops window removes its agent folder as it ends, and
+    close_window would close the new window too. A window whose agent runs stays."""
+    if is_agent_running(bundle):
+        return
+    close_window(bundle)
+    deadline = time.monotonic() + WINDOW_CLOSE_WAIT
+    while get_window_pids(bundle):
+        if time.monotonic() > deadline:
+            raise Refused(f"{bundle}: the agent window where its claude ended stays open")
+        time.sleep(0.5)
+
+
 def hold_ops_task(caller, task):
     """Hold the task a bundle sends to a new ops agent for Seb's yes in hok. The same task asked
     again takes back the request that waits."""
@@ -1681,8 +1695,10 @@ def hold_cut(caller, body):
 
 
 def resume_ops(name, prompt):
-    """Go on with a cut session of the ops container in an ops agent window, on this prompt."""
+    """Go on with a cut session of the ops container in an ops agent window, on this prompt, once
+    the window where its claude ended closed."""
     check_ops_session(name, {"bundle": name, "terminal": True})
+    close_dead_window(name)
 
     def work(log):
         get_agent_folder(name).mkdir(parents=True, exist_ok=True)
@@ -1695,12 +1711,14 @@ def resume_ops(name, prompt):
 
 def resume_bundle(name, session, prompt):
     """Queue a cut session of a bundle to go on in its agent terminal, on this prompt, with the
-    priority, the model and the effort of the last task of its agent."""
+    priority, the model and the effort of the last task of its agent, once the terminal where its
+    claude ended closed."""
     body = {"priority": get_task_priority(name), "resume": True, "task": prompt}
     for key in ("effort", "model"):
         if value := read_text(get_agent_folder(name) / key):
             body[key] = value
     check_task(name, body, session)
+    close_dead_window(name)
     return enqueue(HOST, name, body, session=session)
 
 

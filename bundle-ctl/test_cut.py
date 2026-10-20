@@ -6,6 +6,7 @@
 import json
 import os
 import pathlib
+import shutil
 import sys
 import tempfile
 import threading
@@ -307,13 +308,33 @@ def check_hold(root):
 
 def check_yes(root):
     """Seb's yes: an ops session opens in an ops agent window on its prompt, a bundle session is
-    queued on its prompt and its session, and one that runs again since is left."""
-    opened, state = [], {"launches": {}, "queue": []}
+    queued on its prompt and its session, and one that runs again since is left. The window where
+    the claude of a session ended closes first, but for an agent that runs: the window of an ops
+    session removes its agent folder as it ends."""
+    events, state, threads = [], {"launches": {}, "queue": []}, []
+    ops_taken = f"ops-{OPS_TAKEN}"
+    dead = {ops_taken, BUNDLE, MAPPED}
+    daemon.get_agent_folder(ops_taken).mkdir(parents=True)
+
+    def end_window(name):
+        time.sleep(0.2)
+        if name.startswith(daemon.OPS):
+            shutil.rmtree(daemon.get_agent_folder(name))
+        dead.discard(name)
+        events.append(("closed", name))
+
+    def close_window(name):
+        if name in dead:
+            threads.append(threading.Thread(target=end_window, args=(name,)))
+            threads[-1].start()
+
     cut.get_live_sessions = lambda records: {OPS_LIVE, OPS_CUT}
     daemon.get_transcript = lambda session: True
-    daemon.is_agent_running = lambda name: False
-    daemon.open_terminal = lambda log, name: opened.append(
-        (name, (daemon.get_agent_folder(name) / "task.md").read_text()),
+    daemon.is_agent_running = lambda name: name == MAPPED
+    daemon.get_window_pids = lambda name: [1] * (name in dead)
+    daemon.close_window = close_window
+    daemon.open_terminal = lambda log, name: events.append(
+        ("opened", name, (daemon.get_agent_folder(name) / "task.md").read_text()),
     )
     daemon.start_job = lambda caller, verb, work: (202, work(None))
     daemon.read_state = lambda: state
@@ -327,6 +348,8 @@ def check_yes(root):
     item = daemon.HELD.read_json(path)
     path.with_suffix(".answer").write_text(f"yes {item['digest']}\n")
     daemon.HELD.take(path.with_suffix(".answer"), daemon.send_held)
+    for thread in threads:
+        thread.join()
     text = daemon.HELD.read_json(path.with_suffix(".result"))["text"]
     prompts = {entry["name"]: entry["prompt"] for entry in item["send"]["resume"]}
     agent = daemon.get_agent_folder(BUNDLE)
@@ -336,14 +359,20 @@ def check_yes(root):
     ]
     checks = [
         ("hok says what ran", text == (
-            f"ops agent windows open on ops-{OPS_TAKEN}; queued to go on in their agent terminal:"
+            f"ops agent windows open on {ops_taken}; queued to go on in their agent terminal:"
             f" {BUNDLE}, {MAPPED}; left as they are: ops-{OPS_CUT} (it runs again, or its turn"
             " ended since)"
         )),
-        ("each opens on its prompt", opened == [
-            (BUNDLE, prompts[BUNDLE]),
-            (f"ops-{OPS_TAKEN}", prompts[f"ops-{OPS_TAKEN}"]),
+        ("each opens on its prompt once its dead window closed", events == [
+            ("closed", BUNDLE),
+            ("opened", BUNDLE, prompts[BUNDLE]),
+            ("closed", ops_taken),
+            ("opened", ops_taken, prompts[ops_taken]),
         ]),
+        ("the prompt of an ops session stays", read_text(
+            daemon.get_agent_folder(ops_taken) / "task.md",
+        ) == prompts[ops_taken]),
+        ("the window of an agent that runs stays", MAPPED in dead),
         ("a bundle goes on with its session", read_text(agent / "session") == session("b")),
         ("its last run goes to its history", not (agent / "done").exists()),
         ("the next waits with its session, priority and model", queued == [

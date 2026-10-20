@@ -608,12 +608,23 @@ cut:
 - a session that runs again or whose turn ended since, a bundle already queued or open in a
   window, is left as it is, and the answer in `hok` says why.
 
+Before that, the agent window where the claude of the session ended, on "Press Enter to close",
+closes as the daemon closes a window (SIGUSR1 to its `agent-terminator.py`), and the daemon waits
+up to 30 s for that process to end; a window that stays open leaves the session as it is. A
+window with an `agent-terminal.py` still running is not touched. On 2026-10-20 a rebuild of the
+ops container left 6 ops windows on "ops: claude ended with code 137", and Seb had to say yes to a
+`kill` of them before the yes to the resume (Seb, 2026-10-20: one card). The wait matters for an
+ops session: its window removes `~/.local/state/bundle-ctl/ops/SESSION/` as it ends, and would
+remove the `task.md` of the resume, or the files of the new window. A bundle whose container
+stopped under its agent leaves such a window too, closed the same way before its resume is queued.
+
 The prompt starts on `Continue from where you left off.`, says when the session was cut, that its
 claude stopped with its container or its window and nothing it did, that its background commands,
 servers and agents died with it, and to check what its last call already did (a commit, a push, a
 file written, a request held in hok) before running it again; then that last call. The restarts of
 2026-10-08 told one container the same. `python3 test_cut.py` runs each case on fake transcripts
-and a fake `/proc`, the request held for `hok`, the client, and the yes.
+and a fake `/proc`, the request held for `hok`, the client, and the yes, with the windows it
+closes first.
 
 ## Agent windows
 
