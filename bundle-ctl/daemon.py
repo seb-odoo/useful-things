@@ -860,14 +860,17 @@ def is_held(agent):
 
 
 def check_terminal(caller, bundle, body):
-    """Why the agent terminal of a bundle cannot open on its last session, with no prompt.
+    """Why the agent terminal of a bundle cannot open on its last session, with no prompt, or for
+    the host on a new session with no task when the bundle has no agent.
 
     The window of the bundle closes for it: only that bundle or the host may ask.
     """
     if "task" in body or body.get("resume"):
         raise ValueError("terminal: only without a task")
     agent = get_agent_folder(bundle)
-    if not (agent / "task.md").is_file() or not (agent / "session").exists():
+    started = (agent / "task.md").is_file() and (agent / "session").exists()
+    new = caller == HOST and not (agent / "task.md").exists() and not (agent / "session").exists()
+    if not started and not new:
         raise Refused(f"{bundle} has no agent session to open in a terminal")
     if is_held(agent):
         raise Refused(f"{bundle}: a terminal holds its session, a new one would cut its turn")
@@ -2159,6 +2162,11 @@ def open_bundle(caller, query, body):
         check_terminal(caller, bundle, body)
 
         def work(log):
+            agent = get_agent_folder(bundle)
+            if not (agent / "session").exists():
+                agent.mkdir(exist_ok=True)
+                (agent / "session").write_text(f"{uuid.uuid4()}\n")
+                (agent / "task.md").write_text("")
             open_terminal(log, bundle)
             return {"bundle": bundle}
 

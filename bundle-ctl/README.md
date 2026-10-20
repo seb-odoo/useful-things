@@ -276,7 +276,9 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
 - `bctl open BUNDLE --terminal` opens that terminal again, on the bundle's last session and with
   no prompt: the way back once the X server took the windows away. It is refused while a terminal
   holds the session: a new terminal would take it over and cut its turn. A VS Code window that
-  holds it gives it back (below).
+  holds it gives it back (below). On a bundle with no agent, asked by the host (`ocode -t`), it
+  starts a new agent there: a new session, an empty `task.md`, and claude with no prompt, in a
+  window that shows in front, as an ops agent with no task.
 - What Seb selects with the mouse in claude, and what `/copy` copies, reach the clipboard of the
   host (Seb, 2026-10-15). claude sends it as an OSC 52 escape, which VTE ignores, so the wrapper
   runs `podman exec` in a pty of its own, takes the escape out of the output and gives its text

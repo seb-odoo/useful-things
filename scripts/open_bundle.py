@@ -27,7 +27,7 @@ parser.add_argument(
     "-t",
     "--terminal",
     action="store_true",
-    help="the terminator window of its agent, on its last session, rather than VS Code",
+    help="the terminator window of its agent, a new one when it has none, rather than VS Code",
 )
 args = parser.parse_args()
 bundle_name = clean_bundle_name(args.name)

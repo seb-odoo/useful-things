@@ -43,7 +43,14 @@ import time
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
-from agents import OPS, get_agent_folder, get_mtime, get_transcript, is_agent_running  # noqa: E402
+from agents import (  # noqa: E402
+    OPS,
+    get_agent_folder,
+    get_mtime,
+    get_transcript,
+    is_agent_running,
+    read_text,
+)
 from config import CLAUDE_CONFIG_CONTAINER, HOST_FOLDER  # noqa: E402
 
 CHECK = 1
@@ -201,8 +208,8 @@ def main():
         os.execvp(terminator[0], [*terminator, "--title", get_title(bundle)])
     terminator += ["--title", get_title(bundle, "--starting")]
     agent = get_agent_folder(bundle)
-    fresh = bundle.startswith(OPS) and not (agent / "task.md").is_file()
-    fresh = fresh and not get_transcript(bundle.removeprefix(OPS))
+    session = bundle.removeprefix(OPS) if bundle.startswith(OPS) else read_text(agent / "session")
+    fresh = not read_text(agent / "task.md") and not get_transcript(session)
     terminator += [] if fresh else ["--hidden"]
     since = time.time() * 1000
     code = follow(bundle, subprocess.Popen(terminator), since)

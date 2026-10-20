@@ -16,7 +16,11 @@ import daemon
 # The files of the .agent folder, whether its container has a window, the caller and the refusal.
 CASES = [
     ({}, False, "other", "bundle has no agent session to open in a terminal"),
+    ({}, False, "bundle", "bundle has no agent session to open in a terminal"),
+    ({}, False, daemon.HOST, None),
     ({"task.md"}, False, "other", "bundle has no agent session to open in a terminal"),
+    ({"task.md"}, False, daemon.HOST, "bundle has no agent session to open in a terminal"),
+    ({"session"}, False, daemon.HOST, "bundle has no agent session to open in a terminal"),
     ({"task.md", "session", "held"}, False, "other", "a terminal holds its session"),
     ({"task.md", "session", "held"}, True, "bundle", "a terminal holds its session"),
     ({"task.md", "session"}, True, "other", "bundle is open in a window"),
@@ -91,6 +95,26 @@ def open_ops(root, caller, body):
     except (ValueError, daemon.Refused) as error:
         return str(error)
     return f"held {answer['held']}" if "held" in answer else " ".join(opened)
+
+
+def open_new(root, agent):
+    """What open --terminal leaves for the terminal of a bundle with no agent: a session, no task."""
+    opened = []
+    daemon.get_worktree_bundle_folder = lambda bundle: str(root)
+    daemon.is_made = lambda folder: True
+    daemon.open_terminal = lambda log, name: opened.append(
+        (daemon.read_text(agent / "session"), (agent / "task.md").read_text()),
+    )
+    daemon.start_job = lambda caller, verb, work: (202, work(None))
+    for path in agent.iterdir():
+        path.unlink()
+    try:
+        daemon.open_bundle(daemon.HOST, {}, {"bundle": "bundle", "terminal": True})
+    except daemon.Refused as error:
+        return [f"open a bundle with no agent: {error}"]
+    if len(opened) != 1 or not daemon.SESSION_ID.fullmatch(opened[0][0]) or opened[0][1]:
+        return [f"open a bundle with no agent: {opened!r}"]
+    return []
 
 
 def answer_held(root, start_job):
@@ -171,6 +195,7 @@ def main():
             found = refusal(body)
             if found != expected:
                 failures.append(f"{body}: {found!r}, expected {expected!r}")
+        failures += open_new(pathlib.Path(root), agent)
         for caller, body, expected in OPS_CASES:
             found = open_ops(pathlib.Path(root), caller, body)
             if found != expected:
@@ -180,7 +205,7 @@ def main():
         failures += get_moved(pathlib.Path(root))
     for line in failures:
         print(line)
-    cases = len(CASES) + len(BODIES) + len(OPS_CASES) + 2
+    cases = len(CASES) + len(BODIES) + len(OPS_CASES) + 3
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

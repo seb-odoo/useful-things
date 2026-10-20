@@ -60,7 +60,8 @@ task alone starts a new session. Without a task, the session is told to go on.
 open --terminal opens the agent terminal of the bundle again, on its last Claude session, with
 no prompt: after the X server took the windows away, for one. It is refused while a terminal holds
 that session. When a VS Code window holds it, the window closes and the terminal goes on with the
-session, minimized: only the bundle itself or the host may ask it.
+session, minimized: only the bundle itself or the host may ask it. On a bundle with no agent, the
+host gets a new agent there with no prompt.
 
 open ops opens the VS Code window of the ops container, and with a task or --terminal a new Claude
 session of that container in an agent window of its own, at once. open ops-SESSION --terminal goes
@@ -509,7 +510,7 @@ def main():
     open_.add_argument(
         "--terminal",
         action="store_true",
-        help="the agent terminal on the bundle's last Claude session, with no prompt",
+        help="the agent terminal on the bundle's last Claude session, or a new one, with no prompt",
     )
     open_.add_argument(
         "--wait",

@@ -585,7 +585,8 @@ the PR queries worked.
 
 Opens a local bundle in VS Code, in its dev container, and marks it handled (gbs above).
 `ocode -t BUNDLE` opens the terminator window of its agent instead, on its last session, and marks
-it handled too: `bctl open BUNDLE --terminal`, so a bundle with no agent session is refused.
+it handled too: `bctl open BUNDLE --terminal`, which starts a new agent with no prompt on a bundle
+that has none.
 
 ### bundle_open.py
 

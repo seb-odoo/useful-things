@@ -65,8 +65,9 @@ if [ -n "$terminal" ]; then
 			--permission-mode "$(cat "$agent/mode")" ${2:+-- "$2"}
 	fi
 	# The mode `claude -p` runs in: the Claude tab does not restore the bundles' default, dontAsk.
+	task=$(cat "$agent/task.md")
 	exec claude "${start[@]}" -n "$ODOO_PROXY_HOST" --model "$model" --effort "$effort" \
-		--permission-mode auto -- "$(cat "$agent/task.md")"
+		--permission-mode auto ${task:+-- "$task"}
 fi
 
 # Let Ctrl+C stop the run but not this script, so the tab still opens on the session.
