@@ -458,7 +458,8 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   pressed, and each kind among the marks pressed (his ask: the counts followed no other filter);
   pressed, they keep the rows of one of the marks pressed and of one of the kinds pressed. The
   Branch search beside them (Seb, 2026-10-20: "to look for a branch name (both now and queue)")
-  keeps the rows whose name has its text, and the tasks of the queue whose bundle has it, case
+  keeps the rows whose name has its text, the groups of `hok` included, and the tasks of the
+  queue whose bundle has it, case
   aside. Its text loses a dev remote prefix (`odoo-dev:`), as for `ocode` (Seb, same day); the
   buttons count only the rows it keeps, and Up and Down move a task past the one shown
   above or below it. Under the rows, behind a handle, the queue of `bctl queue`, read every 10 seconds, as `GET /queue`

@@ -534,12 +534,14 @@ def get_leaves(children):
     return [(get_child_line(child), []) for child in children]
 
 
-def keep_owned(lines, children, groups, owned):
-    """The lines with rows of the owner under them, all of them when owned is False, and how many
-    rows of the owner the tree has with them and its groups: the number on its button."""
+def keep_owned(lines, children, groups, owned, search=""):
+    """The lines with rows of the owner under them, all of them when owned is False, the groups
+    whose name has the search, and how many rows of the owner the tree has with them: the number
+    on its button."""
+    groups = [(group, kids) for group, kids in groups if is_found(group.name, search)]
     count = sum(len(children.get(line[KEY], [])) for line in lines)
     count += sum(len(kids) for _group, kids in groups)
-    return [line for line in lines if not owned or line[KEY] in children], count
+    return [line for line in lines if not owned or line[KEY] in children], groups, count
 
 
 def fill_tree(model, tree, parent=None):
@@ -821,7 +823,9 @@ class Agents:
         ]
         agents = [(row.key, info[-1]) for row, info in self.agents_read]
         children, groups = self.owner.get_children(agents)
-        lines, count = keep_owned(lines, children, groups, self.owned.get_active())
+        lines, groups, count = keep_owned(
+            lines, children, groups, self.owned.get_active(), search
+        )
         if self.owned.get_label() != f"{OWNED} {count}":
             self.owned.set_label(f"{OWNED} {count}")
         tree = get_tree(lines, children, groups)

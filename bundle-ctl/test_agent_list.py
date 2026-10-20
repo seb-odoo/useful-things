@@ -400,12 +400,21 @@ def check_tree(agent_list):
     if tree[2][0][12] != 2 or tree[1][1][0][1] != []:
         failures.append(f"a group sorts after the agents, a child has no rows: {tree!r}")
     owned = [
-        agent_list.keep_owned(lines, {"0x4": [child]}, [(group, [child])], pressed)
-        for pressed in (False, True)
+        agent_list.keep_owned(lines, {"0x4": [child]}, [(group, [child])], pressed, search)
+        for pressed, search in ((False, ""), (True, ""), (False, "Host"), (False, "x--seb"))
     ]
-    shape = [([line[key] for line in kept], count) for kept, count in owned]
-    if shape != [(["master-x--seb", "0x4"], 2), (["0x4"], 2)]:
-        failures.append(f"agents kept by the button of hok, and its number: {shape!r}")
+    shape = [
+        ([line[key] for line in kept], [kid.key for kid, _kids in groups], count)
+        for kept, groups, count in owned
+    ]
+    expected = [
+        (["master-x--seb", "0x4"], ["hok group:host"], 2),
+        (["0x4"], ["hok group:host"], 2),
+        (["master-x--seb", "0x4"], ["hok group:host"], 2),
+        (["master-x--seb", "0x4"], [], 1),
+    ]
+    if shape != expected:
+        failures.append(f"rows kept by the button of hok and the search, its number: {shape!r}")
     picker = agent_list.picker
     rows = [
         picker.Row(0, 0, "x", "master-x--seb", "0x1", True),
