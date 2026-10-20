@@ -167,6 +167,7 @@ RECONNECTED = (
     " queue since {time}. Go on with what its outage stopped, and first check what changed"
     " meanwhile where your work depends on it (a PR: its threads, its head, its CI; its base)."
 )
+RESTART_RETRY = 3600
 RESUMED = (
     f"{GO_ON}\n\nSeb closed your window and queued this session again at {{time}}: what you left"
     " running in the background (a PR watch, a server, a test) stopped with it. Before anything"
@@ -202,6 +203,12 @@ SESSION_VARIABLES = (
 SOCKET = STATE / "sock" / "ctl.sock"
 START_CHECK = 10
 STATUS_FRESH = 30
+TERMINAL_CODE = [
+    HERE / "agent-terminal.py",
+    HERE / "agent-terminator.py",
+    HERE / "shift_enter_newline.py",
+    *(SCRIPTS / f"{name}.py" for name in ("agents", "commands", "config", "tab_groups")),
+]
 WINDOW_CLOSE_WAIT = 30
 
 bundle_rows = {"read": float("-inf"), "rows": []}
@@ -209,6 +216,7 @@ disk_warning = {}
 folder_by_container = {}
 jobs = {}
 kept_reviews = {}
+restarted = {}
 state_lock = threading.Lock()
 status_lock = threading.Lock()
 work_lock = threading.Lock()
@@ -1246,6 +1254,7 @@ def keep_launching():
         while True:
             warn_disk()
             delete_safely()
+            restart_safely()
             if time.monotonic() - checked > REVIEW_CHECK:
                 checked = time.monotonic()
                 drop_reviews_safely()
@@ -1268,6 +1277,13 @@ def delete_safely():
     try:
         close_deleted()
         delete_stopped()
+    except Exception:
+        traceback.print_exc()
+
+
+def restart_safely():
+    try:
+        restart_old_terminal()
     except Exception:
         traceback.print_exc()
 
@@ -1553,6 +1569,80 @@ def close_dead_window(bundle):
         if time.monotonic() > deadline:
             raise Refused(f"{bundle}: the agent window where its claude ended stays open")
         time.sleep(0.5)
+
+
+def get_terminals():
+    """The agent-terminal.py process of each bundle, ops windows aside."""
+    terminals = {}
+    for path in pathlib.Path("/proc").glob("[0-9]*/cmdline"):
+        try:
+            args = path.read_bytes().split(b"\0")
+        except OSError:
+            continue
+        if len(args) > 2 and args[1].endswith(b"/agent-terminal.py"):
+            bundle = args[2].decode(errors="replace")
+            if not bundle.startswith(OPS):
+                terminals[bundle] = int(path.parent.name)
+    return terminals
+
+
+def read_stat(pid):
+    """The parent of a process and when it started, in seconds since the epoch."""
+    fields = pathlib.Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()
+    boot = next(
+        line.split()[1] for line in pathlib.Path("/proc/stat").read_text().splitlines()
+        if line.startswith("btime ")
+    )
+    return int(fields[1]), int(boot) + int(fields[19]) / os.sysconf("SC_CLK_TCK")
+
+
+def is_minimized(pid, env):
+    """Whether the windows of this process are all minimized, and it has one."""
+    out = subprocess.run(["wmctrl", "-l", "-p"], capture_output=True, check=False, text=True, env=env)
+    windows = [line.split()[0] for line in out.stdout.splitlines() if line.split()[2:3] == [str(pid)]]
+    return bool(windows) and all(
+        "_NET_WM_STATE_HIDDEN"
+        in subprocess.run(
+            ["xprop", "-id", window, "_NET_WM_STATE"],
+            capture_output=True,
+            check=False,
+            text=True,
+            env=env,
+        ).stdout
+        for window in windows
+    )
+
+
+def restart_old_terminal():
+    """Open a new terminal on the agent of a bundle whose terminal started before the last change
+    of TERMINAL_CODE, which it does not load again: the new one takes the session over and the old
+    window closes. Only when its session is idle, as a background command a turn left (a PR watch)
+    would end with its claude, and while its window is minimized, as Seb sees no window go and the
+    new one opens minimized. One per call, each bundle once an hour at most."""
+    changed = max(get_mtime(path) or 0 for path in TERMINAL_CODE)
+    env = None
+    for bundle, pid in get_terminals().items():
+        agent = get_agent_folder(bundle)
+        try:
+            parent, started = read_stat(pid)
+        except (OSError, IndexError, ValueError):
+            continue
+        if (
+            started >= changed
+            or time.time() - restarted.get(bundle, float("-inf")) < RESTART_RETRY
+            or read_text(agent / "terminal") != str(pid)
+            or (agent / "pause").exists()
+            or is_deleting(bundle)
+            or get_session_status(bundle, read_text(agent / "session")) != "idle"
+        ):
+            continue
+        env = env or session_env()
+        if not is_minimized(parent, env):
+            continue
+        restarted[bundle] = time.time()
+        print(f"{bundle}: its terminal restarts on the code of {format_time(changed)}", flush=True)
+        open_terminal(sys.stdout, bundle)
+        return
 
 
 def hold_ops_task(caller, task):

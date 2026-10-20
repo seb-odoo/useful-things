@@ -292,6 +292,15 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   when the daemon closes the window for Back to queue or Pause (`.agent/pause`), on a takeover, on
   a claude that ended on an error or a container that could not start, nor while the host shuts
   down (`systemctl is-system-running` says `stopping`), so that Firefox restores them.
+- A terminal runs the code it started with. When `agent-terminal.py`, `agent-terminator.py` or a
+  script they load changed since, the daemon opens a new terminal on that bundle, which takes the
+  session over in the same container, and the old window closes (Seb, 2026-10-20: "can we somehow
+  restart them gracefully"). Only when its session is `idle`: not in a turn, nor in a background
+  command a turn left (`shell`, a PR watch), which would end with its claude. Only while its window
+  is minimized, so that Seb sees no window go, as the new one opens minimized; and not under
+  `.agent/pause`. One terminal per pass of the daemon (10 to 60 seconds), each bundle once an hour
+  at most; the journal says `BUNDLE: its terminal restarts on the code of HH:MM`. Ops windows stay
+  as they are. `python3 test_restart.py` runs each case.
 - `bctl open BUNDLE --terminal` opens that terminal again, on the bundle's last session and with
   no prompt: the way back once the X server took the windows away. It is refused while a terminal
   holds the session: a new terminal would take it over and cut its turn. A VS Code window that
