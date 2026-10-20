@@ -623,6 +623,27 @@ def make_view(model, titles, expand, sorts=()):
     return view, scrolled
 
 
+def make_flow(widgets):
+    """A line of widgets that goes on two lines when its side is too narrow for it: the window
+    gets narrower without a scrollbar, and its minimum height grows by one line only."""
+    flow = Gtk.FlowBox(
+        selection_mode=Gtk.SelectionMode.NONE,
+        halign=Gtk.Align.START,
+        min_children_per_line=-(-len(widgets) // 2),
+        max_children_per_line=len(widgets),
+        column_spacing=6,
+        row_spacing=6,
+    )
+    css = Gtk.CssProvider()
+    css.load_from_data(b"flowboxchild { padding: 0; }")
+    for widget in widgets:
+        flow.add(widget)
+        widget.get_parent().get_style_context().add_provider(
+            css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+    return flow
+
+
 def follow_color_scheme():
     """Dark when the desktop asks for it, as VS Code and the browsers are, then at each change of
     the color-scheme of the portal. Dark is the dark Adwaita, which GTK always has: the theme of
@@ -701,18 +722,17 @@ class Agents:
         self.marks = [Gtk.ToggleButton(label=label) for label in labels[: len(picker.MARKS)]]
         self.kinds = [Gtk.ToggleButton(label=label) for label in labels[len(picker.MARKS) :]]
         self.owned = Gtk.ToggleButton(label=OWNED)
-        self.owned.set_no_show_all(isinstance(self.owner, Alone))
-        filters = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        for buttons in ([self.owned, *self.marks], self.kinds):
-            line = Gtk.Box(spacing=6)
-            for button in buttons:
-                button.connect("toggled", self.show)
-                line.pack_start(button, False, False, 0)
-            filters.pack_start(line, False, False, 0)
+        for button in (self.owned, *self.marks, *self.kinds):
+            button.connect("toggled", self.show)
         self.owned.connect("toggled", lambda _button: self.agents_view.expand_all())
         self.search = Gtk.SearchEntry(placeholder_text="Branch")
         self.search.connect("search-changed", self.search_changed)
-        line.pack_end(self.search, False, False, 0)
+        filters = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        owned = [] if isinstance(self.owner, Alone) else [self.owned]
+        filters.pack_start(make_flow([*owned, *self.marks]), False, False, 0)
+        line = make_flow([make_flow(self.kinds), self.search])
+        line.set_halign(Gtk.Align.FILL)
+        filters.pack_start(line, False, False, 0)
         self.agents = Gtk.TreeStore(*[str] * 12, int, int, float, float, float, float)
         self.sorted_agents = Gtk.TreeModelSort(model=self.agents)
         self.agents_view, agents = make_view(self.sorted_agents, COLUMNS, 8, SORTS)
@@ -720,7 +740,7 @@ class Agents:
         self.agents_view.get_selection().connect("changed", self.selected)
         self.agents_view.connect("button-press-event", self.open_menu)
         self.agents_view.connect("row-activated", self.bring_up)
-        self.queue_head = Gtk.Label(xalign=0)
+        self.queue_head = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
         self.queue = Gtk.ListStore(*[str] * len(QUEUE_COLUMNS))
         self.queue_view, queue = make_view(self.queue, QUEUE_COLUMNS, 6)
         self.queue_view.get_selection().set_mode(Gtk.SelectionMode.MULTIPLE)
@@ -761,15 +781,15 @@ class Agents:
             item.connect("activate", action)
             self.menu.append(item)
         self.menu.show_all()
-        buttons = Gtk.Box(spacing=6)
+        buttons = []
         for label, action in (*actions, ("New ops agent", lambda _button: picker.open_ops())):
             button = Gtk.Button(label=label)
             button.connect("clicked", action)
-            buttons.pack_start(button, False, False, 0)
+            buttons.append(button)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=6)
         box.pack_start(filters, False, False, 0)
         box.pack_start(self.panes, True, True, 0)
-        box.pack_start(buttons, False, False, 0)
+        box.pack_start(make_flow(buttons), False, False, 0)
         return box
 
     def start(self):
