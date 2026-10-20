@@ -146,6 +146,7 @@ PICKS = [
 BRING_UPS = [
     (("--agent", "master-a--seb"), "wmctrl -i -a 0x06"),
     (("--agent", "master-c-aku"), "wmctrl -i -a 0x04"),
+    (("--terminal", "master-a--seb"), "wmctrl -i -a 0x06"),
     (("--code", "master-a--seb"), "wmctrl -i -a 0x08"),
 ]
 
@@ -210,18 +211,20 @@ def get_new_ops():
 
 def get_started_agents():
     """What --agent runs for a bundle with no window, when bctl starts its agent, then when bctl
-    refuses: the code it ends on and the commands, with no wait for the window."""
+    refuses, and what --terminal runs for a bundle with a VS Code window only: the code it ends on
+    and the commands, with no wait for the window."""
     found = []
-    for code in (0, 1):
+    cases = ((0, {}, True), (1, {}, True), (0, {"master-z--seb": {"code": "0x98"}}, False))
+    for code, windows, with_code in cases:
         picker = load_picker()
-        shown = iter([{}, {}, {"master-z--seb": {"terminal": "0x99"}}])
+        shown = iter([windows, {}, {"master-z--seb": {"terminal": "0x99"}}])
         picker.get_windows = lambda shown=shown: (next(shown), [], [])
         ran, done = [], types.SimpleNamespace(returncode=code)
         picker.subprocess = types.SimpleNamespace(
             run=lambda command, ran=ran, done=done, **_: ran.append(command) or done,
         )
         picker.time = types.SimpleNamespace(monotonic=time.monotonic, sleep=lambda _seconds: None)
-        found.append((picker.bring_up_agent("master-z--seb"), ran))
+        found.append((picker.bring_up_agent("master-z--seb", with_code), ran))
     return found
 
 
@@ -409,7 +412,8 @@ def main():
     if (started := get_new_ops()) != [new_ops]:
         failures.append(f"pick 1 new-ops: started {started!r}, expected {[new_ops]!r}")
     bctl = [sys.executable, str(HERE / "client" / "bctl.py"), "open", "master-z--seb", "--terminal"]
-    started = [(0, [bctl, ["wmctrl", "-i", "-a", "0x99"]]), (1, [bctl])]
+    raised = ["wmctrl", "-i", "-a", "0x99"]
+    started = [(0, [bctl, raised]), (1, [bctl]), (0, [bctl, raised])]
     if (found := get_started_agents()) != started:
         failures.append(f"--agent with no window: {found!r}, expected {started!r}")
     found, records = get_ops_agents()

@@ -8,6 +8,7 @@ after a ✅ fw, before a ✅ runbot.
     window-picker.py --show
     window-picker.py --counts
     window-picker.py --agent BUNDLE
+    window-picker.py --terminal BUNDLE
     window-picker.py --code BUNDLE
 
 --show opens rofi on this script, where the row under the mouse is selected. A click on a bundle
@@ -40,7 +41,8 @@ its session, else starts that agent again in a terminal on its last session (bct
 --terminal), and brings the window up once it shows, as it opens minimized. For an ops session,
 --agent ops-SESSION brings up its ops agent window, else the ops window when a tab of it runs the
 session, else goes on with the session in a new agent window: hok links the caller of a request
-there. --code brings up its
+there. --terminal is --agent without the VS Code window, which bctl then takes the session from:
+ocode -t. --code brings up its
 VS Code window, else opens it through its `odoo-bundle://` link. The helper of firefox-gateway runs
 them from a tab of the Firefox group of the bundle.
 """
@@ -389,7 +391,7 @@ def is_in_tab(name):
     return name.removeprefix(OPS) in get_live_sessions([records])
 
 
-def bring_up_agent(name):
+def bring_up_agent(name, code=True):
     if name.startswith(OPS):
         window = get_terminal(name)
         if not window and is_in_tab(name):
@@ -397,7 +399,7 @@ def bring_up_agent(name):
             return 0
     else:
         windows = get_windows()[0].get(name, {})
-        window = windows.get("terminal") or windows.get("code")
+        window = windows.get("terminal") or (windows.get("code") if code else None)
     if not window:
         command = [sys.executable, str(HERE / "client" / "bctl.py"), "open", name, "--terminal"]
         if code := subprocess.run(command, check=False).returncode:
@@ -414,6 +416,8 @@ def bring_up_agent(name):
 def main():
     if len(sys.argv) == 3 and sys.argv[1] == "--agent":
         return bring_up_agent(sys.argv[2])
+    if len(sys.argv) == 3 and sys.argv[1] == "--terminal":
+        return bring_up_agent(sys.argv[2], code=False)
     if len(sys.argv) == 3 and sys.argv[1] == "--code":
         return pick(sys.argv[2], terminal=False)
     if sys.argv[1:] == ["--show"]:

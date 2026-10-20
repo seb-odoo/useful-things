@@ -410,7 +410,9 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   dropped once the window is up). A Cinnamon shortcut runs it. `window-picker.py --agent BUNDLE`
   brings up the terminal of its agent, else its VS Code window, which then holds the session,
   else starts that agent again in a terminal (`bctl open BUNDLE --terminal`) and brings the window
-  up once it shows; `--code BUNDLE` is the click on its row. The helper of firefox-gateway runs
+  up once it shows; `--terminal BUNDLE` does the same without the VS Code window, which bctl takes
+  the session from (`ocode -t`, Seb, 2026-10-20: "I'm expecting this to unminimize the terminal
+  so I can see it"); `--code BUNDLE` is the click on its row. The helper of firefox-gateway runs
   them from a tab of the Firefox group of the bundle, and `bundle-info.py BUNDLE` for the bundle
   tab first in that group (Seb, 2026-10-20: "as much info as possible [...] or even better the
   conversation itself"): JSON with the session of its agent, the close line of its last answer,
