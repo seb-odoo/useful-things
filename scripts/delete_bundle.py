@@ -16,6 +16,7 @@ import threading
 from contextlib import nullcontext
 
 import argcomplete
+import tab_groups
 from command_runner import ignore_error
 from commands import (
     clean_bundle_name,
@@ -232,6 +233,7 @@ def delete_bundle(
 
     runner.parallel_run(Tree("Repositories"), get_repos(), handle_repo)
     runner.run(["rm", "-rf", get_worktree_bundle_folder(bundle_name)])
+    tab_groups.ask({"op": "close", "bundle": bundle_name})
     runner.run(["rm", "-rf", f"{CLAUDE_CONFIG_CONTAINER}/{bundle_name}"])
     runner.run(["rm", "-rf", f"{BUNDLE_DB_CONTAINER}/{bundle_name}"])
     runner.run(["rm", "-rf", f"{EXTENSIONS_CONTAINER}/{bundle_name}"])

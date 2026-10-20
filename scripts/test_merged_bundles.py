@@ -36,6 +36,8 @@ def main():
         delete_bundle.CLAUDE_CONFIG_CONTAINER = f"{root}/claude-config"
         delete_bundle.EXTENSIONS_CONTAINER = f"{root}/extensions"
         delete_bundle._bundle_databases = lambda runner, bundle_name: []
+        closed = []
+        delete_bundle.tab_groups.ask = lambda request: closed.append(request)
         for repo in REPOS:
             folder = commands.get_repo_folder(repo)
             git(root, "init", folder)
@@ -126,6 +128,10 @@ def main():
         dev_deleted = ["master-pr-follows", "master-same-head", "master-with-empty"]
         expected = sorted([*dev_deleted, "master-dev-moved", "master-not-mine"])
         found["bundles deleted"] = (sorted(deleted), expected)
+        found["tab groups closed"] = (
+            sorted(request["bundle"] for request in closed),
+            expected,
+        )
         found["PRs named per deleted bundle"] = (deleted.get("master-same-head"), ["odoo#1"])
         found["failures"] = (failures, [])
         found["output of the deletion"] = (output.getvalue(), "")

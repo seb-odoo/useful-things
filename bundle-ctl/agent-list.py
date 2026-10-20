@@ -74,6 +74,7 @@ from gi.repository import Gdk, GdkX11, Gio, GLib, Gtk, Pango  # noqa: F401
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
+import tab_groups  # noqa: E402
 from agents import OPS, get_agent_folder, get_mtime, read_text  # noqa: E402
 from commands import clean_bundle_name, get_worktree_bundle_folder  # noqa: E402
 from config import REPO_ROOT  # noqa: E402
@@ -126,7 +127,6 @@ def load(name, path):
 bctl = load("bctl", HERE / "client" / "bctl.py")
 picker = load("picker", HERE / "window-picker.py")
 runs = load("runs", HERE / "runs.py")
-tab_groups = load("tab_groups", HERE / "tab_groups.py")
 ICONS = {kind: icon for icon, kind, _ in load("title", HERE / "client" / "window-title.py").KINDS}
 
 sessions = {}

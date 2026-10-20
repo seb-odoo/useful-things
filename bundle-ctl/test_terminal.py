@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """What agent-terminal.py does when its claude or its terminal ends, when a VS Code window holds
-its session, and with the clipboard escape of claude, with a fake podman, xprop and xclip and the
-wrapper in a pty: python3 test_terminal.py
+its session, and with the clipboard escape of claude, with a fake podman, systemctl, xprop and
+xclip and the wrapper in a pty: python3 test_terminal.py
 """
 
 import importlib.util
@@ -38,6 +38,9 @@ case "$1 $*" in
 "ps "*) [ -e "$STATE/window" ] && echo c1 ;;
 esac
 """
+SYSTEMCTL = """#!/bin/bash
+cat "$STATE/system" 2>/dev/null || echo running
+"""
 XCLIP = """#!/bin/bash
 printf '%s: %s\\n' "$2" "$(cat)" >>"$STATE/clipboard"
 """
@@ -67,7 +70,12 @@ def run_wrapper(root, bundle):
             log.write(f"up {folder}\n")
         return "c1"
 
+    def ask(request):
+        with open(os.environ["LOG"], "a") as log:
+            log.write(f"tabs {request['op']} {request['bundle']}\n")
+
     module.up = up
+    module.tab_groups.ask = ask
     module.copy_gitconfig = lambda container: None
     module.get_container = lambda folder: None
     module.get_transcript = lambda session: next(root.glob(f"{session}.jsonl"), None)
@@ -139,7 +147,8 @@ class Case:
             (self.root / "s1.jsonl").write_text("\n".join(tab) + "\n")
         self.terminator = subprocess.Popen(["sleep", "60"])
         (self.root / "bin").mkdir()
-        for program, script in (("podman", PODMAN), ("xclip", XCLIP), ("xprop", XPROP)):
+        programs = (("podman", PODMAN), ("systemctl", SYSTEMCTL), ("xclip", XCLIP), ("xprop", XPROP))
+        for program, script in programs:
             (self.root / "bin" / program).write_text(script)
             (self.root / "bin" / program).chmod(0o755)
         (self.state / "focus").write_text(f"{os.getpid()}\n")
@@ -184,7 +193,10 @@ class Case:
 
     def check_stopped(self, what):
         self.check(f"{what} ends it", wait(self.terminal.has_ended))
-        self.check(f"{what} stops the container", wait(lambda: self.log()[-1] == "stop c1"))
+        self.check(f"{what} stops the container", wait(lambda: "stop c1" in self.log()))
+
+    def closes_groups(self):
+        return f"tabs close {self.bundle}" in self.log()
 
 
 def check_quit(case):
@@ -192,6 +204,7 @@ def check_quit(case):
     (case.state / "quit").touch()
     case.check_stopped("quitting claude")
     case.check("quitting claude keeps its window", case.terminator.poll() is None)
+    case.check("quitting claude closes its tab groups", case.closes_groups())
 
 
 def check_clipboard(case):
@@ -227,6 +240,7 @@ def check_handoff(case):
     closed = wait(lambda: case.terminator.poll() == -signal.SIGUSR1)
     case.check("a takeover closes its window", closed)
     case.check("a takeover keeps the container", "stop c1" not in case.log())
+    case.check("a takeover keeps its tab groups", not case.closes_groups())
 
 
 def check_sigterm(case):
@@ -239,6 +253,24 @@ def check_close(case):
     case.start()
     os.close(case.terminal.fd)
     case.check_stopped("closing the terminal")
+    case.check("closing the terminal closes its tab groups", case.closes_groups())
+
+
+def check_requeue(case):
+    """The daemon closes the window of an agent it queues again: its tab groups stay."""
+    case.start()
+    (case.agent / "pause").touch()
+    os.close(case.terminal.fd)
+    case.check_stopped("closing the terminal to queue it again")
+    case.check("queuing it again keeps its tab groups", not case.closes_groups())
+
+
+def check_shutdown(case):
+    case.start()
+    (case.state / "system").write_text("stopping\n")
+    os.kill(case.terminal.pid, signal.SIGTERM)
+    case.check_stopped("a shutdown")
+    case.check("a shutdown keeps its tab groups", not case.closes_groups())
 
 
 def check_close_window(case):
@@ -248,6 +280,7 @@ def check_close_window(case):
     handed = wait(lambda: any("agent-takeover.py" in line for line in case.log()))
     case.check("closing the terminal hands the session to the window", handed)
     case.check("closing the terminal keeps the container", "stop c1" not in case.log())
+    case.check("closing the terminal keeps its tab groups", not case.closes_groups())
 
 
 def check_window_closes(case, go_on):
@@ -352,7 +385,8 @@ def main():
         check_ops_resume: CUT,
         check_ops_cut: CUT,
     }
-    checks = (check_quit, check_clipboard, check_sigterm, check_close, check_close_window)
+    checks = (check_quit, check_clipboard, check_sigterm, check_close, check_requeue)
+    checks += (check_shutdown, check_close_window)
     checks += (check_handoff, *tabs)
     checks += (check_ops_quit, check_ops_close)
     bundles = {check_ops_quit: "ops-s2", check_ops_close: "ops-s2"}

@@ -54,6 +54,7 @@ import uuid
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
+import tab_groups  # noqa: E402
 from agents import (  # noqa: E402
     OPS,
     get_agent_folder,
@@ -334,6 +335,22 @@ def stop(*args):
     raise HangUp(1)
 
 
+def close_groups(agent, bundle):
+    """Close the Firefox tab groups of the bundle, as Seb closed its agent. Not when the daemon
+    closed the window to queue the agent again (its `pause` stays until the window is gone), nor
+    when the host shuts down, as Firefox opens the groups again at its start."""
+    if (agent / "pause").exists():
+        return
+    state = subprocess.run(
+        ["systemctl", "is-system-running"],
+        capture_output=True,
+        check=False,
+        text=True,
+    ).stdout.strip()
+    if state != "stopping":
+        tab_groups.ask({"op": "close", "bundle": bundle})
+
+
 def hand_over(container):
     """Stop the claude of the session in the container, where the tab of a window can go on."""
     subprocess.run(
@@ -534,6 +551,8 @@ def main():
         taken_over = handed or window
         if container and not taken_over:
             subprocess.run(["podman", "stop", container], check=False, capture_output=True)
+        if not taken_over and not ending:
+            close_groups(agent, bundle)
     if ending and not taken_over:
         keep_open(f"{bundle}: {ending}", session)
     if handed and os.environ.get("BUNDLE_CTL_WINDOW_PID"):

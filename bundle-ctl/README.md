@@ -240,7 +240,9 @@ branches again with the same commits, so a commit made after the request still k
   Else closing the window or the terminal stays Seb's call.
 - The yes also closes the Firefox tab groups of the bundle (Seb, 2026-10-20), which the request
   lists: the helper of firefox-gateway answers on `$XDG_RUNTIME_DIR/firefox-gateway/host.sock`
-  (`tab_groups.py`). With no helper, Firefox closed say, there is nothing to close.
+  (`scripts/tab_groups.py`). `delete_bundle.py` closes them too, so a bundle deleted by gbs, gfa
+  or by hand loses its groups as well. With no helper, Firefox closed say, there is nothing to
+  close.
 - `--wait S` waits that long for his answer and prints it, as `hctl --wait` does: exit 0 on his
   yes, 126 when he refused, 75 when it still waits. The same delete asked again replaces the
   request that waits, under the same `bN`, and waits for it.
@@ -276,6 +278,11 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   the container itself. With a VS Code window attached, it keeps the container and hands the
   session to that window instead (`client/agent-takeover.py`, as the window does when it opens):
   else its claude runs on with no terminal, and the tab finds the session open in another process.
+- Quitting claude or closing the terminal also closes the Firefox tab groups of the bundle (Seb,
+  2026-10-20: "closing an agent or deleting a bundle should also close its firefox group"). Not
+  when the daemon closes the window for Back to queue or Pause (`.agent/pause`), on a takeover, on
+  a claude that ended on an error or a container that could not start, nor while the host shuts
+  down (`systemctl is-system-running` says `stopping`), so that Firefox restores them.
 - `bctl open BUNDLE --terminal` opens that terminal again, on the bundle's last session and with
   no prompt: the way back once the X server took the windows away. It is refused while a terminal
   holds the session: a new terminal would take it over and cut its turn. A VS Code window that
@@ -423,8 +430,8 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   `du` of its folder when its row comes, then every 10 minutes: its `node_modules` counts there,
   though they are hard links of the base. The Tabs column of a bundle has the icon of each of its
   Firefox tab groups (Seb, 2026-10-20), read with the rows from the helper of firefox-gateway
-  (`tab_groups.py`), then, when they all look finished, why: `🚀👀 PR merged, PR opened`.
-  Buttons above the rows count each mark among the kinds
+  (`scripts/tab_groups.py`), then, when they all look finished, why: `🚀👀 PR merged, PR
+  opened`. Buttons above the rows count each mark among the kinds
   pressed, and each kind among the marks pressed (his ask: the counts followed no other filter);
   pressed, they keep the rows of one of the marks pressed and of one of the kinds pressed. The
   Branch search beside them (Seb, 2026-10-20: "to look for a branch name (both now and queue)")
@@ -448,8 +455,8 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   up the Firefox tab group of the first selected bundle, and Close tabs closes the groups of each,
   at once (Seb, 2026-10-20: a closed tab comes back with Ctrl+Shift+T); Close closes the
   window of each after a question, as the daemon does (SIGUSR1 to its `agent-terminator.py`), so
-  its claude stops. Back to queue, after a question too, queues the session of each selected
-  bundle again (`POST /requeue`, at the lowest priority of the queue, so last), and the daemon
+  its claude stops and its tab groups close. Back to queue, after a question too, queues the
+  session of each selected bundle again (`POST /requeue`, at the lowest priority of the queue, so last), and the daemon
   closes its window once its turn ended, 2 minutes at most: when its turn comes, a new terminal
   goes on with that session, told that its window closed and to check what changed since its last
   turn (`RESUMED` in `daemon.py`). Pause does the same with
