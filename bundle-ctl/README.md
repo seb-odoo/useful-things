@@ -395,7 +395,10 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   brings up the terminal of its agent, else its VS Code window, which then holds the session,
   else starts that agent again in a terminal (`bctl open BUNDLE --terminal`) and brings the window
   up once it shows; `--code BUNDLE` is the click on its row. The helper of firefox-gateway runs
-  them from a tab of the Firefox group of the bundle. `--agent ops-SESSION` brings up the ops agent
+  them from a tab of the Firefox group of the bundle, and `bundle-info.py BUNDLE` for the bundle
+  tab first in that group (Seb, 2026-10-20: "as much info as possible [...] or even better the
+  conversation itself"): JSON with the session of its agent, the close line of its last answer,
+  and its last 120 prompts, answers and tool calls. `--agent ops-SESSION` brings up the ops agent
   window of that session, else the ops window when a claude of the ops container runs the session
   out of an agent window (in a tab), else goes on with it in a new agent window (`bctl open
   ops-SESSION --terminal`). `hok` links the caller of a request there (Seb, 2026-10-20: "a direct
