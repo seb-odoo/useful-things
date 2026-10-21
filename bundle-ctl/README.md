@@ -605,28 +605,31 @@ The agent of a terminal learns at once when someone else acts on a PR of its bun
 what to do: ask Seb to validate, or act.
 
 - mail-watch of mail-agent names to the mail gateway the PRs of each new GitHub mail, about 15 s
-  after it lands. `client/prwatch.py`, a Claude Code channel, waits there (`GET
-  /_gateway/touched?after=N`, answered at the next mail or after 50 s) with the PRs of the bundle:
-  those whose head is the branch of the bundle, in odoo, enterprise or any repo of `/workspace` on
-  that branch, found when the session starts.
+  after it lands. `client/prwatch.py` waits there (`GET /_gateway/touched?after=N`, answered at
+  the next mail or after 50 s) for the PRs of the bundle: those whose head is the branch of the
+  bundle, in any repo of `/workspace` on that branch, found when it starts. `agent-run.sh
+  --terminal` starts it beside claude, in a session of its own, once per container (a lock).
 - For one of them it reads on GitHub what came since its last look: reviews, review comments and
-  comments of anyone but Seb, a head the bundle does not have in its branch, a close. It sends one
-  `<channel source="prwatch">` message that names them, with no text a stranger wrote; the agent
-  reads them with gh. An idle session starts a turn on it, a busy one gets it at its next step.
-  Its instructions to the agent come with the channel (`INSTRUCTIONS`).
-- The first look of a PR starts from the head GitHub has when the session starts, so a commit
-  amended and not pushed yet is not told as a push of someone else. `.agent/prwatch.json` keeps
-  the last look of each PR across sessions.
-- claude loads a channel of its own only with `--dangerously-load-development-channels`, which
-  opens a dialog first: `agent-terminal.py` answers it with Enter, once, as it shows.
-- A seat of a Claude Team or Enterprise organization gets no channel until an admin of that
-  organization sets `channelsEnabled` (claude then drops every event and says so under its
-  banner). `prwatch.py --allowed` reads the account and the organization settings cached in the
-  Claude config, and `agent-run.sh --terminal` loads the channel only when it says yes.
-- Agent terminals only: an agent window, its Claude tab and the ops agents get none.
+  comments of anyone but Seb, a head the bundle does not have in its branch, a close. It leaves one
+  line in `.agent/pr-events/` that names them, with no text a stranger wrote (the agent reads them
+  with gh), and what to do with them (`ADVICE`).
+- The first look of a PR starts from the head GitHub has then, so a commit amended and not pushed
+  yet is not told as a push of someone else. `.agent/prwatch.json` keeps the last look of each PR.
+- Each line goes to the agent once, by the first of three: a hook of the bundles' Claude settings
+  at its next tool call or prompt (`prwatch.py --hook`, PostToolUse and UserPromptSubmit),
+  `client/agent-stop.py`, which keeps the turn going rather than let it end, and
+  `agent-terminal.py`, which types the line, then Enter, as the next prompt of an idle session.
+- Idle is the `idle` status of the session in the records of claude: no turn, no dialog open
+  (a question or a permission is `waiting`), and no wait for the reset of the usage limit. The
+  terminal types nothing while a key Seb typed since his last Enter may be a draft (a mouse move
+  or a focus change is none), nor after a slash command he sent, which may leave a menu open: his
+  next prompt then carries the line, by the hook.
+- Not a Claude Code channel, though it would wake an idle session too: a seat of a Claude Team
+  organization gets none until an admin of the organization turns channels on, and Seb wants no
+  such ask nor a feature Claude turns on remotely (2026-10-21).
 
 `python3 test_prwatch.py` runs the looks on a fake GitHub and a real git repo, the wait on a fake
-gateway and the protocol; `test_terminal.py` the answer to the dialog.
+gateway, the hooks and the Stop hook; `test_terminal.py` the typing.
 
 ## Ops agents
 

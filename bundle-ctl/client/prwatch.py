@@ -1,32 +1,35 @@
 #!/usr/bin/env python3
-"""Tell the agent of a bundle when someone else acts on one of its PRs: a Claude Code channel.
+"""Tell the agent of a bundle when someone else acts on one of its PRs.
 
-claude starts it (`client/agent-run.sh --terminal`) and gets each event as a `<channel
-source="prwatch">` message, which starts a turn on an idle session and reaches a busy one at its
-next step. It waits on the mail gateway, where mail-watch names the PRs of each new GitHub mail
-(`GET /_gateway/touched`), and for a PR of the bundle reads on GitHub what came since its last
-look: reviews and comments of others, a head the bundle does not have, a close. The event names
-them and never carries their text: the agent reads that with gh.
+client/agent-run.sh --terminal starts it beside claude, once per container. It waits on the mail
+gateway, where mail-watch names the PRs of each new GitHub mail (`GET /_gateway/touched`), and for
+a PR of the bundle reads on GitHub what came since its last look: reviews and comments of others,
+a head the bundle does not have, a close. It leaves one line per PR in .agent/pr-events/, which
+names them and never carries their text: the agent reads that with gh.
 
-    prwatch.py --allowed      exit 0 when the account claude is logged in with takes a channel
+One of three hands each line to the agent, once: this script as a PostToolUse or UserPromptSubmit
+hook (`--hook`), client/agent-stop.py before the turn ends, or agent-terminal.py, which types it
+as the next prompt of an idle session.
+
+    prwatch.py            the watch
+    prwatch.py --hook     the lines that wait, as context of a hook
 """
 
 import datetime
+import fcntl
 import json
 import os
 import pathlib
 import subprocess
 import sys
-import threading
 import time
-import urllib.error
 import urllib.parse
 import urllib.request
 
-CONFIG = pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or pathlib.Path.home() / ".claude")
-ORGANIZATIONS = ("claude_team", "claude_enterprise")
 WORKSPACE = pathlib.Path("/workspace")
-STATE = WORKSPACE / ".agent" / "prwatch.json"
+AGENT = WORKSPACE / ".agent"
+EVENTS = AGENT / "pr-events"
+STATE = AGENT / "prwatch.json"
 TOUCHED = "https://gmail.googleapis.com/_gateway/touched"
 GITHUB = "https://api.github.com"
 OWNER = "odoo"
@@ -39,30 +42,15 @@ REVIEWS = {
     "COMMENTED": ("review", "reviews"),
     "DISMISSED": ("dismissed review", "dismissed reviews"),
 }
-INSTRUCTIONS = """\
-prwatch sends a <channel source="prwatch"> message when someone else acts on a PR of this bundle:
-a review, a comment, a push this bundle does not have, a close. It names what came, never its text:
-read it with gh (the PR, its reviews and comments; git fetch for a push) before anything else.
-Then decide as for any other work of this bundle: what is Seb's call (an answer to a reviewer, a
-change of approach, work over someone else's push) you prepare and ask him; what follows from your
-task and his rules you do. Either way, your reply opens on what came and what you did with it."""
-
-out = threading.Lock()
-
-
-def send(message):
-    with out:
-        sys.stdout.write(json.dumps(message) + "\n")
-        sys.stdout.flush()
-
-
-def say(text, pr):
-    send({"jsonrpc": "2.0", "method": "notifications/claude/channel",
-          "params": {"content": text, "meta": {"pr": pr}}})
+ADVICE = (
+    "Read what came with gh before anything else. What is Seb's call (an answer to a reviewer, a"
+    " change of approach, work over someone else's push), prepare and ask him; what follows from"
+    " your task and his rules, do. Open your reply on what came and what you did with it."
+)
 
 
 def log(text):
-    print(f"prwatch: {text}", file=sys.stderr, flush=True)
+    print(f"{time.strftime('%H:%M:%S')} {text}", file=sys.stderr, flush=True)
 
 
 def get(url, timeout=30):
@@ -86,25 +74,35 @@ def read_json(path):
     return found if type(found) is dict else {}
 
 
-def read_state():
-    return read_json(STATE)
-
-
-def is_allowed():
-    """Whether claude may load a channel for the account it is logged in with: a seat of a Team or
-    Enterprise organization only once its admin turned channels on. Otherwise claude drops the
-    events and says so under its banner, in every agent terminal."""
-    account = read_json(CONFIG / ".claude.json").get("oauthAccount") or {}
-    return (account.get("organizationType") not in ORGANIZATIONS
-            or read_json(CONFIG / "remote-settings.json").get("channelsEnabled") is True)
-
-
 def write_state(state):
     try:
         STATE.with_suffix(".tmp").write_text(json.dumps(state, indent=1))
         STATE.with_suffix(".tmp").replace(STATE)
     except OSError as error:
         log(f"state not kept: {error}")
+
+
+def leave(text):
+    """One line for the agent, whole or not at all for whoever takes it."""
+    EVENTS.mkdir(exist_ok=True)
+    name = f"{time.time_ns()}.txt"
+    (EVENTS / f".{name}").write_text(f"PR event: {text} {ADVICE}")
+    (EVENTS / f".{name}").replace(EVENTS / name)
+
+
+def take(folder=None):
+    """The lines that wait, oldest first, each taken by one caller only: the hooks in the container
+    and agent-terminal.py on the host take from the same folder."""
+    taken = []
+    for path in sorted((folder or EVENTS).glob("[!.]*.txt")):
+        mine = path.with_name(f".{path.name}.taken")
+        try:
+            path.rename(mine)
+            taken.append(mine.read_text().strip())
+            mine.unlink()
+        except OSError:
+            continue
+    return taken
 
 
 def git(repo, *args):
@@ -187,7 +185,7 @@ def look(pr, repo, seen, me):
 
 class Watch:
     def __init__(self):
-        self.state = read_state()
+        self.state = read_json(STATE)
         self.prs = {}
         self.listed = float("-inf")
         self.me = ""
@@ -232,7 +230,8 @@ class Watch:
                 for pr in dict.fromkeys(one["pr"] for one in answer["touched"]):
                     text = self.told(pr)
                     if text:
-                        say(text, pr)
+                        leave(text)
+                        log(f"told: {text}")
                 after, pause = answer["next"], RETRY[0]
             except (OSError, ValueError, KeyError, TypeError) as error:
                 log(f"{error!r}, again in {pause} s")
@@ -240,36 +239,25 @@ class Watch:
                 pause = min(pause * 2, RETRY[1])
 
 
-def reply(message, started):
-    method = message.get("method")
-    if method == "initialize":
-        send({"jsonrpc": "2.0", "id": message["id"], "result": {
-            "protocolVersion": message.get("params", {}).get("protocolVersion", "2025-06-18"),
-            "capabilities": {"experimental": {"claude/channel": {}}},
-            "serverInfo": {"name": "prwatch", "version": "1"},
-            "instructions": INSTRUCTIONS,
-        }})
-    elif method == "notifications/initialized" and not started.is_set():
-        started.set()
-        threading.Thread(target=Watch().run, daemon=True).start()
-    elif method == "ping":
-        send({"jsonrpc": "2.0", "id": message["id"], "result": {}})
-    elif "id" in message and method:
-        send({"jsonrpc": "2.0", "id": message["id"],
-              "error": {"code": -32601, "message": f"no {method}"}})
+def hook():
+    """As a PostToolUse or UserPromptSubmit hook: the lines that wait, as context of the agent."""
+    event = json.load(sys.stdin).get("hook_event_name", "")
+    told = take()
+    if told:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": event,
+                                                 "additionalContext": "\n".join(told)}}))
 
 
 def main():
-    if sys.argv[1:] == ["--allowed"]:
-        sys.exit(0 if is_allowed() else 1)
-    started = threading.Event()
-    for line in sys.stdin:
-        try:
-            message = json.loads(line)
-        except ValueError:
-            continue
-        if type(message) is dict:
-            reply(message, started)
+    if sys.argv[1:] == ["--hook"]:
+        hook()
+        return
+    lock = (AGENT / "prwatch.lock").open("w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return
+    Watch().run()
 
 
 if __name__ == "__main__":

@@ -15,7 +15,8 @@ stops the container. A VS Code window opened on the bundle takes the session ove
 as long as that window.
 A terminal closed while such a window is attached hands its session to that window the same way.
 The claude runs in a pty of the wrapper, which hands its clipboard escapes (OSC 52), ignored by
-terminator, to xclip while the window has the focus.
+terminator, to xclip while the window has the focus, and types the PR events of client/prwatch.py
+in an idle session.
 
 Started on a bundle whose run already began, it goes on with that session and does not run the
 task again. When another terminal holds the session, it takes it over as a window does, in the
@@ -34,6 +35,7 @@ stops it, and a closed terminal stops its own claude.
 import base64
 import contextlib
 import fcntl
+import importlib.util
 import json
 import os
 import pathlib
@@ -61,6 +63,7 @@ from agents import (  # noqa: E402
     get_bundle_container,
     get_container,
     get_resume,
+    get_session_status,
     get_transcript,
     has_window,
     read_text,
@@ -72,6 +75,17 @@ from commands import (  # noqa: E402
 )
 from config import HOST_FOLDER, REPO_ROOT  # noqa: E402
 
+
+def load_client(name, file):
+    spec = importlib.util.spec_from_file_location(name, HERE / "client" / file)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+PRWATCH = load_client("prwatch", "prwatch.py")
+TITLE = load_client("title", "window-title.py")
+
 CLAUDE = "/home/vscode/.claude/bin/claude"
 CLI = "ms-vscode-remote.remote-containers-*/dist/spec-node/devContainersSpecCLI.js"
 CLIPBOARD = re.compile(rb"\x1b\]52;([a-z0-9]*);([A-Za-z0-9+/=]*|\?)(?:\x07|\x1b\\)")
@@ -79,22 +93,19 @@ CLIPBOARD_LIMIT = 1 << 22
 CLIPBOARD_PART = re.compile(rb"\x1b\]52;[a-z0-9]*(?:;(?:[A-Za-z0-9+/=]*|\?)\x1b?)?")
 CLIPBOARD_START = b"\x1b]52;"
 CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
-DIALOG = (b"WARNING:Loadingdevelopmentchannels", b"Iamusingthisforlocaldevelopment")
-DIALOG_WAIT = 0.3
-DIALOG_WITHIN = 1 << 16
+ENTER_AFTER = 0.3
 GO_ON = "Continue from where you left off."
 MODES = ("acceptEdits", "auto", "default", "plan")
 # Leave the alternate screen and the mouse modes a killed claude stays in, and show the cursor.
 RESET = "\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m"
-SCREEN_CODES = re.compile(
-    rb"\x1b\[[0-9;?<>=]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][0-9A-B]|\x1b[=>]|\s"
-)
+NOT_TYPED = re.compile(rb"\x1b\[<[0-9;]*[Mm]|\x1b\[M[\s\S]{3}|\x1b\[[IO]")
 SELECTIONS = {"c": "clipboard", "p": "primary"}
 START_LOCK = pathlib.Path.home() / ".claude" / "agent-start.lock"
 START_SPACE = 10
 TAKEOVER_WAIT = 30
 TRANSCRIPTS = pathlib.Path.home() / ".claude" / "projects" / "-workspace"
 USER = "vscode"
+WAKE_EVERY = 2
 WINDOW_WAIT = 120
 
 
@@ -196,10 +207,10 @@ def keep_open(ending, session=None):
     os.execvp("sh", ["sh", "-c", wait, ending])
 
 
-def run_tty(command):
+def run_tty(command, waker=None):
     """Run the podman exec of a claude in a pty of its own, and copy this terminal to it and back,
     so that the clipboard escape (OSC 52) of claude, which terminator ignores, reaches the clipboard
-    of the host. Its exit code."""
+    of the host, and that a PR event can be typed in it (Waker). Its exit code."""
     if not os.isatty(0):
         return subprocess.run(command, check=False).returncode
     size = fcntl.ioctl(0, termios.TIOCGWINSZ, bytes(8))
@@ -211,7 +222,7 @@ def run_tty(command):
     mode = termios.tcgetattr(0)
     tty.setraw(0)
     try:
-        copy_tty(fd)
+        copy_tty(fd, waker)
     except BaseException:
         os.kill(pid, signal.SIGKILL)
         os.waitpid(pid, 0)
@@ -229,23 +240,30 @@ def copy_size(fd):
         fcntl.ioctl(fd, termios.TIOCSWINSZ, fcntl.ioctl(0, termios.TIOCGWINSZ, bytes(8)))
 
 
-def copy_tty(fd):
+def copy_tty(fd, waker=None):
     """Copy the keys to the pty and its output to this terminal, until the command ends. A tail
     that may start a clipboard escape waits for the next read; a lone start of one goes out after
-    50 ms with no output. The dialog claude shows before it loads the PR channel
-    (client/prwatch.py), as no flag loads a development channel without it, gets its Enter once."""
-    held = start = b""
-    answer_at = None
+    50 ms with no output. The Enter of a typed PR event goes ENTER_AFTER after its text: sent
+    together, claude takes them as a paste, where Enter is a new line."""
+    held = b""
+    enter_at = None
     inputs = [0, fd]
     while True:
-        ready = select.select(inputs, [], [], 0.05 if held or answer_at else None)[0]
+        wait = 0.05 if held or enter_at else WAKE_EVERY if waker else None
+        ready = select.select(inputs, [], [], wait)[0]
         if not ready and len(held) < len(CLIPBOARD_START):
             write_terminal(held)
             held = b""
-        if answer_at and time.monotonic() >= answer_at:
-            answer_at = None
+        if enter_at and time.monotonic() >= enter_at:
+            enter_at = None
             with contextlib.suppress(OSError):
                 write_all(fd, b"\r")
+        elif waker and not enter_at:
+            prompt = waker.take()
+            if prompt:
+                with contextlib.suppress(OSError):
+                    write_all(fd, prompt)
+                enter_at = time.monotonic() + ENTER_AFTER
         if fd in ready:
             try:
                 data = os.read(fd, 65536)
@@ -254,12 +272,6 @@ def copy_tty(fd):
             if not data:
                 write_terminal(held)
                 return
-            if start is not None:
-                start += data
-                if all(one in SCREEN_CODES.sub(b"", start) for one in DIALOG):
-                    start, answer_at = None, time.monotonic() + DIALOG_WAIT
-                elif len(start) > DIALOG_WITHIN:
-                    start = None
             out, held = take_clipboard(held + data)
             write_terminal(out)
         if 0 in ready:
@@ -269,8 +281,47 @@ def copy_tty(fd):
                 data = b""
             if not data:
                 stop()
+            if waker:
+                waker.keys(data)
             with contextlib.suppress(OSError):
                 write_all(fd, data)
+
+
+class Waker:
+    """Types the PR events client/prwatch.py leaves in .agent/pr-events as the next prompt of an
+    idle session, when nothing was typed in this terminal since the last Enter: a draft of Seb
+    stays his, and the event then reaches the agent with his next prompt, by the hook of
+    prwatch.py. Nor after a slash command he sent, which may leave a menu open. Idle is no turn, no
+    dialog open and no wait for the reset of the usage limit."""
+
+    def __init__(self, agent, bundle, session):
+        self.events = agent / "pr-events"
+        self.bundle = bundle
+        self.session = session
+        self.line = b""
+        self.draft = False
+        self.looked = float("-inf")
+
+    def keys(self, data):
+        self.line += NOT_TYPED.sub(b"", data)
+        if self.line[-1:] in (b"\r", b"\x03"):
+            self.draft = self.line[-1:] == b"\r" and self.line.lstrip()[:1] == b"/"
+            self.line = b""
+        elif self.line:
+            self.draft = True
+
+    def take(self):
+        if self.draft or time.monotonic() - self.looked < WAKE_EVERY:
+            return None
+        self.looked = time.monotonic()
+        if (
+            not any(self.events.glob("[!.]*.txt"))
+            or get_session_status(self.bundle, self.session) != "idle"
+            or TITLE.is_resuming(self.session)
+        ):
+            return None
+        told = PRWATCH.take(self.events)
+        return " ".join(told).encode() if told else None
 
 
 def write_terminal(data):
@@ -547,7 +598,8 @@ def main():
             ["podman", "exec", "--interactive", "--tty", "--detach-keys=", "--user", USER]
             + ["--workdir", "/workspace", "--env", f"TERM={os.environ.get('TERM', 'xterm')}"]
             + [container, "bash", str(HERE / "client" / "agent-run.sh"), "--terminal", session]
-            + ([GO_ON] if cut else [])
+            + ([GO_ON] if cut else []),
+            Waker(agent, bundle, session),
         )
         if code:
             ending = f"claude ended with code {code}"

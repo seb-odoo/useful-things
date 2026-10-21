@@ -571,6 +571,7 @@ def check_requeue(root):
         entry = {"type": "assistant", "entrypoint": "cli", "message": {"content": [last[bundle]]}}
         (root / f"{bundle}.jsonl").write_text(json.dumps(entry) + "\n")
     daemon.CLAUDE_CONFIG_CONTAINER = str(root / "claude-config")
+    sys.modules["agents"].CLAUDE_CONFIG_CONTAINER = daemon.CLAUDE_CONFIG_CONTAINER
     daemon.PAUSE_WAIT = 3
     daemon.close_window = windows.discard
     daemon.get_transcript = lambda session: root / f"{session}.jsonl"

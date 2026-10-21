@@ -53,6 +53,7 @@ from agents import (  # noqa: E402
     get_last_text,
     get_mtime,
     get_resume,
+    get_session_status,
     get_transcript,
     get_window_pids,
     has_window,
@@ -666,21 +667,6 @@ def requeue_agent(caller, query, body):
         why = "when it went back to the queue to wait for the GitHub connection of the host"
     threading.Thread(target=stop_after_turn, args=(bundle, session, why), daemon=True).start()
     return 202, {**answer, "wait": PAUSE_WAIT}
-
-
-def get_session_status(bundle, session):
-    """What the claude of a bundle's session does, as its newest record says: `busy` in a turn,
-    `idle` or `shell` once the turn ended, None with no record."""
-    records = []
-    for path in pathlib.Path(CLAUDE_CONFIG_CONTAINER, bundle, "sessions").glob("*.json"):
-        try:
-            record = json.loads(path.read_text())
-        except (OSError, ValueError):
-            continue
-        if isinstance(record, dict) and record.get("sessionId") == session:
-            records.append(record)
-    newest = max(records, key=lambda record: record.get("startedAt") or 0, default={})
-    return newest.get("status")
 
 
 def stop_after_turn(bundle, session, why):

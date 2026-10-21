@@ -59,12 +59,7 @@ if [ -n "$terminal" ]; then
 		start=(--resume "$session")
 	fi
 	start+=(--plugin-dir "$(dirname "$(readlink -f "$0")")/../agentbar")
-	# The PR channel: agent-terminal.py answers the dialog every development channel opens with.
-	prwatch="$(dirname "$(readlink -f "$0")")/prwatch.py"
-	if python3 "$prwatch" --allowed; then
-		start+=(--mcp-config "{\"mcpServers\": {\"prwatch\": {\"command\": \"python3\", \"args\": [\"$prwatch\"]}}}")
-		start+=(--dangerously-load-development-channels server:prwatch)
-	fi
+	setsid python3 "$(dirname "$(readlink -f "$0")")/prwatch.py" >>"$agent/prwatch.log" 2>&1 &
 	# Record the mode for the Claude tab: without .agent/mode, the tab resumes the session in plan.
 	[ -s "$agent/mode" ] || echo auto >"$agent/mode"
 	if [ -n "$reopen" ]; then

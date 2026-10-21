@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """What agent-terminal.py does when its claude or its terminal ends, when a VS Code window holds
-its session, with the clipboard escape of claude and the dialog of a development channel, with a
-fake podman, systemctl, xprop and xclip and the wrapper in a pty: python3 test_terminal.py
+its session, with the clipboard escape of claude and a PR event to type, with a fake podman,
+systemctl, xprop and xclip and the wrapper in a pty: python3 test_terminal.py
 """
 
 import importlib.util
@@ -30,13 +30,7 @@ case "$1 $*" in
 \t\t\tsleep 0.2
 \t\t\tprintf '\\007after\\033]52;c;?\\007'
 \t\t}
-\t\t[ -e "$STATE/dialog" ] && {
-\t\t\trm -f "$STATE/dialog"
-\t\t\tprintf '\\033[1mWARNING:\\033[1CLoading\\033[1Cdevelopment channels\\033[0m\\r\\n'
-\t\t\tprintf '\\033[2C1.\\033[1CI am using\\033[1Cthis for local\\033[1Cdevelopment\\r\\n'
-\t\t\tIFS= read -r -t 3 _ && touch "$STATE/answered"
-\t\t}
-\t\tsleep 0.1
+\t\tIFS= read -r -t 0.1 line && printf '%s\\n' "$line" >>"$STATE/typed"
 \tdone ;;
 "exec "*agent-takeover.py*) touch "$AGENT/handoff" ;;
 "exec "*) cat >/dev/null ;;
@@ -86,6 +80,11 @@ def run_wrapper(root, bundle):
     module.get_container = lambda folder: None
     module.get_transcript = lambda session: next(root.glob(f"{session}.jsonl"), None)
     module.space_start = lambda: None
+    status = pathlib.Path(os.environ["STATE"]) / "status"
+    module.get_session_status = lambda bundle, session: (
+        status.read_text() if status.exists() else "idle"
+    )
+    module.TITLE.is_resuming = lambda session: False
     module.HOST_FOLDER = str(root / "host-ctl")
     module.REPO_ROOT = str(root)
     module.get_agent_folder = lambda name: root / name / ".agent"
@@ -238,17 +237,41 @@ def check_clipboard(case):
     case.check_stopped("quitting claude")
 
 
-def check_dialog(case):
-    """The dialog claude shows before it loads a development channel gets an Enter, the first time
-    only: the same words later are the agent's own output."""
+def check_wake(case):
+    """A PR event is typed, then Enter, in an idle session only, and not over a draft of Seb: a
+    key he typed since his last Enter keeps it waiting, a mouse move does not."""
+    events = case.agent / "pr-events"
+    events.mkdir()
+    typed = case.state / "typed"
+
+    def lines():
+        return typed.read_text().splitlines() if typed.exists() else []
+
     case.start()
-    (case.state / "dialog").touch()
-    case.check("the dialog shows", wait(lambda: "development channels" in case.terminal.read()))
-    case.check("and gets its Enter", wait((case.state / "answered").exists))
-    (case.state / "answered").unlink()
-    (case.state / "dialog").touch()
-    time.sleep(4)
-    case.check("a second one gets none", not (case.state / "answered").exists())
+    (case.state / "status").write_text("busy")
+    (events / "1.txt").write_text("PR event: one")
+    time.sleep(3)
+    case.check("a busy session gets none", not lines() and (events / "1.txt").exists())
+    (case.state / "status").write_text("idle")
+    case.check("an idle one gets it as a prompt", wait(lambda: lines() == ["PR event: one"]))
+    case.check("taken once", not (events / "1.txt").exists())
+    os.write(case.terminal.fd, b"ab")
+    (events / "2.txt").write_text("PR event: two")
+    time.sleep(3)
+    case.check("a draft of Seb keeps it waiting", (events / "2.txt").exists())
+    os.write(case.terminal.fd, b"\r")
+    case.check("his Enter lets it go, after his prompt",
+               wait(lambda: lines()[1:] == ["ab", "PR event: two"]))
+    os.write(case.terminal.fd, b"\x1b[<35;10;5M\x1b[I")
+    (events / "3.txt").write_text("PR event: three")
+    case.check("a mouse move or a focus is no draft",
+               wait(lambda: lines()[-1:] and lines()[-1].endswith("PR event: three")))
+    os.write(case.terminal.fd, b"/config\r")
+    (events / "4.txt").write_text("PR event: four")
+    time.sleep(3)
+    case.check("a slash command keeps it waiting", (events / "4.txt").exists())
+    os.write(case.terminal.fd, b"x\r")
+    case.check("until the next Enter", wait(lambda: lines()[-2:] == ["x", "PR event: four"]))
     (case.state / "quit").touch()
     case.check_stopped("quitting claude")
 
@@ -406,7 +429,7 @@ def main():
         check_ops_resume: CUT,
         check_ops_cut: CUT,
     }
-    checks = (check_quit, check_clipboard, check_dialog, check_sigterm, check_close, check_requeue)
+    checks = (check_quit, check_clipboard, check_wake, check_sigterm, check_close, check_requeue)
     checks += (check_shutdown, check_close_window)
     checks += (check_handoff, *tabs)
     checks += (check_ops_quit, check_ops_close)

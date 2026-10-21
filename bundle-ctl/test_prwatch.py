@@ -41,7 +41,9 @@ def git(*args):
 
 def make_workspace(folder):
     prwatch.WORKSPACE = folder
-    prwatch.STATE = folder / ".agent" / "prwatch.json"
+    prwatch.AGENT = folder / ".agent"
+    prwatch.EVENTS = prwatch.AGENT / "pr-events"
+    prwatch.STATE = prwatch.AGENT / "prwatch.json"
     (folder / ".agent").mkdir()
     (folder / "odoo").mkdir()
     (folder / "upgrade-util").mkdir()
@@ -162,69 +164,68 @@ def test_run():
     watch.told = lambda pr: f"{pr}: told" if pr == "odoo#1" else ""
     prwatch.get = gateway
     prwatch.time.sleep = slept.append
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+    with contextlib.redirect_stderr(io.StringIO()):
         try:
             watch.run()
         except Stop:
             pass
     check("it waits on the gateway from where the last answer said",
-          [url.removeprefix(prwatch.TOUCHED) for url in asked], ["", "?after=4", "?after=6", "?after=6"])
+          [url.removeprefix(prwatch.TOUCHED) for url in asked],
+          ["", "?after=4", "?after=6", "?after=6"])
     check("a gateway down waits before asking again", slept, [prwatch.RETRY[0]])
-    check("one channel event per PR of the bundle",
-          [json.loads(line) for line in out.getvalue().splitlines()],
-          [{"jsonrpc": "2.0", "method": "notifications/claude/channel",
-            "params": {"content": "odoo#1: told", "meta": {"pr": "odoo#1"}}}])
+    check("one line per PR of the bundle, with what to do of it", prwatch.take(),
+          [f"PR event: odoo#1: told {prwatch.ADVICE}"])
 
 
-class Thread:
-    def __init__(self, target, daemon):
-        self.target = target
+def hooked(event):
+    out = io.StringIO()
+    sys.stdin = io.StringIO(json.dumps({"hook_event_name": event, "session_id": "s1"}))
+    with contextlib.redirect_stdout(out):
+        prwatch.hook()
+    return json.loads(out.getvalue()) if out.getvalue() else None
 
-    def start(self):
-        self.target()
 
+def test_hooks(folder):
+    prwatch.leave("a")
+    prwatch.leave("b")
+    check("each line waits whole, none half written",
+          sorted(path.name.startswith(".") for path in prwatch.EVENTS.iterdir()), [False, False])
+    check("a hook gives the agent every line that waits, oldest first", hooked("PostToolUse"),
+          {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext":
+                                  f"PR event: a {prwatch.ADVICE}\nPR event: b {prwatch.ADVICE}"}})
+    check("once", hooked("UserPromptSubmit"), None)
+    check("and leaves nothing behind", list(prwatch.EVENTS.iterdir()), [])
 
-def test_protocol():
+    sys.modules["prwatch"] = prwatch
+    spec = importlib.util.spec_from_file_location("stop", HERE / "client" / "agent-stop.py")
+    stop = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(stop)
+    stop.AGENT = prwatch.AGENT
+    (prwatch.AGENT / "session").write_text("s1\n")
+    (prwatch.AGENT / "terminal").write_text("1\n")
+    prwatch.leave("c")
+
+    def stopped():
+        out = io.StringIO()
+        sys.stdin = io.StringIO(json.dumps({"session_id": "s1", "last_assistant_message": "Pushed: x"}))
+        with contextlib.redirect_stdout(out):
+            stop.main()
+        return out.getvalue(), (prwatch.AGENT / "done").exists()
+
+    check("a line that waits keeps the turn going, with no verdict written", stopped(),
+          (json.dumps({"decision": "block", "reason": f"PR event: c {prwatch.ADVICE}"}) + "\n",
+           False))
+    check("then the turn ends on its verdict", stopped(), ("", True))
+
     started = []
     prwatch.Watch.run = lambda self: started.append(self)
-    prwatch.threading.Thread = Thread
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        sys.stdin = io.StringIO("\n".join([
-            json.dumps({"jsonrpc": "2.0", "id": 0, "method": "initialize",
-                        "params": {"protocolVersion": "2025-11-25"}}),
-            "not json",
-            json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}),
-            json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}),
-            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}),
-            json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-        ]) + "\n")
+    sys.argv = ["prwatch.py"]
+    with (prwatch.AGENT / "prwatch.lock").open("w") as held:
+        prwatch.fcntl.flock(held, prwatch.fcntl.LOCK_EX)
         prwatch.main()
-    sent = [json.loads(line) for line in out.getvalue().splitlines()]
-    check("a channel, in the protocol claude asked",
-          {key: sent[0]["result"][key] for key in ("protocolVersion", "capabilities")},
-          {"protocolVersion": "2025-11-25", "capabilities": {"experimental": {"claude/channel": {}}}})
-    check("with what to do of an event", "Seb's call" in sent[0]["result"]["instructions"], True)
-    check("a ping is answered, any other request refused",
-          [(one["id"], "result" in one) for one in sent[1:]], [(1, True), (2, False)])
-    check("the watch starts once", len(started), 1)
-
-
-def test_allowed(folder):
-    prwatch.CONFIG = folder
-    for what, account, settings, expected in (
-        ("a Max account", {"organizationType": "claude_max"}, None, True),
-        ("a seat of a Team", {"organizationType": "claude_team"}, {}, False),
-        ("of an Enterprise", {"organizationType": "claude_enterprise"}, None, False),
-        ("of a Team that turned channels on", {"organizationType": "claude_team"},
-         {"channelsEnabled": True}, True),
-    ):
-        (folder / ".claude.json").write_text(json.dumps({"oauthAccount": account}))
-        (folder / "remote-settings.json").unlink(missing_ok=True)
-        if settings is not None:
-            (folder / "remote-settings.json").write_text(json.dumps(settings))
-        check(f"a channel for {what}", prwatch.is_allowed(), expected)
+    check("a second watch in the same container ends at once", started, [])
+    prwatch.main()
+    check("the first one watches", len(started), 1)
 
 
 def main():
@@ -232,9 +233,7 @@ def main():
         make_workspace(pathlib.Path(name))
         test_look(pathlib.Path(name))
         test_run()
-    with tempfile.TemporaryDirectory() as name:
-        test_allowed(pathlib.Path(name))
-    test_protocol()
+        test_hooks(pathlib.Path(name))
     print("\n".join(failures) or "all good")
     sys.exit(1 if failures else 0)
 
