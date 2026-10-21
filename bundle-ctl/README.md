@@ -598,6 +598,36 @@ move to another process, so the window closes and the terminal starts the contai
 `devcontainer/claude-config.py` marks the onboarding as done in the containers' Claude config: the
 interactive claude stops on its theme picker otherwise.
 
+## PR events
+
+The agent of a terminal learns at once when someone else acts on a PR of its bundle (Seb,
+2026-10-21: "new review comments, someone else pushed, etc [...] no polling though"), and decides
+what to do: ask Seb to validate, or act.
+
+- mail-watch of mail-agent names to the mail gateway the PRs of each new GitHub mail, about 15 s
+  after it lands. `client/prwatch.py`, a Claude Code channel, waits there (`GET
+  /_gateway/touched?after=N`, answered at the next mail or after 50 s) with the PRs of the bundle:
+  those whose head is the branch of the bundle, in odoo, enterprise or any repo of `/workspace` on
+  that branch, found when the session starts.
+- For one of them it reads on GitHub what came since its last look: reviews, review comments and
+  comments of anyone but Seb, a head the bundle does not have in its branch, a close. It sends one
+  `<channel source="prwatch">` message that names them, with no text a stranger wrote; the agent
+  reads them with gh. An idle session starts a turn on it, a busy one gets it at its next step.
+  Its instructions to the agent come with the channel (`INSTRUCTIONS`).
+- The first look of a PR starts from the head GitHub has when the session starts, so a commit
+  amended and not pushed yet is not told as a push of someone else. `.agent/prwatch.json` keeps
+  the last look of each PR across sessions.
+- claude loads a channel of its own only with `--dangerously-load-development-channels`, which
+  opens a dialog first: `agent-terminal.py` answers it with Enter, once, as it shows.
+- A seat of a Claude Team or Enterprise organization gets no channel until an admin of that
+  organization sets `channelsEnabled` (claude then drops every event and says so under its
+  banner). `prwatch.py --allowed` reads the account and the organization settings cached in the
+  Claude config, and `agent-run.sh --terminal` loads the channel only when it says yes.
+- Agent terminals only: an agent window, its Claude tab and the ops agents get none.
+
+`python3 test_prwatch.py` runs the looks on a fake GitHub and a real git repo, the wait on a fake
+gateway and the protocol; `test_terminal.py` the answer to the dialog.
+
 ## Ops agents
 
 A Claude session of the ops container (`BUNDLE_CTL_HOST_FOLDER`) can run in an agent window of

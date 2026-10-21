@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """What agent-terminal.py does when its claude or its terminal ends, when a VS Code window holds
-its session, and with the clipboard escape of claude, with a fake podman, systemctl, xprop and
-xclip and the wrapper in a pty: python3 test_terminal.py
+its session, with the clipboard escape of claude and the dialog of a development channel, with a
+fake podman, systemctl, xprop and xclip and the wrapper in a pty: python3 test_terminal.py
 """
 
 import importlib.util
@@ -29,6 +29,12 @@ case "$1 $*" in
 \t\t\tprintf 'before\\033]52;c;%s' "$(printf 'copied text' | base64)"
 \t\t\tsleep 0.2
 \t\t\tprintf '\\007after\\033]52;c;?\\007'
+\t\t}
+\t\t[ -e "$STATE/dialog" ] && {
+\t\t\trm -f "$STATE/dialog"
+\t\t\tprintf '\\033[1mWARNING:\\033[1CLoading\\033[1Cdevelopment channels\\033[0m\\r\\n'
+\t\t\tprintf '\\033[2C1.\\033[1CI am using\\033[1Cthis for local\\033[1Cdevelopment\\r\\n'
+\t\t\tIFS= read -r -t 3 _ && touch "$STATE/answered"
 \t\t}
 \t\tsleep 0.1
 \tdone ;;
@@ -232,6 +238,21 @@ def check_clipboard(case):
     case.check_stopped("quitting claude")
 
 
+def check_dialog(case):
+    """The dialog claude shows before it loads a development channel gets an Enter, the first time
+    only: the same words later are the agent's own output."""
+    case.start()
+    (case.state / "dialog").touch()
+    case.check("the dialog shows", wait(lambda: "development channels" in case.terminal.read()))
+    case.check("and gets its Enter", wait((case.state / "answered").exists))
+    (case.state / "answered").unlink()
+    (case.state / "dialog").touch()
+    time.sleep(4)
+    case.check("a second one gets none", not (case.state / "answered").exists())
+    (case.state / "quit").touch()
+    case.check_stopped("quitting claude")
+
+
 def check_handoff(case):
     case.start()
     (case.agent / "handoff").touch()
@@ -385,7 +406,7 @@ def main():
         check_ops_resume: CUT,
         check_ops_cut: CUT,
     }
-    checks = (check_quit, check_clipboard, check_sigterm, check_close, check_requeue)
+    checks = (check_quit, check_clipboard, check_dialog, check_sigterm, check_close, check_requeue)
     checks += (check_shutdown, check_close_window)
     checks += (check_handoff, *tabs)
     checks += (check_ops_quit, check_ops_close)

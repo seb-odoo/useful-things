@@ -79,10 +79,16 @@ CLIPBOARD_LIMIT = 1 << 22
 CLIPBOARD_PART = re.compile(rb"\x1b\]52;[a-z0-9]*(?:;(?:[A-Za-z0-9+/=]*|\?)\x1b?)?")
 CLIPBOARD_START = b"\x1b]52;"
 CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
+DIALOG = (b"WARNING:Loadingdevelopmentchannels", b"Iamusingthisforlocaldevelopment")
+DIALOG_WAIT = 0.3
+DIALOG_WITHIN = 1 << 16
 GO_ON = "Continue from where you left off."
 MODES = ("acceptEdits", "auto", "default", "plan")
 # Leave the alternate screen and the mouse modes a killed claude stays in, and show the cursor.
 RESET = "\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m"
+SCREEN_CODES = re.compile(
+    rb"\x1b\[[0-9;?<>=]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][0-9A-B]|\x1b[=>]|\s"
+)
 SELECTIONS = {"c": "clipboard", "p": "primary"}
 START_LOCK = pathlib.Path.home() / ".claude" / "agent-start.lock"
 START_SPACE = 10
@@ -226,14 +232,20 @@ def copy_size(fd):
 def copy_tty(fd):
     """Copy the keys to the pty and its output to this terminal, until the command ends. A tail
     that may start a clipboard escape waits for the next read; a lone start of one goes out after
-    50 ms with no output."""
-    held = b""
+    50 ms with no output. The dialog claude shows before it loads the PR channel
+    (client/prwatch.py), as no flag loads a development channel without it, gets its Enter once."""
+    held = start = b""
+    answer_at = None
     inputs = [0, fd]
     while True:
-        ready = select.select(inputs, [], [], 0.05 if held else None)[0]
+        ready = select.select(inputs, [], [], 0.05 if held or answer_at else None)[0]
         if not ready and len(held) < len(CLIPBOARD_START):
             write_terminal(held)
             held = b""
+        if answer_at and time.monotonic() >= answer_at:
+            answer_at = None
+            with contextlib.suppress(OSError):
+                write_all(fd, b"\r")
         if fd in ready:
             try:
                 data = os.read(fd, 65536)
@@ -242,6 +254,12 @@ def copy_tty(fd):
             if not data:
                 write_terminal(held)
                 return
+            if start is not None:
+                start += data
+                if all(one in SCREEN_CODES.sub(b"", start) for one in DIALOG):
+                    start, answer_at = None, time.monotonic() + DIALOG_WAIT
+                elif len(start) > DIALOG_WITHIN:
+                    start = None
             out, held = take_clipboard(held + data)
             write_terminal(out)
         if 0 in ready:
