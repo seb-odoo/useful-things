@@ -176,6 +176,8 @@ def main():
     parser.add_argument("--repo-root", default=values["REPO_ROOT"])
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
+    if args.out is None and args.target != "odoo-dev":
+        parser.error(f"--target {args.target} needs --out: the default is the config of the bundles")
 
     base_path = args.base or pathlib.Path(__file__).resolve().parent / "base.jsonc"
     out_path = args.out or pathlib.Path(values["WORKTREE_ROOT"]) / ".devcontainer/devcontainer.json"
