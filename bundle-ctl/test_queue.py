@@ -164,6 +164,7 @@ def prepare(root, bundles, cap, short=False, disk=100):
     daemon.get_worktree_container_folder = lambda: str(root)
     daemon.has_window = lambda container: "window" in bundles[container]
     daemon.is_held = lambda agent: (agent / "held").exists()
+    daemon.is_terminal_minimized = lambda agent, env: (agent / "minimized").exists()
     daemon.open_terminal = lambda log, bundle: launched.append(bundle)
     daemon.read_disk_free = lambda: disk
     daemon.read_state = lambda: state
@@ -859,6 +860,57 @@ def check_close(root):
     return [f"close: {name}" for name, passed in checks if not passed], len(checks)
 
 
+def check_go_on(root):
+    """A task behind an agent that gave its verdict in a minimized terminal goes on in its session,
+    in a new terminal that takes it over; a window on screen, a turn or a background command that
+    runs, and Seb's no keep the task waiting, and hok asks only for the window on screen."""
+    minimized = {**ENDED_ANOTHER, "container": "c\n", "minimized": ""}
+    bundles = {
+        "ended": minimized,
+        "shown": {**ENDED_ANOTHER, "container": "c\n"},
+        "asking": {**RUNS_ANOTHER, "minimized": ""},
+        "watching": minimized,
+        "kept": minimized,
+    }
+    state, launched = prepare(root, bundles, 8)
+    state["kept_terminals"] = {"kept": QUEUED}
+    statuses = {"ended": "idle", "shown": "idle", "asking": "waiting", "watching": "shell"}
+    status = daemon.get_session_status
+    daemon.get_session_status = lambda bundle, session: statuses.get(bundle, "idle")
+    daemon.launch_safely()
+    agent = daemon.get_agent_folder("ended")
+    kept = sorted(path.name for path in agent.iterdir())
+    history = sorted(path.name for path in next((agent / "history").iterdir()).iterdir())
+    waits = [f"{item['bundle']}: {item['waits_for']}" for item in state["queue"]]
+    cards = [
+        daemon.HELD.read_json(path)["send"]["close"] for path in daemon.HELD_DIR.glob("*.json")
+    ]
+    daemon.get_session_status = status
+    checks = [
+        ("the minimized one goes on", launched == ["ended"]),
+        (
+            "its session, terminal and container stay for the takeover",
+            kept
+            == ["container", "history", "parent", "priority", "queued", "session", "task.md",
+                "terminal"],
+        ),
+        ("its verdict goes to the history", {"done", "run.lock"} <= set(history)),
+        ("the task is the next prompt", daemon.read_text(agent / "task.md") == TASK),
+        (
+            "the others wait",
+            waits
+            == [
+                "shown: its terminal to close",
+                "asking: its agent to end, then its terminal to close",
+                "watching: its terminal to close",
+                "kept: its terminal to close",
+            ],
+        ),
+        ("hok asks only for the window on screen", cards == ["shown"]),
+    ]
+    return [f"go on: {name}" for name, passed in checks if not passed], len(checks)
+
+
 def check_ramp(root):
     """Only an agent that began its run in the last AGENT_RAMP seconds and gave no verdict counts
     for the memory it takes soon.
@@ -899,6 +951,7 @@ def main():
         check_parked,
         check_priority,
         check_close,
+        check_go_on,
         check_ramp,
     ):
         with tempfile.TemporaryDirectory() as root:
