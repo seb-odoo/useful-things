@@ -16,6 +16,7 @@
     bctl open --cut [--resume [--wait SECONDS]]
     bctl build
     bctl delete [BUNDLE] --reason TEXT [--drop COMMIT]... [--wait SECONDS]
+    bctl node-modules [BASE] [--reason TEXT] [--wait SECONDS]
     bctl run [--kind KIND] [--workers N] [-- COMMAND...]
     bctl runs [--json]
 
@@ -57,6 +58,11 @@ session waits until the GitHub connection of the host is up, and goes on told so
 open --resume gives the task to the last Claude session of the bundle as its next prompt, where a
 task alone starts a new session. Without a task, the session is told to go on.
 
+A task on a bundle that is made already, or that has an agent, goes to the queue when the host,
+that bundle or the bundle that queued its last task sends it. From any other bundle it waits for
+Seb in hok, and his yes queues it as from the bundle that queued the last task, so that the sender
+gets no say over that bundle. --wait then works as for delete.
+
 open --terminal opens the agent terminal of the bundle again, on its last Claude session, with
 no prompt: after the X server took the windows away, for one. It is refused while a terminal holds
 that session. When a VS Code window holds it, the window closes and the terminal goes on with the
@@ -91,6 +97,11 @@ and the agent ended its turn, its window closes, its container stops, delete_bun
 last answer of the agent is kept on the host. With --wait, bctl waits that
 long for his answer and prints it: exit 0 on his yes, 126 when he refused, 75 when it still waits.
 The same delete asked again takes back the request that waits.
+
+node-modules builds the node_modules of a base again, from the package.json of the web tooling of
+its branch and the lock in use, when that package.json changed: every bundle of the base links its
+node_modules there, read-only. From a bundle, for its own base, it waits for Seb in hok, and
+--wait works as for delete. A bundle that runs keeps the old one until its container restarts.
 
 run waits in the run queue of the host until cores and memory are free for a heavy command, then
 runs COMMAND pinned to the cores it got, which it holds until COMMAND ends. Without COMMAND the
@@ -256,8 +267,18 @@ def print_deletion(answer):
     )
 
 
-def print_ops_task(answer):
-    print(f"waits for Seb: hok {answer['held']}. His yes opens an ops agent on this task.")
+def print_held_task(answer):
+    yes = f"queues this task for {answer['bundle']}"
+    if answer["bundle"] == "ops":
+        yes = "opens an ops agent on this task"
+    print(f"waits for Seb: hok {answer['held']}. His yes {yes}.")
+
+
+def print_node_modules(answer):
+    print(
+        f"waits for Seb: hok {answer['held']}. His yes builds the node_modules of {answer['base']}"
+        " again.",
+    )
 
 
 def print_cut(answer):
@@ -518,7 +539,7 @@ def main():
         "--wait",
         default=0,
         type=int,
-        help="ops with a task from a bundle, or --cut: seconds to wait for Seb's answer",
+        help="a task held for Seb, or --cut: seconds to wait for his answer",
     )
     commands.add_parser("build", help="make the bundle of this container, started bare")
     add_repo = commands.add_parser(
@@ -538,6 +559,13 @@ def main():
     )
     delete.add_argument("--reason", required=True, help="the line Seb reads before his yes")
     delete.add_argument("--wait", default=0, type=int, help="seconds to wait for his answer")
+    node_modules = commands.add_parser(
+        "node-modules",
+        help="build the node_modules of a base again, once its package.json changed",
+    )
+    node_modules.add_argument("base", nargs="?", help="default: the base of this container")
+    node_modules.add_argument("--reason", help="the line Seb reads before his yes")
+    node_modules.add_argument("--wait", default=0, type=int, help="seconds to wait for his answer")
     run_ = commands.add_parser("run", help="a heavy command, once the host has cores for it")
     run_.add_argument(
         "--kind",
@@ -628,6 +656,18 @@ def main():
             print_deletion(answer)
             sys.stdout.flush()
             wait_held(answer["held"], args.wait)
+    elif args.command == "node-modules":
+        given = {"base": args.base, "reason": args.reason}
+        body = {key: value for key, value in given.items() if value}
+        answer = request("POST", "/node-modules", body)
+        if "job" in answer:
+            answer = follow(answer["job"])
+        else:
+            printer = print_node_modules
+            if args.wait:
+                print_node_modules(answer)
+                sys.stdout.flush()
+                wait_held(answer["held"], args.wait)
     elif args.command == "open" and args.cut:
         if args.resume:
             answer = request("POST", "/open", {"cut": True, "resume": True})
@@ -675,9 +715,9 @@ def main():
         if "job" in answer:
             answer = follow(answer["job"])
         if "held" in answer:
-            printer = print_ops_task
-            if args.wait:
-                print_ops_task(answer)
+            printer = print_held_task
+            if getattr(args, "wait", 0):
+                print_held_task(answer)
                 sys.stdout.flush()
                 wait_held(answer["held"], args.wait)
     if args.json or printer is None:

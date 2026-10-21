@@ -29,7 +29,7 @@ A bundle gets a worktree of each repo of `folder_by_repo` in `config.py` (`desig
 
 - owl's dev remote is a fork, `OWL_DEV_REMOTE` in `config.env`. Its worktrees start with no
   `node_modules` on purpose. The clone's own install predates the monorepo (npm workspaces,
-  vitest), so hard-linking it the way odoo and enterprise share theirs would seed a tree that does
+  vitest), so sharing it the way odoo and enterprise share theirs would seed a tree that does
   not match `package-lock.json`. A build in a worktree pays for its own `npm ci`, and it writes
   `packages/owl/dist/owl.iife.js`, which is what odoo vendors as
   `addons/web/static/lib/owl/owl.js`.
@@ -52,27 +52,24 @@ A bundle gets a worktree of each repo of `folder_by_repo` in `config.py` (`desig
 
 ### Shared node_modules
 
-The bundles of one base share one `node_modules` (`WORKTREE_ROOT/<base>/node_modules`, plus
-`<base>/package-lock.json`), hard-linked into the `odoo/` and `enterprise/` folders of each
-bundle by `_install_js_tooling` in `utils.py`.
+The bundles of one base share one `node_modules` (`WORKTREE_ROOT/<base>/node_modules`, with its
+`package.json` and `package-lock.json` beside it), which only the host writes. Each container
+mounts the one of its base read-only at `/opt/node_modules`, and the `node_modules` of its `odoo/`
+and `enterprise/` is a link there, made by `devcontainer/initialize.py` before each start. A folder
+of their own there goes at that start: the hard links of the base a bundle had before 2026-10-21
+let it write the files that the ESLint of every other bundle of the base loads.
 
-Hard links, not symlinks: `npm install` *deletes* a symlinked `node_modules` and rebuilds a real
-one per worktree (it logs `npm WARN reify Removing non-directory .../node_modules`), so a symlink
-never shares anything. A hard-linked folder is a *real* directory npm won't delete, while files
-share inodes so there's no extra disk cost (a file's `stat` link count is about 1 + 2 x the
-number of bundles).
+`_install_js_tooling` in `utils.py` runs `enable.sh` for its config files and its hooks, with npm in
+dry run: `npm install` would replace the link with a tree of its own, built from the branch. Do not
+patch `enable.sh` instead: it is tracked upstream (`odoo/addons/web/tooling/enable.sh`), so a hand
+patch is gone in the next worktree. The fix of a tooling file of Odoo belongs in these scripts.
 
-The first worktree of a base builds a real node_modules with `enable.sh`, then it is hard-linked
-into `<base>/node_modules`; later worktrees `cp -al` the base in and run `enable.sh` again, where
-`npm install` does nothing when the tree matches. A base with no `node_modules` yet takes the one
-of another bundle of that base.
-
-Do not patch `enable.sh` to guard its enterprise `cp -a`. That file is tracked upstream
-(`odoo/addons/web/tooling/enable.sh`), so a hand patch is gone in the next worktree, and the
-unguarded `cp -a "$community/node_modules" node_modules` nests a full copy inside the already
-hard-linked directory (`enterprise/node_modules/node_modules`, no inode shared, about 200M a
-bundle). `_install_js_tooling` drops that copy right after calling `enable.sh` instead. Same
-reasoning for any other tooling file of Odoo: the fix belongs in these scripts.
+`bctl node-modules` builds the tree of a base again when the `package.json` of the web tooling of
+its branch changes: npm installs that file with the lock in use, in a box with the network
+(`HOST_BOX`), beside the old tree, which then gives way. A bundle asks it for its own base and waits
+for Seb's yes, which `hok` shows with the change of `package.json`; the host asks it at once. A
+container that runs keeps the old tree until it restarts. A base with no tree yet gets one the
+same way.
 
 A bundle can arrive with only some of its repos. A runbot batch still in preparation lists a
 commit only for the repos pushed so far, so `fetch_bundle` falls back to each missing repo's base
@@ -88,9 +85,9 @@ The base is never the upstream of the new branch. With `--no-push` the branch ha
 a plain `git push`, which creates it on the dev remote and tracks it there
 (`branch.<name>.pushRemote`, and `push.autoSetupRemote` in the config of the repo;
 `test_upstream.py`).
-Links shared `node_modules`, runs web tooling setup, and opens the bundle in VS Code.
+Runs web tooling setup, and opens the bundle in VS Code.
 The setup script (`enable.sh`) comes from the branch: with `HOST_BOX` in `config.env` it runs boxed,
-with no network, and a base with no `node_modules` yet takes the one of another bundle of that base.
+with no network.
 
 ```bash
 $ python scripts/create_bundle.py master test
@@ -112,15 +109,8 @@ Repositories
     ├── [0.02-2.38] /home/seb/repo/upgrade ✅️ git fetch odoo master -p
     └── [2.39-3.28] /home/seb/repo/upgrade ✅️ git worktree add /home/seb/src/odoo/master/master-test--seb/upgrade odoo/master
 [12.05-12.05] /home/seb/src/odoo/master/master-test--seb ✅️ touch /home/seb/src/odoo/master/master-test--seb/.made
-[12.05-12.06] /home/seb/src/odoo/master/master-test--seb ✅️ rm -rf /home/seb/src/odoo/master/master-test--seb/odoo/node_modules
-[12.06-12.41] /home/seb/src/odoo/master/master-test--seb ✅️ cp -al /home/seb/src/odoo/master/node_modules /home/seb/src/odoo/master/master-test--seb/odoo/node_modules
-[12.41-12.42] /home/seb/src/odoo/master/master-test--seb ✅️ rm -rf /home/seb/src/odoo/master/master-test--seb/enterprise/node_modules
-[12.42-12.77] /home/seb/src/odoo/master/master-test--seb ✅️ cp -al /home/seb/src/odoo/master/node_modules /home/seb/src/odoo/master/master-test--seb/enterprise/node_modules
-[12.77-12.78] /home/seb/src/odoo/master/master-test--seb ✅️ cp /home/seb/src/odoo/master/package-lock.json /home/seb/src/odoo/master/master-test--seb/odoo/package-lock.json
 [12.78-19.58] /home/seb/src/odoo/master/master-test--seb ✅️ bash ./odoo/addons/web/tooling/enable.sh
 y
-
-[19.58-19.61] /home/seb/src/odoo/master/master-test--seb ✅️ rm -rf /home/seb/src/odoo/master/master-test--seb/enterprise/node_modules/node_modules
 [19.61-19.76] /home/seb/src/odoo/master/master-test--seb ✅️ code --folder-uri vscode-remote://dev-container+<hex>/workspace
 Done
 ```
@@ -129,13 +119,13 @@ Done
 
 Fetches bundle metadata from runbot and creates/updates local worktrees.
 
-Queries the runbot API, checks out each repo at the matching commit, links shared `node_modules`, runs web tooling setup, and opens the bundle in VS Code. `design-themes` and `documentation` get a worktree only when the bundle has a branch there.
+Queries the runbot API, checks out each repo at the matching commit, runs web tooling setup, and opens the bundle in VS Code. `design-themes` and `documentation` get a worktree only when the bundle has a branch there.
 
 `pfb -t BUNDLE` opens the terminator window of its agent instead, as `ocode -t` does, for a bundle
 that is not local yet or was deleted: a deleted bundle lost its `.agent`, so its agent is a new one
 with no prompt.
 
-Also takes a PR link (`fetch_bundle.py https://github.com/odoo/odoo/pull/292267`), or the `owner:branch` label runbot shows for a fork PR: the bundle is the PR head. When the head is on a fork, the fork is added as a remote named after its owner and the branch tracks it, so pull and push go to the PR. Deleting the last bundle tracking that remote removes it.
+Also takes a PR link (`fetch_bundle.py https://github.com/odoo/odoo/pull/292267`), or the `owner:branch` label runbot shows for a fork PR: the bundle is the PR head. A head that is no bundle name (`BUNDLE_NAME` in `commands.py`: letters, digits, dots, dashes and underscores, 100 at most) is refused before anything is made, as the author of the PR chooses it and it goes unquoted into the mount options of the container and the config of the proxy (`test_bundle_names.py`). When the head is on a fork, the fork is added as a remote named after its owner and the branch tracks it, so pull and push go to the PR. Deleting the last bundle tracking that remote removes it.
 
 Runbot names the bundle of a fork PR with the full label `<owner>:<head>`, while an odoo-dev
 bundle has no prefix. Asked without the prefix, the API answers `"id": false` and pfb falls back

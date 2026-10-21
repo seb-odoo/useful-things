@@ -7,6 +7,8 @@
 Description=Bundle requests of the Odoo dev containers
 
 [Service]
+# ~/.local/bin first: the git there boxes the bundle repos, whose .git a container can write.
+Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
 # Every bundle container mounts this folder: a missing mount source stops the container from starting.
 ExecStartPre=/usr/bin/mkdir -p %S/bundle-ctl/sock
 ExecStart=%h/virtualenvs/odoo20/bin/python %h/repo/useful-things/bundle-ctl/daemon.py

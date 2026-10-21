@@ -39,9 +39,9 @@ def check(what, got, expected):
         failures.append(f"{what}: got {got!r}, expected {expected!r}")
 
 
-def run(folder, transcript):
+def run(folder, transcript, any_session=False):
     info.get_agent_folder = lambda bundle: folder
-    info.get_transcript = lambda session: transcript if session == SESSION else None
+    info.get_transcript = lambda session: transcript if any_session or session == SESSION else None
     return info.get_info("master-x--seb")
 
 
@@ -51,6 +51,8 @@ def main():
         transcript = folder / f"{SESSION}.jsonl"
         transcript.write_text("".join(f"{json.dumps(entry)}\n" for entry in ENTRIES) + "not json\n[1]\n")
         check("no session", run(folder, transcript), {"bundle": "master-x--seb", "close": "", "conversation": [], "session": None})
+        (folder / "session").write_text("*\n")
+        check("a session that is no id", run(folder, transcript, any_session=True)["session"], None)
         (folder / "session").write_text(f"{SESSION}\n")
         got = run(folder, transcript)
         check("session", got["session"], SESSION)

@@ -64,6 +64,17 @@ OPS_CASES = [
     (daemon.HOST, {"bundle": NEW, "terminal": True}, f"{NEW}: no conversation to go on with"),
     (daemon.HOST, {"bundle": RUNNING, "terminal": True}, f"{RUNNING}: already in a window"),
 ]
+# The caller of a task on the bundle, the bundle that queued its last task, the body, and what
+# becomes of the task: queued with no yes, or held for Seb's.
+TASK_CASES = [
+    (daemon.HOST, None, {"task": "do"}, "queued by host"),
+    ("bundle", None, {"task": "do"}, "queued by bundle"),
+    ("parent", "parent", {"task": "do"}, "queued by parent"),
+    ("other", "parent", {"task": "do"}, "held b3"),
+    ("other", None, {"task": "do"}, "held b3"),
+    ("other", "parent", {"task": daemon.GO_ON, "resume": True}, "held b4"),
+    ("parent", "parent", {"task": daemon.GO_ON, "resume": True}, "queued by parent"),
+]
 
 
 def refusal(body, caller="other"):
@@ -137,6 +148,33 @@ def answer_held(root, start_job):
     return [] if found == expected else [f"yes to b1: {found!r}, expected {expected!r}"]
 
 
+def queue_task(agent, queued, caller, parent, body):
+    (agent / "parent").unlink(missing_ok=True)
+    if parent:
+        (agent / "parent").write_text(f"{parent}\n")
+    (agent / "session").write_text("x\n")
+    try:
+        code, answer = daemon.open_bundle(caller, {}, {"bundle": "bundle", **body})
+    except (ValueError, daemon.Refused) as error:
+        return str(error)
+    if "held" in answer:
+        return f"held {answer['held']}"
+    return f"queued by {queued[-1][0]}" if code == 202 and queued else repr(answer)
+
+
+def answer_task(agent, queued):
+    """What Seb's yes to the task of b3 queues: the task as from the parent of the bundle."""
+    (agent / "parent").write_text("parent\n")
+    path = daemon.HELD_DIR / "3.json"
+    answer = path.with_suffix(".answer")
+    answer.write_text(f"yes {daemon.HELD.read_json(path)['digest']}\n")
+    daemon.HELD.take(answer, daemon.send_held)
+    found = [daemon.HELD.read_json(path.with_suffix(".result"))["text"], queued[-1]]
+    task = "The agent of the bundle other sends this task, and Seb said yes to it in hok:\n\ndo"
+    expected = ["the task of other is queued for bundle", ("parent", "bundle", task)]
+    return [] if found == expected else [f"yes to b3: {found!r}, expected {expected!r}"]
+
+
 def get_moved(root):
     """What a move of an ops session to a tab leaves for the ops window, once its agent window
     closed on SIGUSR1: the mode of the session, and the prompt that tells a cut turn to go on."""
@@ -201,11 +239,24 @@ def main():
             if found != expected:
                 failures.append(f"open ops {caller} {body}: {found!r}, expected {expected!r}")
         failures += answer_held(pathlib.Path(root), start_job)
+        queued = []
+        daemon.get_agent_folder = lambda bundle: agent
+        daemon.has_window = lambda container: False
+        daemon.read_state = lambda: {"queue": []}
+        daemon.enqueue = lambda caller, bundle, body, build=None: queued.append(
+            (caller, bundle, body["task"]),
+        ) or {"bundle": bundle}
+        for caller, parent, body, expected in TASK_CASES:
+            found = queue_task(agent, queued, caller, parent, body)
+            if found != expected:
+                case = f"task of {caller}, parent {parent}"
+                failures.append(f"{case}: {found!r}, expected {expected!r}")
+        failures += answer_task(agent, queued)
         daemon.move_to_tab = move_to_tab
         failures += get_moved(pathlib.Path(root))
     for line in failures:
         print(line)
-    cases = len(CASES) + len(BODIES) + len(OPS_CASES) + 3
+    cases = len(CASES) + len(BODIES) + len(OPS_CASES) + len(TASK_CASES) + 4
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

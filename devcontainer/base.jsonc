@@ -49,21 +49,30 @@
     "source=@SHARED_CLAUDE@,target=/home/vscode/.claude-project,type=bind,readonly,z",
     "source=@WORKTREE_ROOT@/.vscode,target=@WORKTREE_ROOT@/.vscode,type=bind,Z",
     "source=@USEFUL_THINGS@/odools.toml,target=@USEFUL_THINGS@/odools.toml,type=bind,readonly,Z",
+    // The node_modules of the base, where odoo/ and enterprise/ link (initialize.py). Read-only, as
+    // the ESLint of every bundle of the base loads it.
+    "source=${localWorkspaceFolder}/../node_modules,target=/opt/node_modules,type=bind,readonly,z",
     "source=@HOME@/.claude,target=/home/vscode/.claude,type=bind,Z",
     // What a session takes as orders or runs comes back read-only over it: the host's Claude reads
     // the same files, so a hook written from a bundle would run on the host. The root stays
     // writable, as the login is saved there by rename. settings.json is a copy of the bundle
     // (claude-config.py), where a model picked in a tab is kept. HOST_PROJECT holds the memory of
-    // the host sessions.
+    // the host sessions. Each name at the root of ~/.claude has its line in the table of README.md.
     "source=@HOME@/.claude/CLAUDE.md,target=/home/vscode/.claude/CLAUDE.md,type=bind,readonly,z",
     "source=@HOME@/.claude/agents,target=/home/vscode/.claude/agents,type=bind,readonly,z",
     "source=@HOME@/.claude/bin,target=/home/vscode/.claude/bin,type=bind,readonly,z",
     "source=@HOME@/.claude/commands,target=/home/vscode/.claude/commands,type=bind,readonly,z",
     "source=@HOME@/.claude/external,target=/home/vscode/.claude/external,type=bind,readonly,z",
+    // hok writes the files a proposal of handoff/<bundle> holds: a bundle writes its own only, at
+    // ~/handoff, as a write under a .claude folder asks for approval whatever the hooks say.
+    "source=@HOME@/.claude/handoff,target=/home/vscode/.claude/handoff,type=bind,readonly,z",
+    "source=@HOME@/.claude/handoff,target=/home/vscode/handoff,type=bind,readonly,z",
+    "source=@HOME@/.claude/handoff/${localWorkspaceFolderBasename},target=/home/vscode/handoff/${localWorkspaceFolderBasename},type=bind,z",
     "source=@HOME@/.claude/hooks,target=/home/vscode/.claude/hooks,type=bind,readonly,z",
     "source=@HOME@/.claude/output-styles,target=/home/vscode/.claude/output-styles,type=bind,readonly,z",
     "source=@HOME@/.claude/plugins,target=/home/vscode/.claude/plugins,type=bind,readonly,z",
     "source=@HOME@/.claude/projects/@HOST_PROJECT@,target=/home/vscode/.claude/projects/@HOST_PROJECT@,type=bind,readonly,z",
+    "source=@HOME@/.claude/review-corpus,target=/home/vscode/.claude/review-corpus,type=bind,readonly,z",
     "source=@HOME@/.claude/routines,target=/home/vscode/.claude/routines,type=bind,readonly,z",
     "source=@HOME@/.claude/rules,target=/home/vscode/.claude/rules,type=bind,readonly,z",
     "source=@HOME@/.claude/skills,target=/home/vscode/.claude/skills,type=bind,readonly,z",
@@ -86,14 +95,18 @@
     "source=@HOME@/.claude/loop.md,target=/home/vscode/.claude/loop.md,type=bind,readonly,z",
     "source=@HOME@/.claude/scheduled_tasks.json,target=/home/vscode/.claude/scheduled_tasks.json,type=bind,readonly,z",
     "source=@HOME@/.claude/settings.local.json,target=/home/vscode/.claude/settings.local.json,type=bind,readonly,z",
-    // The inbox where a bundle leaves a proposal for hok (host-ctl handoff.py), out of ~/.claude
-    // too: a write under a .claude folder asks for approval, whatever the hooks say.
-    "source=@HOME@/.claude/handoff,target=/home/vscode/handoff,type=bind,z",
     // Claude sources these before each Bash command: the containers get their own.
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/session-env,target=/home/vscode/.claude/session-env,type=bind,z",
     // Claude names a live session's record after its pid, the same few pids in every container.
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/sessions,target=/home/vscode/.claude/sessions,type=bind,z",
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/shell-snapshots,target=/home/vscode/.claude/shell-snapshots,type=bind,z",
+    // What Claude keeps for itself and reads again in a later session: its own, as for .claude.json.
+    "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/backups,target=/home/vscode/.claude/backups,type=bind,z",
+    "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/cache,target=/home/vscode/.claude/cache,type=bind,z",
+    "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/file-history,target=/home/vscode/.claude/file-history,type=bind,z",
+    "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/ide,target=/home/vscode/.claude/ide,type=bind,z",
+    // Claude runs a mod of dev-mods/<session> in its own process, a session of the host too: empty.
+    "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/dev-mods,target=/home/vscode/.claude/dev-mods,type=bind,readonly,z",
     // Where the Claude tab stores the permission mode of each session: kept over a rebuild.
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/extension-storage,target=/home/vscode/.vscode-server/data/User/globalStorage/anthropic.claude-code,type=bind,z",
     "source=@CONFIG_ROOT@/Code/User,target=/home/vscode/.config/Code/User,type=bind,readonly,Z",
@@ -150,8 +163,14 @@
     "source=@USEFUL_THINGS@/bundle-ctl/client,target=@USEFUL_THINGS@/bundle-ctl/client,type=bind,readonly,z"
   ],
   // Runs on the host before each start: a missing mount source stops the container from starting.
-  // claude-autoopen closes the "Press any key" terminal Dev Containers opens for initializeCommand.
-  "initializeCommand": "mkdir -p @REPO_ROOT@/TestWarden/engine/.cache @STATE_ROOT@/bundle-ctl/sock @STATE_ROOT@/ssh-github-mux/request @STATE_ROOT@/ssh-github-mux/sock && python3 @USEFUL_THINGS@/devcontainer/claude-config.py ${localWorkspaceFolderBasename} && python3 @USEFUL_THINGS@/devcontainer/extensions.py ${localWorkspaceFolderBasename} ${localWorkspaceFolder} && python3 @USEFUL_THINGS@/devcontainer/bundle-db.py ${localWorkspaceFolderBasename}",
+  // An array, so that no shell reads the folder name. claude-autoopen closes the "Press any key"
+  // terminal Dev Containers opens for initializeCommand.
+  "initializeCommand": [
+    "python3",
+    "@USEFUL_THINGS@/devcontainer/initialize.py",
+    "${localWorkspaceFolderBasename}",
+    "${localWorkspaceFolder}"
+  ],
   // The postgres server of the bundle, when it has one. An agent terminal starts it too
   // (agent-run.sh): `devcontainer up --skip-post-create` skips this.
   "postStartCommand": "bash @USEFUL_THINGS@/container-rw/bundle-pg.sh",

@@ -15,7 +15,8 @@ the dev containers live on another network, the proxy joins it by a quadlet drop
 (`odoo-proxy.container.d/`). The config is generated
 from the live container list by [`../scripts/proxy.py`](../scripts/proxy.py): each dev container
 is labelled `devcontainer.local_folder=<bundle path>`, so the subdomain is the bundle folder
-basename. A `podman events` watcher regenerates the config whenever a container starts or stops,
+basename. A basename that is no bundle name (`BUNDLE_NAME` in `scripts/commands.py`) gets no route:
+a `;` or a `}` in it would add directives to the config. A `podman events` watcher regenerates the config whenever a container starts or stops,
 so routes (and changing bridge IPs) stay in sync automatically.
 
 ## One-time host setup

@@ -20,7 +20,7 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
-from agents import get_agent_folder, get_transcript, read_text  # noqa: E402
+from agents import SESSION_ID, get_agent_folder, get_transcript, read_text  # noqa: E402
 
 INPUT_KEYS = ("command", "file_path", "pattern", "path", "url", "description", "prompt")
 MAX_ITEMS = 120
@@ -68,6 +68,7 @@ def get_items(entry):
 
 def get_info(bundle):
     session = read_text(get_agent_folder(bundle) / "session")
+    session = session if SESSION_ID.fullmatch(session or "") else None
     transcript = session and get_transcript(session)
     items = [item for entry in read_entries(transcript) for item in get_items(entry)] if transcript else []
     answers = [item for item in items if item["role"] == "assistant"]

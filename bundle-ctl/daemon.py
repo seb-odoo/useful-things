@@ -11,6 +11,7 @@ kernel and never from the request.
 
 from concurrent.futures import ThreadPoolExecutor
 import datetime
+import difflib
 import hashlib
 import http.server
 import importlib.util
@@ -69,6 +70,7 @@ from branch_status import (  # noqa: E402
     has_write_tree,
 )
 from commands import (  # noqa: E402
+    BUNDLE_NAME,
     MADE,
     drop_stale_containers,
     get_base_for_repo,
@@ -79,11 +81,17 @@ from commands import (  # noqa: E402
     get_repo_folder,
     get_repos,
     get_sticky_bundles,
+    get_worktree_base_folder,
     get_worktree_bundle_folder,
     get_worktree_bundle_repo_folder,
     get_worktree_container_folder,
 )
-from config import BUNDLE_SUFFIX, CLAUDE_CONFIG_CONTAINER, STICKY_BUNDLES  # noqa: E402
+from config import (  # noqa: E402
+    BUNDLE_SUFFIX,
+    CLAUDE_CONFIG_CONTAINER,
+    HOST_BOX,
+    STICKY_BUNDLES,
+)
 from utils import UtilsRunner  # noqa: E402
 
 import cut  # noqa: E402
@@ -126,7 +134,6 @@ AGENT_RAMP = 10 * 60
 AGENT_TERMINAL = CONFIG.get("AGENT_TERMINAL") or "gnome-terminal --window --title {bundle} --"
 BARE_FOLDER = frozenset({".agent", ".claude", ".devcontainer", ".vscode", "odools.toml", "tasks"})
 BRANCHES_TIMEOUT = 120
-BUNDLE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 CONTAINER_ID = re.compile(r"/libpod-(?:payload-)?([0-9a-f]{64})")
 DEFAULT_EFFORT = "medium"
 DEFAULT_MODEL = "opus"
@@ -1739,6 +1746,33 @@ def hold_ops_task(caller, task):
     return 200, {"bundle": "ops", "held": f"{HELD_LETTER}{HELD.add(HELD_DIR, item)}"}
 
 
+def may_queue(caller, bundle):
+    """Whether a task of the caller goes to the queue of a bundle with no yes: from the host, the
+    bundle itself, or the one that queued its last task."""
+    return caller in (HOST, bundle, read_text(get_agent_folder(bundle) / "parent"))
+
+
+def hold_task(caller, bundle, body, build=None):
+    """Hold the task a bundle sends to a bundle it may not queue on for Seb's yes in hok: the agent
+    of that bundle runs it in auto mode and pushes its branch. The same task asked again takes back
+    the request that waits."""
+    if HELD is None:
+        raise Refused("no gateway-core beside useful-things: hok cannot list the task")
+    task = OPS_TASK.format(bundle=caller) + body["task"]
+    item = {
+        "client": caller,
+        "key": f"task {caller} {bundle} {hashlib.sha256(task.encode()).hexdigest()}",
+        "lines": [
+            *(["in its last session"] if body.get("resume") else []),
+            *body["task"].splitlines(),
+        ],
+        "send": {"queue": {"body": {**body, "task": task}, "build": build, "bundle": bundle}},
+        "title": f"send a task to the bundle {bundle}",
+        "yes": f"the task below is queued for {bundle}, whose agent runs it and pushes its branch",
+    }
+    return 200, {"bundle": bundle, "held": f"{HELD_LETTER}{HELD.add(HELD_DIR, item)}"}
+
+
 def find_cut():
     """The sessions a crash or a restart cut (cut.py), newest first: the last session of each
     bundle whose container is down, and each session of the ops container that no claude runs."""
@@ -2231,6 +2265,20 @@ def send_deletion(item):
     return f"{bundle} is being deleted, see {job['log']}"
 
 
+def send_task(item):
+    """Seb's yes to the task a bundle sends to another one: queued as from the parent of that
+    bundle, so that the yes does not make the sender its parent."""
+    queued = item["send"]["queue"]
+    bundle, body = queued["bundle"], queued["body"]
+    try:
+        check_task(bundle, body)
+    except Refused as error:
+        raise ValueError(str(error)) from None
+    parent = read_text(get_agent_folder(bundle) / "parent") or HOST
+    enqueue(parent, bundle, body, queued["build"])
+    return f"the task of {item['client']} is queued for {bundle}"
+
+
 def send_close(item):
     """Seb's yes to closing the terminal of a bundle whose agent gave its verdict: the task that
     waits for it starts once its container stopped."""
@@ -2262,11 +2310,26 @@ def keep_terminal(item):
 
 def send_held(item):
     """Seb's yes to what was held: the deletion of a bundle, the close of an agent terminal, the
-    task a bundle sends to a new ops agent, or the resume of the cut sessions."""
+    task a bundle sends to a new ops agent or to another bundle, or the resume of the cut
+    sessions."""
     if "resume" in item["send"]:
         return resume_cut(item["send"]["resume"])
     if "close" in item["send"]:
         return send_close(item)
+    if "queue" in item["send"]:
+        return send_task(item)
+    if "node_modules" in item["send"]:
+        base, package = (item["send"]["node_modules"][key] for key in ("base", "package"))
+        _code, answer = start_job(
+            HOST,
+            "node-modules",
+            lambda log: refresh_node_modules(log, base, package),
+        )
+        job = jobs[answer["job"]]
+        wait_job(job)
+        if job["state"] == "done":
+            return f"the node_modules of {base} is built again: a bundle loads it at its next start"
+        return f"the node_modules of {base} is being built, see {job['log']}"
     if "bundle" in item["send"]:
         return send_deletion(item)
     _code, answer = open_ops(HOST, "ops", {"task": item["send"]["task"]})
@@ -2305,6 +2368,8 @@ def create(caller, query, body):
     args = [base, name, "--no-push", "--no-open"]
     for repo in branch_repos:
         args += ["--branch-repo", repo]
+    if "task" in body and get_agent_folder(bundle).is_dir() and not may_queue(caller, bundle):
+        return hold_task(caller, bundle, body, ["create_bundle.py", *args])
     if "task" in body:
         return 202, enqueue(caller, bundle, body, ["create_bundle.py", *args])
 
@@ -2333,6 +2398,8 @@ def fetch(caller, query, body):
         raise Refused(f"{bundle} is already here, open it instead")
     check_unpushed(bundle, "pfb")
     check_task(bundle, body)
+    if "task" in body and get_agent_folder(bundle).is_dir() and not may_queue(caller, bundle):
+        return hold_task(caller, bundle, body, ["fetch_bundle.py", name, "--no-open"])
     if "task" in body:
         return 202, enqueue(caller, bundle, body, ["fetch_bundle.py", name, "--no-open"])
 
@@ -2340,6 +2407,93 @@ def fetch(caller, query, body):
         return build(log, caller, bundle, body, "fetch_bundle.py", name, "--no-open")
 
     return start_job(caller, "fetch", work)
+
+
+def read_package(base):
+    """The package.json of the web tooling of odoo on the base branch."""
+    ref = f"{get_remote_ref(base, 'odoo')}:addons/web/tooling/_package.json"
+    res = subprocess.run(
+        ["git", "-C", get_repo_folder("odoo"), "show", ref],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if res.returncode:
+        raise Refused(f"no package.json of the web tooling at {ref}: {res.stderr.strip()}")
+    return res.stdout
+
+
+def refresh_node_modules(log, base, package):
+    """npm installs `package` beside the node_modules of the base, with the lock in use, boxed and
+    with the network when HOST_BOX is set. The new tree then takes the place of the old one, which
+    stays as .node_modules.old until the next refresh: a container that runs keeps its mount."""
+    folder = pathlib.Path(get_worktree_base_folder(base))
+    fresh, old = folder / ".node_modules.new", folder / ".node_modules.old"
+    shutil.rmtree(fresh, ignore_errors=True)
+    fresh.mkdir()
+    (fresh / "package.json").write_text(package)
+    if (folder / "package-lock.json").is_file():
+        shutil.copy(folder / "package-lock.json", fresh / "package-lock.json")
+    install = ["npm", "install", "--no-audit", "--no-fund"]
+    if HOST_BOX:
+        install = [HOST_BOX, "--net", "--dir", str(fresh), "--", *install]
+    log.write(f"$ {' '.join(install)}\n")
+    log.flush()
+    res = subprocess.run(
+        install,
+        cwd=fresh,
+        stdin=subprocess.DEVNULL,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if res.returncode or not (fresh / "node_modules" / ".bin").is_dir():
+        raise Refused(f"npm install exited with {res.returncode}")
+    shutil.rmtree(old, ignore_errors=True)
+    if (folder / "node_modules").is_dir():
+        (folder / "node_modules").rename(old)
+    (fresh / "node_modules").rename(folder / "node_modules")
+    for name in ("package.json", "package-lock.json"):
+        (fresh / name).replace(folder / name)
+    fresh.rmdir()
+    return {"base": base}
+
+
+def node_modules(caller, query, body):
+    """Build the node_modules of a base again from the package.json of its branch: at once for
+    the host, held for Seb's yes for a bundle, which asks for its own base only."""
+    base = body.get("base") or ("" if caller == HOST else get_base_from_bundle_name(caller))
+    if base not in STICKY_BUNDLES:
+        raise ValueError(f"base must be one of {', '.join(STICKY_BUNDLES)}")
+    if caller != HOST and base != get_base_from_bundle_name(caller):
+        raise Refused("a bundle asks for the node_modules of its own base only")
+    package = read_package(base)
+    if caller == HOST:
+        return start_job(
+            caller,
+            "node-modules",
+            lambda log: refresh_node_modules(log, base, package),
+        )
+    if HELD is None:
+        raise Refused("no gateway-core beside useful-things: hok cannot list the request")
+    used = read_text(pathlib.Path(get_worktree_base_folder(base)) / "package.json")
+    diff = used and list(difflib.unified_diff(used.splitlines(), package.splitlines(), lineterm=""))
+    item = {
+        "client": caller,
+        "key": f"node-modules {base}",
+        "lines": diff[2:] if diff else [
+            "the same package.json as the one in use" if used else "no package.json in use yet:",
+            *([] if used else package.splitlines()),
+        ],
+        "reason": str(body.get("reason") or ""),
+        "send": {"node_modules": {"base": base, "package": package}},
+        "title": f"build the node_modules of {base} again",
+        "yes": (
+            "npm installs this package.json in a box, with the network: the bundles of"
+            f" {base} load the new node_modules at their next start"
+        ),
+    }
+    return 200, {"base": base, "held": f"{HELD_LETTER}{HELD.add(HELD_DIR, item)}"}
 
 
 def prepare_folder(bundle):
@@ -2473,6 +2627,8 @@ def open_bundle(caller, query, body):
 
         return start_job(caller, "open", work)
     check_task(bundle, body)
+    if "task" in body and not may_queue(caller, bundle):
+        return hold_task(caller, bundle, body)
     if "task" in body:
         return 202, enqueue(caller, bundle, body)
     return start_job(caller, "open", lambda log: open_or_enqueue(log, caller, bundle, body))
@@ -2527,6 +2683,7 @@ VERBS = {
     ("POST", "/fetch"): fetch,
     ("POST", "/force-queue"): force_queue,
     ("POST", "/move"): move_task,
+    ("POST", "/node-modules"): node_modules,
     ("POST", "/open"): open_bundle,
     ("POST", "/requeue"): requeue_agent,
     ("POST", "/schedule"): schedule_task,

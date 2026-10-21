@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""What initialize.py does before the start of a bundle container, with the scripts it runs faked:
+python3 test_initialize.py"""
+
+import json
+import os
+import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
+
+HERE = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+
+import build  # noqa: E402
+
+NAME = "a b;touch shell-ran"
+FAKE = """import json, sys
+with open(sys.argv[0] + ".calls", "a") as file:
+    file.write(json.dumps(sys.argv[1:]) + "\\n")
+"""
+INSIDE = "/opt/node_modules"
+
+
+def initialize(root, folder):
+    env = {
+        "HOME": str(root / "home"),
+        "PATH": os.environ["PATH"],
+        "REPO_ROOT": str(root / "repo"),
+        "STATE_ROOT": str(root / "state"),
+    }
+    return subprocess.run(
+        [sys.executable, str(root / "tools" / "initialize.py"), NAME, str(folder)],
+        capture_output=True,
+        check=False,
+        cwd=root,
+        env=env,
+        text=True,
+    )
+
+
+def main():
+    failures = []
+
+    def check(what, got, expected):
+        if got != expected:
+            failures.append(f"{what}: got {got!r}, expected {expected!r}")
+
+    base_config = build.read_jsonc(HERE / "base.jsonc")
+    check(
+        "initializeCommand",
+        base_config["initializeCommand"],
+        [
+            "python3",
+            "@USEFUL_THINGS@/devcontainer/initialize.py",
+            "${localWorkspaceFolderBasename}",
+            "${localWorkspaceFolder}",
+        ],
+    )
+    mount = f"source=${{localWorkspaceFolder}}/../node_modules,target={INSIDE},type=bind,readonly,z"
+    check("node_modules mount", mount in base_config["mounts"], True)
+    with tempfile.TemporaryDirectory() as name:
+        root = pathlib.Path(name)
+        (root / "tools").mkdir()
+        for script in ("initialize.py", "config.py"):
+            shutil.copy(HERE / script, root / "tools" / script)
+        for script in ("claude-config.py", "extensions.py", "bundle-db.py"):
+            (root / "tools" / script).write_text(FAKE)
+        base = root / "src" / "master"
+        folder = base / NAME
+        (folder / "odoo" / "node_modules" / "eslint").mkdir(parents=True)
+        (base / "shared.js").write_text("shared\n")
+        os.link(base / "shared.js", folder / "odoo" / "node_modules" / "eslint" / "index.js")
+        (folder / "enterprise").mkdir()
+
+        res = initialize(root, folder)
+        check("exit code", (res.returncode, res.stderr), (0, ""))
+        calls = [
+            json.loads(line)
+            for script in ("claude-config.py", "extensions.py", "bundle-db.py")
+            for line in (root / "tools" / f"{script}.calls").read_text().splitlines()
+        ]
+        check("the name, one argument", calls, [[NAME], [NAME, str(folder)], [NAME]])
+        check("no shell", (root / "shell-ran").exists(), False)
+        check("mount source", (base / "node_modules").is_dir(), True)
+        for repo in ("odoo", "enterprise"):
+            path = folder / repo / "node_modules"
+            check(f"{repo} link", path.is_symlink() and os.readlink(path), INSIDE)
+        check("hard link gone", os.stat(base / "shared.js").st_nlink, 1)
+        check("again", initialize(root, folder).returncode, 0)
+        check("odoo link kept", os.readlink(folder / "odoo" / "node_modules"), INSIDE)
+
+        (root / "other" / "node_modules").mkdir(parents=True)
+        shutil.rmtree(folder / "odoo")
+        (folder / "odoo").symlink_to(root / "other")
+        initialize(root, folder)
+        check("odoo behind a link", (root / "other" / "node_modules").is_symlink(), False)
+    for line in failures:
+        print(line)
+    print("all as expected" if not failures else f"{len(failures)} failure(s)")
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

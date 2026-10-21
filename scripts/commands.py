@@ -3,6 +3,7 @@
 import glob
 import hashlib
 import os
+import re
 import subprocess
 import sys
 
@@ -17,6 +18,8 @@ from config import (
     WORKTREE_CONTAINER,
 )
 
+# A bundle name goes unquoted into the mount options of its container and the config of nginx.
+BUNDLE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 MADE = ".made"
 
 

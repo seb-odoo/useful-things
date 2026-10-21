@@ -16,7 +16,8 @@ as a copy of the host's, with the workspace (/workspace unless given) marked tru
 `claude -p` ignores the permissions of the bundle's .claude, its imports from outside allowed, or
 an agent stops on the question for the runbot-fix-agents CLAUDE.md that the bundle CLAUDE.md
 imports, and the onboarding marked done, or the interactive claude of an agent terminal stops on
-its theme picker.
+its theme picker. So are what Claude keeps for itself and reads again later (backups, cache,
+file-history, ide) and dev-mods, whose mods run in the Claude process of their session.
 
 What a session takes as orders is mounted read-only in a bundle (see README.md), so what a tab has
 to write gets a file of the bundle: settings.json, a copy of the host's where a model picked in a
@@ -42,12 +43,24 @@ ORDERS = (
     "hooks",
     "output-styles",
     "plugins",
+    "review-corpus",
     "routines",
     "rules",
     "skills",
     "workflows",
 )
-OWN = ("extension-storage", "project", "session-env", "sessions", "shell-snapshots")
+OWN = (
+    "backups",
+    "cache",
+    "dev-mods",
+    "extension-storage",
+    "file-history",
+    "ide",
+    "project",
+    "session-env",
+    "sessions",
+    "shell-snapshots",
+)
 # Files Claude writes in its config folder: a copy per container, as the host's Claude reads them.
 COPIES = (
     "daemon.json",
@@ -120,7 +133,7 @@ def main():
         if (own / name).is_symlink():
             (own / name).unlink()
         (own / name).mkdir(parents=True, exist_ok=True)
-    for name in (*ORDERS, "handoff", f"projects/{values['HOST_PROJECT']}"):
+    for name in (*ORDERS, f"handoff/{sys.argv[1]}", f"projects/{values['HOST_PROJECT']}"):
         (claude / name).mkdir(parents=True, exist_ok=True)
     (claude / "CLAUDE.md").touch()
     write_settings(claude, own)

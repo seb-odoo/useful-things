@@ -16,6 +16,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from commands import BUNDLE_NAME
+
 CONTAINER_NAME = "odoo-proxy"
 DEVCONTAINER_LABEL = "devcontainer.local_folder"
 HTTP_PORT = 8069
@@ -35,7 +37,8 @@ def _proxy_networks():
 
 
 def _running_dev_containers():
-    """Yield (subdomain, ip) for every running dev container, newest last."""
+    """Yield (subdomain, ip) for every running dev container, newest last, but one whose folder
+    name is no bundle name: it would add directives to the config of nginx."""
     ids = subprocess.run(
         ["podman", "ps", "--format", "{{.ID}}"],
         capture_output=True,
@@ -64,9 +67,10 @@ def _running_dev_containers():
             for name, network in sorted(networks.items(), key=lambda pair: pair[0] not in shared)
         ]
         ip = next(filter(None, addresses), None)
-        if not ip:
+        name = os.path.basename(folder.rstrip("/"))
+        if not ip or not BUNDLE_NAME.fullmatch(name):
             continue
-        yield os.path.basename(folder.rstrip("/")), ip
+        yield name, ip
 
 
 def _render(server_name, ip, port=HTTP_PORT):

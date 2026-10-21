@@ -109,17 +109,38 @@ The container runs as the host user (`--userns=keep-id`), so a file it can write
 trusts. The rule: the host never runs, and never loads as config, a file a bundle container can
 write. So these are read-only in a bundle: the shell helpers (`container-rw/`), the venv, the VS
 Code user settings, TestWarden, DiscussModelParser and runbot-fix-agents (the cache of the
-test-warden engine comes back writable over it), and what the next paragraphs name.
+test-warden engine comes back writable over it), the `node_modules` of its base, which every
+bundle of that base loads (`/opt/node_modules`, see "Shared node_modules" in
+`scripts/README.md`), and what the next paragraphs name.
 
 **Claude.** A container uses the host's `~/.claude` as its config folder (`CLAUDE_CONFIG_DIR`), so
 it shares the host's login: a token refresh is locked and saved in that folder. Never give a
 container a copy or a link of `.credentials.json`: a refresh replaces the link with a copy and
-revokes every other one. The root of the folder stays writable for that, and what a session takes
-as orders or runs comes back read-only over it: `CLAUDE.md`, `hooks`, `skills`, `bin`, `agents`,
-`commands`, `output-styles`, `plugins`, `external`, `rules` (read as the user's own instructions),
-`routines`, `workflows`, and the memory of the host sessions. A name Claude Code adds there later
-is writable until it joins this list: `host-ctl/test_escape.py` names the ones it checks. The host's
-Claude reads the same files, so a hook a bundle could write would run on the host.
+revokes every other one. So the root of the folder stays writable, and each name in it gets the
+mount the table below says. The host's Claude reads the same files, so a hook a bundle could write
+would run on the host. A name Claude Code adds there later is writable from every container until
+it gets its line here: `host-ctl/test_escape.py` holds the same list, and its `claude-entries`
+line is OPEN on a name of the host's `~/.claude` that the list does not hold.
+
+| name in `~/.claude` | in a bundle | in the ops container |
+| --- | --- | --- |
+| `.credentials.json` | shared, writable: the login | same |
+| `CLAUDE.md`, `agents`, `bin`, `commands`, `external`, `hooks`, `output-styles`, `plugins`, `routines`, `rules` (read as the user's own instructions), `skills`, `workflows` | shared, read-only: what a session takes as orders or runs | its draft |
+| `launch.json`, `loop.md`, `scheduled_tasks.json`, `settings.local.json` | shared, read-only: what Claude reads as the project folder of the home | same |
+| `.git` | shared, read-only, by the fragment of host-ctl: the host commits there | same |
+| `review-corpus` | shared, read-only: the reviews the review skill learns from | shared, writable |
+| `projects` | shared, writable, but the memory of the host sessions, read-only | shared, writable |
+| `.claude.json`, `daemon.json`, `policy-limits.json`, `remote-settings-helper-consent`, `remote-settings.json`, `settings.json` | its own copy, below | same |
+| `backups`, `cache`, `file-history`, `ide`, `session-env`, `sessions`, `shell-snapshots` | its own folder, below | same |
+| `dev-mods` | its own folder, empty and read-only | its own folder |
+| `agent-start.lock` | shared, writable: one lock of agent starts for every container | same |
+| `handoff` | shared, read-only, also at `~/handoff`, where `handoff/<bundle>` is writable: a bundle proposes a change in its own folder only, which `hok` writes on a yes (host-ctl `handoff.py`) | shared, writable |
+| `plans` | shared, writable: what a session plans | same |
+| `history.jsonl`, `paste-cache`, `debug`, `telemetry`, `stats-cache.json`, `.ruff_cache` | shared, writable: prompts, logs and counts, which no session runs | same |
+| `.last-cleanup`, `.last-config-audit`, `.last-update-result.json`, `policy-limits.json.stamp.json`, `remote-settings.json.synced-at`, and the `.signature.json` and `.signature-iat.json` of `policy-limits.json` and `remote-settings.json` | shared, writable: dates and signatures. A copy of its own would need one more bind of the host on itself (below) | same |
+| `.gitignore`, `README.md` | shared, writable: files of the config repo, which the host commits by name | same |
+| `.claude.json.tmp.*` | shared, writable: what a save of `.claude.json` leaves when its rename fails | same |
+
 What a tab has to write is a file of the bundle, made by [`claude-config.py`](claude-config.py)
 before every start:
 
@@ -157,6 +178,11 @@ before every start:
   "always allow" holds for that bundle.
 - `session-env`, `shell-snapshots`, and the storage of the Claude extension (the permission mode
   of each session, kept over a rebuild).
+- what Claude keeps for itself and reads again in a later session, as for `.claude.json`:
+  `backups`, `cache` (the list of models among them), `file-history` (what a rewind writes back
+  in the files of a session) and `ide` (the lock files of the editor windows).
+- `dev-mods`, empty and read-only in a bundle: Claude runs a mod of `dev-mods/<session>` in the
+  Claude process of that session, and a session of the host would load one a bundle wrote there.
 - `sessions`, where Claude keeps the record of each live session, named after its pid: the claude
   of every container has the same few pids (21 or 22 for an agent in a terminal), so in the
   shared folder the records overwrite each other, and a claude that ends deletes the record of
@@ -210,7 +236,10 @@ container and lost on rebuild, except Claude's (a per-bundle mount).
 **The container config.** The tools name it at `WORKTREE_ROOT/.devcontainer/devcontainer.json`
 (`get_devcontainer_config` in `scripts/commands.py`), never through the bundle folder: its
 `initializeCommand` and its mounts apply on the host at the next start, and a container writes its
-bundle folder. Open a bundle with `ocode`, a gbs link or `bctl`, which all carry that path.
+bundle folder. Open a bundle with `ocode`, a gbs link or `bctl`, which all carry that path. The
+`initializeCommand` is an array, [`initialize.py`](initialize.py) with the folder name and the
+folder as its arguments, so that no shell reads the name: a PR author chooses it, and `pfb`
+refuses one that is no bundle name (`test_initialize.py`).
 
 **The network.** The base gives a container the default bridge (`--net=bridge`): the whole
 internet, and every network the host routes, a VPN included. What the container reads can then be
@@ -231,10 +260,14 @@ agent of the session holds no key: each host of `~/.ssh/config` names its own wi
 It also opens a link a container asks for (`$BROWSER`, `code --openExternal`) in the browser of the
 host, and for a localhost address it first forwards the port into the container, with no prompt:
 a page the container serves then runs its scripts in the host browser, outside the network of the
-container. `remote.forwardOnOpen` does not cover that path. So VS Code opens links with
-[`host-browser.py`](host-browser.py) (`workbench.externalBrowser`), which refuses a localhost
-address on any port but plain http on 80, where the Odoo proxy listens, and hands the rest to the
-default browser.
+container. `remote.forwardOnOpen` does not cover that path, and the URL of any page can carry data
+out of the network of the container. So VS Code opens links with
+[`host-browser.py`](host-browser.py) (`workbench.externalBrowser`), which opens nothing itself: it
+hands each page to firefox-gateway, cloned beside this repo, which checks it against the hosts of
+its config (a localhost address on plain http port 80 only, where the Odoo proxy listens) and
+holds it for a yes in `hok`, as the pages a container asks for. VS Code runs it for a link of any
+of its windows with the URL alone, so the card cannot say which window asked, and the page opens
+in no tab group. A page refused, or with no firefox-gateway, is a notification that says why.
 
 **Postgres** cannot tell a container from the host (same uid on the same socket), so the role must
 not be a superuser, or `COPY ... TO PROGRAM` runs commands on the host:

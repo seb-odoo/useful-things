@@ -13,6 +13,7 @@ import re
 import requests
 from branch_status import PR_URL, get_github_repo, get_pr, git
 from commands import (
+    BUNDLE_NAME,
     clean_bundle_name,
     get_base_for_repo,
     get_base_from_bundle_name,
@@ -25,6 +26,7 @@ from commands import (
 )
 from config import OPTIONAL_REPOS
 from rich import print
+from rich.markup import escape
 from rich.tree import Tree
 from utils import UtilsRunner
 
@@ -43,6 +45,16 @@ args = parser.parse_args()
 fork_remote_by_repo = {}
 
 
+def check_bundle_name(name):
+    if not BUNDLE_NAME.fullmatch(name):
+        print(
+            f"[red]{escape(name)}[/red] cannot be a bundle name: letters, digits, dots, dashes and"
+            " underscores only, 100 at most",
+        )
+        raise SystemExit(1)
+    return name
+
+
 def get_bundle_names_from_pr(github_repo, number):
     repo = next((repo for repo in get_repos() if get_github_repo(repo) == github_repo), None)
     if not repo:
@@ -53,7 +65,7 @@ def get_bundle_names_from_pr(github_repo, number):
     except ValueError as error:
         print(f"[red]{error}[/red]")
         raise SystemExit(1) from None
-    head, base = pr["headRefName"], pr["baseRefName"]
+    head, base = check_bundle_name(pr["headRefName"]), pr["baseRefName"]
     dev_remote = get_remote_dev_repo(repo)
     dev_github_repo = get_github_repo(repo, dev_remote)
     head_github_repo = f"{pr['headRepositoryOwner']['login']}/{pr['headRepository']['name']}"
@@ -92,7 +104,7 @@ elif (owner := args.name.rpartition(":")[0]) and owner not in dev_remotes:
     github_repo = re.search(r"github\.com[:/](.+?)(?:\.git)?$", pr["remote"])[1]
     bundle_name, _, pr_base = get_bundle_names_from_pr(github_repo, pr["name"])
 else:
-    bundle_name, pr_base = clean_bundle_name(args.name), None
+    bundle_name, pr_base = check_bundle_name(clean_bundle_name(args.name)), None
     response = get_runbot_bundle(bundle_name)
 cross_base = bool(pr_base) and not bundle_name.startswith(f"{pr_base}-")
 
