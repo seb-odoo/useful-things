@@ -15,8 +15,8 @@ stops the container. A VS Code window opened on the bundle takes the session ove
 as long as that window.
 A terminal closed while such a window is attached hands its session to that window the same way.
 The claude runs in a pty of the wrapper, which hands its clipboard escapes (OSC 52), ignored by
-terminator, to xclip while the window has the focus, and types the PR events of client/prwatch.py
-in an idle session.
+terminator, to xclip while the window has the focus, and types in an idle session the task the
+daemon leaves for it and the PR events of client/prwatch.py.
 
 Started on a bundle whose run already began, it goes on with that session and does not run the
 task again. When another terminal holds the session, it takes it over as a window does, in the
@@ -99,6 +99,8 @@ MODES = ("acceptEdits", "auto", "default", "plan")
 # Leave the alternate screen and the mouse modes a killed claude stays in, and show the cursor.
 RESET = "\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m"
 NOT_TYPED = re.compile(rb"\x1b\[<[0-9;]*[Mm]|\x1b\[M[\s\S]{3}|\x1b\[[IO]")
+PASTE_END = b"\x1b[201~"
+PASTE_START = b"\x1b[200~"
 SELECTIONS = {"c": "clipboard", "p": "primary"}
 START_LOCK = pathlib.Path.home() / ".claude" / "agent-start.lock"
 START_SPACE = 10
@@ -288,13 +290,15 @@ def copy_tty(fd, waker=None):
 
 
 class Waker:
-    """Types the PR events client/prwatch.py leaves in .agent/pr-events as the next prompt of an
-    idle session, when nothing was typed in this terminal since the last Enter: a draft of Seb
-    stays his, and the event then reaches the agent with his next prompt, by the hook of
-    prwatch.py. Nor after a slash command he sent, which may leave a menu open. Idle is no turn, no
-    dialog open and no wait for the reset of the usage limit."""
+    """Types as the next prompt of an idle session the task the daemon left for this terminal
+    (.agent/task.md with no run.lock, which it then makes), else the PR events client/prwatch.py
+    leaves in .agent/pr-events, when nothing was typed in this terminal since the last Enter: a
+    draft of Seb stays his, and a PR event then reaches the agent with his next prompt, by the
+    hook of prwatch.py. Nor after a slash command he sent, which may leave a menu open. Idle is no
+    turn, no dialog open and no wait for the reset of the usage limit."""
 
     def __init__(self, agent, bundle, session):
+        self.agent = agent
         self.events = agent / "pr-events"
         self.bundle = bundle
         self.session = session
@@ -314,14 +318,24 @@ class Waker:
         if self.draft or time.monotonic() - self.looked < WAKE_EVERY:
             return None
         self.looked = time.monotonic()
+        has_task = (self.agent / "task.md").is_file() and not (self.agent / "run.lock").exists()
         if (
-            not any(self.events.glob("[!.]*.txt"))
+            not (has_task or any(self.events.glob("[!.]*.txt")))
             or get_session_status(self.bundle, self.session) != "idle"
             or TITLE.is_resuming(self.session)
         ):
             return None
+        if has_task:
+            return self.take_task()
         told = PRWATCH.take(self.events)
         return " ".join(told).encode() if told else None
+
+    def take_task(self):
+        try:
+            (self.agent / "run.lock").mkdir()
+        except FileExistsError:
+            return None
+        return PASTE_START + (self.agent / "task.md").read_bytes().strip() + PASTE_END
 
 
 def write_terminal(data):

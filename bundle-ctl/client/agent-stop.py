@@ -3,7 +3,8 @@
 
 The run is either in a terminal (agent-terminal.py) or handed over to the Claude tab: agent-run.sh
 stops `claude -p` at its first tool call and the tab reruns that turn. A turn that ends without a
-verdict line (a background job still running) leaves .agent/waiting instead.
+verdict line (a background job still running) leaves .agent/waiting instead. A turn that ends
+before the terminal typed the task the daemon left for it (no .agent/run.lock) writes nothing.
 
 A PR event that waits (client/prwatch.py) keeps any session of the bundle from ending its turn:
 the turn goes on with it.
@@ -39,6 +40,7 @@ def main():
         hook.get("session_id") != read("session")
         or (read("handoff") is None and read("terminal") is None)
         or read("done") is not None
+        or not (AGENT / "run.lock").exists()
     ):
         return
     message = hook.get("last_assistant_message") or ""

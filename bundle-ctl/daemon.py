@@ -228,6 +228,15 @@ TERMINAL_CODE = [
     HERE / "shift_enter_newline.py",
     *(SCRIPTS / f"{name}.py" for name in ("agents", "commands", "config", "tab_groups")),
 ]
+TERMINAL_FILES = (
+    "container",
+    "mode",
+    "pr-events",
+    "prwatch.json",
+    "prwatch.lock",
+    "prwatch.log",
+    "terminal",
+)
 TITLE = load_title()
 WINDOW_CLOSE_WAIT = 30
 
@@ -1158,17 +1167,14 @@ def launch_queued():
             elif is_deleting(bundle):
                 item["waits_for"] = "the deletion of its checkout"
             elif is_busy(bundle, is_running or bundle in state["launches"]):
-                item["waits_for"] = "its agent to end" + (
-                    ", then its terminal to close" if in_terminal else ""
-                )
+                item["waits_for"] = "its agent to end"
             elif free < DISK_STOP:
                 item["waits_for"] = f"disk space ({free:.0f} GB left, {DISK_STOP:.0f} needed)"
-            elif in_terminal and has_display and can_go_on(item, state, env):
-                go_on(item)
+            elif in_terminal and not (waits_for := get_terminal_wait(item, now)):
+                hand_to_terminal(item)
                 continue
             elif in_terminal:
-                # Wait for its last terminal to close: the `died` event comes back here.
-                item["waits_for"] = "its terminal to close"
+                item["waits_for"] = waits_for
             elif container and has_window(container):
                 # The claude-autoopen extension of the window starts it.
                 item["task"] = get_resumed(item)
@@ -1204,9 +1210,6 @@ def launch_queued():
                 item["waits_for"] = "memory on the host" if fits else "a slot"
             queue.append(item)
         state["queue"] = queue
-        if kept := state.get("kept_terminals"):
-            queued = {item["bundle"] for item in queue}
-            state["kept_terminals"] = {name: at for name, at in kept.items() if name in queued}
         write_state(state)
     return paced
 
@@ -1285,7 +1288,6 @@ def keep_launching():
 def launch_safely():
     try:
         paced = launch_queued()
-        ask_closes()
     except Exception:
         traceback.print_exc()
         return False
@@ -1597,71 +1599,6 @@ def close_dead_window(bundle):
         time.sleep(0.5)
 
 
-def get_close_cards():
-    """The requests of hok to close an agent terminal that still wait, by bundle."""
-    cards = {}
-    for path in HELD_DIR.glob("*.json"):
-        bundle = ((HELD.read_json(path) or {}).get("send") or {}).get("close")
-        if bundle and not path.with_suffix(".answer").exists():
-            cards[bundle] = path
-    return cards
-
-
-def ask_closes():
-    """Ask Seb in hok to close the terminal of each bundle whose agent gave its verdict while a
-    task waits for that terminal, and take back the requests no task waits on any more. Only for
-    a window on screen: the task goes on in the session of a minimized one (can_go_on). Never
-    from a pass of the queue: a yes holds HELD.lock, and its send may run a pass."""
-    if HELD is None:
-        return
-    with state_lock:
-        state = read_state()
-    kept = state.get("kept_terminals", {})
-    env = None
-    closes = {}
-    for item in state["queue"]:
-        agent = get_agent_folder(item["bundle"])
-        if (
-            item.get("waits_for") == "its terminal to close"
-            and (agent / "done").exists()
-            and kept.get(item["bundle"]) != item["queued"]
-            and not is_terminal_minimized(agent, env := env or session_env())
-        ):
-            closes[item["bundle"]] = item
-    with HELD.lock:
-        cards = get_close_cards()
-        for bundle in cards.keys() - closes.keys():
-            cards[bundle].unlink(missing_ok=True)
-    for bundle, item in closes.items():
-        if bundle not in cards and not is_in_turn(bundle):
-            HELD.add(HELD_DIR, get_close_card(bundle, item))
-
-
-def get_close_card(bundle, item):
-    report = read_text(get_agent_folder(bundle) / "result.md")
-    since = format_time(item["queued"])
-    return {
-        "client": bundle,
-        "key": f"close {bundle}",
-        "lines": [
-            *(
-                ["its agent ended on this report:"]
-                + [f"  {line}".rstrip() for line in report.splitlines()]
-                if report
-                else []
-            ),
-            f"the task from {item['parent']} that waits for it since {since}:",
-            *(f"  {line}".rstrip() for line in item["task"].splitlines()),
-        ],
-        "send": {"close": bundle, "queued": item["queued"]},
-        "title": f"close the terminal of {bundle}",
-        "yes": (
-            "its terminal closes as when you close it: its claude and its container stop, then the"
-            f" task from {item['parent']} starts in the bundle"
-        ),
-    }
-
-
 def get_terminals():
     """The agent-terminal.py process of each bundle, ops windows aside."""
     terminals = {}
@@ -1702,6 +1639,15 @@ def is_minimized(pid, env):
         ).stdout
         for window in windows
     )
+
+
+def is_terminal_minimized(agent, env):
+    """Whether the window of the terminal that holds the session of an agent is minimized."""
+    try:
+        parent, _started = read_stat(int(read_text(agent / "terminal")))
+    except (OSError, IndexError, TypeError, ValueError):
+        return False
+    return is_minimized(parent, env)
 
 
 def restart_old_terminal():
@@ -1789,48 +1735,38 @@ def close_freed(bundle):
         pause.unlink(missing_ok=True)
 
 
-def is_terminal_minimized(agent, env):
-    """Whether the window of the terminal that holds the session of an agent is minimized."""
-    try:
-        parent, _started = read_stat(int(read_text(agent / "terminal")))
-    except (OSError, IndexError, TypeError, ValueError):
-        return False
-    return is_minimized(parent, env)
-
-
-def can_go_on(item, state, env):
-    """Whether a task goes on in the session of the agent that gave its verdict in a terminal of
-    its bundle, rather than wait for Seb to close that terminal: as for restart_old_terminal, only
-    while its session is idle and its window minimized. A window on screen is his: hok asks him to
-    close it (ask_closes), and his no keeps it."""
+def get_terminal_wait(item, now):
+    """What a task behind the agent of a terminal waits for before that terminal types it as the
+    next prompt of the session, None when nothing: the verdict of that agent, then an idle session
+    (no turn, his or a PR event's, no dialog, no wait for the usage limit). A task that names
+    another session waits for the terminal to close."""
     agent = get_agent_folder(item["bundle"])
     session = read_text(agent / "session")
-    return (
-        (agent / "done").exists()
-        and item.get("session") in (None, session)
-        and (item.get("after") or 0) <= time.time()
-        and state.get("kept_terminals", {}).get(item["bundle"]) != item["queued"]
-        and not (agent / "pause").exists()
-        and get_session_status(item["bundle"], session) == "idle"
-        and not TITLE.is_resuming(session)
-        and is_terminal_minimized(agent, env)
-    )
+    if item.get("session") not in (None, session):
+        # The `died` event of its last terminal comes back here.
+        return "its terminal to close"
+    if not (agent / "done").exists():
+        return "its agent to end"
+    if (item.get("after") or 0) > now:
+        return f"its time, {format_time(item['after'])}"
+    if (
+        (agent / "pause").exists()
+        or get_session_status(item["bundle"], session) != "idle"
+        or TITLE.is_resuming(session)
+    ):
+        return "its session to be idle"
+    return None
 
 
-def go_on(item):
-    """Give the task to the session of the agent of its bundle, in a new terminal that takes the
-    session over from the old one: `terminal` and `container` stay for it, and the old window
-    closes as for a restart, with no stop of its container nor of its tab groups."""
-    bundle = item["bundle"]
-    item["task"] = get_resumed(item)
-    item["resume"] = True
-    write_task(item, keep=("terminal", "container"))
-    print(
-        f"{bundle}: the task from {item['parent']} goes on in the session of its agent",
-        flush=True,
-    )
-    takeover = f"goes on with the task from {item['parent']}, same session"
-    start_job(item["parent"], "spawn", lambda log: open_terminal(log, bundle, takeover))
+def hand_to_terminal(item):
+    """Leave the task to the terminal of the agent of its bundle, which types it as the next prompt
+    of the same session and begins its run (agent-terminal.py): no window opens or closes. What
+    that terminal and its PR watch use stays, and so do the model and the effort of the session,
+    which claude keeps."""
+    agent = get_agent_folder(item["bundle"])
+    model, effort = (read_text(agent / name) for name in ("model", "effort"))
+    write_task({**item, "resume": True, "model": model, "effort": effort}, keep=TERMINAL_FILES)
+    print(f"{item['bundle']}: the task from {item['parent']} goes to its terminal", flush=True)
 
 
 def hold_ops_task(caller, task):
@@ -2382,43 +2318,11 @@ def send_task(item):
     return f"the task of {item['client']} is queued for {bundle}"
 
 
-def send_close(item):
-    """Seb's yes to closing the terminal of a bundle whose agent gave its verdict: the task that
-    waits for it starts once its container stopped."""
-    bundle, at = item["send"]["close"], item["send"]["queued"]
-    with state_lock:
-        queue = read_state()["queue"]
-    task = next((task for task in queue if (task["bundle"], task["queued"]) == (bundle, at)), None)
-    if task is None:
-        raise ValueError(f"the task left the queue: the terminal of {bundle} stays open")
-    if not get_window_pids(bundle):
-        return f"the terminal of {bundle} was closed already: its task starts"
-    if is_in_turn(bundle):
-        raise ValueError(
-            f"a turn runs in the terminal of {bundle}: it stays open, and hok asks again once that"
-            " turn ended",
-        )
-    close_window(bundle)
-    return f"the terminal of {bundle} closes: the task from {task['parent']} starts after it"
-
-
-def keep_terminal(item):
-    """Seb's no to closing a terminal: hok does not ask again for the task that waits on it."""
-    if "close" in item["send"]:
-        with state_lock:
-            state = read_state()
-            state.setdefault("kept_terminals", {})[item["send"]["close"]] = item["send"]["queued"]
-            write_state(state)
-
-
 def send_held(item):
-    """Seb's yes to what was held: the deletion of a bundle, the close of an agent terminal, the
-    task a bundle sends to a new ops agent or to another bundle, or the resume of the cut
-    sessions."""
+    """Seb's yes to what was held: the deletion of a bundle, the task a bundle sends to a new ops
+    agent or to another bundle, or the resume of the cut sessions."""
     if "resume" in item["send"]:
         return resume_cut(item["send"]["resume"])
-    if "close" in item["send"]:
-        return send_close(item)
     if "queue" in item["send"]:
         return send_task(item)
     if "node_modules" in item["send"]:
@@ -2869,7 +2773,7 @@ def main():
     if HELD:
         threading.Thread(
             target=HELD.serve,
-            args=(HELD_DIR, send_held, keep_terminal),
+            args=(HELD_DIR, send_held),
             daemon=True,
         ).start()
     keep_launching()

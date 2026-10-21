@@ -42,10 +42,10 @@ CASES = [
     (
         {"busy": RUNS_ANOTHER, "fresh": FRESH},
         ["fresh"],
-        ["busy: its agent to end, then its terminal to close"],
+        ["busy: its agent to end"],
     ),
-    ({"ended": ENDED_ANOTHER}, [], ["ended: its terminal to close"]),
-    ({"ended": {**ENDED_ANOTHER, "window": ""}}, [], ["ended: its terminal to close"]),
+    ({"ended": ENDED_ANOTHER}, [], ["ended: its session to be idle"]),
+    ({"ended": {**ENDED_ANOTHER, "window": ""}}, [], ["ended: its session to be idle"]),
     ({"launching": LAUNCHES_ANOTHER}, [], ["launching: its agent to end"]),
     ({"stranded": NEVER_RAN_ANOTHER}, ["stranded"], []),
     ({"window": RUNS_ANOTHER_IN_WINDOW}, [], ["window: its agent to end"]),
@@ -59,40 +59,40 @@ CASES = [
         {"starting": STARTS_ANOTHER, "fresh": FRESH},
         [],
         [
-            "starting: its agent to end, then its terminal to close",
+            "starting: its agent to end",
             "fresh: the agent of starting to start",
         ],
     ),
     (
         {"stuck": NEVER_STARTED_ANOTHER, "fresh": FRESH},
         ["fresh"],
-        ["stuck: its agent to end, then its terminal to close"],
+        ["stuck: its agent to end"],
     ),
     (
         {"busy": RUNS_ANOTHER, "fresh": FRESH},
         [],
-        ["busy: its agent to end, then its terminal to close", "fresh: a slot"],
+        ["busy: its agent to end", "fresh: a slot"],
         1,
     ),
     (
         {"busy": RUNS_ANOTHER, "fresh": FRESH, "later": FRESH},
         ["fresh"],
         [
-            "busy: its agent to end, then its terminal to close, over the cap",
+            "busy: its agent to end, over the cap",
             "later: the agent of fresh to start, over the cap",
         ],
         1,
         True,
     ),
-    ({"ended": ENDED_ANOTHER, "fresh": FRESH}, ["fresh"], ["ended: its terminal to close"], 1),
-    ({"held": HELD_ANOTHER, "fresh": FRESH}, ["fresh"], ["held: its terminal to close"], 1),
+    ({"ended": ENDED_ANOTHER, "fresh": FRESH}, ["fresh"], ["ended: its session to be idle"], 1),
+    ({"held": HELD_ANOTHER, "fresh": FRESH}, ["fresh"], ["held: its session to be idle"], 1),
     ({"fresh": FRESH}, [], ["fresh: memory on the host"], 8, False, True),
     ({"fresh": FRESH}, ["fresh"], [], 8, True, True),
     (
         {"busy": RUNS_ANOTHER, "fresh": FRESH},
         [],
         [
-            "busy: its agent to end, then its terminal to close",
+            "busy: its agent to end",
             "fresh: disk space (20 GB left, 30 needed)",
         ],
         8,
@@ -164,7 +164,6 @@ def prepare(root, bundles, cap, short=False, disk=100):
     daemon.get_worktree_container_folder = lambda: str(root)
     daemon.has_window = lambda container: "window" in bundles[container]
     daemon.is_held = lambda agent: (agent / "held").exists()
-    daemon.is_terminal_minimized = lambda agent, env: (agent / "minimized").exists()
     daemon.open_terminal = lambda log, bundle, takeover=None: launched.append(bundle)
     daemon.read_disk_free = lambda: disk
     daemon.read_state = lambda: state
@@ -788,94 +787,31 @@ def check_parked(root):
     return [f"parked: {name}" for name, passed in checks if not passed], len(checks)
 
 
-def check_close(root):
-    """A task that waits for the terminal of an agent that gave its verdict asks Seb in hok, once,
-    to close that terminal and not during a turn; his yes closes it, his no keeps it with no new
-    card for that task, and a terminal closed by hand takes the card back."""
-    bundles = {"ended": ENDED_ANOTHER, "typing": ENDED_ANOTHER, "busy": RUNS_ANOTHER}
-    state, launched = prepare(root, bundles, 8)
-    (daemon.get_agent_folder("ended") / "result.md").write_text("pushed: abc\n")
-    turns, windows = {"typing"}, {"ended", "typing"}
-    in_turn = daemon.is_in_turn
-    daemon.is_in_turn = turns.__contains__
-    daemon.get_window_pids = lambda bundle: [1] * (bundle in windows)
-    daemon.close_window = windows.discard
-
-    def get_cards():
-        return {
-            path.stem: daemon.HELD.read_json(path)
-            for path in daemon.HELD_DIR.glob("*.json")
-        }
-
-    def answer(number, words):
-        path = daemon.HELD_DIR / f"{number}.json"
-        said = f"yes {daemon.HELD.read_json(path)['digest']}" if words == "yes" else words
-        path.with_suffix(".answer").write_text(f"{said}\n")
-        daemon.HELD.take(path.with_suffix(".answer"), daemon.send_held, daemon.keep_terminal)
-        return daemon.HELD.read_json(path.with_suffix(".result"))["text"]
-
-    daemon.launch_safely()
-    cards = get_cards()
-    card = cards.get("1") or {}
-    since = daemon.format_time(QUEUED)
-    lines = [
-        "its agent ended on this report:",
-        "  pushed: abc",
-        f"the task from host that waits for it since {since}:",
-        f"  {TASK}",
-    ]
-    found = list(cards), card.get("send"), card.get("lines"), card.get("client")
-    asked = ["1"], {"close": "ended", "queued": QUEUED}, lines, "ended"
-    checks = [("one card, for the ended agent", found == asked)]
-    created = card.get("created")
-    daemon.launch_safely()
-    found = list(get_cards()), get_cards().get("1", {}).get("created")
-    checks.append(("the next pass asks no more", found == (["1"], created)))
-    found = answer(1, "yes"), windows
-    said = "the terminal of ended closes: the task from host starts after it"
-    checks.append(("a yes closes the terminal", found == (said, {"typing"})))
-    (daemon.get_agent_folder("ended") / "terminal").unlink()
-    turns.clear()
-    daemon.launch_safely()
-    checks.append(("its task starts once it closed", launched == ["ended"]))
-    number, card = next(iter(get_cards().items()), (None, {}))
-    checks.append(("its turn ended, the other asks", card.get("send", {}).get("close") == "typing"))
-    turns.add("typing")
-    text = answer(number, "yes")
-    found = "a turn runs" in text, windows, get_cards()
-    checks.append(("a yes during a turn keeps it open", found == (True, {"typing"}, {})))
-    turns.clear()
-    daemon.launch_safely()
-    text = answer(next(iter(get_cards())), "no")
-    daemon.launch_safely()
-    found = state["kept_terminals"], get_cards()
-    checks.append(("a no keeps it, and asks no more", found == ({"typing": QUEUED}, {})))
-    state["kept_terminals"] = {}
-    daemon.launch_safely()
-    (daemon.get_agent_folder("typing") / "terminal").unlink()
-    windows.clear()
-    daemon.launch_safely()
-    found = get_cards(), "typing" in launched, state["kept_terminals"]
-    checks.append(("a terminal closed by hand takes the card back", found == ({}, True, {})))
-    daemon.is_in_turn = in_turn
-    return [f"close: {name}" for name, passed in checks if not passed], len(checks)
-
-
-def check_go_on(root):
-    """A task behind an agent that gave its verdict in a minimized terminal goes on in its session,
-    in a new terminal that takes it over; a window on screen, a turn or a background command that
-    runs, and Seb's no keep the task waiting, and hok asks only for the window on screen."""
-    minimized = {**ENDED_ANOTHER, "container": "c\n", "minimized": ""}
+def check_hand_over(root):
+    """A task behind an agent that gave its verdict in a terminal goes to that terminal once its
+    session is idle, minimized or not, with no new window and no card in hok: the files of the
+    terminal and of its PR watch stay, and so do the model and the effort of the session. A turn,
+    a dialog or a background command that runs, a time to wait and a task for another session keep
+    it waiting."""
+    ended = {**ENDED_ANOTHER, "container": "c\n", "mode": "auto\n", "model": "sonnet\n"}
     bundles = {
-        "ended": minimized,
-        "shown": {**ENDED_ANOTHER, "container": "c\n"},
-        "asking": {**RUNS_ANOTHER, "minimized": ""},
-        "watching": minimized,
-        "kept": minimized,
+        "ended": {**ended, "prwatch.json": "{}"},
+        "asking": RUNS_ANOTHER,
+        "typing": ended,
+        "dialog": ended,
+        "watching": ended,
+        "later": ended,
+        "other": ended,
     }
     state, launched = prepare(root, bundles, 8)
-    state["kept_terminals"] = {"kept": QUEUED}
-    statuses = {"ended": "idle", "shown": "idle", "asking": "waiting", "watching": "shell"}
+    after = time.time() + 3600
+    for item in state["queue"]:
+        item["model"] = "haiku"
+        if item["bundle"] == "later":
+            item["after"] = after
+        if item["bundle"] == "other":
+            item["session"] = "x"
+    statuses = {"typing": "busy", "dialog": "waiting", "watching": "shell"}
     status = daemon.get_session_status
     daemon.get_session_status = lambda bundle, session: statuses.get(bundle, "idle")
     daemon.launch_safely()
@@ -883,33 +819,33 @@ def check_go_on(root):
     kept = sorted(path.name for path in agent.iterdir())
     history = sorted(path.name for path in next((agent / "history").iterdir()).iterdir())
     waits = [f"{item['bundle']}: {item['waits_for']}" for item in state["queue"]]
-    cards = [
-        daemon.HELD.read_json(path)["send"]["close"] for path in daemon.HELD_DIR.glob("*.json")
-    ]
     daemon.get_session_status = status
     checks = [
-        ("the minimized one goes on", launched == ["ended"]),
+        ("no window opens", launched == []),
         (
-            "its session, terminal and container stay for the takeover",
+            "the session, its terminal and its PR watch stay",
             kept
-            == ["container", "history", "parent", "priority", "queued", "session", "task.md",
-                "terminal"],
+            == ["container", "history", "mode", "model", "parent", "priority", "prwatch.json",
+                "queued", "session", "task.md", "terminal"],
         ),
-        ("its verdict goes to the history", {"done", "run.lock"} <= set(history)),
-        ("the task is the next prompt", daemon.read_text(agent / "task.md") == TASK),
+        ("its verdict and its run go to the history", {"done", "run.lock"} <= set(history)),
+        ("the task waits to be typed", daemon.read_text(agent / "task.md") == TASK),
+        ("the model of the session stays", daemon.read_text(agent / "model") == "sonnet"),
         (
             "the others wait",
             waits
             == [
-                "shown: its terminal to close",
-                "asking: its agent to end, then its terminal to close",
-                "watching: its terminal to close",
-                "kept: its terminal to close",
+                "asking: its agent to end",
+                "typing: its session to be idle",
+                "dialog: its session to be idle",
+                "watching: its session to be idle",
+                f"later: its time, {daemon.format_time(after)}",
+                "other: its terminal to close",
             ],
         ),
-        ("hok asks only for the window on screen", cards == ["shown"]),
+        ("hok gets no card", not any(daemon.HELD_DIR.glob("*.json"))),
     ]
-    return [f"go on: {name}" for name, passed in checks if not passed], len(checks)
+    return [f"hand over: {name}" for name, passed in checks if not passed], len(checks)
 
 
 def check_ramp(root):
@@ -951,8 +887,7 @@ def main():
         check_build,
         check_parked,
         check_priority,
-        check_close,
-        check_go_on,
+        check_hand_over,
         check_ramp,
     ):
         with tempfile.TemporaryDirectory() as root:

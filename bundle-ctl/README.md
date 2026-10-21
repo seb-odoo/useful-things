@@ -854,9 +854,8 @@ The answer is the task's place (`queued`) and what it waits for
 each priority, the bundle that queued it, since when and what it waits for, so a caller can pick
 where it goes.
 A task for a bundle whose agent has not ended is queued behind it, so the caller has nothing to
-try again: it waits for `its agent to end`, the verdict of an agent in a window, and for an agent
-in a terminal `then its terminal to close`. Once that agent gave its verdict, the task goes on in
-its session when its window is minimized, else `hok` asks Seb to close that window (see below). A
+try again: it waits for `its agent to end`. Once an agent in a terminal gave its verdict, that
+terminal types the task as the next prompt of the same session (see below). A
 VS Code window opened on the bundle meanwhile first
 takes that terminal's session over, and the task starts in the window at the next pass. A bundle
 holds one queued task: a second one is refused.
@@ -896,27 +895,23 @@ Closing the window of an agent is Seb's call, and so is closing its terminal bef
 (see Agents in a terminal); nothing deletes a bundle without his yes. `done` says the run reached
 its verdict: Seb may still go on in the session, in its terminal while it is on screen, or with
 `bctl open BUNDLE --terminal` once it closed. A task for a bundle whose last
-session still has its terminal waits in the queue until that terminal closes, or until that
-session gave its verdict and its window is minimized.
+session still has its terminal goes to that terminal once that session gave its verdict.
 
-Then the task goes on in that session (Seb, 2026-10-21, as agents asked the ops session to close
-terminals he had not read yet): it is the next prompt of the same conversation, in a new terminal
-that takes the session over from the old one, in the same container, as a restart on new code
-does. The old window closes with no stop of its container nor of its Firefox tab groups. Only
-when the session is `idle` (not `shell`: a background command a turn left would end with its
-claude), not waiting for the reset of the usage limit, and the task names no other session and
-has no time to wait for. The journal says `BUNDLE: the task from PARENT goes on in the session of
-its agent`. An agent that waits for Seb's answer in its turn keeps the task waiting.
-
-When that window is on screen, the daemon asks Seb in `hok` to close it instead (Seb,
-2026-10-21, after a bundle agent took the wait for a fault of bctl): one card per task, held as
-`bN` from the bundle of the terminal, whose band lists it, with the report of the verdict and the
-task that waits. His yes closes the terminal as he would; when a turn runs there (he typed in it),
-nothing closes and a new card comes once that turn ended. His no keeps the terminal, and no card
-comes again for that task, nor does it go on in that session once minimized. A terminal closed by hand, or a task that leaves the queue, takes its
-card back. The cards are asked after a pass of the queue started by the timer or by a container
-start or stop, never inside a pass: a yes holds the lock of `held/`, and what it sends may run a
-pass. `python3 test_queue.py` has the cases.
+There it is the next prompt of the same conversation, typed by the terminal, whether its window is
+minimized or on screen; no window opens or closes (Seb, 2026-10-21: "ideally it should auto fix",
+picked over a new terminal for a minimized window and a card in `hok` that asked him to close one
+on screen). The daemon moves the files of the last run to `.agent/history/` as for any new task,
+but leaves the session, the files of the terminal and of its PR watch, and the model and the
+effort of the session, which claude keeps: a task queued on another model runs on the one of the
+session. `agent-terminal.py` then types the task as one paste, then Enter, as it types a PR event
+(see PR events): only in an idle session, never over a draft of Seb nor after a slash command he
+sent, and before a PR event that waits. It makes `.agent/run.lock` as it types, which begins the
+run; until then `client/agent-stop.py` writes no verdict, as a turn that ends then is not the
+task's. Until the session is `idle` (no turn, no dialog, no background command a turn left, no
+wait for the reset of the usage limit), the task waits for `its session to be idle`; a task with a
+time waits for it, and one that names another session waits for `its terminal to close`. The
+journal says `BUNDLE: the task from PARENT goes to its terminal`. `python3 test_queue.py` and
+`python3 test_terminal.py` have the cases.
 
 The agent runs of all the containers start at least 10 seconds apart (a lock in the shared
 `~/.claude`), as claude processes started together fail each other's OAuth token refresh. A

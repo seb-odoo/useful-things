@@ -276,6 +276,32 @@ def check_wake(case):
     case.check_stopped("quitting claude")
 
 
+def check_task(case):
+    """A task the daemon left for the terminal (task.md, no run.lock) is typed as one paste in an
+    idle session, before a PR event that waits, once, and begins the run."""
+    typed = case.state / "typed"
+
+    def lines():
+        return typed.read_text().splitlines() if typed.exists() else []
+
+    case.start()
+    (case.state / "status").write_text("busy")
+    (case.agent / "pr-events").mkdir()
+    (case.agent / "pr-events" / "1.txt").write_text("PR event: one")
+    (case.agent / "task.md").write_text("next\ntask\n")
+    (case.agent / "run.lock").rmdir()
+    time.sleep(3)
+    case.check("a busy session gets none", not lines())
+    (case.state / "status").write_text("idle")
+    pasted = ["\x1b[200~next", "task\x1b[201~", "PR event: one"]
+    case.check("an idle one gets the task, then the event", wait(lambda: lines() == pasted))
+    case.check("the task begins the run", (case.agent / "run.lock").is_dir())
+    time.sleep(3)
+    case.check("typed once", lines() == pasted)
+    (case.state / "quit").touch()
+    case.check_stopped("quitting claude")
+
+
 def check_handoff(case):
     case.start()
     (case.agent / "handoff").touch()
@@ -429,7 +455,8 @@ def main():
         check_ops_resume: CUT,
         check_ops_cut: CUT,
     }
-    checks = (check_quit, check_clipboard, check_wake, check_sigterm, check_close, check_requeue)
+    checks = (check_quit, check_clipboard, check_wake, check_task, check_sigterm, check_close)
+    checks += (check_requeue,)
     checks += (check_shutdown, check_close_window)
     checks += (check_handoff, *tabs)
     checks += (check_ops_quit, check_ops_close)
