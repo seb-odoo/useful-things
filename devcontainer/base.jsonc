@@ -86,6 +86,9 @@
     "source=@HOME@/.claude/loop.md,target=/home/vscode/.claude/loop.md,type=bind,readonly,z",
     "source=@HOME@/.claude/scheduled_tasks.json,target=/home/vscode/.claude/scheduled_tasks.json,type=bind,readonly,z",
     "source=@HOME@/.claude/settings.local.json,target=/home/vscode/.claude/settings.local.json,type=bind,readonly,z",
+    // The inbox where a bundle leaves a proposal for hok (host-ctl handoff.py), out of ~/.claude
+    // too: a write under a .claude folder asks for approval, whatever the hooks say.
+    "source=@HOME@/.claude/handoff,target=/home/vscode/handoff,type=bind,z",
     // Claude sources these before each Bash command: the containers get their own.
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/session-env,target=/home/vscode/.claude/session-env,type=bind,z",
     // Claude names a live session's record after its pid, the same few pids in every container.

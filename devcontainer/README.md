@@ -162,7 +162,11 @@ before every start:
   shared folder the records overwrite each other, and a claude that ends deletes the record of
   another container's.
 
-A bundle agent that has a fix for one of the read-only files hands it over instead of writing it.
+A bundle agent that has a fix for one of the read-only files hands it over instead of writing it,
+in `~/handoff/<bundle>/` (host-ctl README, "Handoff"). That folder is the host's
+`~/.claude/handoff`, mounted again out of `~/.claude`: Claude asks before a write under a
+`.claude` folder (its "protected paths"), even when a hook allowed it, and in auto mode a `cp` there
+reached Seb as a prompt (2026-10-21).
 
 **VS Code extensions.** Each container mounts a store of its own, read-only: code in an extension
 runs in a window, and a window can type in a terminal of the host. The stores are hard-link clones

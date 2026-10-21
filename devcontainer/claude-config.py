@@ -120,7 +120,7 @@ def main():
         if (own / name).is_symlink():
             (own / name).unlink()
         (own / name).mkdir(parents=True, exist_ok=True)
-    for name in (*ORDERS, f"projects/{values['HOST_PROJECT']}"):
+    for name in (*ORDERS, "handoff", f"projects/{values['HOST_PROJECT']}"):
         (claude / name).mkdir(parents=True, exist_ok=True)
     (claude / "CLAUDE.md").touch()
     write_settings(claude, own)
