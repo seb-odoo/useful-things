@@ -448,7 +448,8 @@ def take_over(agent, bundle):
     container = read_text(agent / "container")
     if not container:
         raise Failure("its agent starts in another terminal")
-    print(f"{bundle}: taking the session over from its other terminal", flush=True)
+    why = os.environ.get("BUNDLE_CTL_TAKEOVER") or "taking the session over from its other terminal"
+    print(f"{bundle}: {why}", flush=True)
     hand_over(container)
     deadline = time.monotonic() + TAKEOVER_WAIT
     # That terminal removes the two markers at its end: write them after it.

@@ -165,7 +165,7 @@ def prepare(root, bundles, cap, short=False, disk=100):
     daemon.has_window = lambda container: "window" in bundles[container]
     daemon.is_held = lambda agent: (agent / "held").exists()
     daemon.is_terminal_minimized = lambda agent, env: (agent / "minimized").exists()
-    daemon.open_terminal = lambda log, bundle: launched.append(bundle)
+    daemon.open_terminal = lambda log, bundle, takeover=None: launched.append(bundle)
     daemon.read_disk_free = lambda: disk
     daemon.read_state = lambda: state
     daemon.session_env = lambda: {"DISPLAY": ":0"}

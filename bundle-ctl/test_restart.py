@@ -38,7 +38,8 @@ CASES = [
 
 
 def restart(root, terminals):
-    """The bundles restarted by one call, for terminals {bundle: case}."""
+    """The bundles restarted by one call, for terminals {bundle: case}, each with the line its new
+    terminal shows."""
     opened = []
     pids = {bundle: 1000 + at for at, bundle in enumerate(terminals)}
     for bundle, case in terminals.items():
@@ -59,7 +60,7 @@ def restart(root, terminals):
     )
     daemon.is_minimized = lambda pid, env: by_pid[pid]["minimized"]
     daemon.session_env = dict
-    daemon.open_terminal = lambda log, bundle: opened.append(bundle)
+    daemon.open_terminal = lambda log, bundle, takeover: opened.append((bundle, takeover))
     daemon.print = lambda *args, **kwargs: None
     daemon.restart_old_terminal()
     return opened
@@ -74,14 +75,18 @@ def check_cases(root):
     for at, (changes, expected) in enumerate(CASES):
         daemon.restarted.clear()
         bundle = f"b{at}"
-        found = restart(root, {bundle: {**BASE, **changes}})
+        found = [name for name, _ in restart(root, {bundle: {**BASE, **changes}})]
         if found != ([bundle] if expected else []):
             failures.append(f"{changes}: restarted {found}, expected {expected}")
     daemon.restarted.clear()
     both = {"x1": BASE, "x2": BASE}
-    found = [restart(root, both), restart(root, both), restart(root, both)]
+    found = [[name for name, _ in restart(root, both)] for _ in range(3)]
     if found != [["x1"], ["x2"], []]:
         failures.append(f"two old terminals, three calls: {found}, expected one each, then none")
+    daemon.restarted.clear()
+    line = restart(root, {"y1": BASE})[0][1]
+    if line != f"restarts on the bundle-ctl code of {daemon.format_time(200)}, same session":
+        failures.append(f"the line of the new terminal: {line}")
     return failures
 
 
@@ -116,7 +121,7 @@ def main():
     daemon.get_terminals, daemon.read_stat = get_terminals, read_stat
     for failure in failures:
         print(f"FAIL {failure}")
-    print(f"{len(CASES) + 3 - len(failures)}/{len(CASES) + 3} cases as expected")
+    print(f"{len(CASES) + 4 - len(failures)}/{len(CASES) + 4} cases as expected")
     return 1 if failures else 0
 
 

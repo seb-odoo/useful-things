@@ -316,8 +316,11 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   usage limit, which its claude goes on from by itself and a new one does not. Only while its window
   is minimized, so that Seb sees no window go, as the new one opens minimized; and not under
   `.agent/pause`. One terminal per pass of the daemon (10 to 60 seconds), each bundle once an hour
-  at most; the journal says `BUNDLE: its terminal restarts on the code of HH:MM`. Ops windows stay
-  as they are. `python3 test_restart.py` runs each case.
+  at most; the journal says `BUNDLE: its terminal restarts on the code of HH:MM`, and the new
+  window, before its claude resumes, `BUNDLE: restarts on the bundle-ctl code of HH:MM, same
+  session` (Seb, 2026-10-21, who took the old line for a second terminal). A task given to an idle
+  session says `goes on with the task from PARENT, same session` there. Ops windows stay as they
+  are. `python3 test_restart.py` runs each case.
 - `bctl open BUNDLE --terminal` opens that terminal again, on the bundle's last session and with
   no prompt: the way back once the X server took the windows away. It is refused while a terminal
   holds the session: a new terminal would take it over and cut its turn. A VS Code window that

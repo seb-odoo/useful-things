@@ -742,16 +742,18 @@ def run_script(log, script, *args):
         raise Refused(f"{script} exited with {res.returncode}")
 
 
-def run_in_session(log, *command, scope=True):
-    """Run a command of the graphical session in a unit of its own.
+def run_in_session(log, *command, scope=True, setenv=None):
+    """Run a command of the graphical session in a unit of its own, with the variables of setenv.
 
     Started here, it would die with the daemon's cgroup. A scope waits for the command to end, a
     service does not.
     """
-    env = session_env()
+    setenv = setenv or {}
+    env = session_env() | setenv
     if not env.get("DISPLAY") and not env.get("WAYLAND_DISPLAY"):
         raise Refused("no graphical session to open a window in")
-    session = [f"--setenv={key}={env[key]}" for key in SESSION_VARIABLES if key in env]
+    keys = [*SESSION_VARIABLES, *setenv]
+    session = [f"--setenv={key}={env[key]}" for key in keys if key in env]
     unit = ["--scope"] if scope else session
     res = subprocess.run(
         ["systemd-run", "--user", "--collect", "--quiet", *unit, *command],
@@ -774,12 +776,14 @@ def open_window(log, bundle):
     run_in_session(log, "code", "--folder-uri", UtilsRunner()._devcontainer_folder_uri(folder))
 
 
-def open_terminal(log, bundle):
+def open_terminal(log, bundle, takeover=None):
+    """takeover: the line the new terminal shows when it takes the session from an old one."""
     log.write(f"starting the agent of {bundle} in a terminal\n")
     log.flush()
     terminal = shlex.split(AGENT_TERMINAL.format(bundle=bundle))
     agent = [sys.executable, str(HERE / "agent-terminal.py"), bundle]
-    run_in_session(log, *terminal, *agent, scope=False)
+    setenv = {"BUNDLE_CTL_TAKEOVER": takeover} if takeover else None
+    run_in_session(log, *terminal, *agent, scope=False, setenv=setenv)
 
 
 def run_job(job, work):
@@ -1720,7 +1724,8 @@ def restart_old_terminal():
             continue
         restarted[bundle] = time.time()
         print(f"{bundle}: its terminal restarts on the code of {format_time(changed)}", flush=True)
-        open_terminal(sys.stdout, bundle)
+        takeover = f"restarts on the bundle-ctl code of {format_time(changed)}, same session"
+        open_terminal(sys.stdout, bundle, takeover)
         return
 
 
@@ -1764,7 +1769,8 @@ def go_on(item):
         f"{bundle}: the task from {item['parent']} goes on in the session of its agent",
         flush=True,
     )
-    start_job(item["parent"], "spawn", lambda log: open_terminal(log, bundle))
+    takeover = f"goes on with the task from {item['parent']}, same session"
+    start_job(item["parent"], "spawn", lambda log: open_terminal(log, bundle, takeover))
 
 
 def hold_ops_task(caller, task):
