@@ -456,7 +456,8 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   (`scripts/tab_groups.py`), then, when they all look finished, why: `🚀👀 PR merged, PR
   opened`. Buttons above the rows count each mark among the kinds
   pressed, and each kind among the marks pressed (his ask: the counts followed no other filter);
-  pressed, they keep the rows of one of the marks pressed and of one of the kinds pressed. The
+  pressed, they keep the rows of one of the marks pressed and of one of the kinds pressed: the
+  buttons of a line add up, and the two lines cut each other. The
   Branch search beside them (Seb, 2026-10-20: "to look for a branch name (both now and queue)")
   keeps the rows whose name has its text, the groups of `hok` included, and the tasks of the
   queue whose bundle has it, case
@@ -511,10 +512,12 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   session an ops window is named after), hears which of its rows is selected, and sets the
   title. A row of the owner has no window: the buttons and the menu leave it out. The rows hide
   their expanders while none has rows under it. In the window of `hok`, a `🔑 hok` button before
-  the marks keeps only the agents with a request under them, then the groups, all opened, and
-  counts those requests among the rows the other buttons and the search keep (Seb, 2026-10-20: "I
-  lack a way to easily see what is waiting for hok like before"). The agent list alone does not
-  show it.
+  the marks keeps the agents with a request under them, then the groups, all opened, and
+  counts those requests among the rows the kinds and the search keep (Seb, 2026-10-20: "I
+  lack a way to easily see what is waiting for hok like before"). It adds to the marks as one
+  more of them: `🔑 hok` and `✋ waiting` keep the agents of either, and a mark pressed without
+  it hides the groups (Seb, 2026-10-21: "I want all hok and all waiting, not the
+  intersection"). The agent list alone does not show it.
 - `window-applet/`, a Cinnamon applet, shows the mark that needs Seb most and how many bundles
   have it, in the order ❌ ✋ ✅ 🚀 ⏳ (Seb, 2026-10-15: a failed agent is an error to fix, a
   waiting or finished one waits for him, one stuck on starting comes after, one in progress does

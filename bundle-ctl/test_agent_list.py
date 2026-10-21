@@ -30,14 +30,24 @@ FILTERS = [
     "📝 review 0",
 ]
 FACETS = [
-    (set(), {"fw"}, ["❌ failed 0", "✅ finished 1", "✋ waiting 0", "⏳ running 0", "🚀 starting 0"]),
-    ({1}, set(), ["🔧 ops 0", "⏩ fw 1", "🤖 runbot 0", "🎯 task 0", "⭐ mine 0"]),
+    (
+        set(),
+        {"fw"},
+        None,
+        ["❌ failed 0", "✅ finished 1", "✋ waiting 0", "⏳ running 0", "🚀 starting 0"],
+    ),
+    ({1}, set(), None, ["🔧 ops 0", "⏩ fw 1", "🤖 runbot 0", "🎯 task 0", "⭐ mine 0"]),
+    ({1}, set(), {"mine"}, ["🔧 ops 0", "⏩ fw 1", "🤖 runbot 0", "🎯 task 0", "⭐ mine 1"]),
 ]
 FILTERED = [
-    (set(), set(), ["fw", "ops", "mine"]),
-    ({1}, set(), ["fw"]),
-    (set(), {"mine", "ops"}, ["ops", "mine"]),
-    ({1, 3}, {"ops"}, ["ops"]),
+    (set(), set(), None, ["fw", "ops", "mine"]),
+    ({1}, set(), None, ["fw"]),
+    (set(), {"mine", "ops"}, None, ["ops", "mine"]),
+    ({1, 3}, {"ops"}, None, ["ops"]),
+    (set(), set(), set(), []),
+    (set(), set(), {"mine"}, ["mine"]),
+    ({1}, set(), {"mine"}, ["fw", "mine"]),
+    ({3}, {"ops", "mine"}, {"fw", "mine"}, ["ops", "mine"]),
 ]
 SEARCHED = [
     ("", set(), ["fw", "ops", "mine"], "✅ finished 1"),
@@ -188,14 +198,14 @@ def check_filters(agent_list):
     failures = []
     if (found := agent_list.get_filters(rows, set(), set())) != FILTERS:
         failures.append(f"filters {found!r}, expected {FILTERS!r}")
-    for ranks, kinds, expected in FACETS:
-        found = agent_list.get_filters(rows, ranks, kinds)
+    for ranks, kinds, owned, expected in FACETS:
+        found = agent_list.get_filters(rows, ranks, kinds, "", owned)
         if expected not in (found[:5], found[5:10]):
-            failures.append(f"filters while {ranks} and {kinds} are pressed: {found!r}")
-    for ranks, kinds, expected in FILTERED:
-        found = [row.key for row in rows if agent_list.is_kept(row, ranks, kinds)]
+            failures.append(f"filters while {ranks}, {kinds} and {owned} are pressed: {found!r}")
+    for ranks, kinds, owned, expected in FILTERED:
+        found = [row.key for row in rows if agent_list.is_kept(row, ranks, kinds, "", owned)]
         if found != expected:
-            failures.append(f"rows kept by {ranks} and {kinds}: {found!r}, expected {expected!r}")
+            failures.append(f"rows kept by {ranks}, {kinds}, {owned}: {found!r}, not {expected!r}")
     for search, kinds, expected, label in SEARCHED:
         found = [row.key for row in rows if agent_list.is_kept(row, set(), kinds, search)]
         labels = agent_list.get_filters(rows, set(), kinds, search)
@@ -423,22 +433,19 @@ def check_tree(agent_list):
         failures.append(f"tree {shape!r}")
     if tree[2][0][12] != 2 or tree[1][1][0][1] != []:
         failures.append(f"a group sorts after the agents, a child has no rows: {tree!r}")
-    owned = [
-        agent_list.keep_owned(lines, {"0x4": [child]}, [(group, [child])], pressed, search)
-        for pressed, search in ((False, ""), (True, ""), (False, "Host"), (False, "x--seb"))
+    kept = [
+        agent_list.keep_groups(keys, {"0x4": [child]}, [(group, [child])], shown, search)
+        for keys, shown, search in (
+            (["master-x--seb", "0x4"], True, ""),
+            (["master-x--seb", "0x4"], False, ""),
+            (["master-x--seb"], True, "Host"),
+            (["master-x--seb", "0x4"], True, "x--seb"),
+        )
     ]
-    shape = [
-        ([line[key] for line in kept], [kid.key for kid, _kids in groups], count)
-        for kept, groups, count in owned
-    ]
-    expected = [
-        (["master-x--seb", "0x4"], ["hok group:host"], 2),
-        (["0x4"], ["hok group:host"], 2),
-        (["master-x--seb", "0x4"], ["hok group:host"], 2),
-        (["master-x--seb", "0x4"], [], 1),
-    ]
+    shape = [([kid.key for kid, _kids in groups], count) for groups, count in kept]
+    expected = [(["hok group:host"], 2), ([], 2), (["hok group:host"], 1), ([], 1)]
     if shape != expected:
-        failures.append(f"rows kept by the button of hok and the search, its number: {shape!r}")
+        failures.append(f"groups kept by the buttons and the search, the number of hok: {shape!r}")
     picker = agent_list.picker
     rows = [
         picker.Row(0, 0, "x", "master-x--seb", "0x1", True),

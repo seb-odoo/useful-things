@@ -48,8 +48,8 @@ These parts are Agents, which another window can show with rows of its own under
 Child each) and rows of its own at the end. When host-ctl is on this machine, a start opens the
 window of hok (hokwin.py), which shows them with the requests of each agent under its row; this
 window opens alone when hok ends with an error within START seconds. There, the 🔑 hok button
-before the marks keeps the agents with a request under them and the groups of requests, and
-counts those requests.
+before the marks keeps the agents with a request under them and the groups of requests, besides
+the rows of the marks pressed, and counts those requests.
 
     agent-list.py --select KEY
 
@@ -217,10 +217,10 @@ def get_name(row):
     return f"{picker.LOADING} {title}" if loading else title
 
 
-def get_filters(rows, ranks, kinds, search=""):
+def get_filters(rows, ranks, kinds, search="", owned=None):
     """The label of each filter button: each mark, then each kind, with its number of rows among
-    the ones the search and the pressed buttons of the other line keep."""
-    found = [get_kind(row) for row in rows if is_kept(row, ranks, set(), search)]
+    the ones the search and the pressed buttons of the other line keep, owned as for is_kept."""
+    found = [get_kind(row) for row in rows if is_kept(row, ranks, set(), search, owned)]
     labels = [f"{ICONS[kind]} {kind} {found.count(kind)}" for kind in picker.KINDS]
     kept = [row for row in rows if is_kept(row, set(), kinds, search)]
     return [*picker.get_counts(kept), *labels]
@@ -230,12 +230,14 @@ def is_found(text, search):
     return clean_bundle_name(search).strip().casefold() in text.casefold()
 
 
-def is_kept(row, ranks, kinds, search=""):
-    """Whether a row has one of the marks of ranks and one of the kinds, an empty set keeps all,
-    and the search in its name."""
+def is_kept(row, ranks, kinds, search="", owned=None):
+    """Whether a row has the search in its name, one of the kinds, and one of the marks of ranks
+    or its key in owned, the agents with rows of the owner under them while its button is pressed,
+    None when not. The buttons of a line add up, and a line with none pressed keeps all."""
     if not is_found(get_name(row), search):
         return False
-    return (not ranks or row.rank in ranks) and (not kinds or get_kind(row) in kinds)
+    marked = row.rank in ranks or row.key in (owned or ())
+    return (marked or not ranks and owned is None) and (not kinds or get_kind(row) in kinds)
 
 
 def get_window_title(rows):
@@ -542,14 +544,13 @@ def get_leaves(children):
     return [(get_child_line(child), []) for child in children]
 
 
-def keep_owned(lines, children, groups, owned, search=""):
-    """The lines with rows of the owner under them, all of them when owned is False, the groups
-    whose name has the search, and how many rows of the owner the tree has with them: the number
-    on its button."""
+def keep_groups(keys, children, groups, shown, search=""):
+    """The groups whose name has the search, none when shown is False, and how many rows of the
+    owner the agents of keys and the groups with the search have: the number on its button."""
     groups = [(group, kids) for group, kids in groups if is_found(group.name, search)]
-    count = sum(len(children.get(line[KEY], [])) for line in lines)
+    count = sum(len(children.get(key, [])) for key in keys)
     count += sum(len(kids) for _group, kids in groups)
-    return [line for line in lines if not owned or line[KEY] in children], groups, count
+    return groups if shown else [], count
 
 
 def fill_tree(model, tree, parent=None):
@@ -864,20 +865,22 @@ class Agents:
         ranks = {rank for rank, button in enumerate(self.marks) if button.get_active()}
         kinds = {kind for kind, button in zip(picker.KINDS, self.kinds) if button.get_active()}
         search = self.search.get_text()
-        labels = get_filters([row for row, _info in self.agents_read], ranks, kinds, search)
+        rows = [row for row, _info in self.agents_read]
+        agents = [(row.key, info[-1]) for row, info in self.agents_read]
+        children, groups = self.owner.get_children(agents)
+        owned = set(children) if self.owned.get_active() else None
+        labels = get_filters(rows, ranks, kinds, search, owned)
         for button, label in zip(self.marks + self.kinds, labels):
             if button.get_label() != label:
                 button.set_label(label)
         lines = [
             self.get_line(place, row, info)
             for place, (row, info) in enumerate(self.agents_read)
-            if is_kept(row, ranks, kinds, search)
+            if is_kept(row, ranks, kinds, search, owned)
         ]
-        agents = [(row.key, info[-1]) for row, info in self.agents_read]
-        children, groups = self.owner.get_children(agents)
-        lines, groups, count = keep_owned(
-            lines, children, groups, self.owned.get_active(), search
-        )
+        counted = [row.key for row in rows if is_kept(row, set(), kinds, search)]
+        shown = owned is not None or not ranks
+        groups, count = keep_groups(counted, children, groups, shown, search)
         if self.owned.get_label() != f"{OWNED} {count}":
             self.owned.set_label(f"{OWNED} {count}")
         tree = get_tree(lines, children, groups)
