@@ -21,7 +21,10 @@ container, test runs first, so that they never take the whole host together (see
 
 ## Install
 
-See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the scripts need.
+See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the scripts need. The
+unit sets its own PATH, `~/.local/bin` first, where host-ctl puts the git that boxes the bundle
+repos: a container writes their `.git`, and the jobs run git there (`daemon-git` in
+`host-ctl/test_escape.py`).
 
 ## Verbs
 
@@ -35,9 +38,11 @@ See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the 
 | `POST /create` | `gnb` with `--no-push`, then a window; with a task, only its queue entry, the bundle being made when its agent asks (see Bare start); refused when the bundle exists, a branch has unpushed commits or, with no task, the disk is short (see Disk) |
 | `POST /delete` | the deletion of a bundle, held for Seb's yes in `hok` (see Deletion); a container asks for its own, or for the one of a child |
 | `GET /cut` | the Claude sessions a crash or a restart cut, bundles and ops (see Cut sessions); the host and the ops container only |
-| `GET /held` | what became of a deletion, an ops task or a resume this caller asked (`?id=bN`): it waits, or what Seb said in `hok`; `?wait=S` long-polls it, 50 s at most |
+| `GET /held` | what became of a deletion, a task for ops or for another bundle, a build of `node_modules` or a resume this caller asked (`?id=bN`): it waits, or what Seb said in `hok`; `?wait=S` long-polls it, 50 s at most |
+| `GET /hok` | the requests of `hok` that wait for the caller, a bundle its own and the host those of the ops session `?session=`: name, where a yes acts and what it does, when it was asked, put off or not (see the agent list) |
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window; with a task, only its queue entry, as for `create`; refused when the bundle is here, a branch has unpushed commits or, with no task, the disk is short |
-| `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle, but for `resume` or `terminal` in a bare folder, whose session knows how to build it. On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window, and from a bundle a task alone, held as `bN` for Seb's yes in `hok`; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents). With `cut` and `resume` and no bundle, the resume of every cut session, held as `bN` for one yes of Seb (see Cut sessions) |
+| `POST /node-modules` | the `node_modules` of `base` built again from the `package.json` of the web tooling of its branch, with the lock in use (see `scripts/README.md`, Shared node_modules): a job for the host; from a bundle, for its own base only, held as `bN` for Seb's yes in `hok`, which shows the change of `package.json` |
+| `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle, but for `resume` or `terminal` in a bare folder, whose session knows how to build it. A task from a bundle that is neither that bundle nor its parent waits for Seb's yes as `bN` (see A task for another bundle). On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window, and from a bundle a task alone, held as `bN` for Seb's yes in `hok`; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents). With `cut` and `resume` and no bundle, the resume of every cut session, held as `bN` for one yes of Seb (see Cut sessions) |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
 | `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, its text, whether it resumes the session of its bundle and the session it names, and the memory left on the host, `short` when a start would add to a host that already lacks it |
 | `POST /force-queue` | the tasks queued now may start over the cap, those that wait for their time (`--after`) or for a manual resume (`--paused`) aside, or with `bundle` the task of that bundle, its time and its pause too; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
@@ -259,6 +264,17 @@ branches again with the same commits, so a commit made after the request still k
   others need its `--force`, which drops such files too: the request is then refused on them.
 - `python3 test_delete.py` runs each case on git repos of its own.
 
+## A task for another bundle
+
+The agent of a bundle runs its task in auto mode, and git-gate lets it push its own branch with no
+yes. So a task on a bundle that is there already (`open`, and `create` or `fetch` of a folder that
+holds an `.agent`), `--resume` included, goes to the queue with no yes only from the host, from
+that bundle, or from its parent, the bundle that queued its last task (`.agent/parent`). From any
+other bundle, a review bundle on the PR of a stranger say, the daemon holds it as `bN` for Seb's yes
+in `hok`, opened by "The agent of the bundle X sends this task". His yes queues it as from the
+parent: the sender does not become the parent, and its next task waits for a yes again. The same
+task sent again replaces the request that waits. `python3 test_open.py` has the cases.
+
 ## Agents in a terminal
 
 A task (`.agent/task.md`) runs with Claude in the bundle's container, without a VS Code window: an
@@ -431,6 +447,14 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   out of an agent window (in a tab), else goes on with it in a new agent window (`bctl open
   ops-SESSION --terminal`). `hok` links the caller of a request there (Seb, 2026-10-20: "a direct
   link to open the agent from which they come from"), through `odoo-bundle://agent/NAME`.
+- `agent-list.py --select KEY` brings the window up on the row of KEY once its rows show it, 10
+  seconds at most: a bundle, an ops agent window by its session (`ops-SESSION`), or in the window
+  of `hok`, which it hands the key to, a request (`hok:NAME`). The band of an agent terminal links
+  it (Seb, 2026-10-21: "see which pending hok requests are related to this agent + link to
+  open+focus this hok request on the app", "a button to focus the current agent in the agent
+  list"), through `bundle_open.py` (scripts README), and reads the requests of its agent with `GET
+  /hok`: `hok waiting` of host-ctl, read again after 5 seconds at most, as every agent terminal
+  asks, then kept to the bundle that asks.
 - `agent-list.py`, a GTK window that stays open (Seb, 2026-10-15: "a new display for agents list
   that I can keep open and that updates live"), has the rows of the picker, read again every 2
   seconds, the terminals shown on screen included, and no other window. The mark and the kind of

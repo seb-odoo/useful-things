@@ -145,6 +145,8 @@ GO_ON = "Continue from where you left off."
 HELD = load_held()
 HELD_DIR = STATE / "held"
 HELD_LETTER = "b"
+HOK_KEPT = 5
+HOK_WAITING = pathlib.Path(CONFIG["REPO_ROOT"]) / "host-ctl" / "approve.py"
 HOST = "host"
 HOST_FOLDER = CONFIG.get("BUNDLE_CTL_HOST_FOLDER")
 HOST_ONLY = {("POST", "/force-queue")}
@@ -1863,6 +1865,39 @@ def get_held(caller, query, body):
         time.sleep(1)
 
 
+def list_hok(caller, query, body):
+    """The requests of hok that wait for the caller: a bundle its own, the host those of the ops
+    session `?session=`. `hok waiting` of host-ctl lists them all, read again after HOK_KEPT
+    seconds: every agent terminal asks."""
+    if not HOK_WAITING.is_file():
+        raise Refused("no host-ctl beside useful-things")
+    session = query.get("session", [""])[0]
+    if caller == HOST and not session:
+        raise ValueError("the host names the ops session: ?session=")
+    with hok_lock:
+        if time.monotonic() - hok_read["at"] > HOK_KEPT:
+            done = subprocess.run(
+                [sys.executable, str(HOK_WAITING), "waiting"],
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=30,
+            )
+            if done.returncode:
+                raise Refused(f"hok waiting exited with {done.returncode}: {done.stderr[-300:]}")
+            hok_read.update(at=time.monotonic(), listed=json.loads(done.stdout))
+        listed = hok_read["listed"]
+    if caller == HOST:
+        mine = [row for row in listed if (row["caller"], row["session"]) == ("ops", session)]
+    else:
+        mine = [row for row in listed if row["caller"] == caller]
+    return 200, {"requests": mine}
+
+
+hok_lock = threading.Lock()
+hok_read = {"at": -HOK_KEPT, "listed": []}
+
+
 def delete_stopped():
     """Start the deletions Seb said yes to whose container stopped: their jobs, by bundle."""
     with state_lock:
@@ -2384,6 +2419,7 @@ VERBS = {
     ("GET", "/branches"): branches,
     ("GET", "/cut"): list_cut,
     ("GET", "/held"): get_held,
+    ("GET", "/hok"): list_hok,
     ("GET", "/job"): get_job,
     ("GET", "/queue"): get_queue,
     ("GET", "/runs"): list_runs,

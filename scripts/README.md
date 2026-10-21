@@ -604,6 +604,20 @@ when NAME is `ops-SESSION`, as `window-picker.py --agent NAME` does (bundle-ctl 
 puts it on the name of the caller of a request, and `odoo-bundle://ops` when an ops request
 carries no session.
 
+The band of an agent terminal (`bundle-ctl/agentbar`) has three more (Seb,
+2026-10-21: "a way to easily see which pending hok requests are related to this agent", "link to
+open firefox group tab for all relevant bundle pages", "a button to focus the current agent in the
+agent list"):
+
+- `odoo-bundle://hok/NAME` brings up the agent list on the request NAME of hok, and
+  `odoo-bundle://list/NAME` on the row of the agent NAME, a bundle or `ops-SESSION`:
+  `agent-list.py --select` of bundle-ctl, which hands it to the window of hok.
+- `odoo-bundle://tabs/BUNDLE` brings up the Firefox tab group of the bundle with the pages it lacks,
+  or makes it: the thread and the diff of each PR `https://runbot.odoo.com/api/bundle` lists for
+  it, then its page on runbot. The group is named as `firefox-tabs` names it, the icon and the name
+  of the window title, and `open_group.py` of firefox-gateway opens it: the click is the yes, so no
+  card waits in hok.
+
 One-time setup, so that a click on a `gbs` branch name reaches it:
 
 ```bash
