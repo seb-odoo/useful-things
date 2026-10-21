@@ -55,9 +55,11 @@ A bundle gets a worktree of each repo of `folder_by_repo` in `config.py` (`desig
 The bundles of one base share one `node_modules` (`WORKTREE_ROOT/<base>/node_modules`, with its
 `package.json` and `package-lock.json` beside it), which only the host writes. Each container
 mounts the one of its base read-only at `/opt/node_modules`, and the `node_modules` of its `odoo/`
-and `enterprise/` is a link there, made by `devcontainer/initialize.py` before each start. A folder
-of their own there goes at that start: the hard links of the base a bundle had before 2026-10-21
-let it write the files that the ESLint of every other bundle of the base loads.
+and `enterprise/` is a link there. `_install_js_tooling` makes it after `enable.sh`, and
+`devcontainer/initialize.py` makes it again before each start: a container that started bare got
+its worktrees from `bctl build` after its start, so only the first one links them. A folder of
+their own there goes at that start: the hard links of the base a bundle had before 2026-10-21 let
+it write the files that the ESLint of every other bundle of the base loads.
 
 `_install_js_tooling` in `utils.py` runs `enable.sh` for its config files and its hooks, with npm in
 dry run: `npm install` would replace the link with a tree of its own, built from the branch. Do not
@@ -193,15 +195,13 @@ Commits
     └── [1.59-1.61] /home/seb/repo/upgrade-util ✅️ git worktree add /home/seb/src/odoo/master/master-test--seb/upgrade-util 8a61e891df29e0cc0fc7c4159f2139506471a8d8
 [5.27-5.27] /home/seb/src/odoo/master/master-test--seb ✅️ touch /home/seb/src/odoo/master/master-test--seb/.made
 [5.27-5.28] /home/seb/src/odoo/master/master-test--seb ✅️ rm -rf /home/seb/src/odoo/master/master-test--seb/odoo/node_modules
-[5.28-5.63] /home/seb/src/odoo/master/master-test--seb ✅️ cp -al /home/seb/src/odoo/master/node_modules /home/seb/src/odoo/master/master-test--seb/odoo/node_modules
-[5.63-5.64] /home/seb/src/odoo/master/master-test--seb ✅️ rm -rf /home/seb/src/odoo/master/master-test--seb/enterprise/node_modules
-[5.64-5.99] /home/seb/src/odoo/master/master-test--seb ✅️ cp -al /home/seb/src/odoo/master/node_modules /home/seb/src/odoo/master/master-test--seb/enterprise/node_modules
-[5.99-6.00] /home/seb/src/odoo/master/master-test--seb ✅️ cp /home/seb/src/odoo/master/package-lock.json /home/seb/src/odoo/master/master-test--seb/odoo/package-lock.json
-[6.00-8.29] /home/seb/src/odoo/master/master-test--seb ✅️ bash ./odoo/addons/web/tooling/enable.sh
+[5.28-5.29] /home/seb/src/odoo/master/master-test--seb ✅️ rm -rf /home/seb/src/odoo/master/master-test--seb/enterprise/node_modules
+[5.29-7.12] /home/seb/src/odoo/master/master-test--seb ✅️ env npm_config_dry_run=true npm_config_audit=false npm_config_fund=false bash ./odoo/addons/web/tooling/enable.sh
 y
 
-[8.29-8.32] /home/seb/src/odoo/master/master-test--seb ✅️ rm -rf /home/seb/src/odoo/master/master-test--seb/enterprise/node_modules/node_modules
-[8.32-8.48] /home/seb/src/odoo/master/master-test--seb ✅️ code --folder-uri vscode-remote://dev-container+<hex>/workspace
+[7.12-7.13] /home/seb/src/odoo/master/master-test--seb ✅️ ln -sfn /opt/node_modules /home/seb/src/odoo/master/master-test--seb/odoo/node_modules
+[7.13-7.14] /home/seb/src/odoo/master/master-test--seb ✅️ ln -sfn /opt/node_modules /home/seb/src/odoo/master/master-test--seb/enterprise/node_modules
+[7.14-7.30] /home/seb/src/odoo/master/master-test--seb ✅️ code --folder-uri vscode-remote://dev-container+<hex>/workspace
 Done
 ```
 
