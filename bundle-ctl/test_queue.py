@@ -143,6 +143,7 @@ def prepare(root, bundles, cap, short=False, disk=100):
     }
     launched = []
     daemon.DISK_STOP = 30
+    daemon.HELD_DIR = root / "held"
     daemon.MAX_AGENTS = cap
     daemon.describe_memory = lambda _open_windows: {
         "available": 9.0,
@@ -785,6 +786,79 @@ def check_parked(root):
     return [f"parked: {name}" for name, passed in checks if not passed], len(checks)
 
 
+def check_close(root):
+    """A task that waits for the terminal of an agent that gave its verdict asks Seb in hok, once,
+    to close that terminal and not during a turn; his yes closes it, his no keeps it with no new
+    card for that task, and a terminal closed by hand takes the card back."""
+    bundles = {"ended": ENDED_ANOTHER, "typing": ENDED_ANOTHER, "busy": RUNS_ANOTHER}
+    state, launched = prepare(root, bundles, 8)
+    (daemon.get_agent_folder("ended") / "result.md").write_text("pushed: abc\n")
+    turns, windows = {"typing"}, {"ended", "typing"}
+    in_turn = daemon.is_in_turn
+    daemon.is_in_turn = turns.__contains__
+    daemon.get_window_pids = lambda bundle: [1] * (bundle in windows)
+    daemon.close_window = windows.discard
+
+    def get_cards():
+        return {
+            path.stem: daemon.HELD.read_json(path)
+            for path in daemon.HELD_DIR.glob("*.json")
+        }
+
+    def answer(number, words):
+        path = daemon.HELD_DIR / f"{number}.json"
+        said = f"yes {daemon.HELD.read_json(path)['digest']}" if words == "yes" else words
+        path.with_suffix(".answer").write_text(f"{said}\n")
+        daemon.HELD.take(path.with_suffix(".answer"), daemon.send_held, daemon.keep_terminal)
+        return daemon.HELD.read_json(path.with_suffix(".result"))["text"]
+
+    daemon.launch_safely()
+    cards = get_cards()
+    card = cards.get("1") or {}
+    since = daemon.format_time(QUEUED)
+    lines = [
+        "its agent ended on this report:",
+        "  pushed: abc",
+        f"the task from host that waits for it since {since}:",
+        f"  {TASK}",
+    ]
+    found = list(cards), card.get("send"), card.get("lines"), card.get("client")
+    asked = ["1"], {"close": "ended", "queued": QUEUED}, lines, "ended"
+    checks = [("one card, for the ended agent", found == asked)]
+    created = card.get("created")
+    daemon.launch_safely()
+    found = list(get_cards()), get_cards().get("1", {}).get("created")
+    checks.append(("the next pass asks no more", found == (["1"], created)))
+    found = answer(1, "yes"), windows
+    said = "the terminal of ended closes: the task from host starts after it"
+    checks.append(("a yes closes the terminal", found == (said, {"typing"})))
+    (daemon.get_agent_folder("ended") / "terminal").unlink()
+    turns.clear()
+    daemon.launch_safely()
+    checks.append(("its task starts once it closed", launched == ["ended"]))
+    number, card = next(iter(get_cards().items()), (None, {}))
+    checks.append(("its turn ended, the other asks", card.get("send", {}).get("close") == "typing"))
+    turns.add("typing")
+    text = answer(number, "yes")
+    found = "a turn runs" in text, windows, get_cards()
+    checks.append(("a yes during a turn keeps it open", found == (True, {"typing"}, {})))
+    turns.clear()
+    daemon.launch_safely()
+    text = answer(next(iter(get_cards())), "no")
+    daemon.launch_safely()
+    found = state["kept_terminals"], get_cards()
+    checks.append(("a no keeps it, and asks no more", found == ({"typing": QUEUED}, {})))
+    state["kept_terminals"] = {}
+    daemon.launch_safely()
+    (daemon.get_agent_folder("typing") / "terminal").unlink()
+    windows.clear()
+    daemon.launch_safely()
+    found = get_cards(), "typing" in launched, state["kept_terminals"]
+    checks.append(("a terminal closed by hand takes the card back", found == ({}, True, {})))
+    daemon.is_in_turn = in_turn
+    return [f"close: {name}" for name, passed in checks if not passed], len(checks)
+
+
 def check_ramp(root):
     """Only an agent that began its run in the last AGENT_RAMP seconds and gave no verdict counts
     for the memory it takes soon.
@@ -824,6 +898,7 @@ def main():
         check_build,
         check_parked,
         check_priority,
+        check_close,
         check_ramp,
     ):
         with tempfile.TemporaryDirectory() as root:

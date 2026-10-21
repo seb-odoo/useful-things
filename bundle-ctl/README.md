@@ -804,7 +804,8 @@ each priority, the bundle that queued it, since when and what it waits for, so a
 where it goes.
 A task for a bundle whose agent has not ended is queued behind it, so the caller has nothing to
 try again: it waits for `its agent to end`, the verdict of an agent in a window, and for an agent
-in a terminal `then its terminal to close`. A VS Code window opened on the bundle meanwhile first
+in a terminal `then its terminal to close`, which `hok` asks Seb to close once that agent gave its
+verdict (see below). A VS Code window opened on the bundle meanwhile first
 takes that terminal's session over, and the task starts in the window at the next pass. A bundle
 holds one queued task: a second one is refused.
 One agent starts at a time, as several containers and claude sessions that start together take
@@ -844,6 +845,16 @@ without his yes, nor stops the container of a session he can still type in. `don
 run reached its verdict, as Seb often goes on in the session. A task for a bundle whose last
 session still has its terminal waits in the queue until that terminal closes, whether that session
 reached its verdict or not.
+
+Once that agent gave its verdict, the daemon asks Seb in `hok` to close its terminal (Seb,
+2026-10-21, after a bundle agent took the wait for a fault of bctl): one card per task, held as
+`bN` from the bundle of the terminal, whose band lists it, with the report of the verdict and the
+task that waits. His yes closes the terminal as he would; when a turn runs there (he typed in it),
+nothing closes and a new card comes once that turn ended. His no keeps the terminal, and no card
+comes again for that task. A terminal closed by hand, or a task that leaves the queue, takes its
+card back. The cards are asked after a pass of the queue started by the timer or by a container
+start or stop, never inside a pass: a yes holds the lock of `held/`, and what it sends may run a
+pass. `python3 test_queue.py` has the cases.
 
 The agent runs of all the containers start at least 10 seconds apart (a lock in the shared
 `~/.claude`), as claude processes started together fail each other's OAuth token refresh. A

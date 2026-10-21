@@ -1202,6 +1202,9 @@ def launch_queued():
                 item["waits_for"] = "memory on the host" if fits else "a slot"
             queue.append(item)
         state["queue"] = queue
+        if kept := state.get("kept_terminals"):
+            queued = {item["bundle"] for item in queue}
+            state["kept_terminals"] = {name: at for name, at in kept.items() if name in queued}
         write_state(state)
     return paced
 
@@ -1278,10 +1281,12 @@ def keep_launching():
 
 def launch_safely():
     try:
-        return launch_queued()
+        paced = launch_queued()
+        ask_closes()
     except Exception:
         traceback.print_exc()
         return False
+    return paced
 
 
 def delete_safely():
@@ -1580,6 +1585,66 @@ def close_dead_window(bundle):
         if time.monotonic() > deadline:
             raise Refused(f"{bundle}: the agent window where its claude ended stays open")
         time.sleep(0.5)
+
+
+def get_close_cards():
+    """The requests of hok to close an agent terminal that still wait, by bundle."""
+    cards = {}
+    for path in HELD_DIR.glob("*.json"):
+        bundle = ((HELD.read_json(path) or {}).get("send") or {}).get("close")
+        if bundle and not path.with_suffix(".answer").exists():
+            cards[bundle] = path
+    return cards
+
+
+def ask_closes():
+    """Ask Seb in hok to close the terminal of each bundle whose agent gave its verdict while a
+    task waits for that terminal, and take back the requests no task waits on any more. Never
+    from a pass of the queue: a yes holds HELD.lock, and its send may run a pass."""
+    if HELD is None:
+        return
+    with state_lock:
+        state = read_state()
+    kept = state.get("kept_terminals", {})
+    closes = {
+        item["bundle"]: item
+        for item in state["queue"]
+        if item.get("waits_for") == "its terminal to close"
+        and (get_agent_folder(item["bundle"]) / "done").exists()
+        and kept.get(item["bundle"]) != item["queued"]
+    }
+    with HELD.lock:
+        cards = get_close_cards()
+        for bundle in cards.keys() - closes.keys():
+            cards[bundle].unlink(missing_ok=True)
+    for bundle, item in closes.items():
+        if bundle not in cards and not is_in_turn(bundle):
+            HELD.add(HELD_DIR, get_close_card(bundle, item))
+
+
+def get_close_card(bundle, item):
+    report = read_text(get_agent_folder(bundle) / "result.md")
+    since = format_time(item["queued"])
+    return {
+        "client": bundle,
+        "key": f"close {bundle}",
+        "lines": [
+            *(
+                ["its agent ended on this report:"]
+                + [f"  {line}".rstrip() for line in report.splitlines()]
+                if report
+                else []
+            ),
+            f"the task from {item['parent']} that waits for it since {since}:",
+            *(f"  {line}".rstrip() for line in item["task"].splitlines()),
+        ],
+        "send": {"close": bundle, "queued": item["queued"]},
+        "title": f"close the terminal of {bundle}",
+        "yes": (
+            "its terminal closes as when you close it: its claude and its container stop, then the"
+            f" task from {item['parent']} starts in the bundle"
+        ),
+    }
 
 
 def get_terminals():
@@ -2166,11 +2231,42 @@ def send_deletion(item):
     return f"{bundle} is being deleted, see {job['log']}"
 
 
+def send_close(item):
+    """Seb's yes to closing the terminal of a bundle whose agent gave its verdict: the task that
+    waits for it starts once its container stopped."""
+    bundle, at = item["send"]["close"], item["send"]["queued"]
+    with state_lock:
+        queue = read_state()["queue"]
+    task = next((task for task in queue if (task["bundle"], task["queued"]) == (bundle, at)), None)
+    if task is None:
+        raise ValueError(f"the task left the queue: the terminal of {bundle} stays open")
+    if not get_window_pids(bundle):
+        return f"the terminal of {bundle} was closed already: its task starts"
+    if is_in_turn(bundle):
+        raise ValueError(
+            f"a turn runs in the terminal of {bundle}: it stays open, and hok asks again once that"
+            " turn ended",
+        )
+    close_window(bundle)
+    return f"the terminal of {bundle} closes: the task from {task['parent']} starts after it"
+
+
+def keep_terminal(item):
+    """Seb's no to closing a terminal: hok does not ask again for the task that waits on it."""
+    if "close" in item["send"]:
+        with state_lock:
+            state = read_state()
+            state.setdefault("kept_terminals", {})[item["send"]["close"]] = item["send"]["queued"]
+            write_state(state)
+
+
 def send_held(item):
-    """Seb's yes to what was held: the deletion of a bundle, the task a bundle sends to a new ops
-    agent, or the resume of the cut sessions."""
+    """Seb's yes to what was held: the deletion of a bundle, the close of an agent terminal, the
+    task a bundle sends to a new ops agent, or the resume of the cut sessions."""
     if "resume" in item["send"]:
         return resume_cut(item["send"]["resume"])
+    if "close" in item["send"]:
+        return send_close(item)
     if "bundle" in item["send"]:
         return send_deletion(item)
     _code, answer = open_ops(HOST, "ops", {"task": item["send"]["task"]})
@@ -2511,7 +2607,11 @@ def main():
     print(f"listening on {SOCKET}", flush=True)
     RUNS.watch()
     if HELD:
-        threading.Thread(target=HELD.serve, args=(HELD_DIR, send_held), daemon=True).start()
+        threading.Thread(
+            target=HELD.serve,
+            args=(HELD_DIR, send_held, keep_terminal),
+            daemon=True,
+        ).start()
     keep_launching()
     server.serve_forever()
 
