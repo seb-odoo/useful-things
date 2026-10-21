@@ -492,9 +492,11 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   under the kinds, at full width (Seb, 2026-10-20: "agent list should not have a global
   horizontal scrollbar that hides the search when too small, make it responsive"): the side of
   `hok` scrolls sideways only once it is half as wide as before. Under the rows, behind a handle, the queue of `bctl queue`, read every 10 seconds, as `GET /queue`
-  runs `podman ps`, in its order, which no header click changes. A task there has the mark and
-  the kind of its bundle (Seb, 2026-10-19), those of its row when it has one, else those its
-  window would show once the session it goes on with is idle; its last message, its own text or,
+  runs `podman ps`, in its order, which no header click changes. A task there has its own state,
+  paused, over the cap or else queued (Seb, 2026-10-21, as the mark of its bundle showed a task
+  behind a running agent as running), and the kind of its bundle (Seb, 2026-10-19), that of its
+  row when it has one, else the one its window would show once the session it goes on with is
+  idle; its last message, its own text or,
   for a session queued again as it was, the last prompt of that session; and its last answer,
   the close line of the last answer of that session, else its first line. A new task has no
   session yet, so no answer. Under it, Force lets each

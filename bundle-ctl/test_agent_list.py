@@ -105,10 +105,10 @@ QUEUED = [
     {"bundle": "master-c-fw--seb", "resume": True, "session": "S8", "task": "Go on with it"},
 ]
 QUEUED_LINES = [
-    ["✋ waiting", "⭐ mine", "master-r--seb", "0", "13:00", "a slot", "yes, go on",
+    ["queued", "⭐ mine", "master-r--seb", "0", "13:00", "a slot", "yes, go on",
      "Waiting for you: r+ on odoo#7"],
-    ["⏳ running", "⭐ mine", "master-n--seb", "0", "13:00", "a slot", "Fix the test", ""],
-    ["✅ finished", "⏩ fw", "master-c-fw--seb", "0", "13:00", "a slot", "Go on with it",
+    ["queued", "⭐ mine", "master-n--seb", "0", "13:00", "a slot", "Fix the test", ""],
+    ["queued", "⏩ fw", "master-c-fw--seb", "0", "13:00", "a slot", "Go on with it",
      "pushed: abc"],
 ]
 TRANSCRIPTS = {
@@ -506,7 +506,7 @@ def main():
             failures.append(f"ops row, minimized {minimized}: {found!r}, expected {expected!r}")
     queue = (
         "8/15 agents at work in a terminal, 1 queued",
-        [["", "", "master-x--seb", "5", "14:02", "a slot", "", ""]],
+        [["queued", "", "master-x--seb", "5", "14:02", "a slot", "", ""]],
     )
     if (found := agent_list.describe_queue(QUEUE)) != queue:
         failures.append(f"queue {found!r}, expected {queue!r}")
@@ -515,9 +515,10 @@ def main():
         failures.append(f"queue while the host is short of memory: {head!r}")
     if (found := agent_list.describe_queue(None)) != ("bundle-ctl does not answer", []):
         failures.append(f"queue with no daemon: {found!r}")
-    forced = dict(QUEUE, queue=[dict(QUEUE["queue"][0], forced=True)])
-    if (found := agent_list.describe_queue(forced)[1][0][5]) != "a slot, over the cap":
-        failures.append(f"forced task waits for {found!r}")
+    for flag, state in (("forced", "over the cap"), ("paused", "paused")):
+        flagged = dict(QUEUE, queue=[dict(QUEUE["queue"][0], **{flag: True})])
+        if (found := agent_list.describe_queue(flagged)[1][0][:6:5]) != [state, "a slot"]:
+            failures.append(f"{flag} task: {found!r}")
     searched = [agent_list.describe_queue(QUEUE, search=text) for text in ("X--S", "master-y")]
     if searched != [queue, (queue[0], [])]:
         failures.append(f"queue searched {searched!r}, expected the task of master-x--seb alone")

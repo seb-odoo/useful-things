@@ -33,8 +33,9 @@ at most (bctl requeue): the queue starts it again with "Continue from where you 
 turn comes. Pause does the same, and the task waits in the queue for a manual resume. A right
 click on a row opens a menu with these seven. New ops agent runs bctl open ops --terminal.
 
-A task of the queue has the mark and the kind of its bundle: those of its row when it has one, else
-those its window would show once the session it goes on with is idle. Its last message is its own
+A task of the queue has its own state (paused, over the cap, else queued) and the kind of its
+bundle: that of its row when it has one, else the one its window would show once the session it
+goes on with is idle. Its last message is its own
 text, or the last prompt of that session for a session queued again as it was, and its last answer
 the close line of the last answer of that session, else its first line. Under
 the queue, Force lets each selected task start over the cap, Up and Down move the first selected
@@ -462,7 +463,7 @@ def read_queue():
 
 def describe_queue(answer, rows=(), search=""):
     """The head and the lines of the queue, those of the bundles the search is in. A task whose
-    bundle has a row takes its mark and kind from it, else from the title read with the queue."""
+    bundle has a row takes its kind from it, else from the title read with the queue."""
     if answer is None:
         return "bundle-ctl does not answer", []
     head = f"{answer['agents']}/{answer['max_agents']} agents at work in a terminal"
@@ -477,14 +478,16 @@ def describe_queue(answer, rows=(), search=""):
         title = item.get("title") or ""
         row = found.get(item["bundle"])
         row = row or picker.Row(None, picker.get_rank(title), title, item["bundle"], None, True)
-        waits_for = [item.get("waits_for"), item.get("forced") and "over the cap"]
+        forced = item.get("forced") and "over the cap"
+        state = "paused" if item.get("paused") else forced or "queued"
         lines.append(
             [
-                *get_mark_and_kind(row),
+                state,
+                get_mark_and_kind(row)[1],
                 item["bundle"],
                 str(item["priority"]),
                 item.get("queued") or "",
-                ", ".join(filter(None, waits_for)),
+                item.get("waits_for") or "",
                 item.get("message") or "",
                 item.get("answer") or "",
             ],
