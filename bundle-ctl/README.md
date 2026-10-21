@@ -294,21 +294,35 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   on `default`, the default of the account, which Anthropic sets and which is not the
   `ANTHROPIC_MODEL` of the settings.
 - A turn that ends on a verdict writes `done` (`client/agent-stop.py`), a turn that ends on
-  anything else `waiting`. Either way the claude session stays open in its terminal, for Seb to
-  read what ran and to type in. A `done` agent leaves its slot of the cap, a `waiting` one keeps
-  it. Both keep their container, so a new task waits for `memory on the host` when the host is
-  short of it.
-- Quitting claude or closing the terminal stops the container, and nothing else does: Seb may
-  type in that session at any time. Without a verdict the agent then reads `stopped`. So does a
+  anything else `waiting`. A `waiting` agent keeps its slot of the cap, its container, and its
+  session open in its terminal, for Seb to read what ran and to type in. A `done` agent leaves its
+  slot, and the daemon closes its terminal a few minutes later (below), so that its container
+  gives its memory back.
+- Quitting claude or closing the terminal stops the container. Before the verdict nothing else
+  does: Seb may type in that session at any time. Without a verdict the agent then reads `stopped`. So does a
   terminal that dies without closing (killed, or lost with the X server): `podman exec` does not see that hangup, so the wrapper ends on the hangup and stops
   the container itself. With a VS Code window attached, it keeps the container and hands the
   session to that window instead (`client/agent-takeover.py`, as the window does when it opens):
   else its claude runs on with no terminal, and the tab finds the session open in another process.
 - Quitting claude or closing the terminal also closes the Firefox tab groups of the bundle (Seb,
   2026-10-20: "closing an agent or deleting a bundle should also close its firefox group"). Not
-  when the daemon closes the window for Back to queue or Pause (`.agent/pause`), on a takeover, on
+  when the daemon closes the window for Back to queue, Pause or a verdict (`.agent/pause`), on a takeover, on
   a claude that ended on an error or a container that could not start, nor while the host shuts
   down (`systemctl is-system-running` says `stopping`), so that Firefox restores them.
+- Once its agent gave its verdict, the daemon closes the terminal (Seb, 2026-10-21: "bundle agents
+  shouldn't wait for their own ci or something, this is done with triage. once work is done,
+  agents should free up slot"). The CI, the staging and the reviews of its PRs are for the next
+  triage, which queues a new task: PR events (below) no longer reach a closed agent. Only when the
+  last answer of its session opens on a verdict and its session has been `idle` for 5 minutes
+  (`FREE_AFTER`, so that Seb sees its ✅ or ✋ and can bring it up): not in a turn he started, a
+  dialog, a background command a turn left (`shell`: the watch of a review that waits for his
+  review), nor the reset of the usage limit. Only while its window is minimized, as one on screen
+  is his to read, and while no task is queued for the bundle, which goes on in that session
+  (below). Its claude and its container stop as when Seb closes it, but its Firefox tab groups
+  stay: they hold the pages the report asks him to open. The report stays in `.agent/result.md`
+  and in the transcript, the agent reads `done`, and `bctl open BUNDLE --terminal` opens the
+  session again. The journal says `BUNDLE: its agent ended on its verdict, its terminal closes`.
+  `python3 test_restart.py` runs each case.
 - A terminal runs the code it started with. When `agent-terminal.py`, `agent-terminator.py` or a
   script they load changed since, the daemon opens a new terminal on that bundle, which takes the
   session over in the same container, and the old window closes (Seb, 2026-10-20: "can we somehow
@@ -878,9 +892,10 @@ prompt. When none is given, `Continue from where you left off.` and, at the laun
 closed and what to check since its last turn. This is how an agent cut before its
 verdict (`stopped`) starts again with what it knew. It is refused when the bundle has no session,
 or is open in a window, where the session goes on in its Claude tab.
-Closing the terminal or the window of an agent is Seb's call, and nothing deletes a bundle
-without his yes, nor stops the container of a session he can still type in. `done` only says the
-run reached its verdict, as Seb often goes on in the session. A task for a bundle whose last
+Closing the window of an agent is Seb's call, and so is closing its terminal before its verdict
+(see Agents in a terminal); nothing deletes a bundle without his yes. `done` says the run reached
+its verdict: Seb may still go on in the session, in its terminal while it is on screen, or with
+`bctl open BUNDLE --terminal` once it closed. A task for a bundle whose last
 session still has its terminal waits in the queue until that terminal closes, or until that
 session gave its verdict and its window is minimized.
 

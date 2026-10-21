@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Which agent terminal the daemon restarts on new code, and how it finds them, without a terminal:
-python3 test_restart.py
+"""Which agent terminal the daemon restarts on new code or closes once its agent gave its verdict,
+and how it finds them, without a terminal: python3 test_restart.py
 """
 
 import os
@@ -8,6 +8,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -33,6 +34,35 @@ CASES = [
     ({"status": "shell"}, False),
     ({"status": None}, False),
     ({"resuming": True}, False),
+    ({"minimized": False}, False),
+]
+
+FREE_BASE = {
+    "queued": False,
+    "held": True,
+    "done": True,
+    "pause": False,
+    "age": 600,
+    "status": "idle",
+    "resuming": False,
+    "answer": "pushed: 1234abc\n\nDone ...",
+    "minimized": True,
+}
+# What differs from FREE_BASE, and whether the terminal closes.
+FREE_CASES = [
+    ({}, True),
+    ({"answer": "**needs Seb:** review odoo#1, approve"}, True),
+    ({"queued": True}, False),
+    ({"held": False}, False),
+    ({"done": False}, False),
+    ({"pause": True}, False),
+    ({"age": 60}, False),
+    ({"status": "busy"}, False),
+    ({"status": "waiting"}, False),
+    ({"status": "shell"}, False),
+    ({"resuming": True}, False),
+    ({"answer": "The CI is green now."}, False),
+    ({"answer": None}, False),
     ({"minimized": False}, False),
 ]
 
@@ -90,6 +120,60 @@ def check_cases(root):
     return failures
 
 
+def free(root, bundle, case):
+    """The bundles one call closes, for a terminal of `bundle` in `case`."""
+    agent = root / bundle / ".agent"
+    agent.mkdir(parents=True, exist_ok=True)
+    (agent / "session").write_text("s1\n")
+    (agent / "terminal").write_text(f"{1000 if case['held'] else 1}\n")
+    for name in ("done", "pause"):
+        (agent / name).unlink(missing_ok=True)
+        if case[name]:
+            (agent / name).write_text("0\n")
+    transcript = root / bundle / "s1.jsonl"
+    transcript.touch()
+    os.utime(transcript, (time.time() - case["age"],) * 2)
+    queue = [{"bundle": bundle}] if case["queued"] else []
+    closed = []
+    daemon.read_state = lambda: {"queue": queue}
+    daemon.get_agent_folder = lambda bundle: root / bundle / ".agent"
+    daemon.get_terminals = lambda: {bundle: 1000}
+    daemon.get_transcript = lambda session: transcript
+    daemon.get_last_text = lambda transcript: case["answer"]
+    daemon.get_session_status = lambda bundle, session: case["status"]
+    daemon.TITLE.is_resuming = lambda session: case["resuming"]
+    daemon.read_stat = lambda pid: (pid, 0)
+    daemon.is_minimized = lambda pid, env: case["minimized"]
+    daemon.session_env = dict
+    daemon.close_freed = closed.append
+    daemon.print = lambda *args, **kwargs: None
+    daemon.free_done_terminals()
+    for thread in threading.enumerate():
+        if thread is not threading.main_thread():
+            thread.join(1)
+    return closed
+
+
+def check_free(root):
+    failures = []
+    close_freed = daemon.close_freed
+    for at, (changes, expected) in enumerate(FREE_CASES):
+        bundle = f"f{at}"
+        found = free(root, bundle, {**FREE_BASE, **changes})
+        if found != ([bundle] if expected else []):
+            failures.append(f"free {changes}: closed {found}, expected {expected}")
+    daemon.close_freed = close_freed
+    pause = root / "g1" / ".agent" / "pause"
+    pause.parent.mkdir(parents=True)
+    seen = []
+    daemon.close_window = lambda bundle: seen.append(pause.exists())
+    daemon.get_window_pids = lambda bundle: []
+    daemon.close_freed("g1")
+    if seen != [True] or pause.exists():
+        failures.append(f"close_freed: pause while closing {seen}, after {pause.exists()}")
+    return failures
+
+
 def check_processes(root):
     """get_terminals and read_stat on processes named as agent-terminal.py runs."""
     script = root / "agent-terminal.py"
@@ -118,10 +202,13 @@ def main():
     get_terminals, read_stat = daemon.get_terminals, daemon.read_stat
     with tempfile.TemporaryDirectory() as root:
         failures += check_cases(pathlib.Path(root))
+    with tempfile.TemporaryDirectory() as root:
+        failures += check_free(pathlib.Path(root))
     daemon.get_terminals, daemon.read_stat = get_terminals, read_stat
     for failure in failures:
         print(f"FAIL {failure}")
-    print(f"{len(CASES) + 4 - len(failures)}/{len(CASES) + 4} cases as expected")
+    total = len(CASES) + len(FREE_CASES) + 5
+    print(f"{total - len(failures)}/{total} cases as expected")
     return 1 if failures else 0
 
 
