@@ -1,0 +1,6 @@
+{
+  "name": "agentbar",
+  "version": "0.1.0",
+  "description": "A band above the prompt of a bundle or ops agent: its requests that wait in hok, and links to them, to its row in the agent list and to its Firefox tab group",
+  "types": "./types/index.d.ts"
+}

@@ -381,6 +381,30 @@ def check_usage(agent_list):
     return failures
 
 
+def check_pick(agent_list):
+    """A row asked by --select: an ops agent window by its session, a row that shows later, and
+    none after PICK_TIME."""
+    failures, selected, shown = [], [], {"0x4", "master-x--seb"}
+    agents = agent_list.Agents.__new__(agent_list.Agents)
+    agents.select = lambda key: selected.append(key) or key in shown
+    row = agent_list.picker.Row(None, 0, "🔧 Refactor (ops)", "0x4", "0x4", True)
+    agents.agents_read = [(row, ("", "", 0.0, "", "s1"))]
+    agents.pick("ops-s1")
+    if selected != ["0x4"] or agents.target is not None:
+        failures.append(f"pick of an ops session selected {selected!r}, left {agents.target!r}")
+    agents.pick("hok:g12")
+    shown.add("hok:g12")
+    agents.select_target()
+    if selected[1:] != ["hok:g12", "hok:g12"] or agents.target is not None:
+        failures.append(f"pick of a row that shows later selected {selected!r}")
+    agents.pick("gone")
+    agents.target = ("gone", 0.0)
+    agents.select_target()
+    if agents.target is not None:
+        failures.append(f"pick still waits after PICK_TIME: {agents.target!r}")
+    return failures
+
+
 def check_tree(agent_list):
     """The rows another window adds under the agents and after them, the session of each agent,
     and the start of hok, with scripts that stand for it."""
@@ -496,11 +520,11 @@ def main():
             failures.append(f"move {step} of {bundles[at]} in {bundles}: {found!r}")
     failures += check_filters(agent_list) + check_reads(agent_list) + check_usage(agent_list)
     failures += check_ask(agent_list) + check_queue(agent_list) + check_tabs(agent_list)
-    failures += check_tree(agent_list)
+    failures += check_tree(agent_list) + check_pick(agent_list)
     for line in failures:
         print(line)
     cases = len(AGENTS) + len(OPS_INFOS) + 4 + 1 + len(FACETS) + len(FILTERED) + 2 + 7 + 3 + 3
-    cases += len(QUEUED_LINES) + 1 + 2 + len(SEARCHED) + 1 + len(MOVES) + len(TABS) + 2 + 9
+    cases += len(QUEUED_LINES) + 1 + 2 + len(SEARCHED) + 1 + len(MOVES) + len(TABS) + 2 + 9 + 3
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

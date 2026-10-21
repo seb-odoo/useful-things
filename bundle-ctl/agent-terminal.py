@@ -467,6 +467,7 @@ def run_ops(name):
             ["podman", "exec", "--interactive", "--tty", "--detach-keys=", "--user", USER]
             + ["--workdir", REPO_ROOT, "--env", f"TERM={os.environ.get('TERM', 'xterm')}"]
             + ["--env", "SHELL=/bin/bash", container, CLAUDE, "--model", "opus"]
+            + ["--plugin-dir", str(HERE / "agentbar")]
             + get_ops_start(session, task)
         )
     except HangUp:

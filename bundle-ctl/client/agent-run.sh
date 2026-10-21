@@ -58,6 +58,7 @@ if [ -n "$terminal" ]; then
 	if [ -e "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/-workspace/$session.jsonl" ]; then
 		start=(--resume "$session")
 	fi
+	start+=(--plugin-dir "$(dirname "$(readlink -f "$0")")/../agentbar")
 	# Record the mode for the Claude tab: without .agent/mode, the tab resumes the session in plan.
 	[ -s "$agent/mode" ] || echo auto >"$agent/mode"
 	if [ -n "$reopen" ]; then

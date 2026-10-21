@@ -50,6 +50,12 @@ window of hok (hokwin.py), which shows them with the requests of each agent unde
 window opens alone when hok ends with an error within START seconds. There, the 🔑 hok button
 before the marks keeps the agents with a request under them and the groups of requests, and
 counts those requests.
+
+    agent-list.py --select KEY
+
+brings the window up on the row of KEY once its rows show it: a bundle, an ops agent window by
+its session (ops-SESSION), or a row of the owner, a request of hok (hok:NAME). The band of an
+agent terminal links it through bundle_open.py.
 """
 
 import collections
@@ -96,6 +102,7 @@ ICON = HERE / "agent-list.svg"
 KEY, WINDOW, TITLE = 9, 10, 11
 NOT_BUILT = "Nothing of this bundle is checked out yet"
 OWNED = "🔑 hok"
+PICK_TIME = 10
 SORTS = (12, 13, 2, 14, 15, 16, 17, 7, 8)
 PLACE = (
     pathlib.Path(os.environ.get("XDG_STATE_HOME") or pathlib.Path.home() / ".local/state")
@@ -566,13 +573,13 @@ def get_all(rows):
         yield from get_all(row.iterchildren())
 
 
-def open_hok():
+def open_hok(args=()):
     """Start the window of hok, which shows the agents with the requests of each: whether it
     runs, or brought up the one open. False when host-ctl is not on this machine, or when hok ends
     with an error within START seconds."""
     if not HOK.is_file():
         return False
-    command = [sys.executable, str(HOK)]
+    command = [sys.executable, str(HOK), *args]
     started = subprocess.Popen(command, start_new_session=True, stdin=subprocess.DEVNULL)
     try:
         return started.wait(START) == 0
@@ -722,6 +729,7 @@ class Agents:
         self.disks = {}
         self.owner = owner or Alone(window)
         self.queue_answer = None
+        self.target = None
         self.updating = False
         self.usage = {}
         self.usage_reader = Usage()
@@ -830,6 +838,22 @@ class Agents:
         self.agents_view.scroll_to_cell(row.path, None, False, 0, 0)
         return True
 
+    def pick(self, key):
+        """Select the row of key once the rows show it, for PICK_TIME seconds at most. An ops agent
+        window is found by its session (ops-SESSION)."""
+        self.target = (key, time.monotonic() + PICK_TIME)
+        self.select_target()
+
+    def select_target(self):
+        if self.target is None:
+            return
+        key, until = self.target
+        if key.startswith(OPS):
+            sessions = {info[-1]: row.key for row, info in self.agents_read if info[-1]}
+            key = sessions.get(key.removeprefix(OPS), key)
+        if self.select(key) or time.monotonic() > until:
+            self.target = None
+
     def search_changed(self, _entry):
         self.show()
         self.show_queue(self.queue_answer)
@@ -872,6 +896,7 @@ class Agents:
         if bool(children) != self.agents_view.get_show_expanders():
             self.agents_view.set_show_expanders(bool(children))
         self.children = children
+        self.select_target()
 
     def get_line(self, place, row, info):
         """The columns of a row, then its key, window and title, then the values its columns sort
@@ -1068,8 +1093,16 @@ class Agents:
 
 class AgentList(Gtk.Application):
     def __init__(self):
-        super().__init__(application_id="org.bundle_ctl.AgentList")
+        flags = Gio.ApplicationFlags.HANDLES_COMMAND_LINE
+        super().__init__(application_id="org.bundle_ctl.AgentList", flags=flags)
         self.agents = self.window = None
+
+    def do_command_line(self, line):
+        args = line.get_arguments()[1:]
+        self.activate()
+        if args[:1] == ["--select"] and args[1:]:
+            self.agents.pick(args[1])
+        return 0
 
     def do_activate(self):
         if self.window:
@@ -1103,5 +1136,5 @@ class AgentList(Gtk.Application):
 
 
 if __name__ == "__main__":
-    if not open_hok():
-        AgentList().run()
+    if not open_hok(sys.argv[1:]):
+        AgentList().run(sys.argv)
