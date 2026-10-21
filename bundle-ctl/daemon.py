@@ -146,6 +146,7 @@ DISK_WARN = float(
     os.environ.get("BUNDLE_CTL_DISK_WARN_GB") or CONFIG.get("BUNDLE_CTL_DISK_WARN_GB") or 60,
 )
 EFFORTS = ("low", "medium", "high", "xhigh")
+FREE_AFTER = 5 * 60
 GITHUB_ASK = 600
 GITHUB_MUX = pathlib.Path.home() / ".local" / "state" / "ssh-github-mux"
 GITHUB_OWNER = re.compile(r"[A-Za-z0-9-]{1,39}")
@@ -236,6 +237,7 @@ folder_by_container = {}
 jobs = {}
 kept_reviews = {}
 restarted = {}
+ops_lock = threading.Lock()
 state_lock = threading.Lock()
 status_lock = threading.Lock()
 work_lock = threading.Lock()
@@ -786,8 +788,8 @@ def open_terminal(log, bundle, takeover=None):
     run_in_session(log, *terminal, *agent, scope=False, setenv=setenv)
 
 
-def run_job(job, work):
-    with work_lock, open(job["log"], "a", buffering=1) as log:
+def run_job(job, work, lock):
+    with lock, open(job["log"], "a", buffering=1) as log:
         job["state"] = "running"
         try:
             job["result"] = work(log) or {}
@@ -803,7 +805,7 @@ def run_job(job, work):
     print(f"{job['caller']} job {job['id']} {job['verb']} {job['state']}", flush=True)
 
 
-def start_job(caller, verb, work):
+def start_job(caller, verb, work, lock=work_lock):
     (STATE / "jobs").mkdir(parents=True, exist_ok=True)
     job_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}"
     job = {
@@ -815,7 +817,7 @@ def start_job(caller, verb, work):
         "verb": verb,
     }
     jobs[job_id] = job
-    threading.Thread(target=run_job, args=(job, work), daemon=True).start()
+    threading.Thread(target=run_job, args=(job, work, lock), daemon=True).start()
     return 202, {"job": job_id}
 
 
@@ -1269,6 +1271,7 @@ def keep_launching():
             warn_disk()
             delete_safely()
             restart_safely()
+            free_safely()
             if time.monotonic() - checked > REVIEW_CHECK:
                 checked = time.monotonic()
                 drop_reviews_safely()
@@ -1300,6 +1303,13 @@ def delete_safely():
 def restart_safely():
     try:
         restart_old_terminal()
+    except Exception:
+        traceback.print_exc()
+
+
+def free_safely():
+    try:
+        free_done_terminals()
     except Exception:
         traceback.print_exc()
 
@@ -1729,6 +1739,56 @@ def restart_old_terminal():
         return
 
 
+def free_done_terminals():
+    """Close the terminal of each bundle whose agent ended its run on a verdict, so that its
+    container gives its memory back: the CI, the staging and the reviews of its PRs are for the
+    next triage. Only once its session is idle on a last answer that opens on a verdict, for
+    FREE_AFTER, and while its window is minimized, as for restart_old_terminal. A task queued for
+    the bundle goes on in that session instead (can_go_on)."""
+    with state_lock:
+        state = read_state()
+    queued = {item["bundle"] for item in state["queue"]} | set(state.get("deletions", []))
+    env = None
+    for bundle, pid in get_terminals().items():
+        agent = get_agent_folder(bundle)
+        session = read_text(agent / "session")
+        transcript = session and get_transcript(session)
+        if (
+            bundle in queued
+            or read_text(agent / "terminal") != str(pid)
+            or not (agent / "done").exists()
+            or (agent / "pause").exists()
+            or is_deleting(bundle)
+            or not transcript
+            or time.time() - (get_mtime(transcript) or 0) < FREE_AFTER
+            or get_session_status(bundle, session) != "idle"
+            or TITLE.is_resuming(session)
+        ):
+            continue
+        lines = (get_last_text(transcript) or "").strip().splitlines()
+        if not lines or not cut.VERDICT.match(lines[0].strip().lstrip("#*_` ")):
+            continue
+        env = env or session_env()
+        if not is_terminal_minimized(agent, env):
+            continue
+        print(f"{bundle}: its agent ended on its verdict, its terminal closes", flush=True)
+        threading.Thread(target=close_freed, args=(bundle,), daemon=True).start()
+
+
+def close_freed(bundle):
+    """Close the agent window of a bundle as Seb would, its Firefox tab groups aside: its `pause`
+    keeps them, as they hold the pages its report asks him to open."""
+    pause = get_agent_folder(bundle) / "pause"
+    pause.write_text(f"{time.time() + WINDOW_CLOSE_WAIT}\n")
+    try:
+        close_window(bundle)
+        deadline = time.monotonic() + WINDOW_CLOSE_WAIT
+        while get_window_pids(bundle) and time.monotonic() < deadline:
+            time.sleep(0.5)
+    finally:
+        pause.unlink(missing_ok=True)
+
+
 def is_terminal_minimized(agent, env):
     """Whether the window of the terminal that holds the session of an agent is minimized."""
     try:
@@ -1948,7 +2008,7 @@ def resume_ops(name, prompt):
         open_terminal(log, name)
         return {"bundle": name}
 
-    return start_job(HOST, "open", work)
+    return start_job(HOST, "open", work, ops_lock)
 
 
 def resume_bundle(name, session, prompt):
@@ -2641,7 +2701,7 @@ def open_ops(caller, bundle, body):
         open_terminal(log, name)
         return {"bundle": name}
 
-    return start_job(caller, "open", work)
+    return start_job(caller, "open", work, ops_lock)
 
 
 def open_bundle(caller, query, body):

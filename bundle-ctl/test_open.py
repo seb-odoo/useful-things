@@ -100,7 +100,7 @@ def open_ops(root, caller, body):
     daemon.move_to_tab = lambda log, name: opened.append(f"tab {name}")
     daemon.open_terminal = open_terminal
     daemon.open_window = lambda log, bundle: opened.append(f"window {bundle}")
-    daemon.start_job = lambda caller, verb, work: (202, work(None))
+    daemon.start_job = lambda caller, verb, work, lock: (202, work(None))
     try:
         _code, answer = daemon.open_bundle(caller, {}, {"bundle": "ops", **body})
     except (ValueError, daemon.Refused) as error:
@@ -129,7 +129,8 @@ def open_new(root, agent):
 
 
 def answer_held(root, start_job):
-    """What Seb's yes to the task a bundle sends opens, with the real jobs of the daemon."""
+    """What Seb's yes to the task a bundle sends opens, with the real jobs of the daemon, while a
+    job of a bundle runs."""
     opened = []
     daemon.STATE = root
     daemon.open_terminal = lambda log, name: opened.append(
@@ -139,7 +140,8 @@ def answer_held(root, start_job):
     path = daemon.HELD_DIR / "1.json"
     answer = path.with_suffix(".answer")
     answer.write_text(f"yes {daemon.HELD.read_json(path)['digest']}\n")
-    daemon.HELD.take(answer, daemon.send_held)
+    with daemon.work_lock:
+        daemon.HELD.take(answer, daemon.send_held)
     found = [daemon.HELD.read_json(path.with_suffix(".result"))["text"], *opened]
     expected = [
         "an ops agent window opens on the task of bundle",

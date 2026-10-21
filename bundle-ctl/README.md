@@ -58,9 +58,10 @@ which the scripts link last, so no container can start in it. The same `create` 
 again finishes it.
 
 `add-repo`, `create`, `fetch` and `open` answer 202 with a job id, and the jobs run one at a time, as two
-fetches of one repo collide on its remote refs. A job takes the `DISPLAY` and `SSH_AUTH_SOCK` of the
-desktop session from `systemctl --user show-environment`, so it fails until Seb is logged in. The
-daemon never pushes.
+fetches of one repo collide on its remote refs. The opens of the ops window and of the ops agent
+windows touch no bundle: they run one at a time among themselves, never behind the build of a
+bundle. A job takes the `DISPLAY` and `SSH_AUTH_SOCK` of the desktop session from `systemctl
+--user show-environment`, so it fails until Seb is logged in. The daemon never pushes.
 
 `bctl` (`client/bctl.py`, stdlib only, defined in `container-rw/devcontainer.bashrc`) calls them
 from a container or from the host: `bctl whoami`, `bctl status`. The containers mount `client/`
