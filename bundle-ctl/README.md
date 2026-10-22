@@ -856,7 +856,9 @@ The answer is the task's place (`queued`) and what it waits for
 each priority, the bundle that queued it, since when and what it waits for, so a caller can pick
 where it goes.
 A task for a bundle whose agent has not ended is queued behind it, so the caller has nothing to
-try again: it waits for `its agent to end`. Once an agent in a terminal gave its verdict, that
+try again: it waits for `the previous agent of the bundle to end (at work since HH:MM)`, the
+start of its run (Seb, 2026-10-21, as `its agent to end` read as the task waiting on itself:
+"why would a queued item wait on itself?"). Once an agent in a terminal gave its verdict, that
 terminal types the task as the next prompt of the same session (see below). A
 VS Code window opened on the bundle meanwhile first
 takes that terminal's session over, and the task starts in the window at the next pass. A bundle
@@ -910,8 +912,9 @@ session. `agent-terminal.py` then types the task as one paste, then Enter, as it
 sent, and before a PR event that waits. It makes `.agent/run.lock` as it types, which begins the
 run; until then `client/agent-stop.py` writes no verdict, as a turn that ends then is not the
 task's. Until the session is `idle` (no turn, no dialog, no background command a turn left, no
-wait for the reset of the usage limit), the task waits for `its session to be idle`; a task with a
-time waits for it, and one that names another session waits for `its terminal to close`. The
+wait for the reset of the usage limit), the task waits for `the previous agent of the bundle to be
+idle`; a task with a time waits for it, and one that names another session waits for `the
+terminal of the previous agent of the bundle to close`. The
 journal says `BUNDLE: the task from PARENT goes to its terminal`. `python3 test_queue.py` and
 `python3 test_terminal.py` have the cases.
 

@@ -7,6 +7,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import socket
 import subprocess
 import sys
@@ -34,6 +35,10 @@ HELD_ANOTHER = {**ENDED_ANOTHER, "held": ""}
 LAUNCHES_ANOTHER = {"launching": "", "task.md": "other"}
 NEVER_RAN_ANOTHER = {"queued": f"{QUEUED - 60}\n", "task.md": "other"}
 RUNS_ANOTHER_IN_WINDOW = {"session": "s\n", "task.md": "other", "window": ""}
+BUSY = "the previous agent of the bundle to end"
+BUSY_SINCE = f"{BUSY} (at work since T)"
+IDLE = "the previous agent of the bundle to be idle"
+SINCE = re.compile(r"(?<=at work since )[^)]*")
 
 CASES = [
     ({"fresh": FRESH}, ["fresh"], []),
@@ -42,57 +47,57 @@ CASES = [
     (
         {"busy": RUNS_ANOTHER, "fresh": FRESH},
         ["fresh"],
-        ["busy: its agent to end"],
+        [f"busy: {BUSY_SINCE}"],
     ),
-    ({"ended": ENDED_ANOTHER}, [], ["ended: its session to be idle"]),
-    ({"ended": {**ENDED_ANOTHER, "window": ""}}, [], ["ended: its session to be idle"]),
-    ({"launching": LAUNCHES_ANOTHER}, [], ["launching: its agent to end"]),
+    ({"ended": ENDED_ANOTHER}, [], [f"ended: {IDLE}"]),
+    ({"ended": {**ENDED_ANOTHER, "window": ""}}, [], [f"ended: {IDLE}"]),
+    ({"launching": LAUNCHES_ANOTHER}, [], [f"launching: {BUSY}"]),
     ({"stranded": NEVER_RAN_ANOTHER}, ["stranded"], []),
-    ({"window": RUNS_ANOTHER_IN_WINDOW}, [], ["window: its agent to end"]),
+    ({"window": RUNS_ANOTHER_IN_WINDOW}, [], [f"window: {BUSY}"]),
     ({"first": FRESH, "second": FRESH}, ["first"], ["second: the agent of first to start"]),
     (
         {"launching": LAUNCHES_ANOTHER, "fresh": FRESH},
         [],
-        ["launching: its agent to end", "fresh: the agent of launching to start"],
+        [f"launching: {BUSY}", "fresh: the agent of launching to start"],
     ),
     (
         {"starting": STARTS_ANOTHER, "fresh": FRESH},
         [],
         [
-            "starting: its agent to end",
+            f"starting: {BUSY}",
             "fresh: the agent of starting to start",
         ],
     ),
     (
         {"stuck": NEVER_STARTED_ANOTHER, "fresh": FRESH},
         ["fresh"],
-        ["stuck: its agent to end"],
+        [f"stuck: {BUSY}"],
     ),
     (
         {"busy": RUNS_ANOTHER, "fresh": FRESH},
         [],
-        ["busy: its agent to end", "fresh: a slot"],
+        [f"busy: {BUSY_SINCE}", "fresh: a slot"],
         1,
     ),
     (
         {"busy": RUNS_ANOTHER, "fresh": FRESH, "later": FRESH},
         ["fresh"],
         [
-            "busy: its agent to end, over the cap",
+            f"busy: {BUSY_SINCE}, over the cap",
             "later: the agent of fresh to start, over the cap",
         ],
         1,
         True,
     ),
-    ({"ended": ENDED_ANOTHER, "fresh": FRESH}, ["fresh"], ["ended: its session to be idle"], 1),
-    ({"held": HELD_ANOTHER, "fresh": FRESH}, ["fresh"], ["held: its session to be idle"], 1),
+    ({"ended": ENDED_ANOTHER, "fresh": FRESH}, ["fresh"], [f"ended: {IDLE}"], 1),
+    ({"held": HELD_ANOTHER, "fresh": FRESH}, ["fresh"], [f"held: {IDLE}"], 1),
     ({"fresh": FRESH}, [], ["fresh: memory on the host"], 8, False, True),
     ({"fresh": FRESH}, ["fresh"], [], 8, True, True),
     (
         {"busy": RUNS_ANOTHER, "fresh": FRESH},
         [],
         [
-            "busy: its agent to end",
+            f"busy: {BUSY_SINCE}",
             "fresh: disk space (20 GB left, 30 needed)",
         ],
         8,
@@ -183,7 +188,8 @@ def run_pass(root, bundles, cap=8, force=False, short=False, disk=100):
     else:
         daemon.launch_queued()
     return launched, [
-        f"{item['bundle']}: {item['waits_for']}{', over the cap' * item.get('forced', False)}"
+        SINCE.sub("T", f"{item['bundle']}: {item['waits_for']}")
+        + ", over the cap" * item.get("forced", False)
         for item in state["queue"]
     ]
 
@@ -818,7 +824,7 @@ def check_hand_over(root):
     agent = daemon.get_agent_folder("ended")
     kept = sorted(path.name for path in agent.iterdir())
     history = sorted(path.name for path in next((agent / "history").iterdir()).iterdir())
-    waits = [f"{item['bundle']}: {item['waits_for']}" for item in state["queue"]]
+    waits = [SINCE.sub("T", f"{item['bundle']}: {item['waits_for']}") for item in state["queue"]]
     daemon.get_session_status = status
     checks = [
         ("no window opens", launched == []),
@@ -835,12 +841,12 @@ def check_hand_over(root):
             "the others wait",
             waits
             == [
-                "asking: its agent to end",
-                "typing: its session to be idle",
-                "dialog: its session to be idle",
-                "watching: its session to be idle",
+                f"asking: {BUSY_SINCE}",
+                f"typing: {IDLE}",
+                f"dialog: {IDLE}",
+                f"watching: {IDLE}",
                 f"later: its time, {daemon.format_time(after)}",
-                "other: its terminal to close",
+                "other: the terminal of the previous agent of the bundle to close",
             ],
         ),
         ("hok gets no card", not any(daemon.HELD_DIR.glob("*.json"))),

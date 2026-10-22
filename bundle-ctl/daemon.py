@@ -1186,7 +1186,7 @@ def launch_queued():
             elif is_deleting(bundle):
                 item["waits_for"] = "the deletion of its checkout"
             elif is_busy(bundle, is_running or bundle in state["launches"]):
-                item["waits_for"] = "its agent to end"
+                item["waits_for"] = get_previous_end(folder)
             elif free < DISK_STOP:
                 item["waits_for"] = f"disk space ({free:.0f} GB left, {DISK_STOP:.0f} needed)"
             elif in_terminal and not (waits_for := get_terminal_wait(item, now)):
@@ -1765,9 +1765,9 @@ def get_terminal_wait(item, now):
     session = read_text(agent / "session")
     if item.get("session") not in (None, session):
         # The `died` event of its last terminal comes back here.
-        return "its terminal to close"
+        return "the terminal of the previous agent of the bundle to close"
     if not (agent / "done").exists():
-        return "its agent to end"
+        return get_previous_end(agent)
     if (item.get("after") or 0) > now:
         return f"its time, {format_time(item['after'])}"
     if (
@@ -1775,8 +1775,15 @@ def get_terminal_wait(item, now):
         or get_session_status(item["bundle"], session) != "idle"
         or TITLE.is_resuming(session)
     ):
-        return "its session to be idle"
+        return "the previous agent of the bundle to be idle"
     return None
+
+
+def get_previous_end(agent):
+    """The wait of a task behind the agent at work in its bundle, with since when it works."""
+    started = get_mtime(agent / "run.lock")
+    since = f" (at work since {format_time(started)})" if started else ""
+    return f"the previous agent of the bundle to end{since}"
 
 
 def hand_to_terminal(item):
