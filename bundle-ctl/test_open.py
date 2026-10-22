@@ -7,6 +7,8 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -108,21 +110,30 @@ def open_ops(root, caller, body):
     return f"held {answer['held']}" if "held" in answer else " ".join(opened)
 
 
-def open_new(root, agent):
-    """What open --terminal leaves for the terminal of a bundle with no agent: a session, no task."""
+def open_new(root, agent, start_job):
+    """What open --terminal leaves for the terminal of a bundle with no agent: a session, no task.
+    It opens while a job of another bundle runs, and after the job of its own bundle."""
     opened = []
+    daemon.STATE = root
     daemon.get_worktree_bundle_folder = lambda bundle: str(root)
     daemon.is_made = lambda folder: True
     daemon.open_terminal = lambda log, name: opened.append(
         (daemon.read_text(agent / "session"), (agent / "task.md").read_text()),
     )
-    daemon.start_job = lambda caller, verb, work: (202, work(None))
+    daemon.start_job = start_job
     for path in agent.iterdir():
         path.unlink()
     try:
-        daemon.open_bundle(daemon.HOST, {}, {"bundle": "bundle", "terminal": True})
+        with daemon.work_lock, daemon.bundle_locks.setdefault("bundle", threading.Lock()):
+            body = {"bundle": "bundle", "terminal": True}
+            _code, answer = daemon.open_bundle(daemon.HOST, {}, body)
+            time.sleep(0.5)
+            early = list(opened)
+        daemon.wait_job(daemon.jobs[answer["job"]])
     except daemon.Refused as error:
         return [f"open a bundle with no agent: {error}"]
+    if early:
+        return [f"open a bundle with no agent: opened during the job of its bundle {early!r}"]
     if len(opened) != 1 or not daemon.SESSION_ID.fullmatch(opened[0][0]) or opened[0][1]:
         return [f"open a bundle with no agent: {opened!r}"]
     return []
@@ -235,7 +246,7 @@ def main():
             found = refusal(body)
             if found != expected:
                 failures.append(f"{body}: {found!r}, expected {expected!r}")
-        failures += open_new(pathlib.Path(root), agent)
+        failures += open_new(pathlib.Path(root), agent, start_job)
         for caller, body, expected in OPS_CASES:
             found = open_ops(pathlib.Path(root), caller, body)
             if found != expected:

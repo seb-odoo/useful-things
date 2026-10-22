@@ -196,6 +196,25 @@ def check_processes(root):
             proc.wait()
 
 
+def check_launches(root):
+    """Which launches a restart of the daemon keeps: all but the spawn of a queued task whose
+    terminal never started."""
+    daemon.get_agent_folder = lambda bundle: root / bundle
+    agents = {
+        "spawned": {"task.md": 1000},
+        "started": {"task.md": 1000, "terminal": 1001},
+        "window": {"task.md": 500},
+        "bare": {},
+    }
+    for bundle, files in agents.items():
+        (root / bundle).mkdir()
+        for name, mtime in files.items():
+            (root / bundle / name).write_text("x\n")
+            os.utime(root / bundle / name, (mtime, mtime))
+    found = sorted(daemon.get_alive_launches(dict.fromkeys(agents, 1000)))
+    return [] if found == ["bare", "started", "window"] else [f"launches after a restart: {found}"]
+
+
 def main():
     with tempfile.TemporaryDirectory() as root:
         failures = check_processes(pathlib.Path(root))
@@ -204,10 +223,12 @@ def main():
         failures += check_cases(pathlib.Path(root))
     with tempfile.TemporaryDirectory() as root:
         failures += check_free(pathlib.Path(root))
+    with tempfile.TemporaryDirectory() as root:
+        failures += check_launches(pathlib.Path(root))
     daemon.get_terminals, daemon.read_stat = get_terminals, read_stat
     for failure in failures:
         print(f"FAIL {failure}")
-    total = len(CASES) + len(FREE_CASES) + 5
+    total = len(CASES) + len(FREE_CASES) + 6
     print(f"{total - len(failures)}/{total} cases as expected")
     return 1 if failures else 0
 

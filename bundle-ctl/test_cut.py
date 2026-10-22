@@ -336,7 +336,7 @@ def check_yes(root):
     daemon.open_terminal = lambda log, name: events.append(
         ("opened", name, (daemon.get_agent_folder(name) / "task.md").read_text()),
     )
-    daemon.start_job = lambda caller, verb, work, lock=None: (202, work(None))
+    daemon.start_job = lambda caller, verb, work, lock=None, bundle=None: (202, work(None))
     daemon.read_state = lambda: state
     daemon.write_state = lambda state: None
     daemon.get_bundle_container = lambda bundle: None

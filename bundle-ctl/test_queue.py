@@ -168,7 +168,7 @@ def prepare(root, bundles, cap, short=False, disk=100):
     daemon.read_disk_free = lambda: disk
     daemon.read_state = lambda: state
     daemon.session_env = lambda: {"DISPLAY": ":0"}
-    daemon.start_job = lambda caller, verb, work: work(None)
+    daemon.start_job = lambda caller, verb, work, lock=None, bundle=None: work(None)
     daemon.write_state = lambda state: None
     return state, launched
 

@@ -10,6 +10,7 @@ kernel and never from the request.
 """
 
 from concurrent.futures import ThreadPoolExecutor
+import contextlib
 import datetime
 import difflib
 import hashlib
@@ -240,6 +241,7 @@ TERMINAL_FILES = (
 TITLE = load_title()
 WINDOW_CLOSE_WAIT = 30
 
+bundle_locks = {}
 bundle_rows = {"read": float("-inf"), "rows": []}
 disk_warning = {}
 folder_by_container = {}
@@ -797,8 +799,11 @@ def open_terminal(log, bundle, takeover=None):
     run_in_session(log, *terminal, *agent, scope=False, setenv=setenv)
 
 
-def run_job(job, work, lock):
-    with lock, open(job["log"], "a", buffering=1) as log:
+def run_job(job, work, locks):
+    with contextlib.ExitStack() as held:
+        for lock in locks:
+            held.enter_context(lock)
+        log = held.enter_context(open(job["log"], "a", buffering=1))
         job["state"] = "running"
         try:
             job["result"] = work(log) or {}
@@ -814,7 +819,8 @@ def run_job(job, work, lock):
     print(f"{job['caller']} job {job['id']} {job['verb']} {job['state']}", flush=True)
 
 
-def start_job(caller, verb, work, lock=work_lock):
+def start_job(caller, verb, work, lock=work_lock, bundle=None):
+    """The job runs under lock, None for none, and after the jobs of its bundle that came first."""
     (STATE / "jobs").mkdir(parents=True, exist_ok=True)
     job_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}"
     job = {
@@ -826,7 +832,8 @@ def start_job(caller, verb, work, lock=work_lock):
         "verb": verb,
     }
     jobs[job_id] = job
-    threading.Thread(target=run_job, args=(job, work, lock), daemon=True).start()
+    locks = [bundle and bundle_locks.setdefault(bundle, threading.Lock()), lock]
+    threading.Thread(target=run_job, args=(job, work, filter(None, locks)), daemon=True).start()
     return 202, {"job": job_id}
 
 
@@ -1024,6 +1031,18 @@ def is_busy(bundle, alive):
     return alive and (folder / "task.md").is_file() and not (folder / "done").exists()
 
 
+def get_alive_launches(launches):
+    """The launches still alive after a restart of the daemon. The spawn of a queued task dies with
+    the daemon until its terminal starts: the stranded check queues the task again. A window opened
+    by hand is recorded once open, after its task.md."""
+    alive = {}
+    for bundle, launched in launches.items():
+        folder = get_agent_folder(bundle)
+        if (folder / "terminal").exists() or (get_mtime(folder / "task.md") or 0) < launched - 1:
+            alive[bundle] = launched
+    return alive
+
+
 def get_starting(launches, open_windows, now):
     """The bundle of an agent that was launched and has not begun its run, None when no such.
 
@@ -1201,6 +1220,8 @@ def launch_queued():
                     item["parent"],
                     "spawn",
                     lambda log, bundle=bundle: open_terminal(log, bundle),
+                    lock=None,
+                    bundle=bundle,
                 )
                 starting = bundle
                 continue
@@ -1509,7 +1530,7 @@ def add_repo(caller, query, body):
         run_script(log, "add_repo.py", bundle, repo)
         return {"bundle": bundle, "repo": repo}
 
-    return start_job(caller, "add-repo", work)
+    return start_job(caller, "add-repo", work, bundle=bundle)
 
 
 def delete(caller, query, body):
@@ -2059,7 +2080,7 @@ def delete_stopped():
             keep_last_answer(bundle)
             run_script(log, "delete_bundle.py", *(["--force"] if force else []), bundle)
 
-        _code, answer = start_job(HOST, f"delete {bundle}", work)
+        _code, answer = start_job(HOST, f"delete {bundle}", work, bundle=bundle)
         started[bundle] = jobs[answer["job"]]
     return started
 
@@ -2263,7 +2284,7 @@ def drop_idle_reviews():
                 raise
 
         print(f"delete {bundle}: unused since {format_time(since)}", flush=True)
-        _code, answer = start_job(HOST, f"delete {bundle}", work)
+        _code, answer = start_job(HOST, f"delete {bundle}", work, bundle=bundle)
         started[bundle] = jobs[answer["job"]]
     return started
 
@@ -2383,7 +2404,7 @@ def create(caller, query, body):
     def work(log):
         return build(log, caller, bundle, body, "create_bundle.py", *args)
 
-    return start_job(caller, "create", work)
+    return start_job(caller, "create", work, bundle=bundle)
 
 
 def fetch(caller, query, body):
@@ -2413,7 +2434,7 @@ def fetch(caller, query, body):
     def work(log):
         return build(log, caller, bundle, body, "fetch_bundle.py", name, "--no-open")
 
-    return start_job(caller, "fetch", work)
+    return start_job(caller, "fetch", work, bundle=bundle)
 
 
 def read_package(base):
@@ -2531,7 +2552,7 @@ def build_bundle(caller, query, body):
             write_state(state)
         return {"bundle": bundle}
 
-    return start_job(caller, "build", work)
+    return start_job(caller, "build", work, bundle=bundle)
 
 
 def check_ops_session(bundle, body):
@@ -2632,13 +2653,18 @@ def open_bundle(caller, query, body):
             open_terminal(log, bundle)
             return {"bundle": bundle}
 
-        return start_job(caller, "open", work)
+        return start_job(caller, "open", work, lock=None, bundle=bundle)
     check_task(bundle, body)
     if "task" in body and not may_queue(caller, bundle):
         return hold_task(caller, bundle, body)
     if "task" in body:
         return 202, enqueue(caller, bundle, body)
-    return start_job(caller, "open", lambda log: open_or_enqueue(log, caller, bundle, body))
+    return start_job(
+        caller,
+        "open",
+        lambda log: open_or_enqueue(log, caller, bundle, body),
+        bundle=bundle,
+    )
 
 
 def set_building(bundle, building):
@@ -2767,6 +2793,7 @@ def main():
     with state_lock:
         state = read_state()
         state["building"] = []
+        state["launches"] = get_alive_launches(state["launches"])
         write_state(state)
     print(f"listening on {SOCKET}", flush=True)
     RUNS.watch()
