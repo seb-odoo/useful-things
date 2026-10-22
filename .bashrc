@@ -43,6 +43,7 @@ alias ubash="source ~/.bashrc"
 alias hackchromeheadless="google-chrome --headless --remote-debugging-port=8071"
 
 alias list-swap="smem -s swap"
+alias reclaim-swap="bash ~/repo/useful-things/reclaim-swap.sh"
 
 # fetch, create, and push a new branch
 alias gnb="python ~/repo/useful-things/scripts/create_bundle.py"
