@@ -16,7 +16,7 @@ as long as that window.
 A terminal closed while such a window is attached hands its session to that window the same way.
 The claude runs in a pty of the wrapper, which hands its clipboard escapes (OSC 52), ignored by
 terminator, to xclip while the window has the focus, and types in an idle session the task the
-daemon leaves for it and the PR events of client/prwatch.py.
+daemon leaves for it, the PR events of client/prwatch.py, and GO_ON after an API error.
 
 Started on a bundle whose run already began, it goes on with that session and does not run the
 task again. When another terminal holds the session, it takes it over as a window does, in the
@@ -62,6 +62,7 @@ from agents import (  # noqa: E402
     get_agent_folder,
     get_bundle_container,
     get_container,
+    get_mtime,
     get_resume,
     get_session_status,
     get_transcript,
@@ -101,6 +102,7 @@ RESET = "\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[
 NOT_TYPED = re.compile(rb"\x1b\[<[0-9;]*[Mm]|\x1b\[M[\s\S]{3}|\x1b\[[IO]")
 PASTE_END = b"\x1b[201~"
 PASTE_START = b"\x1b[200~"
+RETRY_AFTER = 5 * 60
 SELECTIONS = {"c": "clipboard", "p": "primary"}
 START_LOCK = pathlib.Path.home() / ".claude" / "agent-start.lock"
 START_SPACE = 10
@@ -295,7 +297,9 @@ class Waker:
     leaves in .agent/pr-events, when nothing was typed in this terminal since the last Enter: a
     draft of Seb stays his, and a PR event then reaches the agent with his next prompt, by the
     hook of prwatch.py. Nor after a slash command he sent, which may leave a menu open. Idle is no
-    turn, no dialog open and no wait for the reset of the usage limit."""
+    turn, no dialog open and no wait for the reset of the usage limit. With neither, GO_ON once
+    the session has been idle RETRY_AFTER on an API error that a new request may pass, at most
+    TITLE.RETRIES times in a row: the daemon then puts it back in the queue."""
 
     def __init__(self, agent, bundle, session):
         self.agent = agent
@@ -305,6 +309,8 @@ class Waker:
         self.line = b""
         self.draft = False
         self.looked = float("-inf")
+        self.checked = None
+        self.due = False
 
     def keys(self, data):
         self.line += NOT_TYPED.sub(b"", data)
@@ -319,16 +325,33 @@ class Waker:
             return None
         self.looked = time.monotonic()
         has_task = (self.agent / "task.md").is_file() and not (self.agent / "run.lock").exists()
+        has_events = any(self.events.glob("[!.]*.txt"))
+        retry = not (has_task or has_events) and self.is_retry_due()
         if (
-            not (has_task or any(self.events.glob("[!.]*.txt")))
+            not (has_task or has_events or retry)
             or get_session_status(self.bundle, self.session) != "idle"
             or TITLE.is_resuming(self.session)
         ):
             return None
         if has_task:
             return self.take_task()
+        if retry:
+            self.due = False
+            return GO_ON.encode()
         told = PRWATCH.take(self.events)
         return " ".join(told).encode() if told else None
+
+    def is_retry_due(self):
+        """The transcript is read once it has not changed for RETRY_AFTER, and once per change: a
+        retry it did not take waits for the next one."""
+        transcript = get_transcript(self.session)
+        stamp = transcript and get_mtime(transcript)
+        if not stamp or time.time() - stamp < RETRY_AFTER:
+            return False
+        if stamp != self.checked:
+            self.checked = stamp
+            self.due = 0 < TITLE.count_api_errors(self.session) <= TITLE.RETRIES
+        return self.due
 
     def take_task(self):
         try:

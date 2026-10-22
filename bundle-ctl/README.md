@@ -307,6 +307,18 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   session open in its terminal, for Seb to read what ran and to type in. A `done` agent leaves its
   slot, and the daemon closes its terminal a few minutes later (below), so that its container
   gives its memory back.
+- A turn that ends on an API error that a new request may pass (`server_error` in the transcript:
+  a 5xx, the API out of reach, an answer cut) writes neither, as no Stop hook runs then. Claude
+  has tried again for 4 minutes by then: on 2026-10-21 the network of the host was down 15
+  minutes, and 9 agents kept their slot on that error until Seb saw them (his ask, 2026-10-22:
+  "either auto retry or drop the agent to be queued later to free a slot"). The terminal types
+  `Continue from where you left off.` once the session has been idle 5 minutes on it
+  (`RETRY_AFTER`), as it types a PR event, for 5 such turns in a row at most (`RETRIES` of
+  `client/window-title.py`). On the sixth, the daemon puts the agent back in the queue as Back to
+  queue does, while its window is minimized and before its verdict: its slot goes to the next
+  task, and the queue starts the same session again later. The journal says `BUNDLE: 6 turns in a row ended on an API error,
+  back to the queue`. A usage limit is not such an error: claude goes on at its reset.
+  `python3 test_terminal.py` and `python3 test_restart.py` run each case.
 - Quitting claude or closing the terminal stops the container. Before the verdict nothing else
   does: Seb may type in that session at any time. Without a verdict the agent then reads `stopped`. So does a
   terminal that dies without closing (killed, or lost with the X server): `podman exec` does not see that hangup, so the wrapper ends on the hangup and stops

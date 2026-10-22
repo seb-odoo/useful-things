@@ -1335,6 +1335,7 @@ def restart_safely():
 def free_safely():
     try:
         free_done_terminals()
+        requeue_failed_terminals()
     except Exception:
         traceback.print_exc()
 
@@ -1742,6 +1743,40 @@ def free_done_terminals():
             continue
         print(f"{bundle}: its agent ended on its verdict, its terminal closes", flush=True)
         threading.Thread(target=close_freed, args=(bundle,), daemon=True).start()
+
+
+def requeue_failed_terminals():
+    """Put back in the queue the agent of each bundle whose session ended more turns in a row on an
+    API error than its terminal tries again (TITLE.RETRIES), so that it frees its slot: the queue
+    starts it again with GO_ON. Not after its verdict, as it holds no slot then, and only while its
+    window is minimized, as for free_done_terminals."""
+    with state_lock:
+        state = read_state()
+    queued = {item["bundle"] for item in state["queue"]} | set(state.get("deletions", []))
+    env = None
+    for bundle, pid in get_terminals().items():
+        agent = get_agent_folder(bundle)
+        session = read_text(agent / "session")
+        if (
+            bundle in queued
+            or read_text(agent / "terminal") != str(pid)
+            or (agent / "done").exists()
+            or (agent / "pause").exists()
+            or is_deleting(bundle)
+            or not session
+            or get_session_status(bundle, session) != "idle"
+            or TITLE.count_api_errors(session) <= TITLE.RETRIES
+        ):
+            continue
+        env = env or session_env()
+        if not is_terminal_minimized(agent, env):
+            continue
+        print(
+            f"{bundle}: {TITLE.RETRIES + 1} turns in a row ended on an API error,"
+            " back to the queue",
+            flush=True,
+        )
+        requeue_agent(HOST, {}, {"bundle": bundle})
 
 
 def close_freed(bundle):

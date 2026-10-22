@@ -57,6 +57,7 @@ PROJECTS = (
 )
 RESUMING = "continuing automatically at"
 RESUMING_FOR = 5 * 3600
+RETRIES = 5
 SEPARATELY = re.compile(r"[*_\s]*Separately\s*:")
 TAIL = 256 * 1024
 TITLES = {"ai-title": "aiTitle", "custom-title": "customTitle"}
@@ -116,6 +117,24 @@ def is_resuming(session):
         except (AttributeError, KeyError, TypeError, ValueError):
             continue
     return False
+
+
+def count_api_errors(session):
+    """How many turns in a row of a session ended on an API error that a new request may pass: a
+    5xx, the API out of reach, an answer cut. 0 when its last message is anything else. A usage
+    limit is not one: Claude goes on with it at the reset."""
+    count = 0
+    for line in reversed(read_tail(session)):
+        try:
+            entry = json.loads(line)
+            if entry["type"] != "assistant" or entry.get("isSidechain"):
+                continue
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not entry.get("isApiErrorMessage") or entry.get("error") != "server_error":
+            return count
+        count += 1
+    return count
 
 
 def is_hok_wait(call):

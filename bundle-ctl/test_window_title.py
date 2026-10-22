@@ -51,6 +51,14 @@ HOK_WAITS = [
     ("hok-then-test", None),
     ("hok-after-prompt", None),
 ]
+API_ERRORS = [
+    ("error-one", ["answer", "502"], 1),
+    ("error-again", ["answer", "502", "prompt", "502", "prompt", "502"], 3),
+    ("error-after-call", ["call", "result", "502"], 1),
+    ("error-then-answer", ["502", "prompt", "answer"], 0),
+    ("error-limit", ["answer", "429"], 0),
+    ("error-of-subagent", ["answer", "subagent"], 0),
+]
 CLOSE_LINES = [
     ("left", "Nothing left: the list shows it."),
     ("separately", "Nothing is left: pushed."),
@@ -197,6 +205,36 @@ def get_hok_waits():
         found = found and round((time.time() - found) / 60) * 60
         if found != ago:
             failures.append(f"hok wait of {session}: started {found} s ago, expected {ago}")
+    return failures
+
+
+def get_api_errors(home):
+    """The turns in a row that ended on a 5xx, the API out of reach or an answer cut, with the
+    prompts that tried again between them; not a usage limit, nor an error of a subagent."""
+    spec = importlib.util.spec_from_file_location("title", HERE / "client" / "window-title.py")
+    title = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(title)
+    text = {"content": [{"type": "text", "text": "API Error"}]}
+    error = {"type": "assistant", "isApiErrorMessage": True, "error": "server_error"}
+    messages = {
+        "answer": {"type": "assistant", "message": {"content": [{"type": "text", "text": "ok"}]}},
+        "call": {"type": "assistant", "message": {"content": [{"type": "tool_use"}]}},
+        "result": {"type": "user", "message": {"content": [{"type": "tool_result"}]}},
+        "prompt": {"type": "user", "message": {"content": "Continue from where you left off."}},
+        "502": error,
+        "429": {**error, "error": "rate_limit"},
+        "subagent": {**error, "isSidechain": True},
+    }
+    failures = []
+    for session, kinds, expected in API_ERRORS:
+        entries = []
+        for kind in kinds:
+            entries.append({"message": text, **messages[kind]})
+            entries.append({"type": "system", "subtype": "turn_duration"})
+        lines = "".join(f"{json.dumps(entry)}\n" for entry in entries)
+        (home / ".claude" / "projects" / "-workspace" / f"{session}.jsonl").write_text(lines)
+        if (found := title.count_api_errors(session)) != expected:
+            failures.append(f"API errors of {session}: {found}, expected {expected}")
     return failures
 
 
@@ -416,6 +454,7 @@ def main():
         write_transcripts(home)
         failures += get_marks()
         failures += get_hok_waits()
+        failures += get_api_errors(home)
         failures += get_close_lines()
         failures += get_loaded()
         failures += get_configs(home)
@@ -431,6 +470,7 @@ def main():
     for line in failures:
         print(line)
     cases = len(MARKS) + len(OPS_MARKS) + len(HOK_WAITS) + len(CLOSE_LINES) + len(CONFIGS)
+    cases += len(API_ERRORS)
     cases += len(FOLLOWED) + 5
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)

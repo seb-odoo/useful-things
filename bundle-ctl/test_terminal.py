@@ -85,6 +85,8 @@ def run_wrapper(root, bundle):
         status.read_text() if status.exists() else "idle"
     )
     module.TITLE.is_resuming = lambda session: False
+    module.TITLE.get_transcript = module.get_transcript
+    module.RETRY_AFTER = 1
     module.HOST_FOLDER = str(root / "host-ctl")
     module.REPO_ROOT = str(root)
     module.get_agent_folder = lambda name: root / name / ".agent"
@@ -302,6 +304,39 @@ def check_task(case):
     case.check_stopped("quitting claude")
 
 
+def check_retry(case):
+    """GO_ON is typed in an idle session whose turn ended on an API error that a new request may
+    pass, once per error, while no more than 5 turns in a row ended so: the daemon then queues it
+    again."""
+    typed = case.state / "typed"
+    transcript = case.root / "s1.jsonl"
+    error = '{"type": "assistant", "isApiErrorMessage": true, "error": "server_error"}'
+    prompt = f'{{"type": "user", "message": {{"content": "{GO_ON}"}}}}'
+
+    def lines():
+        return typed.read_text().splitlines() if typed.exists() else []
+
+    case.start()
+    (case.state / "status").write_text("busy")
+    transcript.write_text("\n".join([*ENDED, error]) + "\n")
+    time.sleep(3)
+    case.check("a busy session gets none", not lines())
+    (case.state / "status").write_text("idle")
+    case.check("an idle one gets GO_ON", wait(lambda: lines() == [GO_ON]))
+    time.sleep(3)
+    case.check("once per error", lines() == [GO_ON])
+    transcript.write_text("\n".join([*ENDED, error, *[prompt, error] * 4]) + "\n")
+    case.check("the fifth error in a row gets it", wait(lambda: lines() == [GO_ON] * 2))
+    transcript.write_text("\n".join([*ENDED, error, *[prompt, error] * 5]) + "\n")
+    time.sleep(4)
+    case.check("the sixth gets none", lines() == [GO_ON] * 2)
+    transcript.write_text("\n".join([*ENDED, error, prompt, ENDED[-1]]) + "\n")
+    time.sleep(4)
+    case.check("an answer after it gets none", lines() == [GO_ON] * 2)
+    (case.state / "quit").touch()
+    case.check_stopped("quitting claude")
+
+
 def check_handoff(case):
     case.start()
     (case.agent / "handoff").touch()
@@ -455,7 +490,8 @@ def main():
         check_ops_resume: CUT,
         check_ops_cut: CUT,
     }
-    checks = (check_quit, check_clipboard, check_wake, check_task, check_sigterm, check_close)
+    checks = (check_quit, check_clipboard, check_wake, check_task, check_retry, check_sigterm)
+    checks += (check_close,)
     checks += (check_requeue,)
     checks += (check_shutdown, check_close_window)
     checks += (check_handoff, *tabs)

@@ -66,6 +66,20 @@ FREE_CASES = [
     ({"minimized": False}, False),
 ]
 
+REQUEUE_BASE = {**FREE_BASE, "done": False, "errors": 6, "answer": "API Error: 502"}
+REQUEUE_CASES = [
+    ({}, True),
+    ({"done": True}, False),
+    ({"errors": 5}, False),
+    ({"errors": 0}, False),
+    ({"queued": True}, False),
+    ({"held": False}, False),
+    ({"pause": True}, False),
+    ({"status": "busy"}, False),
+    ({"status": "shell"}, False),
+    ({"minimized": False}, False),
+]
+
 
 def restart(root, terminals):
     """The bundles restarted by one call, for terminals {bundle: case}, each with the line its new
@@ -146,8 +160,11 @@ def free(root, bundle, case):
     daemon.is_minimized = lambda pid, env: case["minimized"]
     daemon.session_env = dict
     daemon.close_freed = closed.append
+    daemon.TITLE.count_api_errors = lambda session: case.get("errors", 0)
+    daemon.requeue_agent = lambda caller, query, body: closed.append((caller, body["bundle"]))
     daemon.print = lambda *args, **kwargs: None
     daemon.free_done_terminals()
+    daemon.requeue_failed_terminals()
     for thread in threading.enumerate():
         if thread is not threading.main_thread():
             thread.join(1)
@@ -162,6 +179,11 @@ def check_free(root):
         found = free(root, bundle, {**FREE_BASE, **changes})
         if found != ([bundle] if expected else []):
             failures.append(f"free {changes}: closed {found}, expected {expected}")
+    for at, (changes, expected) in enumerate(REQUEUE_CASES):
+        bundle = f"r{at}"
+        found = free(root, bundle, {**REQUEUE_BASE, **changes})
+        if found != ([("host", bundle)] if expected else []):
+            failures.append(f"requeue {changes}: {found}, expected {expected}")
     daemon.close_freed = close_freed
     pause = root / "g1" / ".agent" / "pause"
     pause.parent.mkdir(parents=True)
@@ -228,7 +250,7 @@ def main():
     daemon.get_terminals, daemon.read_stat = get_terminals, read_stat
     for failure in failures:
         print(f"FAIL {failure}")
-    total = len(CASES) + len(FREE_CASES) + 6
+    total = len(CASES) + len(FREE_CASES) + len(REQUEUE_CASES) + 6
     print(f"{total - len(failures)}/{total} cases as expected")
     return 1 if failures else 0
 
