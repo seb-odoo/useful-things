@@ -165,7 +165,9 @@ daemon reads what is left on the disk of the bundles:
   refused, and the queue holds its tasks, forced ones too: `waits for disk space (20 GB left, 30
   needed)`. They start by themselves once the space is back.
 - Under `BUNDLE_CTL_DISK_WARN_GB` (default 60), a desktop notification says what is left, then
-  again at each 10 GB less, and again once the disk went 10 GB over that line in between.
+  again at each 10 GB less, and again once the disk went 10 GB over that line in between. The
+  level warned is kept in `~/.local/state/bundle-ctl/disk-warned`, so a restart of the daemon
+  does not warn again.
 - `python3 test_queue.py` has the cases.
 
 A bundle of someone else's PR (no `BUNDLE_SUFFIX` in its name) goes by itself once nobody used it

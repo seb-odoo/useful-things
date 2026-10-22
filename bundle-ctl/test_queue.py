@@ -358,8 +358,9 @@ def check_moves(root):
     return [f"moves: {name}: {get_queue()}" for name, passed in checks if not passed], len(checks)
 
 
-def check_disk(_root):
-    """Under the floor a new bundle is refused, and the desktop hears of each 10 GB less."""
+def check_disk(root):
+    """Under the floor a new bundle is refused, and the desktop hears of each 10 GB less, once
+    across a restart of the daemon."""
     checks = []
     daemon.DISK_STOP, daemon.DISK_WARN = 30, 60
     daemon.read_disk_free = lambda: 20.4
@@ -378,7 +379,7 @@ def check_disk(_root):
         checks.append((f"{verb.__name__} is refused under the floor", error == refused))
     shown = []
     daemon.notify = lambda summary, body: shown.append((summary, body.split(".")[0]))
-    daemon.disk_warning.clear()
+    daemon.DISK_WARNED = root / "disk-warned"
     for free in (75, 58, 52, 44, 25, 26, 49, 66, 71, 50):
         daemon.read_disk_free = lambda free=free: free
         daemon.warn_disk()
@@ -395,6 +396,17 @@ def check_disk(_root):
                 ),
                 ("50 GB left on the disk", "Under 30 GB, new bundles and agent starts will wait"),
             ],
+        ),
+    )
+    shown.clear()
+    daemon.DISK_WARNED.write_text("2\n")
+    for free in (29, 21, 19):
+        daemon.read_disk_free = lambda free=free: free
+        daemon.warn_disk()
+    checks.append(
+        (
+            "a level warned before a restart is not warned again",
+            [summary for summary, _held in shown] == ["19 GB left on the disk"],
         ),
     )
     return [f"disk: {name}" for name, passed in checks if not passed], len(checks)

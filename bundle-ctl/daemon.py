@@ -146,6 +146,7 @@ DISK_STOP = float(
 DISK_WARN = float(
     os.environ.get("BUNDLE_CTL_DISK_WARN_GB") or CONFIG.get("BUNDLE_CTL_DISK_WARN_GB") or 60,
 )
+DISK_WARNED = STATE / "disk-warned"
 EFFORTS = ("low", "medium", "high", "xhigh")
 FREE_AFTER = 5 * 60
 GITHUB_ASK = 600
@@ -243,7 +244,6 @@ WINDOW_CLOSE_WAIT = 30
 
 bundle_locks = {}
 bundle_rows = {"read": float("-inf"), "rows": []}
-disk_warning = {}
 folder_by_container = {}
 jobs = {}
 kept_reviews = {}
@@ -506,17 +506,19 @@ def notify(summary, body):
 
 def warn_disk():
     """Tell Seb on his desktop when the disk goes under DISK_WARN, then at each 10 GB less, until
-    it is 10 GB over DISK_WARN again.
+    it is 10 GB over DISK_WARN again. The level warned is kept in DISK_WARNED, so a restart of the
+    daemon does not warn again.
     """
     try:
         free = read_disk_free()
         if free >= DISK_WARN + 10:
-            disk_warning.pop("level", None)
+            DISK_WARNED.unlink(missing_ok=True)
             return
         level = int(free // 10)
-        if free >= DISK_WARN or level >= disk_warning.get("level", level + 1):
+        warned = read_text(DISK_WARNED)
+        if free >= DISK_WARN or (warned and level >= int(warned)):
             return
-        disk_warning["level"] = level
+        DISK_WARNED.write_text(f"{level}\n")
         print(f"disk {free:.0f} GB left", flush=True)
         held = (
             f"New bundles and agent starts wait until {DISK_STOP:.0f} GB are free."
