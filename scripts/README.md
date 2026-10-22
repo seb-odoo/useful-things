@@ -331,7 +331,10 @@ when its head holds `<BUNDLE_SUFFIX>-` and ends with `-fw` (fw-bot pings reviewe
 
 - label `conflict`, or
 - head `statusCheckRollup.state` FAILURE/ERROR (pending is ignored), or
-- a fw-bot comment "is the last of the forward-port chain" without a later `@robodoo ... r+`.
+- a fw-bot comment that asks for an r+ (`FW_ASKS`: the last hop of the chain, the next hop in
+  conflict or out of the chain, its own head moved, its cherry-pick conflict to resolve) without a
+  later `@robodoo ... r+`, in a comment or a review. The ask itself writes `@robodoo r+`, so the
+  search starts after it.
 
 gfa then fetches it from the dev remote and runs `git branch --track` (no worktree; `pfb <head>`
 for a bundle). Cleanup: gbs deletes a merged hop it sees locally, dev branch included. Otherwise

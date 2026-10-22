@@ -51,7 +51,13 @@ from commands import (
 )
 from delete_bundle import delete_bundle
 
-FW_TIP_MESSAGE = "is the last of the forward-port chain"
+FW_ASKS = (
+    "is the last of the forward-port chain",
+    "You can merge the chain up to here",
+    "approvals won't cross",
+    "has become a normal PR",
+    "you will need to merge it via @robodoo",
+)
 R_PLUS = re.compile(r"@robodoo\b.*\br\+")
 
 parser = argparse.ArgumentParser()
@@ -81,13 +87,16 @@ def needs_me(pr):
     rollup = pr["commits"]["nodes"][0]["commit"]["statusCheckRollup"]
     if rollup and rollup["state"] in ("ERROR", "FAILURE"):
         return True
-    comments = pr["comments"]["nodes"]
-    tips = [
+    notes = sorted(
+        pr["comments"]["nodes"] + pr["reviews"]["nodes"], key=lambda note: note["createdAt"]
+    )
+    asks = [
         i
-        for i, comment in enumerate(comments)
-        if (comment["author"] or {}).get("login") == FW_BOT and FW_TIP_MESSAGE in comment["body"]
+        for i, note in enumerate(notes)
+        if (note["author"] or {}).get("login") == FW_BOT
+        and any(ask in note["body"] for ask in FW_ASKS)
     ]
-    return bool(tips) and not any(R_PLUS.search(c["body"]) for c in comments[tips[-1] :])
+    return bool(asks) and not any(R_PLUS.search(n["body"]) for n in notes[asks[-1] + 1 :])
 
 
 def get_branches_to_create():
@@ -104,7 +113,8 @@ def get_branches_to_create():
         "... on PullRequest { headRefName repository { nameWithOwner } "
         "labels(first: 20) { nodes { name } } "
         "commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } "
-        "comments(last: 50) { nodes { author { login } body } } } } } "
+        "comments(last: 50) { nodes { author { login } body createdAt } } "
+        "reviews(last: 20) { nodes { author { login } body createdAt } } } } } "
         f"mine: search(query: {json.dumps(mine_search)}, type: ISSUE, first: 100) {{ nodes {{ "
         "... on PullRequest { headRefName number repository { nameWithOwner } } } } }"
     )
