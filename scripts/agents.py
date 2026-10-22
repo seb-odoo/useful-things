@@ -46,19 +46,26 @@ def get_transcript(session):
     return next(PROJECTS.glob(f"*/{session}.jsonl"), None)
 
 
-def get_session_status(bundle, session):
-    """What the claude of a bundle's session does, as its newest record says: `busy` in a turn,
-    `waiting` on a dialog, `idle` or `shell` once the turn ended, None with no record."""
-    records = []
-    for path in pathlib.Path(CLAUDE_CONFIG_CONTAINER, bundle, "sessions").glob("*.json"):
+def get_session_records(container):
+    """The newest record of each session in the sessions folder of a container, by session."""
+    records = {}
+    for path in pathlib.Path(CLAUDE_CONFIG_CONTAINER, container, "sessions").glob("*.json"):
         try:
             record = json.loads(path.read_text())
         except (OSError, ValueError):
             continue
-        if isinstance(record, dict) and record.get("sessionId") == session:
-            records.append(record)
-    newest = max(records, key=lambda record: record.get("startedAt") or 0, default={})
-    return newest.get("status")
+        if not isinstance(record, dict) or not record.get("sessionId"):
+            continue
+        found = records.get(record["sessionId"], {})
+        if (record.get("startedAt") or 0) >= (found.get("startedAt") or 0):
+            records[record["sessionId"]] = record
+    return records
+
+
+def get_session_status(bundle, session):
+    """What the claude of a bundle's session does, as its newest record says: `busy` in a turn,
+    `waiting` on a dialog, `idle` or `shell` once the turn ended, None with no record."""
+    return get_session_records(bundle).get(session, {}).get("status")
 
 
 def load_takeover():

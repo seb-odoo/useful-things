@@ -487,11 +487,15 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   ask: "all of them"): the mark in the order of the picker, which a first start shows, the kind
   in its order, the times and the sizes as numbers. A bundle row also has the
   state of its agent and since when, from its `.agent/` files (`done 12 min ago`, `waiting for 5
-  min`, `running for 3 min`, then `shown` when its terminal is not minimized). A row whose claude
+  min`, `running for 3 min`, then `shown` when its terminal is not minimized). An ops row has it
+  from the record of its session in the sessions folder of the ops container (Seb, 2026-10-21:
+  "ops agent don't have anything in the since column"): running in a turn, waiting on a dialog or
+  when its mark says it waits for Seb, else done. A row whose claude
   ended on an error, a bundle or an ops one, has that error there: `claude ended with code 137`.
-  Each row has the
-  close line of the picker in its last column, read again only when the transcript changed; a
-  bundle row with none has the first line of its `result.md`. Each row has its CPU and RAM (Seb,
+  Each row has the close line of the last answer of its session in its last column, else the
+  first line of that answer, as an agent at work has no close line yet (Seb, same day: "no last
+  answer"), read again only when the transcript changed; a bundle row with no answer has the
+  first line of its `result.md`. Each row has its CPU and RAM (Seb,
   2026-10-15), read every 5 seconds: those of the container of a bundle, from its
   `libpod-ID.scope` cgroup under the user manager, the RAM
   without the file cache as the run queue counts it; those of the claude of an ops window and its

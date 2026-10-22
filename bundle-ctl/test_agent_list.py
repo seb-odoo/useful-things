@@ -86,11 +86,23 @@ AGENTS = [
 ]
 CLOSES = {"closed": "Waiting for you: r+ on odoo#5"}
 ENDED = "claude ended with code 137"
+AGO = time.time() - 300
+IDLE = {"status": "idle", "statusUpdatedAt": AGO * 1e3}
 OPS_INFOS = [
-    (True, "", ("", "", 0.0)),
-    (False, "", ("shown", "", 0.0)),
-    (True, "Nothing left: merged", ("", "Nothing left: merged", 0.0)),
+    (True, None, "", None, ("", "", 0.0)),
+    (False, None, "", None, ("shown", "", 0.0)),
+    (True, None, "Nothing left: merged", None, ("", "Nothing left: merged", 0.0)),
+    (True, 3, "", {"status": "busy", "statusUpdatedAt": AGO * 1e3}, ("running for 5 min", "", AGO)),
+    (True, 3, "", {"status": "waiting", "updatedAt": AGO * 1e3}, ("waiting for 5 min", "", AGO)),
+    (True, 2, "", IDLE, ("waiting for 5 min", "", AGO)),
+    (False, 1, "", IDLE, ("done 5 min ago, shown", "", AGO)),
 ]
+RECORDS = {
+    "a.json": {"sessionId": "S1", "startedAt": 1, "status": "idle"},
+    "b.json": {"sessionId": "S1", "startedAt": 2, "status": "busy"},
+    "c.json": {"startedAt": 3, "status": "busy"},
+    "d.json": "{",
+}
 PROCESSES = {
     1: (0, 1.0, 100, ["/sbin/init"]),
     10: (1, 2.0, 1000, ["/x/native-binary/claude", "--session-id", "S1", "--model", "opus"]),
@@ -323,7 +335,31 @@ def check_queue(agent_list):
         path.write_text(json.dumps(TRANSCRIPTS["S9"][0], separators=(",", ":")) + "\n")
         if (found := agent_list.get_last_prompt(path)) != "Rebase on master":
             failures.append(f"prompt of a bundle not built yet: {found!r}")
+        answers = [agent_list.read_answer(session) for session in ("S9", "S8", "S0", None)]
+        if answers != ["Waiting for you: r+ on odoo#7", "pushed: abc", "", ""]:
+            failures.append(f"answers {answers!r}: a close line, else the first line")
     return failures
+
+
+def check_records(agent_list):
+    """The newest record of each session of a container, the broken ones and those with no
+    session aside."""
+    agents = sys.modules["agents"]
+    kept = agents.CLAUDE_CONFIG_CONTAINER
+    with tempfile.TemporaryDirectory() as root:
+        folder = pathlib.Path(root, "ops", "sessions")
+        folder.mkdir(parents=True)
+        for name, record in RECORDS.items():
+            (folder / name).write_text(record if isinstance(record, str) else json.dumps(record))
+        agents.CLAUDE_CONFIG_CONTAINER = root
+        try:
+            found = agent_list.get_session_records("ops")
+            status = agents.get_session_status("ops", "S1")
+        finally:
+            agents.CLAUDE_CONFIG_CONTAINER = kept
+    if found != {"S1": RECORDS["b.json"]} or status != "busy":
+        return [f"records {found!r}, status {status!r}: the newest record of S1 alone"]
+    return []
 
 
 def check_reads(agent_list):
@@ -456,13 +492,20 @@ def check_tree(agent_list):
     picker.read_window_pids = lambda: {"0x4": "40"}
     picker.get_session = lambda row, pids: f"S-{row.key}-{pids.get(row.window, '')}"
     groups, agent_list.tab_groups.get_groups = agent_list.tab_groups.get_groups, dict
+    records = agent_list.get_session_records
+    busy = {"status": "busy", "statusUpdatedAt": AGO * 1000}
+    agent_list.get_session_records = lambda container: {"S-0x4-40": busy}
     try:
-        sessions = [info[-1] for _row, info in agent_list.read_agents()]
+        agents = agent_list.read_agents()
     finally:
         picker.get_rows, picker.get_windows, picker.read_window_pids, picker.get_session = read
         agent_list.tab_groups.get_groups = groups
+        agent_list.get_session_records = records
+    sessions = [info[-1] for _row, info in agents]
     if sessions != ["S-master-x--seb-", "S-0x4-40"]:
         failures.append(f"sessions {sessions!r}")
+    if (found := agents[1][1][0]) != "running for 5 min":
+        failures.append(f"state of the ops row from the record of its session: {found!r}")
     kept = (agent_list.HOK, agent_list.START, agent_list.subprocess)
     starts = ((None, False), ("exit(1)", False), ("", True), ("import time; time.sleep(2)", True))
     with tempfile.TemporaryDirectory() as root:
@@ -500,10 +543,11 @@ def main():
     row = agent_list.picker.Row(None, 0, "🔧 Refactor (ops)", "0x0b", "0x0b", False, ENDED)
     if (found := agent_list.get_info(row, "")[0]) != f"{ENDED}, shown":
         failures.append(f"ops row whose claude ended on an error: {found!r}")
-    for minimized, close, expected in OPS_INFOS:
-        row = agent_list.picker.Row(None, None, "🔧 Refactor (ops)", "0x0b", "0x0b", minimized)
-        if (found := agent_list.get_info(row, close)) != expected:
-            failures.append(f"ops row, minimized {minimized}: {found!r}, expected {expected!r}")
+    for minimized, rank, close, record, expected in OPS_INFOS:
+        row = agent_list.picker.Row(None, rank, "🔧 Refactor (ops)", "0x0b", "0x0b", minimized)
+        found = agent_list.get_info(row, close, record)
+        if found[:2] != expected[:2] or abs(found[2] - expected[2]) > 5:
+            failures.append(f"ops row {minimized, rank, record}: {found!r}, expected {expected!r}")
     queue = (
         "8/15 agents at work in a terminal, 1 queued",
         [["queued", "", "master-x--seb", "5", "14:02", "a slot", "", ""]],
@@ -528,11 +572,12 @@ def main():
             failures.append(f"move {step} of {bundles[at]} in {bundles}: {found!r}")
     failures += check_filters(agent_list) + check_reads(agent_list) + check_usage(agent_list)
     failures += check_ask(agent_list) + check_queue(agent_list) + check_tabs(agent_list)
-    failures += check_tree(agent_list) + check_pick(agent_list)
+    failures += check_tree(agent_list) + check_pick(agent_list) + check_records(agent_list)
     for line in failures:
         print(line)
     cases = len(AGENTS) + len(OPS_INFOS) + 4 + 1 + len(FACETS) + len(FILTERED) + 2 + 7 + 3 + 3
     cases += len(QUEUED_LINES) + 1 + 2 + len(SEARCHED) + 1 + len(MOVES) + len(TABS) + 2 + 9 + 3
+    cases += 1 + 1 + 1
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

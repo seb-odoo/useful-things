@@ -5,11 +5,12 @@ again every 2 seconds, the queue every 10.
     agent-list.py
 
 The rows are the ones of the picker, the terminals shown on screen included: each with its mark, its
-kind, its bundle or the title of its conversation, the state of its agent and since when, or the
+kind, its bundle or the title of its conversation, the state of its agent and since when (from
+the .agent/ files of a bundle, from the record of the session of an ops agent), or the
 error its window shows once its claude ended on it (❌ for the picker), ", shown"
 when its terminal is not minimized, its CPU, RAM and disk, the icon of each Firefox tab group of a
 bundle, then why they look finished when they all do (tab_groups.py), and the close line of the
-last answer of its session (picker.get_close_line), else the first line of the result.md of a
+last answer of its session, else its first line, else the first line of the result.md of a
 bundle. A click on a column header sorts the rows by that column: by mark in the order of the picker, by
 kind in its order, by time, by number, or by text. CPU and RAM are those of the container of a
 bundle, its file cache aside, or of the claude of an ops window and its children, as the ops agents share
@@ -83,9 +84,15 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
 import tab_groups  # noqa: E402
-from agents import OPS, get_agent_folder, get_mtime, read_text  # noqa: E402
+from agents import (  # noqa: E402
+    OPS,
+    get_agent_folder,
+    get_mtime,
+    get_session_records,
+    read_text,
+)
 from commands import clean_bundle_name, get_worktree_bundle_folder  # noqa: E402
-from config import REPO_ROOT  # noqa: E402
+from config import HOST_FOLDER, REPO_ROOT  # noqa: E402
 
 AGENTS_CHECK = 2
 APPEARANCE = ("org.freedesktop.appearance", "color-scheme")
@@ -102,6 +109,7 @@ HOK = pathlib.Path(REPO_ROOT) / "host-ctl" / "hokwin.py"
 ICON = HERE / "agent-list.svg"
 KEY, WINDOW, TITLE = 9, 10, 11
 NOT_BUILT = "Nothing of this bundle is checked out yet"
+OPS_CONTAINER = os.path.basename(HOST_FOLDER or "")
 OWNED = "🔑 hok"
 PICK_TIME = 10
 SORTS = (12, 13, 2, 14, 15, 16, 17, 7, 8)
@@ -139,19 +147,36 @@ picker = load("picker", HERE / "window-picker.py")
 runs = load("runs", HERE / "runs.py")
 ICONS = {kind: icon for icon, kind, _ in load("title", HERE / "client" / "window-title.py").KINDS}
 
+answers = {}
 sessions = {}
 
 
-def get_info(row, close):
-    """The state of the agent of a row and since when, from the .agent/ files of its bundle, the
-    close line of its last answer, else the first line of its result.md, and that since as a time,
-    0 when none. An ops row has its window as key, and no such files. A window whose claude ended
-    and that waits for Enter has the error it shows as state."""
+def get_ops_state(row, record, now):
+    """The state of an ops agent and since when, from the record of its session: running in a
+    turn, waiting on a dialog or when its mark says it waits for Seb, else done."""
+    status = record.get("status")
+    if not status:
+        return "", 0.0
+    since = (record.get("statusUpdatedAt") or record.get("updatedAt") or 0) / 1000
+    span = bctl.format_span(now - since)
+    if status == "busy":
+        return f"running for {span}", since
+    if status == "waiting" or get_mark_and_kind(row)[0] == "✋ waiting":
+        return f"waiting for {span}", since
+    return f"done {span} ago", since
+
+
+def get_info(row, answer, record=None):
+    """The state of the agent of a row and since when, from the .agent/ files of its bundle, its
+    answer, else the first line of its result.md, and that since as a time, 0 when none. An ops
+    row has its window as key, and the record of its session in place of such files. A window
+    whose claude ended and that waits for Enter has the error it shows as state."""
     shown = [] if row.minimized else ["shown"]
-    if row.key == row.window:
-        return ", ".join(filter(None, [row.ended, *shown])), close, 0.0
-    folder = get_agent_folder(row.key)
     now = time.time()
+    if row.key == row.window:
+        state, since = get_ops_state(row, record or {}, now)
+        return ", ".join(filter(None, [row.ended or state, *shown])), answer, since
+    folder = get_agent_folder(row.key)
     if (since := get_mtime(folder / "done")) is not None:
         word = "failed" if read_text(folder / "done") == "failed" else "done"
         state = f"{word} {bctl.format_span(now - since)} ago"
@@ -161,7 +186,7 @@ def get_info(row, close):
         state = f"running for {bctl.format_span(now - since)}"
     else:
         state = "starting"
-    answer = close or (read_text(folder / "result.md") or "").partition("\n")[0]
+    answer = answer or (read_text(folder / "result.md") or "").partition("\n")[0]
     return ", ".join([row.ended or state, *shown]), answer, since or 0.0
 
 
@@ -174,16 +199,17 @@ def get_tabs(groups):
 
 
 def read_agents():
-    """Each row of the picker with its state, its close line, its tabs and its session."""
+    """Each row of the picker with its state, its answer, its tabs and its session."""
     rows = picker.get_rows(picker.get_windows(), shown=True)
     pids = picker.read_window_pids() if any(row.key == row.window for row in rows) else {}
+    records = get_session_records(OPS_CONTAINER) if pids else {}
     found = {row.key: picker.get_session(row, pids) for row in rows}
     groups = tab_groups.get_groups()
     return [
         (
             row,
             (
-                *get_info(row, picker.get_close_line(found[row.key])),
+                *get_info(row, read_answer(found[row.key]), records.get(found[row.key])),
                 get_tabs(groups.get(row.key, [])),
                 found[row.key],
             ),
@@ -420,24 +446,42 @@ def get_last_prompt(path):
     return prompt
 
 
-def read_session(bundle, session):
-    """The title the window of a bundle shows once its session is idle, the last prompt of that
-    session, and the close line of its last answer, else its first line. Read again only once
-    the transcript changed, as the queue is read every 10 seconds."""
-    title = picker.load_title()
-    path = session and title.get_transcript(session)
+def get_stamp(path):
     try:
         stat = path.stat()
     except (AttributeError, OSError):
-        return title.get_title(bundle), "", ""
-    stamp = (stat.st_mtime_ns, stat.st_size)
-    if sessions.get(session, (None,))[0] != stamp:
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
+def read_answer(session):
+    """The close line of the last answer of a session, else its first line, as an agent at work
+    has none. Read again only once the transcript changed, as the rows are read every 2 seconds."""
+    title = picker.load_title()
+    stamp = get_stamp(session and title.get_transcript(session))
+    if stamp is None:
+        return ""
+    if answers.get(session, (None,))[0] != stamp:
         last = title.get_last_answer(session)
         first = next((line.strip() for line in last.splitlines() if line.strip()), "")
+        answers[session] = (stamp, title.get_close_line(last) or first)
+    return answers[session][1]
+
+
+def read_session(bundle, session):
+    """The title the window of a bundle shows once its session is idle, the last prompt of that
+    session, and its answer (read_answer). Read again only once the transcript changed, as the
+    queue is read every 10 seconds."""
+    title = picker.load_title()
+    path = session and title.get_transcript(session)
+    stamp = get_stamp(path)
+    if stamp is None:
+        return title.get_title(bundle), "", ""
+    if sessions.get(session, (None,))[0] != stamp:
         found = (
             title.get_title(bundle, {session: "idle"}),
             get_last_prompt(path),
-            title.get_close_line(last) or first,
+            read_answer(session),
         )
         sessions[session] = (stamp, found)
     return sessions[session][1]
