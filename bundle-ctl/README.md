@@ -664,12 +664,17 @@ what to do: ask Seb to validate, or act.
   terminal types nothing while a key Seb typed since his last Enter may be a draft (a mouse move
   or a focus change is none), nor after a slash command he sent, which may leave a menu open: his
   next prompt then carries the line, by the hook.
+- What Seb posts himself from Firefox (a review, a comment, an r+), which prwatch.py leaves aside,
+  comes the same way (Seb, 2026-10-22: "currently I have to tell it manually"): the helper of
+  firefox-gateway runs `pr-posted.py BUNDLE` with one line on stdin that names it, and the script
+  leaves it in `.agent/pr-events/` of the bundle, with an advice of its own (go on from it, no
+  confirmation asked of him).
 - Not a Claude Code channel, though it would wake an idle session too: a seat of a Claude Team
   organization gets none until an admin of the organization turns channels on, and Seb wants no
   such ask nor a feature Claude turns on remotely (2026-10-21).
 
 `python3 test_prwatch.py` runs the looks on a fake GitHub and a real git repo, the wait on a fake
-gateway, the hooks and the Stop hook; `test_terminal.py` the typing.
+gateway, the hooks, the Stop hook and pr-posted.py; `test_terminal.py` the typing.
 
 ## Ops agents
 

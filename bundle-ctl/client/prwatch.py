@@ -82,12 +82,13 @@ def write_state(state):
         log(f"state not kept: {error}")
 
 
-def leave(text):
+def leave(text, folder=None, advice=ADVICE):
     """One line for the agent, whole or not at all for whoever takes it."""
-    EVENTS.mkdir(exist_ok=True)
+    folder = folder or EVENTS
+    folder.mkdir(exist_ok=True)
     name = f"{time.time_ns()}.txt"
-    (EVENTS / f".{name}").write_text(f"PR event: {text} {ADVICE}")
-    (EVENTS / f".{name}").replace(EVENTS / name)
+    (folder / f".{name}").write_text(f"PR event: {text} {advice}")
+    (folder / f".{name}").replace(folder / name)
 
 
 def take(folder=None):

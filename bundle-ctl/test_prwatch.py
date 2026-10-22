@@ -230,12 +230,39 @@ def test_hooks(folder):
     check("the first one watches", len(started), 1)
 
 
+def test_posted(folder):
+    """What Seb posted from Firefox, left by pr-posted.py on the host for the agent of a bundle."""
+    spec = importlib.util.spec_from_file_location("posted", HERE / "pr-posted.py")
+    posted = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(posted)
+    posted.get_agent_folder = lambda bundle: folder / (".agent" if bundle == BUNDLE else "none")
+
+    def run(bundle, line):
+        sys.argv = ["pr-posted.py", bundle]
+        sys.stdin = io.StringIO(line)
+        try:
+            posted.main()
+        except SystemExit as error:
+            return str(error)
+        return None
+
+    line = "odoo/odoo#7 (u): seb-odoo posted from Firefox a comment (u5)."
+    check("left for the agent of the bundle", (run(BUNDLE, f"{line}\n"), prwatch.take()),
+          (None, [f"PR event: {line} {posted.ADVICE}"]))
+    check("a bundle with no agent", run("other--seb", line), "other--seb has no agent folder")
+    check("not a bundle", run("../.agent", line), "../.agent has no agent folder")
+    for wrong in ("", "a\nb", "x" * 2001):
+        check(f"not one line {wrong[:5]!r}", run(BUNDLE, wrong), "one line of 2000 characters at most on stdin")
+    check("nothing left", prwatch.take(), [])
+
+
 def main():
     with tempfile.TemporaryDirectory() as name:
         make_workspace(pathlib.Path(name))
         test_look(pathlib.Path(name))
         test_run()
         test_hooks(pathlib.Path(name))
+        test_posted(pathlib.Path(name))
     print("\n".join(failures) or "all good")
     sys.exit(1 if failures else 0)
 
