@@ -113,7 +113,7 @@ def expand(words, values):
 
 def read_script(path, folder):
     """The text of a shell script a command runs, empty when it cannot be read."""
-    path = pathlib.Path(folder, path)
+    path = pathlib.Path(folder, os.path.expanduser(os.path.expandvars(path)))
     try:
         return path.read_text(errors="replace") if path.stat().st_size <= MAX_SCRIPT else ""
     except OSError:

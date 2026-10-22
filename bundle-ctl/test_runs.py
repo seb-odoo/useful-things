@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import time
+from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -45,6 +46,8 @@ KINDS = [
     (f'S=/tmp/x; E="nice -n 19 {ENGINE} --workers 2"; $E --test x > $S/a', ("hoot", 2)),
     ("S={folder}; bash $S/battery.sh 8331 tag", ("hoot", 3)),
     ("cd {folder} && ./battery.sh", ("hoot", 3)),
+    ("bash ~/battery.sh 8331 tag 2>&1 | tail -20", ("hoot", 3)),
+    ("bash $HOME/battery.sh", ("hoot", 3)),
     ("bash {folder}/missing.sh", None),
     ("python3 ./odoo-bin -d \"it's --test-tags /mail", ("odoo", 1)),
     ("pkill -f odoo-bin; ps aux | grep odoo-bin; pgrep -af 'odoo-bin|engine-linux-amd64'", None),
@@ -68,7 +71,7 @@ def load_hook():
 
 def check_kinds(failures):
     hook = load_hook()
-    with tempfile.TemporaryDirectory() as folder:
+    with tempfile.TemporaryDirectory() as folder, mock.patch.dict(os.environ, HOME=folder):
         script = pathlib.Path(folder) / "battery.sh"
         script.write_text(f'#!/bin/bash\nE="{ENGINE} --workers 3"\n$E --suite-names "$2"\n')
         for text, expected in KINDS:
