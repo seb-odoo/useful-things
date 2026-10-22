@@ -215,6 +215,8 @@ def test_hooks(folder):
     check("a line that waits keeps the turn going, with no verdict written", stopped(),
           (json.dumps({"decision": "block", "reason": f"PR event: c {prwatch.ADVICE}"}) + "\n",
            False))
+    check("a turn before the terminal typed its task writes no verdict", stopped(), ("", False))
+    (prwatch.AGENT / "run.lock").mkdir()
     check("then the turn ends on its verdict", stopped(), ("", True))
 
     started = []
