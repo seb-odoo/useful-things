@@ -404,10 +404,14 @@ is the contained terminal of the VS Code window.
   report, gives the mark by its first line, as before. A session whose turn ended while a
   background command runs is `shell`, and counts as idle: a review agent ends on `needs Seb:` and
   leaves `thread-watch.py` waiting for his review (Seb, 2026-10-14: they showed ⏳ while they
-  waited for him). `client/window-title.py BUNDLE SESSION=STATUS...` picks it. With wmctrl, `agent-terminator.py`
+  waited for him). A busy session whose running call waits for Seb's answer in hok, a
+  `hok-answer` or an `hctl job` that the tail of its transcript shows with no result yet, waits
+  for him too (Seb, 2026-10-22: "agents that waits on hok should be in waiting for me state, not
+  in running"). `client/window-title.py BUNDLE SESSION=STATUS...` picks it. With wmctrl, `agent-terminator.py`
   opens the window on 🚀 and follows the session of its claude every second until the window
-  closes, and keeps the last mark once that claude ended. claude-autoopen follows the sessions of
-  its container.
+  closes, and keeps the last mark once that claude ended; a busy session is read again every 10
+  seconds, as such a call changes the mark and not the status. claude-autoopen follows the
+  sessions of its container, on a change of status only.
   `python3 test_window_title.py` runs each case.
 
 | icon | kind | bundle name |
@@ -422,8 +426,8 @@ is the contained terminal of the VS Code window.
 | mark | the sessions of the window |
 | --- | --- |
 | 🚀 | an agent window whose claude did not start yet: its container starts |
-| ⏳ | one works: `busy`, or waits for the reset of the usage limit, as Claude then goes on by itself (its last notice is `Usage limit reached · continuing automatically at 4pm`, not cancelled by Esc, for 5 hours at most: a claude started later on that session does not go on by itself) |
-| ✋ | one waits for a permission or an answer (`waiting`), or none works and one last answer ends on `Waiting for you`, or has no close line and is no `pushed:` nor `nothing to do:` (`ready to push`, `needs Seb:`, `blocked:`, a chat) |
+| ⏳ | one works: `busy`, out of a call that waits for hok, or waits for the reset of the usage limit, as Claude then goes on by itself (its last notice is `Usage limit reached · continuing automatically at 4pm`, not cancelled by Esc, for 5 hours at most: a claude started later on that session does not go on by itself) |
+| ✋ | one waits for a permission or an answer (`waiting`), or for Seb's answer in hok (`busy` on `hok-answer` or `hctl job`), or none works and one last answer ends on `Waiting for you`, or has no close line and is no `pushed:` nor `nothing to do:` (`ready to push`, `needs Seb:`, `blocked:`, a chat) |
 | ✅ | none works and all last answers end on `Nothing left`, or have no close line and are `pushed:` or `nothing to do:` |
 | ❌ | the run of an agent window ended before its claude started (`.agent/done` is `failed`) |
 | none | no live session |
@@ -490,7 +494,9 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   min`, `running for 3 min`, then `shown` when its terminal is not minimized). An ops row has it
   from the record of its session in the sessions folder of the ops container (Seb, 2026-10-21:
   "ops agent don't have anything in the since column"): running in a turn, waiting on a dialog or
-  when its mark says it waits for Seb, else done. A row whose claude
+  when its mark says it waits for Seb, else done. A row whose call waits for Seb's answer in hok
+  is `waiting for 5 min` from the first of such calls in a row, a bundle one while its mark is
+  ✋, as the mark says it. A row whose claude
   ended on an error, a bundle or an ops one, has that error there: `claude ended with code 137`.
   Each row has the close line of the last answer of its session in its last column, else the
   first line of that answer, as an agent at work has no close line yet (Seb, same day: "no last

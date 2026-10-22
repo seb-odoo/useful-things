@@ -20,8 +20,9 @@ window minimizes it again.
 The title of the window says what the work is about (client/window-title.py). With wmctrl, it also
 follows the status of the agent's session, in the sessions folder of the bundle's container, until
 the window closes: it says the agent starts until its claude does, and that it failed when the
-run ends before (.agent/done written since the window opened). Once its claude ends, the last mark
-stays. When a VS Code window or another terminal takes the session over, agent-terminal.py closes
+run ends before (.agent/done written since the window opened). A busy session is read again every
+REFRESH seconds, as a call that waits for Seb in hok changes its mark and not its status. Once its
+claude ends, the last mark stays. When a VS Code window or another terminal takes the session over, agent-terminal.py closes
 the window: SIGUSR1 to BUNDLE_CTL_WINDOW_PID, this process. The window opens minimized, so that a
 new agent does not take the screen: it waits in the window list (window-picker.py). Terminator maps
 it minimized with --hidden, only when its hide_window key is not bound: the copy of the config
@@ -176,6 +177,8 @@ def follow(bundle, terminator, since):
         if bundle.startswith(OPS) and time.monotonic() - refreshed >= REFRESH:
             refreshed, shown = time.monotonic(), None
             ended = ended or (bool(record) and not is_agent_running(bundle))
+        elif record and record.get("status") == "busy" and time.monotonic() - refreshed >= REFRESH:
+            refreshed, shown = time.monotonic(), None
         status = record and f"{record['sessionId']}={record.get('status') or ''}"
         if not status and not shown and (get_mtime(done) or 0) * 1000 >= since:
             status = "--failed"

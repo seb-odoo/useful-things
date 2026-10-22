@@ -21,9 +21,11 @@ window (ops-SESSION) shows the title of its conversation in place of a name, and
 the parts of the answer: finished with a Done part and neither a Decide nor a Your action part.
 An idle session that waits for the reset of the usage limit works, as Claude goes on with it by
 itself ("Usage limit reached · continuing automatically at 4pm"), until Esc cancels that, for 5
-hours at most.
+hours at most. A busy session whose running call waits for Seb's answer in hok (`hok-answer`,
+`hctl job`) waits for him.
 """
 
+import calendar
 import json
 import os
 import pathlib
@@ -34,6 +36,7 @@ import time
 CLOSE = re.compile(r"[*_\s]*(nothing (is )?left|(waiting|waits) (for|on) you)\b", re.IGNORECASE)
 FINISHED = re.compile(r"(pushed:|nothing to do:)", re.IGNORECASE)
 FLAGS = {"--failed": "❌", "--starting": "🚀"}
+HOK_WAIT = re.compile(r"\b(hok-answer|hctl job)\b")
 KINDS = (
     ("🔧", "ops", lambda name, own: name.startswith(OPS)),
     ("⏩", "fw", lambda name, own: name.endswith("-fw")),
@@ -115,6 +118,37 @@ def is_resuming(session):
     return False
 
 
+def is_hok_wait(call):
+    command = (call.get("input") or {}).get("command") if call.get("name") == "Bash" else None
+    return bool(HOK_WAIT.search(str(command or "")))
+
+
+def get_hok_wait(session):
+    """When a session began to wait for Seb's answer in hok, as epoch seconds: the start of the
+    calls of hok-answer or `hctl job` it made in a row, the last one still running. None when no
+    such call runs: answered, sent to the background, or another call runs."""
+    answered, start, running = set(), None, False
+    for line in reversed(read_tail(session)):
+        try:
+            entry = json.loads(line)
+            content = entry["message"]["content"] if entry["type"] in ("user", "assistant") else None
+        except (KeyError, TypeError, ValueError):
+            continue
+        blocks = [block for block in content if isinstance(block, dict)] if content else []
+        if entry["type"] == "user":
+            if not blocks or any(block.get("type") != "tool_result" for block in blocks):
+                break
+            answered.update(block.get("tool_use_id") for block in blocks)
+            continue
+        calls = [block for block in blocks if block.get("type") == "tool_use"]
+        if not all(map(is_hok_wait, calls)):
+            break
+        if calls:
+            start = calendar.timegm(time.strptime(entry["timestamp"][:19], "%Y-%m-%dT%H:%M:%S"))
+            running = running or any(call.get("id") not in answered for call in calls)
+    return start if running else None
+
+
 def get_close_line(answer):
     """The last line of an answer when it says whether Seb can close the session, as the Stop hook
     guard-report-end.py wants a report to end: only Separately: lines may follow it. Without its
@@ -149,9 +183,10 @@ def get_mark(status_by_session, finished=is_finished):
     statuses = set(status_by_session.values())
     if not statuses:
         return ""
-    if "waiting" in statuses:
+    busy = [session for session, status in status_by_session.items() if status == "busy"]
+    if "waiting" in statuses or any(map(get_hok_wait, busy)):
         return "✋"
-    if "busy" in statuses or any(map(is_resuming, status_by_session)):
+    if busy or any(map(is_resuming, status_by_session)):
         return "⏳"
     answers = map(get_last_answer, status_by_session)
     return "✅" if all(is_closed(answer, finished) for answer in answers) else "✋"

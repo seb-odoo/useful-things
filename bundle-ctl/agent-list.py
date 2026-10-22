@@ -153,12 +153,16 @@ sessions = {}
 
 def get_ops_state(row, record, now):
     """The state of an ops agent and since when, from the record of its session: running in a
-    turn, waiting on a dialog or when its mark says it waits for Seb, else done."""
+    turn, waiting on a dialog, on Seb's answer in hok or when its mark says it waits for Seb, else
+    done."""
     status = record.get("status")
     if not status:
         return "", 0.0
     since = (record.get("statusUpdatedAt") or record.get("updatedAt") or 0) / 1000
     span = bctl.format_span(now - since)
+    waits = status == "busy" and picker.load_title().get_hok_wait(record.get("sessionId"))
+    if waits:
+        return f"waiting for {bctl.format_span(now - waits)}", waits
     if status == "busy":
         return f"running for {span}", since
     if status == "waiting" or get_mark_and_kind(row)[0] == "✋ waiting":
@@ -167,7 +171,8 @@ def get_ops_state(row, record, now):
 
 
 def get_info(row, answer, record=None):
-    """The state of the agent of a row and since when, from the .agent/ files of its bundle, its
+    """The state of the agent of a row and since when, from the .agent/ files of its bundle, or
+    from its transcript while its mark waits on a call that waits for Seb's answer in hok, its
     answer, else the first line of its result.md, and that since as a time, 0 when none. An ops
     row has its window as key, and the record of its session in place of such files. A window
     whose claude ended and that waits for Enter has the error it shows as state."""
@@ -180,6 +185,10 @@ def get_info(row, answer, record=None):
     if (since := get_mtime(folder / "done")) is not None:
         word = "failed" if read_text(folder / "done") == "failed" else "done"
         state = f"{word} {bctl.format_span(now - since)} ago"
+    elif get_mark_and_kind(row)[0] == "✋ waiting" and (
+        since := picker.load_title().get_hok_wait(read_text(folder / "session"))
+    ):
+        state = f"waiting for {bctl.format_span(now - since)}"
     elif (since := get_mtime(folder / "waiting")) is not None:
         state = f"waiting for {bctl.format_span(now - since)}"
     elif (since := get_mtime(folder / "run.lock")) is not None:

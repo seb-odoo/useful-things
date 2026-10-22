@@ -35,6 +35,22 @@ ANSWERS = {
     "wait": ["pushed: c4d3b85\n\nWaiting for you: r+ on [odoo#5](https://github.com/odoo/odoo/pull/5)"],
     "wait-bold": ["**Done**\n- 3/3\n\n**Waiting for you**: hok g12 for the 19.0 hop"],
 }
+CALLS = {
+    "hok": [("hok-answer g3", None)],
+    "hok-again": [("hok-answer g3", "still waits"), ("hctl job 4 --wait 590", None)],
+    "hok-answered": [("hok-answer g3", "sent")],
+    "hok-background": [("hok-answer g3", "Command running in background with ID: b1")],
+    "hok-then-test": [("hok-answer g3", "sent"), ("python3 test_queue.py", None)],
+    "hok-after-prompt": [("hok-answer g3", "still waits"), ("go on", "prompt")],
+}
+HOK_WAITS = [
+    ("hok", 600),
+    ("hok-again", 1200),
+    ("hok-answered", None),
+    ("hok-background", None),
+    ("hok-then-test", None),
+    ("hok-after-prompt", None),
+]
 CLOSE_LINES = [
     ("left", "Nothing left: the list shows it."),
     ("separately", "Nothing is left: pushed."),
@@ -68,6 +84,12 @@ MARKS = [
     (["left=idle", "resuming=idle"], f"⏳ {TITLE}"),
     (["cancelled=idle"], f"✋ {TITLE}"),
     (["resumed=idle"], f"✋ {TITLE}"),
+    (["hok=busy"], f"✋ {TITLE}"),
+    (["hok-again=busy"], f"✋ {TITLE}"),
+    (["hok-answered=busy"], f"⏳ {TITLE}"),
+    (["hok-background=busy"], f"⏳ {TITLE}"),
+    (["hok-then-test=busy"], f"⏳ {TITLE}"),
+    (["hok=busy", "a=busy"], f"✋ {TITLE}"),
 ]
 LIMIT = "Usage limit reached · continuing automatically at 4pm · esc to cancel"
 NOTICES = {
@@ -88,6 +110,7 @@ OPS_MARKS = [
     ("ops-separately", ["separately=idle"], "✅ 🔧 new session (ops)"),
     ("ops-wait", ["wait=idle"], "✋ 🔧 new session (ops)"),
     ("ops-wait-bold", ["wait-bold=idle"], "✋ 🔧 new session (ops)"),
+    ("ops-hok", ["hok=busy"], "✋ 🔧 new session (ops)"),
 ]
 TOPICS = {
     "report": [
@@ -114,6 +137,7 @@ FOLLOWED = [
     [f"⏳ {TITLE}", f"✅ {TITLE}"],
     [f"❌ {TITLE}"],
     [f"⏳ {OPS}", "⏳ 🔧 Ops agent windows (ops)", "🔧 Ops agent windows (ops)"],
+    [f"⏳ {TITLE}", f"✋ {TITLE}"],
 ]
 
 
@@ -138,6 +162,42 @@ def write_transcripts(home):
             entries.append({"type": kind, key: topic, "sessionId": session})
         lines = "".join(f"{json.dumps(entry)}\n" for entry in entries)
         (folder / f"{session}.jsonl").write_text(lines)
+    for session, calls in CALLS.items():
+        entries = [{"type": "user", "message": {"content": "go"}}]
+        for index, (command, result) in enumerate(calls):
+            ago = 600 * (len(calls) - index)
+            stamp = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(time.time() - ago))
+            if result == "prompt":
+                entries.append({"type": "user", "message": {"content": command}})
+                continue
+            call = {"type": "tool_use", "id": f"t{index}", "name": "Bash"}
+            call["input"] = {"command": command}
+            message = {"content": [call]}
+            entries.append({"type": "assistant", "message": message, "timestamp": stamp})
+            entries.append({"type": "attachment"})
+            if result:
+                answer = {"type": "tool_result", "tool_use_id": f"t{index}", "content": result}
+                entries.append({"type": "user", "message": {"content": [answer]}})
+                thinking = {"type": "thinking", "thinking": ""}
+                entries.append({"type": "assistant", "message": {"content": [thinking]}})
+        lines = "".join(f"{json.dumps(entry)}\n" for entry in entries)
+        (folder / f"{session}.jsonl").write_text(lines)
+
+
+def get_hok_waits():
+    """When a session began to wait for Seb's answer in hok: the first of its calls of hok-answer
+    or `hctl job` in a row, while the last one runs; none once answered, sent to the background,
+    or followed by another call or a prompt."""
+    spec = importlib.util.spec_from_file_location("title", HERE / "client" / "window-title.py")
+    title = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(title)
+    failures = []
+    for session, ago in HOK_WAITS:
+        found = title.get_hok_wait(session)
+        found = found and round((time.time() - found) / 60) * 60
+        if found != ago:
+            failures.append(f"hok wait of {session}: started {found} s ago, expected {ago}")
+    return failures
 
 
 def get_marks():
@@ -264,6 +324,25 @@ def get_followed(home):
     threading.Thread(target=run_ops, daemon=True).start()
     terminator.follow("ops-report", window, time.time() * 1000 - 1000)
     titles.append((home / "log").read_text().splitlines())
+
+    def wait_on_hok():
+        transcript = home / ".claude" / "projects" / "-workspace" / "hok-turn.jsonl"
+        transcript.write_text(json.dumps({"type": "user", "message": {"content": "go"}}) + "\n")
+        write("17.json", sessionId="hok-turn", startedAt=time.time() * 1000, status="busy")
+        time.sleep(0.5)
+        call = {"type": "tool_use", "id": "t1", "name": "Bash"}
+        call["input"] = {"command": "hok-answer g3 --wait 590"}
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+        entry = {"type": "assistant", "message": {"content": [call]}, "timestamp": stamp}
+        with transcript.open("a") as file:
+            file.write(f"{json.dumps(entry)}\n")
+
+    window = subprocess.Popen(["sleep", "2"])
+    (home / "pid").write_text(str(window.pid))
+    (home / "log").write_text("")
+    threading.Thread(target=wait_on_hok, daemon=True).start()
+    terminator.follow(BUNDLE, window, time.time() * 1000 - 1000)
+    titles.append((home / "log").read_text().splitlines())
     window = subprocess.Popen(["sleep", "30"])
     threading.Timer(0.3, os.kill, (os.getpid(), signal.SIGUSR1)).start()
     closed = terminator.follow(BUNDLE, window, time.time() * 1000)
@@ -336,6 +415,7 @@ def main():
         os.environ.update(HOME=root, USER="seb")
         write_transcripts(home)
         failures += get_marks()
+        failures += get_hok_waits()
         failures += get_close_lines()
         failures += get_loaded()
         failures += get_configs(home)
@@ -350,7 +430,8 @@ def main():
             failures.append(f"agent-terminator.py: a tab on its session left it on {taken}")
     for line in failures:
         print(line)
-    cases = len(MARKS) + len(OPS_MARKS) + len(CLOSE_LINES) + len(CONFIGS) + len(FOLLOWED) + 5
+    cases = len(MARKS) + len(OPS_MARKS) + len(HOK_WAITS) + len(CLOSE_LINES) + len(CONFIGS)
+    cases += len(FOLLOWED) + 5
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

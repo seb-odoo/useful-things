@@ -520,6 +520,37 @@ def check_tree(agent_list):
     return failures
 
 
+def check_hok_wait(agent_list):
+    """An agent whose running call waits for Seb's answer in hok waits since that call, not runs:
+    a bundle row while its mark is ✋, an ops row from the record of its busy session."""
+    failures = []
+    title = agent_list.picker.load_title()
+    kept = title.PROJECTS, agent_list.get_agent_folder
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(time.time() - 600))
+    call = {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "hok-answer g3"}}
+    entry = {"type": "assistant", "message": {"content": [call]}, "timestamp": stamp}
+    with tempfile.TemporaryDirectory() as root:
+        title.PROJECTS = pathlib.Path(root, "projects")
+        (title.PROJECTS / "-workspace").mkdir(parents=True)
+        (title.PROJECTS / "-workspace" / "H1.jsonl").write_text(f"{json.dumps(entry)}\n")
+        agent_list.get_agent_folder = lambda name: pathlib.Path(root, name, ".agent")
+        folder = pathlib.Path(root, "master-h--seb", ".agent")
+        folder.mkdir(parents=True)
+        (folder / "run.lock").write_text("")
+        (folder / "session").write_text("H1\n")
+        record = {"status": "busy", "sessionId": "H1", "statusUpdatedAt": AGO * 1e3}
+        cases = [
+            (agent_list.picker.Row(None, 2, "✋ master-h--seb", "master-h--seb", "0x01", True), None),
+            (agent_list.picker.Row(None, 3, "⏳ 🔧 Refactor (ops)", "0x0b", "0x0b", True), record),
+        ]
+        for row, record in cases:
+            found = agent_list.get_info(row, "", record)
+            if found[0] != "waiting for 10 min" or abs(found[2] - (time.time() - 600)) > 60:
+                failures.append(f"row {row.key} waiting on hok: {found!r}")
+    title.PROJECTS, agent_list.get_agent_folder = kept
+    return failures
+
+
 def main():
     failures = []
     agent_list = load_list()
@@ -531,7 +562,8 @@ def main():
             for file, (text, age) in files.items():
                 (folder / file).write_text(text)
                 os.utime(folder / file, (time.time() - age,) * 2)
-            row = agent_list.picker.Row(None, None, name, name, "0x01", minimized)
+            rank = len(agent_list.picker.MARKS)
+            row = agent_list.picker.Row(None, rank, name, name, "0x01", minimized)
             found = agent_list.get_info(row, CLOSES.get(name, ""))
             ages = [files[file][1] for file in ("done", "waiting", "run.lock") if file in files]
             since = time.time() - ages[0] if ages else 0.0
@@ -573,11 +605,12 @@ def main():
     failures += check_filters(agent_list) + check_reads(agent_list) + check_usage(agent_list)
     failures += check_ask(agent_list) + check_queue(agent_list) + check_tabs(agent_list)
     failures += check_tree(agent_list) + check_pick(agent_list) + check_records(agent_list)
+    failures += check_hok_wait(agent_list)
     for line in failures:
         print(line)
     cases = len(AGENTS) + len(OPS_INFOS) + 4 + 1 + len(FACETS) + len(FILTERED) + 2 + 7 + 3 + 3
     cases += len(QUEUED_LINES) + 1 + 2 + len(SEARCHED) + 1 + len(MOVES) + len(TABS) + 2 + 9 + 3
-    cases += 1 + 1 + 1
+    cases += 1 + 1 + 1 + 2
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 
