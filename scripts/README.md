@@ -62,7 +62,9 @@ their own there goes at that start: the hard links of the base a bundle had befo
 it write the files that the ESLint of every other bundle of the base loads.
 
 `_install_js_tooling` in `utils.py` runs `enable.sh` for its config files and its hooks, with npm in
-dry run: `npm install` would replace the link with a tree of its own, built from the branch. Do not
+dry run: `npm install` would replace the link with a tree of its own, built from the branch. npm
+is also offline: in the box, with no network, it retried the registry for 14 minutes before it gave
+up (2026-10-21), and offline it gives up at once; `enable.sh` goes on after npm fails. Do not
 patch `enable.sh` instead: it is tracked upstream (`odoo/addons/web/tooling/enable.sh`), so a hand
 patch is gone in the next worktree. The fix of a tooling file of Odoo belongs in these scripts.
 
@@ -87,7 +89,9 @@ The base is never the upstream of the new branch. With `--no-push` the branch ha
 a plain `git push`, which creates it on the dev remote and tracks it there
 (`branch.<name>.pushRemote`, and `push.autoSetupRemote` in the config of the repo;
 `test_upstream.py`).
-Runs web tooling setup, and opens the bundle in VS Code.
+Runs web tooling setup, writes `.made`, and opens the bundle in VS Code. `.made` comes last: a
+bundle cut before it (a restart of bundle-ctl kills its jobs) is half-made, and the same command
+again finishes it.
 The setup script (`enable.sh`) comes from the branch: with `HOST_BOX` in `config.env` it runs boxed,
 with no network.
 
@@ -110,9 +114,9 @@ Repositories
 └── upgrade
     ├── [0.02-2.38] /home/seb/repo/upgrade ✅️ git fetch odoo master -p
     └── [2.39-3.28] /home/seb/repo/upgrade ✅️ git worktree add /home/seb/src/odoo/master/master-test--seb/upgrade odoo/master
-[12.05-12.05] /home/seb/src/odoo/master/master-test--seb ✅️ touch /home/seb/src/odoo/master/master-test--seb/.made
 [12.78-19.58] /home/seb/src/odoo/master/master-test--seb ✅️ bash ./odoo/addons/web/tooling/enable.sh
 y
+[19.58-19.58] /home/seb/src/odoo/master/master-test--seb ✅️ touch /home/seb/src/odoo/master/master-test--seb/.made
 [19.61-19.76] /home/seb/src/odoo/master/master-test--seb ✅️ code --folder-uri vscode-remote://dev-container+<hex>/workspace
 Done
 ```
@@ -193,15 +197,15 @@ Commits
 └── upgrade-util
     ├── [0.19-1.59] /home/seb/repo/upgrade-util ✅️ git fetch odoo 8a61e891df29e0cc0fc7c4159f2139506471a8d8 -p
     └── [1.59-1.61] /home/seb/repo/upgrade-util ✅️ git worktree add /home/seb/src/odoo/master/master-test--seb/upgrade-util 8a61e891df29e0cc0fc7c4159f2139506471a8d8
-[5.27-5.27] /home/seb/src/odoo/master/master-test--seb ✅️ touch /home/seb/src/odoo/master/master-test--seb/.made
 [5.27-5.28] /home/seb/src/odoo/master/master-test--seb ✅️ rm -rf /home/seb/src/odoo/master/master-test--seb/odoo/node_modules
 [5.28-5.29] /home/seb/src/odoo/master/master-test--seb ✅️ rm -rf /home/seb/src/odoo/master/master-test--seb/enterprise/node_modules
-[5.29-7.12] /home/seb/src/odoo/master/master-test--seb ✅️ env npm_config_dry_run=true npm_config_audit=false npm_config_fund=false bash ./odoo/addons/web/tooling/enable.sh
+[5.29-5.62] /home/seb/src/odoo/master/master-test--seb ✅️ env npm_config_dry_run=true npm_config_offline=true npm_config_audit=false npm_config_fund=false bash ./odoo/addons/web/tooling/enable.sh
 y
 
-[7.12-7.13] /home/seb/src/odoo/master/master-test--seb ✅️ ln -sfn /opt/node_modules /home/seb/src/odoo/master/master-test--seb/odoo/node_modules
-[7.13-7.14] /home/seb/src/odoo/master/master-test--seb ✅️ ln -sfn /opt/node_modules /home/seb/src/odoo/master/master-test--seb/enterprise/node_modules
-[7.14-7.30] /home/seb/src/odoo/master/master-test--seb ✅️ code --folder-uri vscode-remote://dev-container+<hex>/workspace
+[5.62-5.63] /home/seb/src/odoo/master/master-test--seb ✅️ ln -sfn /opt/node_modules /home/seb/src/odoo/master/master-test--seb/odoo/node_modules
+[5.63-5.64] /home/seb/src/odoo/master/master-test--seb ✅️ ln -sfn /opt/node_modules /home/seb/src/odoo/master/master-test--seb/enterprise/node_modules
+[5.64-5.64] /home/seb/src/odoo/master/master-test--seb ✅️ touch /home/seb/src/odoo/master/master-test--seb/.made
+[5.64-5.80] /home/seb/src/odoo/master/master-test--seb ✅️ code --folder-uri vscode-remote://dev-container+<hex>/workspace
 Done
 ```
 

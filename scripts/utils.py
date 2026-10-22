@@ -259,9 +259,12 @@ class UtilsRunner(Runner):
         repo_wts = [odoo_wt, enterprise_wt] if has_enterprise else [odoo_wt]
         for repo_wt in repo_wts:
             runner.run(["rm", "-rf", f"{repo_wt}/node_modules"])
-        # npm only says what it would install: the node_modules of a base is built by
-        # `bctl node-modules`, never from a fetched branch.
-        npm = [f"npm_config_{key}" for key in ("dry_run=true", "audit=false", "fund=false")]
+        # npm installs nothing, and offline it gives up at once on a registry the box cannot reach:
+        # the node_modules of a base is built by `bctl node-modules`, never from a fetched branch.
+        npm = [
+            f"npm_config_{key}"
+            for key in ("dry_run=true", "offline=true", "audit=false", "fund=false")
+        ]
         enable = ["env", *npm, "bash", "./odoo/addons/web/tooling/enable.sh"]
         if HOST_BOX:
             # enable.sh and what npm runs come from the fetched branch: boxed, with no network.
@@ -277,8 +280,8 @@ class UtilsRunner(Runner):
         bundle_folder = get_worktree_bundle_folder(bundle_name)
         base_folder = get_worktree_base_folder(get_base_from_bundle_name(bundle_name))
         runner = self.with_params(cwd=bundle_folder)
-        runner.run(["touch", f"{bundle_folder}/{MADE}"])
         self._install_js_tooling(runner, bundle_name=bundle_name, base_folder=base_folder)
+        runner.run(["touch", f"{bundle_folder}/{MADE}"])
         if open_window:
             runner.open_devcontainer_folder(folder=bundle_folder)
 

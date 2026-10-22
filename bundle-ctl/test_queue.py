@@ -2,6 +2,7 @@
 """What a pass of the queue launches, keeps and drops, without podman: python3 test_queue.py"""
 
 import contextlib
+import http.server
 import importlib.util
 import io
 import json
@@ -20,6 +21,7 @@ sys.path.insert(0, str(HERE))
 
 import daemon  # noqa: E402
 
+START_JOB = daemon.start_job
 QUEUED = 1760000000.0
 TASK = "do"
 
@@ -744,6 +746,31 @@ def check_build(root):
     daemon.run_script = lambda log, *args: ran.append(list(args))
     daemon.build_bundle("new", {}, {})
     checks.append(("its bundle builds it once", (ran, state["builds"]) == ([build], {})))
+    repo = root / "repo"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+        + ["-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "work"],
+        check=True,
+    )
+    subprocess.run(["git", "-C", str(repo), "branch", "new"], check=True)
+    get_repos, get_repo_folder = daemon.get_repos, daemon.get_repo_folder
+    daemon.get_repos = lambda: ["odoo"]
+    daemon.get_repo_folder = lambda name: str(repo)
+    state["builds"]["new"] = build
+    try:
+        daemon.build_bundle("new", {}, {})
+        refusal = None
+    except daemon.Refused as error:
+        refusal = str(error)
+    finally:
+        daemon.get_repos, daemon.get_repo_folder = get_repos, get_repo_folder
+    checks.append(
+        (
+            "a build again refuses to reset a commit no remote has",
+            (refusal, ran) == ("new has unpushed commits in odoo, bctl build would reset them", [build]),
+        ),
+    )
     daemon.read_disk_free = lambda: 20.4
     daemon.check_unpushed = lambda bundle, script: None
     daemon.local_branches = lambda bundle: []
@@ -778,6 +805,58 @@ def check_build(root):
     (bare / "odoo").mkdir()
     checks.append(("a worktree makes it no longer bare", not daemon.is_bare(bare)))
     return [f"build: {name}" for name, passed in checks if not passed], len(checks)
+
+
+def check_build_cut(root):
+    """A restart of the daemon kills the build a client follows: the client asks it again of the
+    new daemon, which no longer knows the job."""
+    state, _launched = prepare(root, {"new": FRESH}, 8)
+    state["queue"] = []
+    state["builds"] = {"new": ["fetch_bundle.py", "new", "--no-open"]}
+    path = root / "ctl.sock"
+    asked = []
+
+    class Killed(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            asked.append("killed")
+            data = b'{"job": "old"}'
+            self.send_response(202)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            self.connection.close()
+            threading.Thread(target=restart, daemon=True).start()
+
+    def restart():
+        killed.shutdown()
+        killed.server_close()
+        path.unlink()
+        path.touch()
+        time.sleep(4)
+        path.unlink()
+        new = daemon.Server(str(path), daemon.Handler)
+        threading.Thread(target=new.serve_forever, daemon=True).start()
+
+    killed = daemon.Server(str(path), Killed)
+    threading.Thread(target=killed.serve_forever, daemon=True).start()
+    daemon.STATE = root
+    daemon.identify = lambda connection: "new"
+    daemon.is_in_container = lambda connection: True
+    daemon.check_unpushed = lambda bundle, script: None
+    daemon.run_script = lambda log, *args: asked.append(args[0])
+    daemon.start_job = START_JOB
+    code, lines = run_client(path, "build")
+    checks = [
+        ("the client asks the build again", "bctl: a restart of bundle-ctl killed the job, asked again" in lines),
+        ("the new daemon builds it", (code, asked) == (0, ["killed", "fetch_bundle.py"])),
+        ("its build is done", state["builds"] == {}),
+    ]
+    return [f"build cut: {name}: {lines}" for name, passed in checks if not passed], len(checks)
 
 
 def check_parked(root):
@@ -903,6 +982,7 @@ def main():
         check_requeue,
         check_github,
         check_build,
+        check_build_cut,
         check_parked,
         check_priority,
         check_hand_over,

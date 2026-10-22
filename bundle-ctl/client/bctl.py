@@ -85,7 +85,8 @@ before its last call runs again. --wait then works as for delete. Only the host 
 container may ask it.
 
 build makes the bundle of this container, whose agent started in its bare folder: the create or
-fetch its task was queued with runs now, and the worktrees appear in /workspace.
+fetch its task was queued with runs now, and the worktrees appear in /workspace. A restart of the
+daemon kills the build: bctl asks it again, which finishes the bundle.
 
 branches is gbs run on the host: the table, or with --json the data agents read.
 
@@ -141,19 +142,34 @@ class UnixConnection(http.client.HTTPConnection):
         self.sock.connect(str(self.socket_path))
 
 
-def request(method, path, body=None, timeout=120):
+class JobGone(Exception):
+    """The daemon no longer knows the job: a restart killed it."""
+
+
+def request(method, path, body=None, timeout=120, retry=0):
+    """The answer of the daemon. With `retry`, a daemon that does not answer, as during its
+    restart, is asked again for that many seconds."""
     socket_path = next((path for path in SOCKETS if path.exists()), None)
     if socket_path is None:
         sys.exit("bctl: no bundle-ctl socket, is the daemon running on the host?")
-    connection = UnixConnection(socket_path, timeout)
     data = json.dumps(body).encode() if body is not None else None
     headers = {"Content-Type": "application/json"} if data else {}
-    try:
-        connection.request(method, path, body=data, headers=headers)
-        response = connection.getresponse()
-        answer = json.loads(response.read() or b"{}")
-    except OSError as error:
-        sys.exit(f"bctl: {socket_path}: {error}")
+    deadline = time.monotonic() + retry
+    while True:
+        connection = UnixConnection(socket_path, timeout)
+        try:
+            connection.request(method, path, body=data, headers=headers)
+            response = connection.getresponse()
+            answer = json.loads(response.read() or b"{}")
+            break
+        except OSError as error:
+            if time.monotonic() >= deadline:
+                sys.exit(f"bctl: {socket_path}: {error}")
+            time.sleep(3)
+        finally:
+            connection.close()
+    if response.status == 400 and answer.get("error") == "no such job":
+        raise JobGone
     if response.status >= 300:
         sys.exit(f"bctl: {response.status} {answer.get('error', '')}")
     return answer
@@ -476,10 +492,20 @@ def wait_held(held, seconds):
     sys.exit({"refused": 126, "sent": 0, "waits": 75}.get(answer["state"], 1))
 
 
-def follow(job_id):
+def follow(job_id, again=None):
+    """Print the log of a job until it ends. `again` starts the job anew once a restart of the
+    daemon killed it, and returns its id."""
     offset = 0
     while True:
-        answer = request("GET", f"/job?id={job_id}&offset={offset}&wait=50", timeout=70)
+        path = f"/job?id={job_id}&offset={offset}&wait=50"
+        try:
+            answer = request("GET", path, timeout=70, retry=RUN_RETRY)
+        except JobGone:
+            if again is None:
+                sys.exit("bctl: a restart of bundle-ctl killed the job: send the command again")
+            print("\nbctl: a restart of bundle-ctl killed the job, asked again", file=sys.stderr)
+            job_id, offset = again(), 0
+            continue
         sys.stdout.write(answer["log"])
         sys.stdout.flush()
         offset = answer["offset"]
@@ -641,7 +667,11 @@ def main():
         answer = request("POST", "/unqueue", {"bundle": args.bundle})
         printer = print_unqueued
     elif args.command == "build":
-        answer = follow(request("POST", "/build", {})["job"])
+
+        def build():
+            return request("POST", "/build", {})["job"]
+
+        answer = follow(build(), again=build)
     elif args.command == "add-repo":
         answer = request("POST", "/add-repo", {"bundle": args.bundle, "repo": args.repo})
         answer = follow(answer["job"])

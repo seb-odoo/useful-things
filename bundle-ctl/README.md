@@ -34,7 +34,7 @@ repos: a container writes their `.git`, and the jobs run git there (`daemon-git`
 | `GET /branches` | `gbs --json` run on the host, which deletes the bundles left with merged PRs only; `?format=table&width=N`: its colored table |
 | `GET /status` | every local bundle branch, as read in the last 30 seconds (agents poll it, and a read runs git on each branch): base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open, and its agent: state (`running`, `waiting`, `done`, or `stopped` when its terminal or its window closed before the verdict: nothing runs it any more, and a new task may replace it; a stopped agent carries its `task` text, to queue it again as it was), when it was queued, when its run started (none for a task no window took), when it ended, `stale` when a branch of the bundle got a commit, or its dev remote ref an update (the mtime of its reflog), after that end, retry, and the last write to a session titled with the bundle, its own or an earlier agent's tab Seb went on in (`active N min ago`, or `idle since HH:MM` after 15 minutes; a tab opened by hand has no title and does not count); the queue, each task with its priority, the bundle that queued it, when, and what it waits for |
 | `POST /add-repo` | `add_repo.py`: the worktree of a repo the bundle was made without (`design-themes`, `documentation`); a container asks for its own only |
-| `POST /build` | the `gnb` or `pfb` a task was queued with, for the bundle whose agent started bare (see Bare start); the bundle itself or the host asks; refused when the disk is short |
+| `POST /build` | the `gnb` or `pfb` a task was queued with, for the bundle whose agent started bare (see Bare start); the bundle itself or the host asks; refused when the disk is short, or when a branch of the bundle has a commit no remote has, which the script would reset |
 | `POST /create` | `gnb` with `--no-push`, then a window; with a task, only its queue entry, the bundle being made when its agent asks (see Bare start); refused when the bundle exists, a branch has unpushed commits or, with no task, the disk is short (see Disk) |
 | `POST /delete` | the deletion of a bundle, held for Seb's yes in `hok` (see Deletion); a container asks for its own, or for the one of a child |
 | `GET /cut` | the Claude sessions a crash or a restart cut, bundles and ops (see Cut sessions); the host and the ops container only |
@@ -53,9 +53,14 @@ repos: a container writes their `.git`, and the jobs run git there (`daemon-git`
 | `POST /run` | a heavy command waits for cores: one JSON line each time its place changes, then the CPUs it got (see Runs) |
 | `GET /runs` | the runs that hold cores and the ones that wait, the pool and the memory available |
 
-A `create` or a `fetch` that fails leaves a half-made bundle: a folder with no `.devcontainer`,
-which the scripts link last, so no container can start in it. The same `create` or `fetch` sent
-again finishes it.
+A `create`, a `fetch` or a `build` that fails leaves a half-made bundle: a folder with no
+`.made`, which the scripts write last, after the config files of `enable.sh`. `open` refuses it,
+and the same command sent again finishes it. A restart of the daemon kills its jobs, which run in
+the cgroup of the unit: `bctl build` then asks its build again once the daemon is back, and prints
+`a restart of bundle-ctl killed the job, asked again`; the other verbs say to send them again. On
+2026-10-21 a deploy killed a build in `enable.sh`, which `.made` then preceded: enterprise got no
+`package.json`, the agent no word, and the pre-commit hook of Odoo removed the `node_modules`
+links of the bundle. `python3 test_queue.py` and `scripts/test_optional_repos.py` have the cases.
 
 `add-repo`, `create`, `fetch` and `open` answer 202 with a job id, and the jobs run one at a time, as two
 fetches of one repo collide on its remote refs. The jobs of one bundle also wait for each other. The

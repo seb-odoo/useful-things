@@ -2548,6 +2548,7 @@ def build_bundle(caller, query, body):
     if not args:
         raise Refused(f"{bundle}: nothing to build, its bundle is made or was never queued")
     check_disk()
+    check_unpushed(bundle, "bctl build")
 
     def work(log):
         set_building(bundle, True)

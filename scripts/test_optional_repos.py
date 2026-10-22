@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """A new bundle without design-themes and documentation, and add_repo.py bringing one back, on
-scratch repos, and which bundles get their own postgres folders: python3 test_optional_repos.py
+scratch repos, a create killed in its tooling, and which bundles get their own postgres folders:
+python3 test_optional_repos.py
 """
 
 import os
@@ -111,6 +112,18 @@ def check(root):
     checks.append(
         ("no bundle, no worktree", (code, out.strip()) == (1, "No bundle master-z--me here")),
     )
+    odoo = root / "repo" / "odoo"
+    made = root / "src" / "master" / "master-f--me" / ".made"
+    ends = []
+    for text in ("kill -TERM $PPID\n", "exit 0\n"):
+        (odoo / "addons" / "web" / "tooling" / "enable.sh").write_text(text)
+        git(odoo, "commit", "--quiet", "--all", "-m", "enable.sh")
+        git(odoo, "push", "--quiet", "odoo", "master")
+        code, out = run(env, "create_bundle.py", "master", "f", "--no-push", "--no-open",
+                        "--branch-repo", "odoo")
+        ends.append((code, made.exists()))
+    checks.append(("a create killed in enable.sh leaves no .made, and the same create finishes it",
+                   ends == [(-15, False), (0, True)]))
     for bundle, folder in (("master-d--me", None), ("master-e--me", root / "src" / "master" / "master-e--me")):
         if folder:
             folder.mkdir()
