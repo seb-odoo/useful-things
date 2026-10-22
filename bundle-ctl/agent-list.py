@@ -51,7 +51,8 @@ Child each) and rows of its own at the end. When host-ctl is on this machine, a 
 window of hok (hokwin.py), which shows them with the requests of each agent under its row; this
 window opens alone when hok ends with an error within START seconds. There, the 🔑 hok button
 before the marks keeps the agents with a request under them and the groups of requests, besides
-the rows of the marks pressed, and counts those requests.
+the rows of the marks pressed, and counts those requests. The kinds pressed keep the groups of
+their kind only, as they do the agents.
 
     agent-list.py --select KEY
 
@@ -600,10 +601,16 @@ def get_leaves(children):
     return [(get_child_line(child), []) for child in children]
 
 
-def keep_groups(keys, children, groups, shown, search=""):
-    """The groups whose name has the search, none when shown is False, and how many rows of the
-    owner the agents of keys and the groups with the search have: the number on its button."""
-    groups = [(group, kids) for group, kids in groups if is_found(group.name, search)]
+def keep_groups(keys, children, groups, shown, search="", kinds=()):
+    """The groups whose name has the search and whose kind is one of kinds, any when kinds is
+    empty, none when shown is False, and how many rows of the owner the agents of keys and those
+    groups have: the number on its button."""
+    labels = {f"{ICONS[kind]} {kind}" for kind in kinds}
+    groups = [
+        (group, kids)
+        for group, kids in groups
+        if is_found(group.name, search) and (not kinds or group.kind in labels)
+    ]
     count = sum(len(children.get(key, [])) for key in keys)
     count += sum(len(kids) for _group, kids in groups)
     return groups if shown else [], count
@@ -936,7 +943,7 @@ class Agents:
         ]
         counted = [row.key for row in rows if is_kept(row, set(), kinds, search)]
         shown = owned is not None or not ranks
-        groups, count = keep_groups(counted, children, groups, shown, search)
+        groups, count = keep_groups(counted, children, groups, shown, search, kinds)
         if self.owned.get_label() != f"{OWNED} {count}":
             self.owned.set_label(f"{OWNED} {count}")
         tree = get_tree(lines, children, groups)

@@ -469,17 +469,31 @@ def check_tree(agent_list):
         failures.append(f"tree {shape!r}")
     if tree[2][0][12] != 2 or tree[1][1][0][1] != []:
         failures.append(f"a group sorts after the agents, a child has no rows: {tree!r}")
+    ops = group._replace(key="hok group:ops S1", kind="🔧 ops", name="Refactor")
+    groups = [(group, [child]), (ops, [child])]
     kept = [
-        agent_list.keep_groups(keys, {"0x4": [child]}, [(group, [child])], shown, search)
-        for keys, shown, search in (
-            (["master-x--seb", "0x4"], True, ""),
-            (["master-x--seb", "0x4"], False, ""),
-            (["master-x--seb"], True, "Host"),
-            (["master-x--seb", "0x4"], True, "x--seb"),
+        agent_list.keep_groups(keys, {"0x4": [child]}, groups, shown, search, kinds)
+        for keys, shown, search, kinds in (
+            (["master-x--seb", "0x4"], True, "", set()),
+            (["master-x--seb", "0x4"], False, "", set()),
+            (["master-x--seb"], True, "Host", set()),
+            (["master-x--seb", "0x4"], True, "x--seb", set()),
+            (["master-x--seb"], True, "", {"ops"}),
+            (["master-x--seb"], False, "", {"ops", "fw"}),
+            (["master-x--seb", "0x4"], True, "", {"fw"}),
         )
     ]
     shape = [([kid.key for kid, _kids in groups], count) for groups, count in kept]
-    expected = [(["hok group:host"], 2), ([], 2), (["hok group:host"], 1), ([], 1)]
+    both = ["hok group:host", "hok group:ops S1"]
+    expected = [
+        (both, 3),
+        ([], 3),
+        (["hok group:host"], 1),
+        ([], 1),
+        (["hok group:ops S1"], 1),
+        ([], 1),
+        ([], 1),
+    ]
     if shape != expected:
         failures.append(f"groups kept by the buttons and the search, the number of hok: {shape!r}")
     picker = agent_list.picker

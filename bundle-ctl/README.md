@@ -580,7 +580,10 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   lack a way to easily see what is waiting for hok like before"). It adds to the marks as one
   more of them: `🔑 hok` and `✋ waiting` keep the agents of either, and a mark pressed without
   it hides the groups (Seb, 2026-10-21: "I want all hok and all waiting, not the
-  intersection"). The agent list alone does not show it.
+  intersection"). The kinds pressed cut it as they cut the marks: they keep the groups of their
+  kind only, so not those of the host or of a gateway, and its number counts those (Seb,
+  2026-10-22: "hok filter should combine like other state filters but respect type filters").
+  The agent list alone does not show it.
 - `window-applet/`, a Cinnamon applet, shows the mark that needs Seb most and how many bundles
   have it, in the order ❌ ✋ ✅ 🚀 ⏳ (Seb, 2026-10-15: a failed agent is an error to fix, a
   waiting or finished one waits for him, one stuck on starting comes after, one in progress does
