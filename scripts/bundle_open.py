@@ -1,7 +1,10 @@
-"""Open a bundle from an `odoo-bundle://<bundle name>` link, the one gbs puts on each branch.
+"""Open a bundle from an `odoo-bundle://<bundle name>` link.
 
 A bundle with a worktree opens in its dev container, like ocode. Any other one goes through pfb in
-a terminal, which opens the dev container once the worktrees are built. `odoo-bundle://ops`, which
+a terminal, which opens the dev container once the worktrees are built.
+`odoo-bundle://terminal/NAME`, the one gbs puts on each branch, brings up the VS Code window of the
+bundle when one is open, else the terminal of its agent, like ocode -t, and marks it handled; a
+bundle that is not local goes through pfb -t in a terminal. `odoo-bundle://ops`, which
 hok puts on a request of the ops container with no session, opens that one, like orepo.
 `odoo-bundle://ops-SESSION`, which the shell of an ops agent window prints, also moves its session
 to a tab there. `odoo-bundle://agent/NAME`, which hok puts on the caller of a request, brings up
@@ -25,7 +28,7 @@ import sys
 import urllib.parse
 
 import requests
-from agents import OPS
+from agents import OPS, mark_handled
 from branch_status import get_bundles
 from commands import clean_bundle_name, get_worktree_bundle_folder
 from config import HOST_FOLDER, REPO_ROOT
@@ -42,6 +45,7 @@ PICKER = os.path.join(os.path.dirname(BCTL), "..", "window-picker.py")
 RUNBOT = "https://runbot.odoo.com"
 SCHEME = "odoo-bundle://"
 TABS = "tabs/"
+TERMINAL = "terminal/"
 TITLE = os.path.join(os.path.dirname(BCTL), "window-title.py")
 
 parser = argparse.ArgumentParser()
@@ -59,6 +63,7 @@ def run_or_notify(command):
     res = subprocess.run(command, capture_output=True, check=False, text=True)
     if res.returncode:
         notify((res.stderr or res.stdout).strip())
+    return res.returncode
 
 
 def start(command):
@@ -106,6 +111,10 @@ elif link.startswith(TABS):
     open_tabs(bundle_name)
 elif link.startswith(AGENT):
     run_or_notify([sys.executable, PICKER, "--agent", bundle_name])
+elif link.startswith(TERMINAL) and os.path.isdir(get_worktree_bundle_folder(bundle_name)):
+    if not run_or_notify([sys.executable, PICKER, "--agent", bundle_name]):
+        mark_handled(bundle_name)
+        get_bundles()
 elif bundle_name == "ops" and HOST_FOLDER:
     UtilsRunner().open_devcontainer_folder(folder=HOST_FOLDER)
 elif bundle_name.startswith(OPS) and HOST_FOLDER:
@@ -115,7 +124,9 @@ elif os.path.isdir(get_worktree_bundle_folder(bundle_name)):
     get_bundles()
 else:
     fetch_bundle = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fetch_bundle.py")
-    pfb = shlex.join([sys.executable, fetch_bundle, bundle_name])
+    pfb = shlex.join(
+        [sys.executable, fetch_bundle, bundle_name, *["-t"] * link.startswith(TERMINAL)]
+    )
     subprocess.Popen(
         ["gnome-terminal", "--", "bash", "-c", f"{pfb} || read -rp 'pfb failed, press Enter'"],
     )

@@ -721,7 +721,7 @@ def get_rows(bundle, group, now):
     age = format_age(now - bundle["date"])
     label = f"[cyan]{branch}[/cyan]" if bundle["worktree"] else branch
     icon = "\N{OPEN FILE FOLDER}" if bundle["worktree"] else "\N{INBOX TRAY}"
-    opener = f"[link=odoo-bundle://{branch}]{icon}[/link]"
+    opener = f"[link=odoo-bundle://terminal/{branch}]{icon}[/link]"
     agent = format_agent(bundle["agent"], bundle["group"])
     rows = []
     for repo, row in bundle["repos"].items():

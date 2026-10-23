@@ -12,7 +12,7 @@ after a ✅ fw, before a ✅ runbot.
     window-picker.py --code BUNDLE
 
 --show opens rofi on this script, where the row under the mouse is selected. A click on a bundle
-brings its VS Code window up, or opens it through the `odoo-bundle://` link of gbs; a right click
+brings its VS Code window up, or opens it through its `odoo-bundle://` link; a right click
 or Shift+Enter brings its terminal up, when it has one. A click on another window brings it up. A
 bundle whose VS Code window is opening shows 🔄 for up to 5 minutes, until that window takes its
 row away: closed later, the window gives the row back without 🔄.

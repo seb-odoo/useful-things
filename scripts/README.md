@@ -447,13 +447,16 @@ behind their base they are, whether a rebase conflicts, and their PR with its me
 CI state. Reads local refs only, so the host alias `gbs` runs `gfa --keep-gone` first: a gone
 bundle stays, deleted next by gbs when its PRs are merged, listed when they are closed.
 
-Each branch name is an `odoo-bundle://` link, see `bundle_open.py`.
+The icon left of each branch is an `odoo-bundle://terminal/` link, see `bundle_open.py`: it brings
+up the VS Code window of the bundle when one is open, else the terminal of its agent (Seb,
+2026-10-23: "gbs button should open in terminal (unless vs code is already open for that
+agent)").
 
 A bundle that would be in Waits on me goes to Waits on agents while a bundle-ctl agent works on it
 or its task is queued, until the agent ends on a verdict. An agent whose window closed before its
 verdict shows `agent stopped`: nothing runs it any more.
 
-Opening a bundle in VS Code (its branch link, `ocode`) is handling it: from that click, a bundle
+Opening a bundle (its icon, `ocode`, `ocode -t`) is handling it: from that click, a bundle
 that would be in Waits on me goes to the group its PRs give without what waits on me (CI, drafts,
 reviewer; drafts with no PR), and stays there once the window is closed, until the task of a new
 agent is written or something new waits on me. The click touches `.agent/handled` and keeps in
@@ -595,6 +598,11 @@ agent with no prompt on a bundle that has none. A bundle that is not local is fe
 
 Opens an `odoo-bundle://<bundle>` link: in its dev container when the worktree exists, like
 `ocode`, otherwise through `pfb` in a terminal, which opens the dev container at the end.
+`odoo-bundle://terminal/<bundle>`, the icon of gbs, runs `window-picker.py --agent` (bundle-ctl
+README): the terminal of its agent, else its VS Code window, which then holds the session (a VS
+Code window that opens closes the terminal), else a terminal on its last session or a new agent.
+It marks the bundle handled, as `ocode -t` does. A bundle that is not local goes through `pfb -t`
+in a terminal.
 `odoo-bundle://ops` opens the ops container, like `orepo`. `odoo-bundle://ops-SESSION`, which a
 shell of an ops agent window prints, also moves that session to a tab there (`bctl open
 ops-SESSION`). `odoo-bundle://agent/NAME` brings up the agent of a bundle, or of an ops session
@@ -616,7 +624,7 @@ agent list"):
   of the window title, and `open_group.py` of firefox-gateway opens it: the click is the yes, so no
   card waits in hok.
 
-One-time setup, so that a click on a `gbs` branch name reaches it:
+One-time setup, so that a click on a `gbs` icon reaches it:
 
 ```bash
 $ ln -s ~/repo/useful-things/scripts/odoo-bundle.desktop ~/.local/share/applications/
