@@ -60,12 +60,14 @@ def main():
     )
     mount = f"source=${{localWorkspaceFolder}}/../node_modules,target={INSIDE},type=bind,readonly,z"
     check("node_modules mount", mount in base_config["mounts"], True)
+    mount = "source=@CACHE_ROOT@/warden,target=/home/vscode/.cache/warden,type=bind,readonly,z"
+    check("warden mount", mount in base_config["mounts"], True)
     with tempfile.TemporaryDirectory() as name:
         root = pathlib.Path(name)
         (root / "tools").mkdir()
         for script in ("initialize.py", "config.py"):
             shutil.copy(HERE / script, root / "tools" / script)
-        for script in ("claude-config.py", "extensions.py", "bundle-db.py"):
+        for script in ("warden-chrome.py", "claude-config.py", "extensions.py", "bundle-db.py"):
             (root / "tools" / script).write_text(FAKE)
         base = root / "src" / "master"
         folder = base / NAME
@@ -78,17 +80,18 @@ def main():
         check("exit code", (res.returncode, res.stderr), (0, ""))
         calls = [
             json.loads(line)
-            for script in ("claude-config.py", "extensions.py", "bundle-db.py")
+            for script in ("warden-chrome.py", "claude-config.py", "extensions.py", "bundle-db.py")
             for line in (root / "tools" / f"{script}.calls").read_text().splitlines()
         ]
-        check("the name, one argument", calls, [[NAME], [NAME, str(folder)], [NAME]])
+        check("the name, one argument", calls, [[], [NAME], [NAME, str(folder)], [NAME]])
         check("no shell", (root / "shell-ran").exists(), False)
         check("mount source", (base / "node_modules").is_dir(), True)
         for repo in ("odoo", "enterprise"):
             path = folder / repo / "node_modules"
             check(f"{repo} link", path.is_symlink() and os.readlink(path), INSIDE)
         check("hard link gone", os.stat(base / "shared.js").st_nlink, 1)
-        check("again", initialize(root, folder).returncode, 0)
+        (root / "tools" / "warden-chrome.py").write_text("raise SystemExit(1)\n")
+        check("again, with no browser", initialize(root, folder).returncode, 0)
         check("odoo link kept", os.readlink(folder / "odoo" / "node_modules"), INSIDE)
 
         (root / "other" / "node_modules").mkdir(parents=True)

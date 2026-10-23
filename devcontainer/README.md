@@ -111,7 +111,13 @@ write. So these are read-only in a bundle: the shell helpers (`container-rw/`), 
 Code user settings, TestWarden, DiscussModelParser and runbot-fix-agents (the cache of the
 test-warden engine comes back writable over it), the `node_modules` of its base, which every
 bundle of that base loads (`/opt/node_modules`, see "Shared node_modules" in
-`scripts/README.md`), and what the next paragraphs name.
+`scripts/README.md`), the browser of the Hoot runs, and what the next paragraphs name.
+
+**The browser of the Hoot runs.** The test-warden engine runs
+`~/.cache/warden/chrome-headless-shell`, shared by every bundle and the host, and downloads it
+there when it is missing. A bundle mounts that folder read-only, so
+[`warden-chrome.py`](warden-chrome.py) downloads it on the host before the start of a bundle, once. A bundle started while that download failed (no
+network) has no Hoot run until a later start. For a newer Chrome, delete the folder on the host.
 
 **Claude.** A container uses the host's `~/.claude` as its config folder (`CLAUDE_CONFIG_DIR`), so
 it shares the host's login: a token refresh is locked and saved in that folder. Never give a

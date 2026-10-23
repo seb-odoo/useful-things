@@ -6,7 +6,8 @@
 base.jsonc calls it as an array, so that no shell reads the name of the bundle. It makes the
 folders the container mounts, as a missing mount source stops the container from starting, links
 the node_modules of the base, then runs claude-config.py, extensions.py and bundle-db.py, and stops
-at the first that fails.
+at the first that fails. warden-chrome.py runs before them and never stops a start: a bundle with
+no browser for its Hoot runs still starts.
 """
 
 import os
@@ -62,6 +63,7 @@ def main():
         path.mkdir(parents=True, exist_ok=True)
     (pathlib.Path(folder).parent / "node_modules").mkdir(exist_ok=True)
     link_node_modules(pathlib.Path(folder))
+    subprocess.run([sys.executable, str(HERE / "warden-chrome.py")], check=False)
     for script, *args in (
         ("claude-config.py", name),
         ("extensions.py", name, folder),

@@ -119,12 +119,13 @@
     // test-warden (parallel JS/Hoot test runner, ~/repo/TestWarden): reuse the host-built engine
     // binary + bundled client at the same path (like the venv above). Read-only, as the host runs
     // it too; the engine writes only its engine/.cache, which comes back writable over it. It
-    // launches chrome-headless-shell (auto-downloaded to $HOME/.cache/warden), not the image's
-    // Chrome (which would need a display), so share that cache to fetch it once.
+    // launches chrome-headless-shell from $HOME/.cache/warden, not the image's Chrome (which would
+    // need a display). Read-only, as every bundle and the host run it: initialize.py has the host
+    // download it there (warden-chrome.py).
     // Lowercase z: shared relabel for the parallel containers, like the filestore/extensions mounts.
     "source=@REPO_ROOT@/TestWarden,target=@REPO_ROOT@/TestWarden,type=bind,readonly,z",
     "source=@REPO_ROOT@/TestWarden/engine/.cache,target=@REPO_ROOT@/TestWarden/engine/.cache,type=bind,z",
-    "source=@CACHE_ROOT@/warden,target=/home/vscode/.cache/warden,type=bind,z",
+    "source=@CACHE_ROOT@/warden,target=/home/vscode/.cache/warden,type=bind,readonly,z",
     // DiscussModelParser (~/repo/DiscussModelParser): generates the @types/models.d.ts files
     // for the discuss/mail JS models. Same path as the host so the wrapper in
     // container-rw/devcontainer.bashrc works on both sides; dist/type-gen-idx.mjs is self-contained
