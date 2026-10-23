@@ -59,6 +59,7 @@ if [ -n "$terminal" ]; then
 		start=(--resume "$session")
 	fi
 	start+=(--plugin-dir "$(dirname "$(readlink -f "$0")")/../agentbar")
+	start+=(--settings '{"prefersReducedMotion":true}')
 	setsid python3 "$(dirname "$(readlink -f "$0")")/prwatch.py" >>"$agent/prwatch.log" 2>&1 &
 	# Record the mode for the Claude tab: without .agent/mode, the tab resumes the session in plan.
 	[ -s "$agent/mode" ] || echo auto >"$agent/mode"

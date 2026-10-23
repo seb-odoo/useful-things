@@ -302,6 +302,11 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   Both run on `opus` at `medium` effort, unless its task asked for another model or effort. Never
   on `default`, the default of the account, which Anthropic sets and which is not the
   `ANTHROPIC_MODEL` of the settings.
+- That terminal runs claude with `prefersReducedMotion` (Seb, 2026-10-23): its spinner stops
+  moving, the seconds still count. On 2026-10-22 the 20 agent terminals took 3 of the 12 CPUs
+  to draw it, more than the tests they waited on, and a waiting claude went from 10 redraws a
+  second to 3, and from 12% to 7% of a CPU. His VS Code tabs and the ops windows keep the
+  animation.
 - A turn that ends on a verdict writes `done` (`client/agent-stop.py`), a turn that ends on
   anything else `waiting`. A `waiting` agent keeps its slot of the cap, its container, and its
   session open in its terminal, for Seb to read what ran and to type in. A `done` agent leaves its
