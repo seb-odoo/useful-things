@@ -30,6 +30,7 @@ FALLBACK = (
     ("server", r"odoo-bin\s+-"),
 )
 HELP = {"--help", "--version", "-h"}
+HEREDOC = re.compile(r"<<(-?)[ \t]*(?:'([^'\n]*)'|\"([^\"\n]*)\"|\\?([^\s;&|<>()'\"]+))")
 KEYWORDS = {"!", "do", "elif", "else", "if", "then", "until", "while", "{"}
 LABEL = 120
 LEFT_ALONE = re.compile(r"git\s+(?:reset\s+--hard|checkout\s+--|restore\b)|\bbctl(?:\.py)?\s+run\b")
@@ -73,30 +74,70 @@ WRAPPERS = {
 }
 
 
+def cut_heredocs(text):
+    """The text without the bodies of its heredocs, and these bodies in order. A heredoc that never
+    ends keeps its lines in the text, and its body is None.
+    """
+    kept, bodies, ends, quote, index = [], [], [], "", 0
+    while index < len(text):
+        char = text[index]
+        step = 2 if char == "\\" and quote != "'" else 1
+        if quote:
+            quote = "" if char == quote else quote
+        elif char in "'\"":
+            quote = char
+        elif text.startswith("<<<", index):
+            step = 3
+        elif match := HEREDOC.match(text, index):
+            ends.append((match[1], next(end for end in match.groups()[1:] if end is not None)))
+            step = match.end() - index
+        elif char == "\n" and ends:
+            kept.append(char)
+            index += 1
+            for tabs, end in ends:
+                tabs = r"\t*" if tabs else ""
+                match = re.compile(rf"^{tabs}{re.escape(end)}$", re.MULTILINE).search(text, index)
+                bodies.append(match and text[index : match.start()])
+                index = match.end() + 1 if match else index
+            ends = []
+            continue
+        kept.append(text[index : index + step])
+        index += step
+    return "".join(kept), bodies
+
+
 def split_commands(text):
-    """The simple commands of a shell text, each as its words. A `$(...)` is left out."""
+    """The simple commands of a shell text, each as its words, the heredoc it reads, None when it
+    reads none, and the files it writes. A `$(...)` is left out. A command after a `|` reads the
+    heredoc of the one before.
+    """
+    text, bodies = cut_heredocs(text)
     text = DESCRIPTOR.sub("", text.replace("\\\n", " "))
     lexer = shlex.shlex(text, posix=True, punctuation_chars=PUNCTUATION)
     lexer.commenters = ""
     lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
-    commands, depth, redirected = [[]], 0, False
+    commands, depth, redirect, bodies = [[[], None, []]], 0, "", iter(bodies)
     for token in lexer:
         if not set(token) <= set(PUNCTUATION):
-            if not depth and not redirected:
-                commands[-1].append(token)
-            redirected = False
+            if not depth and (not redirect or ">" in redirect):
+                commands[-1][2 if redirect else 0].append(token)
+            redirect = ""
         elif "<" in token or ">" in token:
-            redirected = True
+            redirect = token
+            body = next(bodies, None) if "<<" in token and "<<<" not in token else None
+            if body is not None and not depth:
+                commands[-1][1] = body
         else:
             for char in token:
-                if char == "(" and (depth or commands[-1][-1:] and commands[-1][-1].endswith("$")):
+                words = commands[-1][0]
+                if char == "(" and (depth or words[-1:] and words[-1].endswith("$")):
                     depth += 1
                 elif char == ")" and depth:
                     depth -= 1
                 elif not depth:
-                    commands.append([])
-    return [words for words in commands if words]
+                    commands.append([[], commands[-1][1] if token == "|" else None, []])
+    return [command for command in commands if command[0]]
 
 
 def expand(words, values):
@@ -111,9 +152,17 @@ def expand(words, values):
     return expanded
 
 
-def read_script(path, folder):
-    """The text of a shell script a command runs, empty when it cannot be read."""
-    path = pathlib.Path(folder, os.path.expanduser(os.path.expandvars(path)))
+def get_path(path, folder):
+    return os.path.normpath(os.path.join(folder, os.path.expanduser(os.path.expandvars(path))))
+
+
+def read_script(path, folder, written):
+    """The text of a shell script a command runs, empty when it cannot be read. A script that a
+    heredoc of the same text wrote is that heredoc: the hook runs before the file exists.
+    """
+    path = pathlib.Path(get_path(path, folder))
+    if str(path) in written:
+        return written[str(path)]
     try:
         return path.read_text(errors="replace") if path.stat().st_size <= MAX_SCRIPT else ""
     except OSError:
@@ -162,8 +211,10 @@ def get_odoo(args, letters=None):
     return "shell" if "s" in (letters or "") else "server", 1
 
 
-def get_kind(words, folder, depth):
-    """The kind of run a simple command is and its workers, None when it is light."""
+def get_kind(words, folder, depth, stdin, written):
+    """The kind of run a simple command is and its workers, None when it is light. `stdin` is the
+    heredoc it reads, and `written` the scripts the text wrote before it.
+    """
     words = strip_wrappers(words)
     if not words:
         return None
@@ -176,7 +227,9 @@ def get_kind(words, folder, depth):
             text = " ".join(args[args.index("-c") + 1 :])
         else:
             script = program if name.endswith(".sh") else get_script(args)[0]
-            text = read_script(script or "", folder)
+            if script in args and "-s" in args[: args.index(script)]:
+                script = None
+            text = read_script(script, folder, written) if script else stdin or ""
         found = depth < MAX_DEPTH and classify(text, folder, depth + 1)
         return found and found[:2]
     if program == "odoo-bin":
@@ -213,15 +266,20 @@ def classify(text, folder=".", depth=0):
             ),
             None,
         )
-    found, values = [], {}
-    for words in commands:
+    found, values, written = [], {}, {}
+    for words, stdin, outputs in commands:
         words = expand(words, values)
         for word in words:
             if not ASSIGNMENT.fullmatch(word):
                 break
             name, _, values[name] = word.partition("=")
-        if kind := get_kind(words, folder, depth):
+        if kind := get_kind(words, folder, depth, stdin, written):
             found.append((*kind, " ".join(words)))
+        if stdin is not None:
+            program = strip_wrappers(words)
+            if program and os.path.basename(program[0]) == "tee":
+                outputs += [word for word in program[1:] if not word.startswith("-")]
+            written.update((get_path(path, folder), stdin) for path in expand(outputs, values))
     return max(found, key=lambda run: (RANK.index(run[0]), run[1]), default=None)
 
 

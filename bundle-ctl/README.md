@@ -120,6 +120,10 @@ An agent does not call `bctl run`. `client/run-hook.py`, a PreToolUse hook of th
 test-warden (`engine-linux-*`, `test-warden.cjs`, and the helpers `twc`, `ott`, `otf`, `obet`),
 whether directly, behind `nice` or `timeout`, from a variable, in `bash -c` or in a script file.
 It reads the kind in the flags (`--stop-after-init`, `--test-tags`, `-i`, `shell`, `--workers N`).
+The body of a heredoc is data: `cat > x.sh <<'EOF'` with `odoo-bin` in it waits for nothing. It
+counts when a shell reads it (`bash <<'EOF'`, `cat <<'EOF' | sh`), or when the same command then
+runs the file it wrote (`bash x.sh` after `EOF`), as that file does not exist yet when the hook
+reads it.
 The agent writes its command as before, and reads on stderr where it waits:
 
     bctl run: waits for 1 core, place 2 in the queue. Running: master-a--seb (hoot, 6 min).
