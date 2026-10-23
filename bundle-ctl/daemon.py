@@ -69,6 +69,7 @@ from branch_status import (  # noqa: E402
     get_open_bundle_folders,
     get_pr,
     get_status,
+    git,
     has_write_tree,
 )
 from commands import (  # noqa: E402
@@ -249,6 +250,7 @@ WINDOW_CLOSE_WAIT = 30
 bundle_locks = {}
 bundle_rows = {"read": float("-inf"), "rows": []}
 folder_by_container = {}
+git_statuses = {}
 jobs = {}
 kept_reviews = {}
 restarted = {}
@@ -356,8 +358,8 @@ def branches(caller, query, body):
 
 
 def status(caller, query, body):
-    """The bundles as read in the last STATUS_FRESH seconds: agents poll this, and each read runs
-    git on every branch.
+    """The bundles as read in the last STATUS_FRESH seconds: agents and the helper of
+    firefox-gateway poll this, and each read lists the branches of every repo.
     """
     with status_lock:
         if time.monotonic() - bundle_rows["read"] > STATUS_FRESH:
@@ -374,24 +376,52 @@ def status(caller, query, body):
     }
 
 
+def read_base_heads(repo, refs):
+    """{ref: its commit} of these refs of repo, from one git call: a missing ref is left out."""
+    out = git(repo, "for-each-ref", "--format=%(refname) %(objectname)", *refs) or ""
+    return dict(line.split(" ") for line in out.splitlines())
+
+
+def read_statuses(executor, heads, write_tree):
+    """The status of each (repo, bundle) of heads, which maps them to their branch commit. On the
+    host each git call starts a host-box, so git reads a status again only when the branch or its
+    base moved."""
+    base_refs = {
+        (repo, bundle): get_remote_ref(
+            get_base_for_repo(get_base_from_bundle_name(bundle), repo),
+            repo,
+        )
+        for repo, bundle in heads
+    }
+    repos = sorted({repo for repo, _bundle in heads})
+    refs = [{ref for (other, _bundle), ref in base_refs.items() if other == repo} for repo in repos]
+    base_heads = dict(zip(repos, executor.map(read_base_heads, repos, refs)))
+    keys = {pair: (head, base_heads[pair[0]].get(base_refs[pair])) for pair, head in heads.items()}
+    moved = [pair for pair in heads if git_statuses.get(pair, (None,))[0] != keys[pair]]
+    for pair, said in zip(moved, executor.map(lambda pair: get_status(*pair, write_tree), moved)):
+        git_statuses[pair] = (keys[pair], said)
+    for pair in set(git_statuses) - set(heads):
+        del git_statuses[pair]
+    return {pair: git_statuses[pair][1] for pair in heads}
+
+
 def list_bundles():
     repos = [repo for repo in get_repos() if os.path.isdir(get_repo_folder(repo))]
     write_tree = has_write_tree()
     repos_by_bundle = {}
     dates = {}
+    heads = {}
     with ThreadPoolExecutor() as executor:
         for repo, branches in zip(repos, executor.map(get_local_branches, repos)):
-            for branch, date, _head, _in_worktree in branches:
+            for branch, date, head, _in_worktree in branches:
                 if branch not in get_sticky_bundles(repo):
                     repos_by_bundle.setdefault(branch, []).append(repo)
+                    heads[repo, branch] = head
                     reflog = f"{get_repo_folder(repo)}/.git/logs/{get_remote_dev_ref(branch, repo)}"
                     pushed = get_mtime(pathlib.Path(reflog)) or 0
                     dates[branch] = max(dates.get(branch, 0), date, pushed)
-        pairs = [(repo, bundle) for bundle, names in repos_by_bundle.items() for repo in names]
         open_future = executor.submit(get_open_bundle_folders)
-        statuses = dict(
-            zip(pairs, executor.map(lambda pair: get_status(*pair, write_tree), pairs)),
-        )
+        statuses = read_statuses(executor, heads, write_tree)
         open_folders = open_future.result()
     with state_lock:
         state = read_state()
