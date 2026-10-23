@@ -355,10 +355,13 @@ def check_records(agent_list):
         try:
             found = agent_list.get_session_records("ops")
             status = agents.get_session_status("ops", "S1")
+            older = agents.get_session_status("ops", "S1", 3)
         finally:
             agents.CLAUDE_CONFIG_CONTAINER = kept
     if found != {"S1": RECORDS["b.json"]} or status != "busy":
         return [f"records {found!r}, status {status!r}: the newest record of S1 alone"]
+    if older is not None:
+        return [f"status {older!r} of a claude started before: none"]
     return []
 
 

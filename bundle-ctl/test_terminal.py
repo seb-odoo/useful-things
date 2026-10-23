@@ -81,9 +81,14 @@ def run_wrapper(root, bundle):
     module.get_transcript = lambda session: next(root.glob(f"{session}.jsonl"), None)
     module.space_start = lambda: None
     status = pathlib.Path(os.environ["STATE"]) / "status"
-    module.get_session_status = lambda bundle, session: (
-        status.read_text() if status.exists() else "idle"
-    )
+    started = pathlib.Path(os.environ["STATE"]) / "started"
+
+    def get_session_status(bundle, session, since=0):
+        if started.exists() and float(started.read_text()) < since:
+            return None
+        return status.read_text() if status.exists() else "idle"
+
+    module.get_session_status = get_session_status
     module.TITLE.is_resuming = lambda session: False
     module.TITLE.get_transcript = module.get_transcript
     module.RETRY_AFTER = 1
@@ -240,8 +245,9 @@ def check_clipboard(case):
 
 
 def check_wake(case):
-    """A PR event is typed, then Enter, in an idle session only, and not over a draft of Seb: a
-    key he typed since his last Enter keeps it waiting, a mouse move does not."""
+    """A PR event is typed, then Enter, in an idle session of the claude this terminal started
+    only, and not over a draft of Seb: a key he typed since his last Enter keeps it waiting, a
+    mouse move does not."""
     events = case.agent / "pr-events"
     events.mkdir()
     typed = case.state / "typed"
@@ -250,8 +256,13 @@ def check_wake(case):
         return typed.read_text().splitlines() if typed.exists() else []
 
     case.start()
-    (case.state / "status").write_text("busy")
+    (case.state / "started").write_text("0")
     (events / "1.txt").write_text("PR event: one")
+    time.sleep(3)
+    case.check("the idle record of an older claude gets none",
+               not lines() and (events / "1.txt").exists())
+    (case.state / "started").unlink()
+    (case.state / "status").write_text("busy")
     time.sleep(3)
     case.check("a busy session gets none", not lines() and (events / "1.txt").exists())
     (case.state / "status").write_text("idle")

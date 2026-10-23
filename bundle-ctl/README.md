@@ -677,7 +677,10 @@ what to do: ask Seb to validate, or act.
   `client/agent-stop.py`, which keeps the turn going rather than let it end, and
   `agent-terminal.py`, which types the line, then Enter, as the next prompt of an idle session.
 - Idle is the `idle` status of the session in the records of claude: no turn, no dialog open
-  (a question or a permission is `waiting`), and no wait for the reset of the usage limit. The
+  (a question or a permission is `waiting`), and no wait for the reset of the usage limit. Only
+  the record of the claude the terminal started counts: one stopped with its container leaves its
+  own, `idle`, and a line typed before claude runs (agent-run.sh waits 10 s first) reaches it with
+  its Enter as a paste, left in the prompt (2026-10-23). The
   terminal types nothing while a key Seb typed since his last Enter may be a draft (a mouse move
   or a focus change is none), nor after a slash command he sent, which may leave a menu open: his
   next prompt then carries the line, by the hook.

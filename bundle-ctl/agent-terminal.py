@@ -297,15 +297,18 @@ class Waker:
     leaves in .agent/pr-events, when nothing was typed in this terminal since the last Enter: a
     draft of Seb stays his, and a PR event then reaches the agent with his next prompt, by the
     hook of prwatch.py. Nor after a slash command he sent, which may leave a menu open. Idle is no
-    turn, no dialog open and no wait for the reset of the usage limit. With neither, GO_ON once
-    the session has been idle RETRY_AFTER on an API error that a new request may pass, at most
-    TITLE.RETRIES times in a row: the daemon then puts it back in the queue."""
+    turn, no dialog open and no wait for the reset of the usage limit, in the claude this terminal
+    started: before it, the line would go to agent-run.sh, and claude would take it with its Enter
+    as a paste, left in its prompt (Seb, 2026-10-23: "composer was pre-filled"). With neither,
+    GO_ON once the session has been idle RETRY_AFTER on an API error that a new request may pass,
+    at most TITLE.RETRIES times in a row: the daemon then puts it back in the queue."""
 
     def __init__(self, agent, bundle, session):
         self.agent = agent
         self.events = agent / "pr-events"
         self.bundle = bundle
         self.session = session
+        self.started = time.time() * 1000
         self.line = b""
         self.draft = False
         self.looked = float("-inf")
@@ -329,7 +332,7 @@ class Waker:
         retry = not (has_task or has_events) and self.is_retry_due()
         if (
             not (has_task or has_events or retry)
-            or get_session_status(self.bundle, self.session) != "idle"
+            or get_session_status(self.bundle, self.session, self.started) != "idle"
             or TITLE.is_resuming(self.session)
         ):
             return None

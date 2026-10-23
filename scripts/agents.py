@@ -62,10 +62,12 @@ def get_session_records(container):
     return records
 
 
-def get_session_status(bundle, session):
+def get_session_status(bundle, session, since=0):
     """What the claude of a bundle's session does, as its newest record says: `busy` in a turn,
-    `waiting` on a dialog, `idle` or `shell` once the turn ended, None with no record."""
-    return get_session_records(bundle).get(session, {}).get("status")
+    `waiting` on a dialog, `idle` or `shell` once the turn ended, None with no record or one
+    started before `since` (ms): a claude stopped with its container leaves its record."""
+    record = get_session_records(bundle).get(session, {})
+    return record.get("status") if (record.get("startedAt") or 0) >= since else None
 
 
 def load_takeover():
