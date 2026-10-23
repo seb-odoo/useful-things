@@ -1,0 +1,10 @@
+[Unit]
+Description=Open the shared SSH connection to github.com at unlock, when a locked screen held it
+
+[Service]
+ExecStart=%h/.local/share/ssh-github-mux/on-unlock
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

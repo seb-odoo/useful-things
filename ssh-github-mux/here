@@ -1,0 +1,12 @@
+#!/bin/sh
+# ExecCondition of ssh-github-mux.service: Bitwarden is asked only when the screen is unlocked.
+dir=~/.local/state/ssh-github-mux
+mkdir -p "$dir/request" "$dir/sock"
+case $(dbus-send --session --print-reply=literal --dest=org.cinnamon.ScreenSaver \
+    /org/cinnamon/ScreenSaver org.cinnamon.ScreenSaver.GetActive 2>/dev/null) in
+*true*)
+    touch "$dir/request/held" "$dir/sock/stopped"
+    exit 1
+    ;;
+esac
+rm -f "$dir/request/held"

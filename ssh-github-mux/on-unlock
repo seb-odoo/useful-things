@@ -1,0 +1,6 @@
+#!/bin/sh
+dir=~/.local/state/ssh-github-mux
+dbus-monitor --session "type='signal',interface='org.cinnamon.ScreenSaver',member='ActiveChanged'" |
+    while read -r line; do
+        [ "$line" = "boolean false" ] && [ -e "$dir/request/held" ] && date > "$dir/request/start"
+    done

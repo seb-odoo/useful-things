@@ -6,6 +6,7 @@ Description=Shared SSH connection to github.com
 StartLimitIntervalSec=0
 
 [Service]
+ExecCondition=%h/.local/share/ssh-github-mux/here
 ExecStartPre=/usr/bin/mkdir -p %h/.local/state/ssh-github-mux/sock
 ExecStart=/usr/bin/ssh -F none -N \
     -o BatchMode=yes \
