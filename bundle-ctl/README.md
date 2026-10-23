@@ -142,8 +142,7 @@ hook on agent commands, the order of the queue, and real clients on a socket of 
 A run can go to a remote worker instead of the laptop's cores: a machine of the `remote-runs`
 repo, which has its own README (the sandbox, the load, the sync). Agents change nothing.
 
-- Only `bctl run --route` goes to a worker, until the first runs there are checked. Then
-  `client/run-hook.py` wraps a lone `odoo-bin` call that stops after init on a DB it names
+- `client/run-hook.py` wraps a lone `odoo-bin` call that stops after init on a DB it names
   (`-d` or `--database`), its program written once in the text: `bctl.py run --route ... --
   ./odoo-bin ...` in place of the line in front. Anything else keeps the line in front and runs
   here: servers, shells, `ott`, scripts, a text with two runs. The Hoot engine stays here until

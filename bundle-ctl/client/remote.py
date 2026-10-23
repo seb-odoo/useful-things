@@ -184,6 +184,10 @@ def extract(data, target):
                     shutil.copyfileobj(source, sink)
 
 
+def drop(database):
+    subprocess.run(["dropdb", "--if-exists", "--force", database], capture_output=True, check=False)
+
+
 def restore(database, folder):
     """The DB the job sent back, put here under its name once whole."""
     dump = folder / "db.dump"
@@ -191,15 +195,15 @@ def restore(database, folder):
         say(f"{database} did not come back")
         return
     temporary = f"{database[:50]}-rr-restore"
-    subprocess.run(["dropdb", "--if-exists", "--force", temporary], check=False)
+    drop(temporary)
     if subprocess.run(["createdb", temporary], check=False).returncode or subprocess.run(
         ["pg_restore", "-d", temporary, "--no-owner", "-j", "2", str(dump)],
         capture_output=True, check=False,
     ).returncode > 1:
         say(f"{database}: the restore failed, the DB here is left as it was")
-        subprocess.run(["dropdb", "--if-exists", "--force", temporary], check=False)
+        drop(temporary)
         return
-    subprocess.run(["dropdb", "--if-exists", "--force", database], check=False)
+    drop(database)
     psql("-c", f'ALTER DATABASE "{temporary}" RENAME TO "{database}"')
     store = FILESTORE / database
     shutil.rmtree(store, ignore_errors=True)

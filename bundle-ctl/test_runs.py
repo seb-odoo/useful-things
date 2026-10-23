@@ -81,6 +81,34 @@ KINDS = [
 ]
 
 
+ROUTE = "python3 {client} run --route --kind odoo --workers 1 -- "
+WRAPS = [
+    ("cd /workspace/odoo && ./odoo-bin -d x -u mail --stop-after-init; echo $?", "cd /workspace/odoo && "),
+    ("DB=$(testdb) && timeout 900 ./odoo-bin -d $DB -i web --stop-after-init", "DB=$(testdb) && timeout 900 "),
+    ("./odoo-bin -d x --test-tags /mail --stop-after-init 2>&1 | tail -50", ""),
+    (f"{ODOO} --test-tags /mail --stop-after-init", None),
+    ("./odoo-bin -d x --http-port 8070", None),
+    ("./odoo-bin --test-tags /mail --stop-after-init", None),
+    ("./odoo-bin -d x -i mail --stop-after-init && ./odoo-bin -d x --http-port 8070 &", None),
+    ("bash -c './odoo-bin -d x -i mail --stop-after-init'", None),
+    ("ott /mail:TestUi", None),
+    (f"{ENGINE} --suite-names '@mail' --workers 2", None),
+]
+
+
+def check_wraps(failures):
+    """Which commands the hook lets go to a remote worker, and where it puts `bctl run --route`."""
+    hook = load_hook()
+    for text, before in WRAPS:
+        expected = None if before is None else (
+            before + ROUTE.format(client=hook.CLIENT) + text[len(before):]
+        )
+        found = hook.wrap(text, hook.find_runs(text))
+        if found != expected:
+            failures.append(f"wrap of {text!r}: {found!r}, expected {expected!r}")
+    return len(WRAPS)
+
+
 def load_hook():
     spec = importlib.util.spec_from_file_location("run_hook", HERE / "client" / "run-hook.py")
     module = importlib.util.module_from_spec(spec)
@@ -393,6 +421,7 @@ def main():
     failures = []
     count = (
         check_kinds(failures)
+        + check_wraps(failures)
         + check_queue(failures)
         + check_room(failures)
         + check_clients(failures)

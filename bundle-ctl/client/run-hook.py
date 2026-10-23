@@ -53,6 +53,7 @@ PAUSE = pathlib.Path("/workspace/.agent/pause")
 PAUSE_MARGIN = 60
 PUNCTUATION = "();<>|&\n"
 PYTHON = re.compile(r"python[\d.]*")
+SAFE_WORD = re.compile(r"[\w./-]+")
 RANK = ("shell", "server", "odoo", "hoot")
 SHELLS = {"bash", "eval", "sh"}
 SOCKET = "/run/bundle-ctl/ctl.sock"
@@ -249,13 +250,36 @@ def get_kind(words, folder, depth, stdin, written):
     return None
 
 
-def classify(text, folder=".", depth=0):
-    """The heaviest run of a shell text: its kind, its workers and the command that makes it.
-    A script the text runs is read from `folder` when its path is relative.
+def find_runs(text, folder=".", depth=0):
+    """Every run of a shell text: its kind, its workers and the words of the command that makes
+    it, or None when the text does not split. A script the text runs is read from `folder` when
+    its path is relative.
     """
     try:
         commands = split_commands(text)
     except ValueError:
+        return None
+    found, values, written = [], {}, {}
+    for words, stdin, outputs in commands:
+        words = expand(words, values)
+        for word in words:
+            if not ASSIGNMENT.fullmatch(word):
+                break
+            name, _, values[name] = word.partition("=")
+        if kind := get_kind(words, folder, depth, stdin, written):
+            found.append((*kind, words))
+        if stdin is not None:
+            program = strip_wrappers(words)
+            if program and os.path.basename(program[0]) == "tee":
+                outputs += [word for word in program[1:] if not word.startswith("-")]
+            written.update((get_path(path, folder), stdin) for path in expand(outputs, values))
+    return found
+
+
+def classify(text, folder=".", depth=0):
+    """The heaviest run of a shell text: its kind, its workers and the command that makes it."""
+    found = find_runs(text, folder, depth)
+    if found is None:
         asked = WORKERS.search(text)
         workers = int(asked[1]) if asked else DEFAULT_WORKERS
         return next(
@@ -266,21 +290,29 @@ def classify(text, folder=".", depth=0):
             ),
             None,
         )
-    found, values, written = [], {}, {}
-    for words, stdin, outputs in commands:
-        words = expand(words, values)
-        for word in words:
-            if not ASSIGNMENT.fullmatch(word):
-                break
-            name, _, values[name] = word.partition("=")
-        if kind := get_kind(words, folder, depth, stdin, written):
-            found.append((*kind, " ".join(words)))
-        if stdin is not None:
-            program = strip_wrappers(words)
-            if program and os.path.basename(program[0]) == "tee":
-                outputs += [word for word in program[1:] if not word.startswith("-")]
-            written.update((get_path(path, folder), stdin) for path in expand(outputs, values))
-    return max(found, key=lambda run: (RANK.index(run[0]), run[1]), default=None)
+    run = max(found, key=lambda run: (RANK.index(run[0]), run[1]), default=None)
+    return run and (run[0], run[1], " ".join(run[2]))
+
+
+def wrap(text, found):
+    """The text with its one movable run started by `bctl.py run --route`, which may send it to a
+    remote worker (README.md, "Remote runs"), or None. Movable: a lone `odoo-bin` call that
+    stops after init, on a DB it names, its program written once in the text.
+    """
+    if not found or len(found) != 1:
+        return None
+    kind, workers, words = found[0]
+    words = strip_wrappers(words)
+    if kind != "odoo" or not words or os.path.basename(words[0]) != "odoo-bin":
+        return None
+    flags = {word.partition("=")[0] for word in words}
+    if "--stop-after-init" not in flags or not {"-d", "--database"} & flags:
+        return None
+    starts = list(re.finditer(rf"(?:^|(?<=[\s;&|(])){re.escape(words[0])}(?=\s)", text))
+    if not SAFE_WORD.fullmatch(words[0]) or len(starts) != 1 or text.count("odoo-bin") != 1:
+        return None
+    route = f"python3 {CLIENT} run --route --kind {kind} --workers {workers} -- "
+    return text[: starts[0].start()] + route + text[starts[0].start() :]
 
 
 def get_pause():
@@ -316,16 +348,19 @@ def main():
     if not found:
         return
     kind, workers, label = found
-    queue = (
-        f"python3 {shlex.quote(str(CLIENT))} run --kind {kind} --workers {workers}"
-        f" --label={shlex.quote(label[:LABEL])}"
-    )
+    wrapped = wrap(command, find_runs(command, data.get("cwd") or "."))
+    if wrapped is None:
+        queue = (
+            f"python3 {shlex.quote(str(CLIENT))} run --kind {kind} --workers {workers}"
+            f" --label={shlex.quote(label[:LABEL])}"
+        )
+        wrapped = f"{queue}\n{command}"
     answer = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "allow",
             "permissionDecisionReason": f"{kind} run, started through the run queue of the host",
-            "updatedInput": {**tool_input, "command": f"{queue}\n{command}"},
+            "updatedInput": {**tool_input, "command": wrapped},
         },
     }
     print(json.dumps(answer))
