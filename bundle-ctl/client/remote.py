@@ -88,7 +88,8 @@ def call(worker, verb, *args, body=b""):
     except ValueError as error:
         raise Fallback(f"{verb}: no answer from the worker") from error
     if "error" in answer:
-        raise Fallback(f"{verb}: {answer['error']}")
+        detail = " / ".join(answer.get("detail") or [])
+        raise Fallback(f"{verb}: {answer['error']}" + (f" ({detail})" if detail else ""))
     return answer
 
 
