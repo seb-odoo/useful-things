@@ -171,6 +171,21 @@ the host had 9 GB in swap and stalled. Every minute the journal has a line such 
 these numbers. Since 2026-10-23 it also gives `cpu=`, and ends on `short` or `busy` when an agent
 would wait.
 
+## CPU log
+
+Each minute the journal also has a `cpu {...}` line (`cpulog.py`): the threads busy, the wait on
+the CPU, the threads of each container by bundle, of each part of the host (`desktop`, each unit
+of his apps, `kernel`...), the bundles whose agent is at work, what runs in the run queue, and the
+processes over 3 seconds of the minute with their command line. A container counts its short
+commands too (a test, a `git log`), as its cgroup does; a process under 3 seconds only shows
+there. It reads `/proc/stat`, the `cpu.stat` of about 60 cgroups and the `stat` of each process,
+and its `cost` field says the CPU seconds that took.
+
+`python3 cpu-report.py --hours 24` sums these lines: where the CPU went by kind of bundle and by
+use (`test` with a run in the run queue, `agent` with its agent at work and no run, `idle` with
+neither), the busiest containers, processes and hours. It reads the journal in pieces of 2 hours,
+so it also works through `hctl` in the ops container. `python3 test_cpulog.py` has the cases.
+
 ## Disk
 
 A bundle takes about 3 GB at once, so agents that each make one can fill the disk in minutes. The

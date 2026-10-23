@@ -96,6 +96,7 @@ from config import (  # noqa: E402
 )
 from utils import UtilsRunner  # noqa: E402
 
+import cpulog  # noqa: E402
 import cut  # noqa: E402
 import runs  # noqa: E402
 import tab_groups  # noqa: E402
@@ -139,6 +140,7 @@ AGENT_TERMINAL = CONFIG.get("AGENT_TERMINAL") or "gnome-terminal --window --titl
 BARE_FOLDER = frozenset({".agent", ".claude", ".devcontainer", ".vscode", "odools.toml", "tasks"})
 BRANCHES_TIMEOUT = 120
 CONTAINER_ID = re.compile(r"/libpod-(?:payload-)?([0-9a-f]{64})")
+CPU_LOG = cpulog.CpuLog(get_worktree_container_folder())
 DEFAULT_EFFORT = "medium"
 DEFAULT_MODEL = "opus"
 DELETE_WAIT = 100
@@ -487,6 +489,20 @@ def log_memory():
         + " busy" * memory["busy"],
         flush=True,
     )
+
+
+def log_cpu():
+    folders = get_open_windows()
+    kinds = {}
+    with RUNS.changed:
+        for run in RUNS.running:
+            kinds.setdefault(run["bundle"], set()).add(run["kind"])
+    line = CPU_LOG.line(
+        [os.path.basename(folder) for folder in folders if count_agents([folder])],
+        {bundle: "+".join(sorted(kind)) for bundle, kind in kinds.items()},
+    )
+    if line:
+        print(line, flush=True)
 
 
 def read_disk_free():
@@ -1316,6 +1332,7 @@ def keep_launching():
                 checked = time.monotonic()
                 drop_reviews_safely()
                 log_memory()
+                log_cpu_safely()
             time.sleep(START_CHECK if launch_safely() else 60)
 
     threading.Thread(target=on_events, daemon=True).start()
@@ -1357,6 +1374,13 @@ def free_safely():
 def drop_reviews_safely():
     try:
         drop_idle_reviews()
+    except Exception:
+        traceback.print_exc()
+
+
+def log_cpu_safely():
+    try:
+        log_cpu()
     except Exception:
         traceback.print_exc()
 
