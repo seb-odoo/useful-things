@@ -134,6 +134,7 @@ AFTER = re.compile(r"([01]?[0-9]|2[0-3]):[0-5][0-9]")
 AGENT_CPU_STALL = 20
 AGENT_GIGABYTES = 2
 AGENT_RAMP = 10 * 60
+AGENT_RAMP_GIGABYTES = 1
 AGENT_TERMINAL = CONFIG.get("AGENT_TERMINAL") or "gnome-terminal --window --title {bundle} --"
 BARE_FOLDER = frozenset({".agent", ".claude", ".devcontainer", ".vscode", "odools.toml", "tasks"})
 BRANCHES_TIMEOUT = 120
@@ -453,15 +454,16 @@ def describe_queue(state):
 
 def describe_memory(open_windows):
     """What the host and the containers have left, and whether it is short for one more agent:
-    the agents that began in the last AGENT_RAMP seconds count at AGENT_GIGABYTES each, as their
-    tests come later, and tasks that stalled on memory in the last minute hold every start back.
+    the agents that began in the last AGENT_RAMP seconds count at AGENT_RAMP_GIGABYTES each, what
+    their session and container take, as their tests pass the memory check of the run queue, and
+    tasks that stalled on memory in the last minute hold every start back.
     `busy` when tasks waited on the CPU AGENT_CPU_STALL percent of the last minute.
     """
     available, _stall, room = runs.read_memory()
     stall = runs.read_stall(60)
     cpu = runs.read_stall(60, pathlib.Path("/proc/pressure/cpu"))
     ramping = count_ramping(open_windows)
-    left = min(available - RUN_MIN_FREE, room) - ramping * AGENT_GIGABYTES
+    left = min(available - RUN_MIN_FREE, room) - ramping * AGENT_RAMP_GIGABYTES
     return {
         "available": round(available, 1),
         "busy": cpu >= AGENT_CPU_STALL,

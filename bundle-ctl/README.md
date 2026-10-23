@@ -150,11 +150,13 @@ fits. What is left is the smaller of:
   `memory.current`, less `file`, plus `shmem` of the slice); what they swapped out does not count;
 - `MemAvailable`, less the 4 GB kept free.
 
-Less what already started and has not taken its memory yet: for an agent, 2 GB for each agent
-that began its run in the last 10 minutes, as its install and its tests come later; for a run,
-what the table says for each run in its first minute. And nothing starts while programs stall on
-memory (`some` of `/proc/pressure/memory`) 5% of the last minute for an agent, of the last 10
-seconds for a run.
+Less what already started and has not taken its memory yet: for an agent, 1 GB for each agent
+that began its run in the last 10 minutes, what its session and its container take (claude 0.4
+GB, Postgres 0.2 GB measured on 2026-10-23); its install and its tests are counted by the run
+queue when they start. At 2 GB, as before, the minute lines of 2026-10-21 were short 132
+minutes, 48 at 1 GB. For a run, what the table says for each run in its first minute. And
+nothing starts while programs stall on memory (`some` of `/proc/pressure/memory`) 5% of the last
+minute for an agent, of the last 10 seconds for a run.
 
 An agent also waits while programs wait on the CPU (`some` of `/proc/pressure/cpu`) 20% of the
 last minute, `AGENT_CPU_STALL` (Seb, 2026-10-23): memory alone let 6 agents start in 5 minutes
