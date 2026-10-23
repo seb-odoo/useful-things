@@ -1,0 +1,172 @@
+"""The remote workers: where a run goes when a worker can take it, and the relay to it.
+
+A worker is a machine of remote-runs, reached over one SSH connection that `worker-mux@NAME`
+holds on the host. This daemon is the gateway of the bundles to it: a bundle asks over its socket,
+which names it by the kernel, and the daemon runs a fixed ssh command through that connection
+with the bundle's name as its first word. No container gets the connection itself.
+See README.md, "Remote runs".
+"""
+
+import json
+import pathlib
+import re
+import subprocess
+import threading
+import time
+
+MUX = pathlib.Path("~/.local/state/remote-runs/mux").expanduser()
+POLL = 15
+FRESH = 60
+ROUTE_MAX_WAIT = 120
+ASK_EVERY = 600
+WORD = {
+    "commit": re.compile(r"[0-9a-f]{40}"),
+    "db": re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}"),
+    "job": re.compile(r"[0-9]{1,12}"),
+    "repo": re.compile(r"[a-z][a-z0-9-]{0,39}"),
+}
+VERBS = {
+    "status": ((), 0),
+    "have": (("repo",), 0),
+    "sync": (("repo", "commit"), 2 * 1024**3),
+    "put": (("db",), 2 * 1024**3),
+    "submit": ((), 64 * 1024),
+    "follow": (("job",), 64 * 1024**2),
+    "cancel": (("job",), 0),
+    "get": (("job",), 0),
+    "forget": ((), 0),
+}
+
+
+class Refused(Exception):
+    pass
+
+
+class Workers:
+    def __init__(self, names, run=subprocess.run, popen=subprocess.Popen):
+        self.names = [name for name in names if WORD["repo"].fullmatch(name)]
+        self.run = run
+        self.popen = popen
+        self.status = {}
+        self.asked = {}
+        self.lock = threading.Lock()
+
+    def socket(self, name):
+        return MUX / name / "sock" / "master"
+
+    def is_up(self, name):
+        return self.socket(name).is_socket()
+
+    def ssh(self, name, *words):
+        return [
+            "ssh", "-F", "none", "-S", str(self.socket(name)), "-o", "ControlMaster=no",
+            "-o", "BatchMode=yes", "-T", "worker", *words,
+        ]
+
+    def ask(self, name):
+        """Have worker-mux open the connection; held while the screen is locked, see here."""
+        now = time.time()
+        if now - self.asked.get(name, 0) < ASK_EVERY:
+            return
+        self.asked[name] = now
+        request = MUX / name / "request"
+        request.mkdir(parents=True, exist_ok=True)
+        (request / "start").write_text(f"{now}\n")
+
+    def poll(self):
+        for name in self.names:
+            if not self.is_up(name):
+                continue
+            try:
+                result = self.run(self.ssh(name, "status", "host"), capture_output=True,
+                                  timeout=20, check=False)
+                status = json.loads(result.stdout)
+            except (subprocess.TimeoutExpired, ValueError):
+                continue
+            if type(status) is dict and "error" not in status:
+                with self.lock:
+                    self.status[name] = (time.time(), status)
+
+    def keep_polling(self):
+        while True:
+            try:
+                self.poll()
+            except OSError as error:
+                print(f"workers: {error}", flush=True)
+            time.sleep(POLL)
+
+    def choose(self, kind, workers):
+        """The worker a run of this kind goes to, or None to run it here. Remote first, as the
+        laptop is the short one, when a worker starts it within ROUTE_MAX_WAIT seconds.
+        """
+        now = time.time()
+        best = None
+        for name in self.names:
+            if not self.is_up(name):
+                self.ask(name)
+                continue
+            with self.lock:
+                seen, status = self.status.get(name, (0, {}))
+            if now - seen > FRESH or status.get("draining"):
+                continue
+            wait = status.get("wait", ROUTE_MAX_WAIT + 1)
+            if wait <= ROUTE_MAX_WAIT and (best is None or wait < best[0]):
+                best = (wait, name)
+        return best[1] if best else None
+
+    def check(self, verb, args):
+        if verb not in VERBS:
+            raise Refused(f"no worker verb {verb}")
+        kinds, _ = VERBS[verb]
+        if len(args) != len(kinds):
+            raise Refused(f"{verb}: {len(kinds)} words")
+        for kind, arg in zip(kinds, args):
+            if not WORD[kind].fullmatch(arg):
+                raise Refused(f"{verb}: not a valid {kind}")
+
+    def relay(self, handler, bundle, name, verb, args):
+        """Pass the bundle's stream to the worker and back, at most the size the verb allows."""
+        self.check(verb, args)
+        if name not in self.names:
+            raise Refused(f"no worker {name}")
+        if not self.is_up(name):
+            self.ask(name)
+            raise Refused(f"no connection to {name}")
+        process = self.popen(self.ssh(name, verb, bundle, *args), stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE)
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/octet-stream")
+        handler.send_header("Connection", "close")
+        handler.end_headers()
+        handler.wfile.flush()
+        limit = VERBS[verb][1]
+
+        def upload():
+            sent = 0
+            try:
+                while chunk := handler.rfile.read1(65536):
+                    sent += len(chunk)
+                    if sent > limit:
+                        process.kill()
+                        break
+                    process.stdin.write(chunk)
+                    process.stdin.flush()
+            except (OSError, ValueError):
+                pass
+            finally:
+                try:
+                    process.stdin.close()
+                except OSError:
+                    pass
+
+        uploading = threading.Thread(target=upload, daemon=True)
+        uploading.start()
+        try:
+            while chunk := process.stdout.read1(65536):
+                handler.wfile.write(chunk)
+                handler.wfile.flush()
+        except OSError:
+            process.kill()
+        finally:
+            process.stdout.close()
+        return process.wait()

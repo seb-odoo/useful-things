@@ -397,7 +397,7 @@ def wait_for_cores(body):
                 return None, f"{response.status} {error}".strip()
             for line in response:
                 answer, deadline = json.loads(line), None
-                if "cpus" in answer:
+                if "cpus" in answer or "remote" in answer:
                     return answer, None
                 if answer != told:
                     if told is None and os.environ.get("CLAUDECODE"):
@@ -425,10 +425,19 @@ def run(args):
     body = {
         "kind": args.kind,
         "label": args.label or " ".join(command),
+        "route": bool(args.route and command),
         "shell": not command,
         "workers": args.workers,
     }
     answer, reason = wait_for_cores(body)
+    if answer and "remote" in answer:
+        import remote
+
+        base = request("GET", "/whoami").get("base") or "master"
+        code = remote.run(command, answer["remote"], args.kind, args.workers, base)
+        if code is not None:
+            sys.exit(code if 0 <= code < 256 else 1)
+        answer, reason = wait_for_cores({**body, "route": False})
     if answer is None:
         print(f"bctl run: no run queue ({reason}), running without it", file=sys.stderr)
     else:
@@ -606,6 +615,11 @@ def main():
         help="what runs: a server and a shell share the cores and never wait (default other)",
     )
     run_.add_argument("--label", help="what `bctl runs` shows (default: the command)")
+    run_.add_argument(
+        "--route",
+        action="store_true",
+        help="may run on a remote worker when one takes it (README.md, Remote runs)",
+    )
     run_.add_argument("--workers", default=1, type=int, help="the workers of a hoot run")
     run_.add_argument("run_command", metavar="COMMAND", nargs=argparse.REMAINDER)
     move = commands.add_parser("move", help="put the queued task of a bundle at another place")

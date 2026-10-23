@@ -386,9 +386,10 @@ def has_left(connection):
         return True
 
 
-def serve(queue, handler, caller, body):
+def serve(queue, handler, caller, body, router=None):
     """Answer `POST /run` with one JSON line each time the place of the run changes, then one when
-    it starts. The run is the peer process, or with `shell` the shell that started it.
+    it starts. The run is the peer process, or with `shell` the shell that started it. A run with
+    `route` goes to the worker `router` names, if any: one line, `{"remote": NAME}`.
     """
     connection = handler.request
     size = struct.calcsize("3i")
@@ -401,6 +402,14 @@ def serve(queue, handler, caller, body):
         handler.send_header("Content-Length", str(len(data)))
         handler.end_headers()
         handler.wfile.write(data)
+        return
+    remote = router(kind, workers) if router and body.get("route") else None
+    if remote:
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/x-ndjson")
+        handler.end_headers()
+        handler.wfile.write(json.dumps({"remote": remote}).encode() + b"\n")
+        print(f"run routed {caller} {kind} to {remote}", flush=True)
         return
     if body.get("shell"):
         pid = get_parent(pid)

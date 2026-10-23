@@ -137,6 +137,39 @@ The journal has one line per start and per end, `run started BUNDLE KIND cpus=4-
 busy on average: read it before changing the cores of a kind. `python3 test_runs.py` runs the
 hook on agent commands, the order of the queue, and real clients on a socket of their own.
 
+## Remote runs
+
+A run can go to a remote worker instead of the laptop's cores: a machine of the `remote-runs`
+repo, which has its own README (the sandbox, the load, the sync). Agents change nothing.
+
+- Only `bctl run --route` goes to a worker, until the first runs there are checked. Then
+  `client/run-hook.py` wraps a lone `odoo-bin` call that stops after init on a DB it names
+  (`-d` or `--database`), its program written once in the text: `bctl.py run --route ... --
+  ./odoo-bin ...` in place of the line in front. Anything else keeps the line in front and runs
+  here: servers, shells, `ott`, scripts, a text with two runs. The Hoot engine stays here until
+  the relay of the bundle's server is built.
+- `POST /run` with `route`: when a worker of `BUNDLE_CTL_WORKERS` (names, comma separated) has
+  answered `status` in the last minute, is not drained, and would start a run within 120 s, the
+  daemon answers `{"remote": NAME}` and keeps no run of its own. Else the run waits here as any.
+- `client/remote.py` then sends each worktree as a snapshot (`client/snapshot.py`: the index and
+  `.git` are never written), the DB the command names when it exists here, submits, and prints
+  the job's output as it comes. A DB the command made, or changed with `-i` or `-u`, comes back
+  under its name: restored beside, then renamed over the old one, with its filestore but the
+  assets, which Odoo makes again.
+- Anything that fails before the job started (no connection, refused, a sync error), or a stream
+  lost during it, runs the command here, with one line on stderr: `bctl run: runs here, not on
+  NAME: why`.
+- `POST /worker/VERB?worker=NAME&arg=...` (`workers.py`) is the relay: from a bundle only, the
+  verb and each word checked, then a fixed `ssh -F none -S MASTER -o ControlMaster=no -T worker
+  VERB BUNDLE ARGS...` through the connection `worker-mux@NAME` holds, the bundle's bytes passed
+  both ways, at most what the verb allows. No container gets the master socket: its holder could
+  open forwards on the laptop and send any verb. The verb `admin` is never relayed.
+- No connection: the daemon writes `request/start` of the mux (once every 10 minutes at most),
+  which asks Bitwarden while the screen is unlocked, and the run goes here meanwhile.
+
+`python3 test_runs.py` has the cases of the wrap; the relay and the client are tested from
+`remote-runs` (`test_relay`).
+
 ## Memory
 
 The containers sit in one cgroup, the `user.slice` of the user manager. It has `MemoryHigh=20G`

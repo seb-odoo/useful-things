@@ -101,6 +101,7 @@ import cpulog  # noqa: E402
 import cut  # noqa: E402
 import runs  # noqa: E402
 import tab_groups  # noqa: E402
+import workers  # noqa: E402
 
 
 def load_config():
@@ -218,6 +219,10 @@ RUNS = runs.RunQueue(
     runs.get_pool(runs.read_cores(), RUN_CPUS),
     RUN_MIN_FREE,
     STATE / "runs.json",
+)
+WORKERS = workers.Workers(
+    filter(None, (os.environ.get("BUNDLE_CTL_WORKERS") or CONFIG.get("BUNDLE_CTL_WORKERS") or "")
+           .split(",")),
 )
 SESSION_VARIABLES = (
     "DBUS_SESSION_BUS_ADDRESS",
@@ -2868,6 +2873,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         if self.caller is None:
             code, answer = 403, {"error": "not a bundle container"}
+        elif method == "POST" and url.path.startswith("/worker/"):
+            code, answer = self.relay(url)
+            if code is None:
+                return
         elif length > MAX_BODY:
             code, answer = 413, {"error": f"body over {MAX_BODY} bytes"}
         elif (method, url.path) == ("POST", "/run"):
@@ -2877,7 +2886,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 body = {}
             body = body if type(body) is dict else {}
             print(f"{self.caller} POST /run {body.get('kind', '')}".strip(), flush=True)
-            runs.serve(RUNS, self, self.caller, body)
+            router = WORKERS.choose if WORKERS.names and is_in_container(self.request) else None
+            runs.serve(RUNS, self, self.caller, body, router)
             return
         elif verb is None:
             code, answer = 404, {"error": f"no verb {method} {url.path}"}
@@ -2902,6 +2912,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def relay(self, url):
+        """`POST /worker/VERB?worker=NAME&arg=...`: the stream of a bundle to a remote worker
+        (README.md, "Remote runs"). Returns (None, None) once the relay answered.
+        """
+        if not is_in_container(self.request) or self.caller == "host":
+            return 403, {"error": "only a bundle sends work to a worker"}
+        query = urllib.parse.parse_qs(url.query)
+        name = (query.get("worker") or [""])[0]
+        verb = url.path.removeprefix("/worker/")
+        try:
+            code = WORKERS.relay(self, self.caller, name, verb, query.get("arg", []))
+        except workers.Refused as error:
+            return 409, {"error": str(error)}
+        print(f"{self.caller} POST /worker/{verb} {name} ssh={code}", flush=True)
+        return None, None
+
 
 class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = True
@@ -2919,6 +2945,8 @@ def main():
         write_state(state)
     print(f"listening on {SOCKET}", flush=True)
     RUNS.watch()
+    if WORKERS.names:
+        threading.Thread(target=WORKERS.keep_polling, daemon=True).start()
     if HELD:
         threading.Thread(
             target=HELD.serve,
