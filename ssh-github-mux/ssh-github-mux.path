@@ -3,6 +3,7 @@ Description=Open the shared SSH connection to github.com when a git command asks
 
 [Path]
 PathModified=%h/.local/state/ssh-github-mux/request/start
+PathModified=%h/.local/state/ssh-github-mux/request/now
 
 [Install]
 WantedBy=paths.target

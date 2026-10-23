@@ -6,14 +6,18 @@ dev containers: one approval until the connection drops (reboot, suspend, networ
 
 - `github-mux.conf`: for `github.com`, waits for the connection (`wait`), then goes through it.
   If it does not come within a minute, or Bitwarden refused, ssh connects directly as before.
-- `wait` writes `request/start`, `ssh-github-mux.path` sees it and starts
+- `wait` writes `request/now`, `ssh-github-mux.path` sees it and starts
   `ssh-github-mux.service`, the connection itself (the filtered agent, so the GitHub key only).
-- While the screen is locked, nobody answers Bitwarden, and each ask times out after a minute.
-  The bundles that wait for GitHub ask again every 10 minutes (the bctl queue) and at each fetch
-  of an agent, so Seb got a stream of asks at his return. `here`, the `ExecCondition` of the
-  unit, skips the start while Cinnamon's screensaver is active and leaves `request/held`.
-  `ssh-github-mux-unlock.service` (`on-unlock`) writes `request/start` again at unlock when that
-  file is there: one ask once he is back.
+- An ask nobody answers dies after a minute, and the bundles that wait for GitHub ask again every
+  10 minutes (the bctl queue) and at each fetch of an agent: Seb got a stream of asks while away,
+  then 8 in an hour while he was at the machine and left the prompt alone. So `here`, the
+  `ExecCondition` of the unit, holds the start and leaves `request/held` while the Cinnamon
+  screensaver is active, and the unit leaves that file too when a run ended with no socket (the
+  ask died, or Bitwarden refused).
+- While `request/held` is there, only an ask of Seb himself goes through: `request/now`, written
+  by `wait` for a git command of the host, and by `on-unlock` at unlock
+  (`ssh-github-mux-unlock.service`). The queue and the agents write `request/start`, held until
+  then, and their tasks wait in the queue as they already do.
 - Containers (`devcontainer/base.jsonc`) get this folder as `/etc/ssh/ssh_config.d` and as
   `~/.local/share/ssh-github-mux`, `sock/` read-only and `request/` read-write: a container uses
   the connection but cannot put a socket the host would trust.
