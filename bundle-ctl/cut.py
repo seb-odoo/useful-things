@@ -5,6 +5,8 @@ and its last turn had not ended:
 
 - its last message is a tool call with no result, or a tool result or a prompt with no answer: an
   interruption by Seb, a command of his such as /model and the summary of a compaction aside;
+- or its last message is an API error that a new request may pass (a 5xx, the API out of reach,
+  an answer cut), as the retry of agent-terminal.py would have sent one;
 - or that turn ended while a background command or agent it started still ran, whose end would
   have started the next turn, on a short answer: not a report (a Done, Decide or Your action part,
   or more than 15 lines, as for the Stop hook guard-report-end.py), no verdict on its first line
@@ -107,7 +109,13 @@ def parse(lines):
             or (kind == "user" and text.lstrip().startswith(LOCAL))
         ):
             continue
-        last = {"author": kind, "entrypoint": entry.get("entrypoint"), "kinds": kinds, "text": text}
+        last = {
+            "author": kind,
+            "entrypoint": entry.get("entrypoint"),
+            "error": bool(entry.get("isApiErrorMessage")) and entry.get("error") == "server_error",
+            "kinds": kinds,
+            "text": text,
+        }
         for block in blocks:
             if block.get("type") != "tool_use":
                 continue
@@ -164,6 +172,8 @@ def get_cut(session):
         return None
     if last["author"] == "assistant" and "tool_use" in last["kinds"]:
         return "a tool call ran"
+    if last["error"]:
+        return "an API error ended its turn"
     if last["author"] == "user":
         if last["text"].lstrip().startswith(INTERRUPTED):
             return None

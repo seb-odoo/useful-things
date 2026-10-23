@@ -57,6 +57,7 @@ CUT = [
 ]
 ENDED = [*CUT, '{"type": "user", "message": {"content": [{"type": "tool_result"}]}}']
 ENDED.append('{"type": "assistant", "message": {"content": [{"type": "text"}]}}')
+API_ERROR = '{"type": "assistant", "isApiErrorMessage": true, "error": "server_error"}'
 
 
 def run_wrapper(root, bundle):
@@ -84,7 +85,7 @@ def run_wrapper(root, bundle):
     started = pathlib.Path(os.environ["STATE"]) / "started"
 
     def get_session_status(bundle, session, since=0):
-        if started.exists() and float(started.read_text()) < since:
+        if bundle.startswith(module.OPS) or started.exists() and float(started.read_text()) < since:
             return None
         return status.read_text() if status.exists() else "idle"
 
@@ -321,7 +322,7 @@ def check_retry(case):
     again."""
     typed = case.state / "typed"
     transcript = case.root / "s1.jsonl"
-    error = '{"type": "assistant", "isApiErrorMessage": true, "error": "server_error"}'
+    error = API_ERROR
     prompt = f'{{"type": "user", "message": {{"content": "{GO_ON}"}}}}'
 
     def lines():
@@ -468,6 +469,18 @@ def check_ops_close(case):
     case.check("closing the terminal keeps the ops container", "stop c1" not in case.log())
 
 
+def check_ops_retry(case):
+    """An ops window types GO_ON in its idle session after an API error, as a bundle terminal does,
+    the status of the session read in the sessions folder of the ops container."""
+    typed = case.state / "typed"
+    case.check("claude runs", wait(case.runs))
+    (case.root / "s2.jsonl").write_text("\n".join([*ENDED, API_ERROR]) + "\n")
+    retried = wait(lambda: typed.exists() and typed.read_text().splitlines() == [GO_ON])
+    case.check("an idle one gets GO_ON", retried)
+    (case.state / "quit").touch()
+    case.check("quitting claude ends it", wait(case.terminal.has_ended))
+
+
 def check_ops_resume(case):
     """An ops window on a session that has a transcript, moved from a tab, resumes it in the mode
     of the tab, and tells it to go on with the turn the tab cut."""
@@ -506,8 +519,8 @@ def main():
     checks += (check_requeue,)
     checks += (check_shutdown, check_close_window)
     checks += (check_handoff, *tabs)
-    checks += (check_ops_quit, check_ops_close)
-    bundles = {check_ops_quit: "ops-s2", check_ops_close: "ops-s2"}
+    checks += (check_ops_quit, check_ops_close, check_ops_retry)
+    bundles = {check_ops_quit: "ops-s2", check_ops_close: "ops-s2", check_ops_retry: "ops-s2"}
     bundles |= {check_ops_resume: "ops-s1", check_ops_cut: "ops-s1"}
     for check in checks:
         with tempfile.TemporaryDirectory() as folder:

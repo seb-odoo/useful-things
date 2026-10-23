@@ -53,6 +53,10 @@ def answer(text):
     return message("assistant", [{"type": "text", "text": text}])
 
 
+def failed(text, error="server_error"):
+    return {**answer(text), "isApiErrorMessage": True, "error": error}
+
+
 def notified(task):
     content = f"<task-notification>\n<task-id>{task}</task-id>\n</task-notification>"
     return {"type": "queue-operation", "operation": "enqueue", "content": content}
@@ -77,6 +81,12 @@ CASES = [
         "a prompt had no answer",
     ),
     ("an answer ends the turn", [*ASKED, result(), answer("pushed")], None),
+    (
+        "an API error ends the turn",
+        [*ASKED, result(), failed("API Error: 502")],
+        "an API error ended its turn",
+    ),
+    ("a usage limit ends the turn", [*ASKED, result(), failed("limit", "rate_limit")], None),
     (
         "an interruption by Seb",
         [*ASKED, result(), message("user", [{"type": "text", "text": f"{cut.INTERRUPTED}]"}])],

@@ -739,7 +739,9 @@ answer as `bctl delete` does, and the same task sent again takes back the reques
 - `agent-terminal.py` runs `claude --session-id SESSION --model opus --permission-mode auto` in
   the ops container, in the repos, started first when it is not up. Other sessions work in that
   container: quitting claude or closing the window never stops it, and a closed window stops its
-  own claude (`pkill`).
+  own claude (`pkill`). A turn that ends on an API error gets `Continue from where you left off.`
+  as in a bundle terminal (above), 5 times in a row at most; no queue takes it after that. Before,
+  three ops windows sat two hours on `502 api.anthropic.com unreachable` (2026-10-23).
 - No cap and no queue: the window opens at once, as a tab would. Opened with a task it opens
   minimized, as any agent window; with no task it shows in front, for the first prompt.
 - The title shows the title of the conversation in place of a name, with 🔧 and `(ops)`:
@@ -790,8 +792,9 @@ A session is cut (`cut.py`) when:
   the host. For a bundle, its container is down too;
 - its transcript was written in the last 3 days;
 - its last turn had not ended: its last message is a tool call with no result, or a tool result
-  or a prompt with no answer, or the turn ended on a short answer that only says where the work
-  is, while a background command or agent it started still ran. An interruption by Seb (Esc), a
+  or a prompt with no answer, or an API error that a new request may pass (`server_error`), or
+  the turn ended on a short answer that only says where the work is, while a background command
+  or agent it started still ran. An interruption by Seb (Esc), a
   command of his (`/model`), the summary of a compaction while idle, a report, a verdict and a
   close line ("Nothing left", "Waiting for you") end a turn. A `claude -p` run is never cut.
 
