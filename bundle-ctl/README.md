@@ -135,18 +135,21 @@ hook on agent commands, the order of the queue, and real clients on a socket of 
 
 ## Memory
 
-The containers sit in one cgroup, the `user.slice` of the user manager. It has `MemoryHigh=16G`
+The containers sit in one cgroup, the `user.slice` of the user manager. It has `MemoryHigh=20G`
 and `CPUWeight=20` (`systemctl --user set-property`, kept in `~/.config/systemd/user.control/`):
-above 16 GB the kernel swaps the pages of the containers before the desktop's, and kills nothing;
+above 20 GB the kernel swaps the pages of the containers before the desktop's, and kills nothing;
 when the CPU is short, the desktop gets it first. The CPU weight needs the `cpu` controller in the
 user manager, which Ubuntu 22.04 does not delegate: the root drop-in
 `/etc/systemd/system/user@.service.d/delegate.conf` (`Delegate=cpu cpuset io memory pids`) gives it
-from the next boot.
+from the next boot. It also has `AllowedCPUs=2-11` (Seb, 2026-10-23): CPUs 0-1, one core, only
+serve the desktop, as a weight gives the desktop a share but never a free core. In a container
+`nproc` says 10. The memory limit was 16 GB until 2026-10-23, when Seb raised it: agents waited
+on it while the host still had 6 to 10 GB available.
 
 An agent starts only when 2 GB fit in what is left, and a run when what the Runs table says
 fits. What is left is the smaller of:
 
-- what the containers have left: 16 GB minus what they hold besides their file cache (the
+- what the containers have left: 20 GB minus what they hold besides their file cache (the
   `memory.current`, less `file`, plus `shmem` of the slice); what they swapped out does not count;
 - `MemAvailable`, less the 4 GB kept free.
 
