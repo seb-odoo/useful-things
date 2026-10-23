@@ -342,7 +342,7 @@ def check_yes(root):
     daemon.get_bundle_container = lambda bundle: None
     daemon.read_disk_free = lambda: 100
     daemon.session_env = lambda: {"DISPLAY": ":0"}
-    daemon.describe_memory = lambda folders: {"short": False}
+    daemon.describe_memory = lambda folders: {"busy": False, "short": False}
     daemon.MAX_AGENTS = 8
     path = daemon.HELD_DIR / "1.json"
     item = daemon.HELD.read_json(path)

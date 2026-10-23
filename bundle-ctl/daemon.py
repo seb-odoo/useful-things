@@ -131,6 +131,7 @@ def load_title():
 
 CONFIG = load_config()
 AFTER = re.compile(r"([01]?[0-9]|2[0-3]):[0-5][0-9]")
+AGENT_CPU_STALL = 20
 AGENT_GIGABYTES = 2
 AGENT_RAMP = 10 * 60
 AGENT_TERMINAL = CONFIG.get("AGENT_TERMINAL") or "gnome-terminal --window --title {bundle} --"
@@ -454,13 +455,17 @@ def describe_memory(open_windows):
     """What the host and the containers have left, and whether it is short for one more agent:
     the agents that began in the last AGENT_RAMP seconds count at AGENT_GIGABYTES each, as their
     tests come later, and tasks that stalled on memory in the last minute hold every start back.
+    `busy` when tasks waited on the CPU AGENT_CPU_STALL percent of the last minute.
     """
     available, _stall, room = runs.read_memory()
     stall = runs.read_stall(60)
+    cpu = runs.read_stall(60, pathlib.Path("/proc/pressure/cpu"))
     ramping = count_ramping(open_windows)
     left = min(available - RUN_MIN_FREE, room) - ramping * AGENT_GIGABYTES
     return {
         "available": round(available, 1),
+        "busy": cpu >= AGENT_CPU_STALL,
+        "cpu": cpu,
         "ramping": ramping,
         "room": None if room == math.inf else round(room, 1),
         "short": left < AGENT_GIGABYTES or stall >= runs.MAX_STALL,
@@ -473,8 +478,11 @@ def log_memory():
     memory = describe_memory(get_open_windows())
     print(
         "memory "
-        + " ".join(f"{key}={value}" for key, value in memory.items() if key != "short")
-        + " short" * memory["short"],
+        + " ".join(
+            f"{key}={value}" for key, value in memory.items() if key not in ("busy", "short")
+        )
+        + " short" * memory["short"]
+        + " busy" * memory["busy"],
         flush=True,
     )
 
@@ -1163,7 +1171,7 @@ def launch_queued():
         has_display = env.get("DISPLAY") or env.get("WAYLAND_DISPLAY")
         starting = get_starting(state["launches"], open_windows, now)
         free = read_disk_free()
-        short = describe_memory(open_windows)["short"]
+        memory = describe_memory(open_windows)
         paced = False
         queue = []
         for item in state["queue"]:
@@ -1180,7 +1188,7 @@ def launch_queued():
             is_running = get_worktree_bundle_folder(bundle) in open_windows
             container = is_running and get_bundle_container(bundle)
             fits = count_agents(open_windows) + len(state["launches"]) < MAX_AGENTS
-            has_room = item.get("forced") or (fits and not short)
+            has_room = item.get("forced") or (fits and not memory["short"] and not memory["busy"])
             can_start = has_display and (is_running or has_room)
             in_terminal = (folder / "terminal").exists() and (container or is_held(folder))
             if item.get("paused"):
@@ -1229,8 +1237,12 @@ def launch_queued():
                 continue
             elif not has_display:
                 item["waits_for"] = "a desktop session"
+            elif not fits:
+                item["waits_for"] = "a slot"
+            elif memory["short"]:
+                item["waits_for"] = "memory on the host"
             else:
-                item["waits_for"] = "memory on the host" if fits else "a slot"
+                item["waits_for"] = "the CPU of the host"
             queue.append(item)
         state["queue"] = queue
         write_state(state)

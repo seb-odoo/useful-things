@@ -48,7 +48,7 @@ repos: a container writes their `.git`, and the jobs run git there (`daemon-git`
 | `POST /force-queue` | the tasks queued now may start over the cap, those that wait for their time (`--after`) or for a manual resume (`--paused`) aside, or with `bundle` the task of that bundle, its time and its pause too; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
 | `POST /move` | the queued task of `bundle` put at `place` (from 1), where it keeps its priority when that priority fits between the tasks around it, else takes the nearest of theirs; then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
 | `POST /requeue` | the session of the agent of `bundle` queued again, last, paused with `paused`, and its agent window closed once its turn ended, 2 minutes at most: meanwhile `client/run-hook.py` refuses its Bash calls, on a reason that tells it to end its turn, and a turn still running at the end goes on told it was cut (see Cut sessions). With `github`, it waits for the GitHub connection of the host. The host or the ops container asks, or with `github` the bundle itself |
-| `POST /schedule` | when the queued task of `bundle` may start: `when` is `spot` (once a slot and the memory let it), `manual` (it waits for a manual resume, until it is scheduled again) or `HH:MM` (that time of the host, today or tomorrow); it no longer goes over the cap. Then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
+| `POST /schedule` | when the queued task of `bundle` may start: `when` is `spot` (once a slot, the memory and the CPU let it), `manual` (it waits for a manual resume, until it is scheduled again) or `HH:MM` (that time of the host, today or tomorrow); it no longer goes over the cap. Then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
 | `POST /unqueue` | the queued task of a bundle dropped; the host, that bundle or the one that queued the task asks |
 | `POST /run` | a heavy command waits for cores: one JSON line each time its place changes, then the CPUs it got (see Runs) |
 | `GET /runs` | the runs that hold cores and the ones that wait, the pool and the memory available |
@@ -156,10 +156,15 @@ what the table says for each run in its first minute. And nothing starts while p
 memory (`some` of `/proc/pressure/memory`) 5% of the last minute for an agent, of the last 10
 seconds for a run.
 
+An agent also waits while programs wait on the CPU (`some` of `/proc/pressure/cpu`) 20% of the
+last minute, `AGENT_CPU_STALL` (Seb, 2026-10-23): memory alone let 6 agents start in 5 minutes
+while the load was 43 on 12 threads. `bctl queue` then says `waits for the CPU of the host`.
+
 `MemAvailable` alone is not enough: it counts the page cache, and read 12 GB on 2026-10-15 while
 the host had 9 GB in swap and stalled. Every minute the journal has a line such as
 `memory available=11.8 ramping=1 room=0.4 stall=19.17 swap=16.1`: read it before changing one of
-these numbers.
+these numbers. Since 2026-10-23 it also gives `cpu=`, and ends on `short` or `busy` when an agent
+would wait.
 
 ## Disk
 
@@ -855,7 +860,7 @@ session of the container is busy or waits for a permission.
 the queue while fewer than `BUNDLE_CTL_MAX_AGENTS` (default 8) agents are at work in a terminal
 (an agent that gave its verdict no longer counts), plus the ones launched in the last 15 minutes
 whose container is not up yet and that did not fail to start, and while the host is not short of
-memory (the task then waits for `memory on the host`). A bundle open in a VS Code window does not count, a session a window took over included: the cap
+memory (the task then waits for `memory on the host`) nor its CPU busy (`the CPU of the host`). A bundle open in a VS Code window does not count, a session a window took over included: the cap
 bounds what the agents spend, and Seb's windows are his.
 `--model haiku|sonnet|opus` (default `opus`) is the model of the task's agent, for the one that
 queues to send a job that needs less to a model that costs less. `--effort low|medium|high|xhigh`
@@ -917,7 +922,8 @@ after what else it waits for; `bctl status` shows them `over the cap`, and a tas
 waits for a slot again. Only a process of the host may ask it: a container gets a 403, the one
 of `BUNDLE_CTL_HOST_FOLDER` too, so that going over the cap stays Seb's call. `bctl queue` lists
 the queue alone, at once, and ends on the memory of the host: `the host is short of memory` when
-one more agent would not fit (see Memory).
+one more agent would not fit, `the host CPU is busy` when its CPU holds the next agent (see
+Memory).
 The cap is read from `~/.config/odoo-dev/config.env` or the unit's environment. The queue is checked
 again on every podman container start and stop, every minute, and every 10 seconds while a task
 waits for an agent to start; it lives in

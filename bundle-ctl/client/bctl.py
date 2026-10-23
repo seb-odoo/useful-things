@@ -246,14 +246,19 @@ def format_room(memory):
 
 
 def format_memory(memory):
-    """What the host has left, as one line that starts with a warning when it is short of it."""
+    """What the host has left, as one line that starts with a warning when it is short of it, or
+    when its CPU is too busy for one more agent."""
     figures = (
         f"{memory['available']} GB available, {format_room(memory)}{memory['swap']} GB in swap,"
         f" programs stalled {memory['stall']:.0f}% of the last minute"
     )
+    if "cpu" in memory:
+        figures += f", waited on the CPU {memory['cpu']:.0f}%"
     if memory.get("ramping"):
         figures += f", {memory['ramping']} agents started in the last 10 minutes"
-    return f"the host is short of memory: {figures}" if memory["short"] else f"memory: {figures}"
+    if memory["short"]:
+        return f"the host is short of memory: {figures}"
+    return f"the host CPU is busy: {figures}" if memory.get("busy") else f"memory: {figures}"
 
 
 def print_requeued(answer):

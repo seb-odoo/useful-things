@@ -95,6 +95,19 @@ CASES = [
     ({"held": HELD_ANOTHER, "fresh": FRESH}, ["fresh"], [f"held: {IDLE}"], 1),
     ({"fresh": FRESH}, [], ["fresh: memory on the host"], 8, False, True),
     ({"fresh": FRESH}, ["fresh"], [], 8, True, True),
+    ({"fresh": FRESH}, [], ["fresh: the CPU of the host"], 8, False, False, 100, True),
+    ({"fresh": FRESH}, [], ["fresh: memory on the host"], 8, False, True, 100, True),
+    ({"fresh": FRESH}, ["fresh"], [], 8, True, False, 100, True),
+    (
+        {"busy": RUNS_ANOTHER, "fresh": FRESH},
+        [],
+        [f"busy: {BUSY_SINCE}", "fresh: a slot"],
+        1,
+        False,
+        False,
+        100,
+        True,
+    ),
     (
         {"busy": RUNS_ANOTHER, "fresh": FRESH},
         [],
@@ -118,12 +131,12 @@ CASES = [
     ),
 ]
 
-def prepare(root, bundles, cap, short=False, disk=100):
+def prepare(root, bundles, cap, short=False, disk=100, busy=False):
     """A daemon whose queue holds these bundles, each given as its `.agent` files, None when its
     folder is gone: its state, and the list its launches go to. `launching`, `old` and `window`
     are no file of an agent: the bundle was just launched and has no container yet, its files
     are older than a launch may take, or it is open in a VS Code window. `short`: the host is
-    short of memory.
+    short of memory; `busy`: its CPU is.
     """
     folders = {bundle: str(root / "master" / bundle) for bundle in bundles}
     for bundle, files in bundles.items():
@@ -154,6 +167,8 @@ def prepare(root, bundles, cap, short=False, disk=100):
     daemon.MAX_AGENTS = cap
     daemon.describe_memory = lambda _open_windows: {
         "available": 9.0,
+        "busy": busy,
+        "cpu": 0,
         "ramping": 0,
         "room": None,
         "short": short,
@@ -180,11 +195,11 @@ def prepare(root, bundles, cap, short=False, disk=100):
     return state, launched
 
 
-def run_pass(root, bundles, cap=8, force=False, short=False, disk=100):
+def run_pass(root, bundles, cap=8, force=False, short=False, disk=100, busy=False):
     """One pass on a queue of these bundles, after a force-queue when `force`: the bundles it
     launches, and the ones it leaves in the queue with what each waits for.
     """
-    state, launched = prepare(root, bundles, cap, short, disk)
+    state, launched = prepare(root, bundles, cap, short, disk, busy)
     if force:
         daemon.force_queue(daemon.HOST, {}, {})
     else:

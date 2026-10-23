@@ -135,7 +135,8 @@ def read_room(path=CONTAINER_SLICE):
 
 
 def read_stall(seconds=10, path=pathlib.Path("/proc/pressure/memory")):
-    """The percent of the last 10, 60 or 300 seconds some task stalled on memory."""
+    """The percent of the last 10, 60 or 300 seconds some task stalled on memory, or on the CPU
+    with /proc/pressure/cpu."""
     try:
         pressure = path.read_text()
         return float(re.search(rf"some.* avg{seconds}=([\d.]+)", pressure)[1])
