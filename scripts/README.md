@@ -588,7 +588,8 @@ Opens a local bundle in VS Code, in its dev container, and marks it handled (gbs
 `ocode -t BUNDLE` brings up the terminator window of its agent instead, and marks it handled too:
 `window-picker.py --terminal BUNDLE`, which brings up the window that holds its session, minimized
 or not, else opens it on its last session with `bctl open BUNDLE --terminal`, which starts a new
-agent with no prompt on a bundle that has none. A bundle that is not local is `pfb -t BUNDLE`.
+agent with no prompt on a bundle that has none. A bundle that is not local is fetched first with
+`pfb --no-open`, then opened the same way; a pfb that fails stops it.
 
 ### bundle_open.py
 
