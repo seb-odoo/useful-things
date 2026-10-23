@@ -636,16 +636,24 @@ def force_queue(caller, query, body):
     return code, dict(answer, forced=forced, started=[name for name in forced if name not in left])
 
 
+def get_queued_task(queue, caller, bundle, verb):
+    """The first task queued for a bundle that the caller may change: the host, that bundle or the
+    one that queued it asks."""
+    items = [item for item in queue if item["bundle"] == bundle]
+    if not items:
+        raise ValueError(f"{bundle} is not queued")
+    item = next((item for item in items if caller in (HOST, bundle, item["parent"])), None)
+    if item is None:
+        raise Refused(f"a bundle {verb} its own task or a task it queued only")
+    return item
+
+
 def unqueue(caller, query, body):
     """Drop the queued task of a bundle. The host, the bundle or the one that queued it asks."""
     bundle = body.get("bundle") or ""
     with state_lock:
         state = read_state()
-        item = next((item for item in state["queue"] if item["bundle"] == bundle), None)
-        if item is None:
-            raise ValueError(f"{bundle} is not queued")
-        if caller not in (HOST, bundle, item["parent"]):
-            raise Refused("a bundle drops its own task or a task it queued only")
+        item = get_queued_task(state["queue"], caller, bundle, "drops")
         state["queue"].remove(item)
         state.setdefault("relaunches", {})[bundle] = MAX_RELAUNCHES
         write_state(state)
@@ -663,11 +671,7 @@ def move_task(caller, query, body):
         queue = state["queue"]
         if type(place) is not int or not 1 <= place <= len(queue):
             raise ValueError(f"place: an integer from 1 to {len(queue)}")
-        item = next((item for item in queue if item["bundle"] == bundle), None)
-        if item is None:
-            raise ValueError(f"{bundle} is not queued")
-        if caller not in (HOST, bundle, item["parent"]):
-            raise Refused("a bundle moves its own task or a task it queued only")
+        item = get_queued_task(queue, caller, bundle, "moves")
         queue.remove(item)
         queue.insert(place - 1, item)
         priority = item.get("priority", 0)
@@ -691,11 +695,7 @@ def schedule_task(caller, query, body):
         raise ValueError("when: spot, manual or a time of the day, HH:MM")
     with state_lock:
         state = read_state()
-        item = next((item for item in state["queue"] if item["bundle"] == bundle), None)
-        if item is None:
-            raise ValueError(f"{bundle} is not queued")
-        if caller not in (HOST, bundle, item["parent"]):
-            raise Refused("a bundle schedules its own task or a task it queued only")
+        item = get_queued_task(state["queue"], caller, bundle, "schedules")
         item["after"] = None if when in ("manual", "spot") else get_next_time(when)
         item["paused"] = when == "manual"
         item.pop("forced", None)
@@ -1002,7 +1002,8 @@ def check_task(bundle, body, session=None):
         raise ValueError(f"model: one of {', '.join(MODELS)}")
     with state_lock:
         state = read_state()
-    if any(item["bundle"] == bundle for item in state["queue"]):
+    queued = [item for item in state["queue"] if item["bundle"] == bundle]
+    if queued and (body.get("resume") or any(item.get("build") for item in queued)):
         raise Refused(f"{bundle} is already queued")
     if body.get("resume"):
         if not session and not (get_agent_folder(bundle) / "session").exists():
@@ -1035,7 +1036,7 @@ def enqueue(caller, bundle, body, build=None, session=None):
     as the sessions of every bundle share one folder."""
     priority = body["priority"] if "priority" in body else get_task_priority(caller)
     after = get_next_time(body["after"]) if "after" in body else None
-    effort, model = body.get("effort"), body.get("model")
+    effort, model, queued = body.get("effort"), body.get("model"), time.time()
     with state_lock:
         state = read_state()
         queue = state["queue"]
@@ -1043,6 +1044,8 @@ def enqueue(caller, bundle, body, build=None, session=None):
             (index for index, item in enumerate(queue) if item.get("priority", 0) < priority),
             len(queue),
         )
+        behind = [index + 1 for index, item in enumerate(queue) if item["bundle"] == bundle]
+        position = max([position, *behind])
         queue.insert(
             position,
             {
@@ -1054,7 +1057,7 @@ def enqueue(caller, bundle, body, build=None, session=None):
                 "parent": caller,
                 "paused": body.get("paused", False),
                 "priority": priority,
-                "queued": time.time(),
+                "queued": queued,
                 "resume": bool(body.get("resume")),
                 "task": body["task"],
                 **({"github": True} if body.get("github") else {}),
@@ -1071,7 +1074,7 @@ def enqueue(caller, bundle, body, build=None, session=None):
     with state_lock:
         queue = read_state()["queue"]
     for place, item in enumerate(queue, 1):
-        if item["bundle"] == bundle:
+        if item["bundle"] == bundle and item["queued"] == queued:
             return {
                 "bundle": bundle,
                 "priority": priority,
@@ -1239,7 +1242,13 @@ def launch_queued():
             has_room = item.get("forced") or (fits and not memory["short"] and not memory["busy"])
             can_start = has_display and (is_running or has_room)
             in_terminal = (folder / "terminal").exists() and (container or is_held(folder))
-            if item.get("paused"):
+            earlier = next((kept for kept in queue if kept["bundle"] == bundle), None)
+            if earlier:
+                item["waits_for"] = (
+                    f"the task queued before it for the bundle to start (from {earlier['parent']},"
+                    f" since {format_time(earlier['queued'])})"
+                )
+            elif item.get("paused"):
                 item["waits_for"] = "a manual resume"
             elif is_deleting(bundle):
                 item["waits_for"] = "the deletion of its checkout"

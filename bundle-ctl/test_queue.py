@@ -447,6 +447,52 @@ def check_priority(root):
     return [f"priority: {name}" for name, passed in checks if not passed], len(checks)
 
 
+def check_second_task(root):
+    """A second task for a queued bundle is taken behind the first, even at a higher priority, and
+    waits for it to start, then for the agent it started to end. A resume, or a task for a bundle
+    still to build, is queued once. The bundle that queued the second task drops it, not the
+    first."""
+    state, launched = prepare(root, {"busy": RUNS_ANOTHER, "fresh": FRESH}, 1)
+    state["queue"] = []
+    daemon.enqueue(daemon.HOST, "fresh", {"priority": -15, "task": "first"})
+    answer = daemon.enqueue("other", "fresh", {"priority": 5, "task": "second"})
+    since = daemon.format_time(state["queue"][0]["queued"])
+    waits = f"the task queued before it for the bundle to start (from host, since {since})"
+    checks = [
+        ("it is taken, behind the first", (answer["queued"], answer["waits_for"]) == (2, waits)),
+        (
+            "in the order they came",
+            [item["task"] for item in state["queue"]] == ["first", "second"],
+        ),
+    ]
+    for name, body, build in (
+        ("a resume", {"resume": True, "task": "x"}, None),
+        ("a task for a bundle to build", {"task": "x"}, ["create_bundle.py"]),
+    ):
+        state["queue"][0]["build"] = build
+        try:
+            daemon.check_task("fresh", body)
+            found = None
+        except daemon.Refused as refusal:
+            found = str(refusal)
+        checks.append((f"{name} is queued once", found == "fresh is already queued"))
+    state["queue"][0].pop("build")
+    code, dropped = daemon.unqueue("other", {}, {"bundle": "fresh"})
+    found = code, dropped["parent"], [item["task"] for item in state["queue"]]
+    checks.append(("its bundle drops the second task", found == (200, "other", ["first"])))
+    daemon.enqueue("other", "fresh", {"priority": 5, "task": "second"})
+    daemon.MAX_AGENTS = 2
+    daemon.launch_queued()
+    agent = root / "master" / "fresh" / ".agent"
+    found = (
+        launched,
+        daemon.read_text(agent / "task.md"),
+        [item["waits_for"] for item in state["queue"]],
+    )
+    checks.append(("the first starts, the second waits", found == (["fresh"], "first", [BUSY])))
+    return [f"second task: {name}" for name, passed in checks if not passed], len(checks)
+
+
 def check_after(root):
     """A task given a time waits for it, past the cap and other tasks, and starts once it came; a
     force of the whole queue leaves it, a force of its bundle starts it."""
@@ -1000,6 +1046,7 @@ def main():
         check_build_cut,
         check_parked,
         check_priority,
+        check_second_task,
         check_hand_over,
         check_ramp,
     ):

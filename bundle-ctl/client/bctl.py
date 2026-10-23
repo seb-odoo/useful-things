@@ -47,7 +47,8 @@ that priority fits between the tasks around, else takes the nearest of theirs. s
 the queued task of a bundle may start: spot, as soon as a slot and the memory let it; manual, once
 it is scheduled again; HH:MM, once that time of the host came, today or tomorrow. It no longer goes
 over the cap. unqueue drops the queued task of a bundle. The host, that bundle, or the bundle that
-queued the task may ask them.
+queued the task may ask them. A bundle with two tasks queued: they act on the first one the caller
+may change.
 
 requeue queues the session of a bundle's agent again, last, and closes its agent window once its
 turn ended, 2 minutes at most: meanwhile its Bash calls are refused, on a reason that tells it to

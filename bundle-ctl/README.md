@@ -934,8 +934,13 @@ start of its run (Seb, 2026-10-21, as `its agent to end` read as the task waitin
 "why would a queued item wait on itself?"). Once an agent in a terminal gave its verdict, that
 terminal types the task as the next prompt of the same session (see below). A
 VS Code window opened on the bundle meanwhile first
-takes that terminal's session over, and the task starts in the window at the next pass. A bundle
-holds one queued task: a second one is refused.
+takes that terminal's session over, and the task starts in the window at the next pass.
+A second task for a bundle that is queued already is taken too, behind the first one whatever its
+priority: it waits for `the task queued before it for the bundle to start (from PARENT, since
+HH:MM)`, then for the agent of that task to end (2026-10-23: an agent got a 409 for a bundle
+whose first task waited on the CPU, and kept a wait open 25 minutes). A resume, and a task for a
+bundle still to build, stay one per bundle: a second one is refused. `bctl unqueue`, `move` and
+`schedule` act on the first task of the bundle that the caller may change.
 One agent starts at a time, as several containers and claude sessions that start together take
 the memory of the host at once: the next task waits for `the agent of BUNDLE to start`, until the
 run of that agent began (its `.agent/run.lock`), its launch failed, or 15 minutes passed.
