@@ -4,6 +4,7 @@
 import os
 import sys
 import tempfile
+import time
 
 import agents
 import branch_status
@@ -33,6 +34,13 @@ def main():
         found["agent task written after the open"] = agents.is_handled(bundle, NEWS)
         agents.mark_handled(bundle)
         found["opened again after the agent task"] = agents.is_handled(bundle, OTHER)
+        two_days_ago = time.time() - 2 * 86400
+        os.utime(folder / "handled", (two_days_ago, two_days_ago))
+        found["opened two days ago, never seen open"] = agents.is_handled(bundle, OTHER)
+        found["opened two days ago, window open"] = agents.is_handled(bundle, OTHER, is_open=True)
+        found["closed since"] = agents.is_handled(bundle, OTHER)
+        os.utime(folder / "handled.open", (two_days_ago, two_days_ago))
+        found["closed two days ago"] = agents.is_handled(bundle, OTHER)
     pr = {"mergebot": None, "pending": False, "state": "open"}
     found["no PR goes to"] = branch_status.get_waiting_group(None)
     found["CI running goes to"] = branch_status.get_waiting_group({**pr, "pending": True})
@@ -58,6 +66,10 @@ def main():
         "less than before": True,
         "agent task written after the open": False,
         "opened again after the agent task": True,
+        "opened two days ago, never seen open": False,
+        "opened two days ago, window open": True,
+        "closed since": True,
+        "closed two days ago": False,
         "no PR goes to": "drafts",
         "CI running goes to": "ci",
         "a draft goes to": "drafts",

@@ -14,6 +14,7 @@ import time
 from commands import get_worktree_bundle_folder
 from config import CLAUDE_CONFIG_CONTAINER, STATE_ROOT
 
+HANDLED_FOR = 24 * 3600
 IDLE_AFTER = 15 * 60
 LAUNCH_GRACE = 15 * 60
 OPS = "ops-"
@@ -131,8 +132,9 @@ def get_window_pids(bundle):
     return pids
 
 
-def is_handled(bundle, news):
-    """Whether Seb opened the bundle in VS Code since its last agent task, and nothing came since.
+def is_handled(bundle, news, is_open=False):
+    """Whether Seb opened the bundle in VS Code since its last agent task, nothing came since, and
+    its window is open or was seen open less than HANDLED_FOR ago.
 
     The first call after his click keeps `news`, what waits on him then: a later one with an item
     it lacks is something new.
@@ -140,6 +142,11 @@ def is_handled(bundle, news):
     folder = get_agent_folder(bundle)
     opened = get_mtime(folder / "handled") or 0
     if opened <= (get_mtime(folder / "task.md") or 0):
+        return False
+    seen_open = folder / "handled.open"
+    if is_open:
+        seen_open.touch()
+    if time.time() - max(opened, get_mtime(seen_open) or 0) > HANDLED_FOR:
         return False
     seen = folder / "handled.json"
     if (get_mtime(seen) or 0) < opened:

@@ -589,7 +589,7 @@ def get_bundles():
         issue = max(issues - {None}, key=list(ISSUE_RANKS).index, default=None)
         is_open = get_worktree_bundle_folder(branch) in open_folders
         agent = get_bundle_agent(branch, agent_state, is_open, now)
-        handled = is_handled(branch, get_news(repos_of_bundle))
+        handled = is_handled(branch, get_news(repos_of_bundle), is_open)
         if group == "me" and agent and agent["state"] in AGENT_WORKING:
             group, issue = "agents", None
         elif group == "me" and handled:

@@ -458,9 +458,11 @@ verdict shows `agent stopped`: nothing runs it any more.
 
 Opening a bundle (its icon, `ocode`, `ocode -t`) is handling it: from that click, a bundle
 that would be in Waits on me goes to the group its PRs give without what waits on me (CI, drafts,
-reviewer; drafts with no PR), and stays there once the window is closed, until the task of a new
-agent is written or something new waits on me. The click touches `.agent/handled` and keeps in
-`.agent/handled.json` what waits on me then: each review thread to answer, each failing check of
+reviewer; drafts with no PR), and stays there until the task of a new agent is written, something
+new waits on me, or a day passed since the click and since gbs last saw its window open
+(`.agent/handled.open`): a bundle I opened and left goes back to Waits on me and to the automatic
+triage (Seb, 2026-10-27, after odoo#296017 sat 8 days with its conflict). The click touches
+`.agent/handled` and keeps in `.agent/handled.json` what waits on me then: each review thread to answer, each failing check of
 a head, a conflict of a head, changes requested, a staging error of a head, a delegation. An item
 missing from that list is something new, and puts the bundle back in Waits on me; an item that
 goes away (a thread I answered) is not. `test_handled.py` runs each case.
