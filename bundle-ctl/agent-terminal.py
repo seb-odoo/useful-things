@@ -295,7 +295,8 @@ def copy_tty(fd, waker=None):
 class Waker:
     """Types as the next prompt of an idle session the task the daemon left for this terminal
     (.agent/task.md with no run.lock, which it then makes), else the PR events client/prwatch.py
-    leaves in .agent/pr-events, when nothing was typed in this terminal since the last Enter: a
+    leaves in .agent/pr-events, in a busy session too, where claude shows them queued at once
+    (Seb, 2026-10-27), when nothing was typed in this terminal since the last Enter: a
     draft of Seb stays his, and a PR event then reaches the agent with his next prompt, by the
     hook of prwatch.py, which WAKE_EVERY after his last key leaves the time to take it. Nor after
     a slash command he sent, which may leave a menu open. Idle is no
@@ -344,11 +345,12 @@ class Waker:
         retry = not (has_task or has_events) and self.is_retry_due()
         status = get_session_status(self.bundle, self.session, self.started)
         resuming = TITLE.is_resuming(self.session)
-        if not (has_task or has_events or retry) or status != "idle" or resuming:
+        ready = status == "idle" or status == "busy" and has_events
+        if not (has_task or has_events or retry) or not ready or resuming:
             self.hold(has_events and f"the session is {'resuming' if resuming else status}")
             return None
         self.hold(None)
-        if has_task:
+        if has_task and status == "idle":
             return self.take_task()
         if retry:
             self.due = False

@@ -263,12 +263,13 @@ def check_wake(case):
     case.check("the idle record of an older claude gets none",
                not lines() and (events / "1.txt").exists())
     (case.state / "started").unlink()
-    (case.state / "status").write_text("busy")
+    (case.state / "status").write_text("waiting")
     time.sleep(3)
-    case.check("a busy session gets none", not lines() and (events / "1.txt").exists())
-    (case.state / "status").write_text("idle")
-    case.check("an idle one gets it as a prompt", wait(lambda: lines() == ["PR event: one"]))
+    case.check("a dialog gets none", not lines() and (events / "1.txt").exists())
+    (case.state / "status").write_text("busy")
+    case.check("a busy one gets it, queued", wait(lambda: lines() == ["PR event: one"]))
     case.check("taken once", not (events / "1.txt").exists())
+    (case.state / "status").write_text("idle")
     os.write(case.terminal.fd, b"ab")
     (events / "2.txt").write_text("PR event: two")
     time.sleep(3)
@@ -290,7 +291,7 @@ def check_wake(case):
     held = [line.split(" ", 1)[1] for line in log.read_text().splitlines() if " an event waits: " in line]
     case.check("why an event waits, once per reason, a draft by its counts only", held == [
         "an event waits: the session is None",
-        "an event waits: the session is busy",
+        "an event waits: the session is waiting",
         "an event waits: a draft of Seb: 2 printable, 0 escapes, 0 backspaces",
         "an event waits: a key of Seb within 2 s",
         "an event waits: a slash command of Seb",
@@ -309,13 +310,13 @@ def check_task(case):
         return typed.read_text().splitlines() if typed.exists() else []
 
     case.start()
-    (case.state / "status").write_text("busy")
+    (case.state / "status").write_text("waiting")
     (case.agent / "pr-events").mkdir()
     (case.agent / "pr-events" / "1.txt").write_text("PR event: one")
     (case.agent / "task.md").write_text("next\ntask\n")
     (case.agent / "run.lock").rmdir()
     time.sleep(3)
-    case.check("a busy session gets none", not lines())
+    case.check("a dialog gets none", not lines())
     (case.state / "status").write_text("idle")
     pasted = ["\x1b[200~next", "task\x1b[201~", "PR event: one"]
     case.check("an idle one gets the task, then the event", wait(lambda: lines() == pasted))
