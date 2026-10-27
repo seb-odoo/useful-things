@@ -806,7 +806,9 @@ what to do: ask Seb to validate, or act.
 - Each line goes to the agent once, by the first of three: a hook of the bundles' Claude settings
   at its next tool call or prompt (`prwatch.py --hook`, PostToolUse and UserPromptSubmit),
   `client/agent-stop.py`, which keeps the turn going rather than let it end, and
-  `agent-terminal.py`, which types the line, then Enter, as the next prompt of an idle session.
+  `agent-terminal.py`, which types the line, then Enter, as the next prompt of an idle session,
+  or in a busy one, where claude shows it queued at once and reads it at its next tool call, as
+  the hook would (Seb, 2026-10-27: he then sees it came and does not type it himself).
 - Idle is the `idle` status of the session in the records of claude: no turn, no dialog open
   (a question or a permission is `waiting`), and no wait for the reset of the usage limit. Only
   the record of the claude the terminal started counts: one stopped with its container leaves its
@@ -819,7 +821,9 @@ what to do: ask Seb to validate, or act.
   starts to type is too late (2026-10-27: "the PR events often arrive after/just as I type
   something in the terminal to notify myself"). It waits 2 s after his last key, so that the hook
   of his prompt takes a line that waited behind his draft. `.agent/prwatch.log` notes each line
-  taken, by whom and how many seconds after it was left.
+  taken, by whom and how many seconds after it was left, and why the terminal holds one: a draft
+  of Seb (how many printable keys, escapes and backspaces, never the text), a key of his in the
+  last 2 s, a slash command, or a session that is not idle.
 - What Seb posts himself from Firefox (a review, a comment, an r+), which prwatch.py leaves aside,
   comes the same way (Seb, 2026-10-22: "currently I have to tell it manually"): the helper of
   firefox-gateway runs `pr-posted.py BUNDLE` with one line on stdin that names it, and the script
