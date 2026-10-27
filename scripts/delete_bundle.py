@@ -11,6 +11,7 @@ import argparse
 import fnmatch
 import glob
 import os
+import re
 import subprocess
 import threading
 from contextlib import nullcontext
@@ -122,6 +123,16 @@ def _bundle_databases(runner: UtilsRunner, bundle_name: str):
     )
 
 
+def bundle_images(bundle_name: str, repositories: list[str]):
+    """The images VS Code built for a bundle, among the repositories `podman images` lists.
+
+    The name is matched whole: as a prefix, `vsc-master-foo-` also takes the images of
+    `master-foo-bar`.
+    """
+    pattern = re.compile(rf"localhost/vsc-{re.escape(bundle_name)}-[0-9a-f]{{64}}(-uid)?")
+    return sorted({repo for repo in repositories if pattern.fullmatch(repo)})
+
+
 def _server_still_on_it(name: str):
     """Say a database outlived its bundle because something is connected to it.
 
@@ -188,6 +199,9 @@ def delete_bundle(
     # Before the worktrees: a container started since the check above makes this fail first.
     if states:
         runner.run(["podman", "rm", *states])
+    repositories = runner.run(["podman", "images", "--format", "{{.Repository}}"]).stdout.split()
+    if images := bundle_images(bundle_name, repositories):
+        runner.run(["podman", "rmi", "--ignore", *images])
 
     def handle_repo(runner: UtilsRunner, repo: str):
         # Every step below writes into the shared repository (worktree metadata, refs):

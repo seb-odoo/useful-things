@@ -256,13 +256,18 @@ than its packs plus 10 GB, as the new pack is written before the old ones go.
 
 ### delete_bundle.py
 
-Removes a bundle from the local system (worktrees, branches, filestore, databases).
+Removes a bundle from the local system (worktrees, branches, filestore, databases, images).
 
 - Deletes git worktrees and local branches for each repo
 - Removes `~/.local/share/bundle-db/<bundle>`: the postgres server and the filestore of the
   bundle (devcontainer/README.md, "How it runs Odoo")
 - For a bundle made before its own server: drops the matching databases of the host's server and
   removes their filestore entries under `~/.local/share/Odoo/filestore/`
+- Removes the podman images VS Code built for the bundle once its container is gone:
+  `localhost/vsc-<bundle>-<sha256 of the bundle folder>`, and the same with `-uid`. The name is
+  matched whole (`test_bundle_images.py`): as a prefix, `vsc-master-foo-` also takes the images of
+  `master-foo-bar`. Before 2026-10-27 nothing removed them: 672 tags of deleted bundles held about
+  24 GB, which `podman system df` did not show
 - Completes the bundle names having a worktree folder (needs `argcomplete`'s global completion,
   see `activate-global-python-argcomplete`)
 - Accepts several bundles at once, deleted in parallel (one thread per bundle)
