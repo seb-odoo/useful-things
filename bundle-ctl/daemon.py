@@ -260,6 +260,7 @@ folder_by_container = {}
 git_statuses = {}
 jobs = {}
 kept_reviews = {}
+package_heads = {}
 restarted = {}
 ops_lock = threading.Lock()
 state_lock = threading.Lock()
@@ -1379,6 +1380,7 @@ def keep_launching():
                 drop_reviews_safely()
                 log_memory()
                 log_cpu_safely()
+                build_node_modules_safely()
             time.sleep(START_CHECK if launch_safely() else 60)
 
     threading.Thread(target=on_events, daemon=True).start()
@@ -2615,6 +2617,32 @@ def refresh_node_modules(log, base, package):
     finally:
         shutil.rmtree(fresh, ignore_errors=True)
     return {"base": base, "tree": tree.name}
+
+
+def build_node_modules():
+    """Build the tree of the package.json of each base whose odoo head moved, when the store has
+    none: a bundle fetches the bases in the shared .git, and the host builds what `bctl
+    node-modules` would build for it (Seb, 2026-10-27)."""
+    refs = [get_remote_ref(base, "odoo") for base in STICKY_BUNDLES]
+    heads = read_base_heads("odoo", refs)
+    for base, ref in zip(STICKY_BUNDLES, refs):
+        if ref not in heads or package_heads.get(base) == heads[ref]:
+            continue
+        package_heads[base] = heads[ref]
+        package = read_package(base)
+        if not (node_modules_tree(package) / "node_modules" / ".bin").is_dir():
+            start_job(
+                HOST,
+                "node-modules",
+                lambda log, base=base, package=package: refresh_node_modules(log, base, package),
+            )
+
+
+def build_node_modules_safely():
+    try:
+        build_node_modules()
+    except Exception:
+        traceback.print_exc()
 
 
 def node_modules(caller, query, body):

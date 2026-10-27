@@ -87,8 +87,10 @@ when the store has none: npm installs that file in a box with the network (`HOST
 of its own that then goes in the store under its key. A tree never changes once there, and a
 bundle linked to its key loads it at once, even in a container that runs. A bundle asks it for its
 own base and waits for Seb's yes, which `hok` shows with the change from the `package.json` of the
-tree it links; the host asks it at once. Nothing deletes a tree yet: one that no bundle links can
-go by hand.
+tree it links; the host asks it at once. The daemon also asks it itself, every minute, for each
+base whose odoo head moved since it last looked and whose `package.json` has no tree: the bundles
+fetch the bases in the shared `.git`, so the tree is there before their first commit on it (Seb,
+2026-10-27). Nothing deletes a tree yet: one that no bundle links can go by hand.
 
 Before 2026-10-27 each base had its own tree, `WORKTREE_ROOT/<base>/node_modules` (and
 `.node_modules.old`). A container started before then still mounts it, and it can go once none
