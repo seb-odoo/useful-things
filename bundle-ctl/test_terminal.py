@@ -286,6 +286,16 @@ def check_wake(case):
     case.check("a slash command keeps it waiting", (events / "4.txt").exists())
     os.write(case.terminal.fd, b"x\r")
     case.check("until the next Enter", wait(lambda: lines()[-2:] == ["x", "PR event: four"]))
+    log = case.agent / "prwatch.log"
+    held = [line.split(" ", 1)[1] for line in log.read_text().splitlines() if " an event waits: " in line]
+    case.check("why an event waits, once per reason, a draft by its counts only", held == [
+        "an event waits: the session is None",
+        "an event waits: the session is busy",
+        "an event waits: a draft of Seb: 2 printable, 0 escapes, 0 backspaces",
+        "an event waits: a key of Seb within 2 s",
+        "an event waits: a slash command of Seb",
+        "an event waits: a key of Seb within 2 s",
+    ])
     (case.state / "quit").touch()
     case.check_stopped("quitting claude")
 

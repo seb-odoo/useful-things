@@ -315,6 +315,7 @@ class Waker:
         self.draft = False
         self.looked = float("-inf")
         self.keyed = float("-inf")
+        self.held = None
         self.checked = None
         self.due = False
 
@@ -333,17 +334,20 @@ class Waker:
         has_events = any(self.events.glob("[!.]*.txt"))
         now = time.monotonic()
         gap = EVENTS_EVERY if has_events else WAKE_EVERY
-        if self.draft or now - self.keyed < WAKE_EVERY or now - self.looked < gap:
+        if self.draft or now - self.keyed < WAKE_EVERY:
+            self.hold(has_events and self.describe_draft())
+            return None
+        if now - self.looked < gap:
             return None
         self.looked = time.monotonic()
         has_task = (self.agent / "task.md").is_file() and not (self.agent / "run.lock").exists()
         retry = not (has_task or has_events) and self.is_retry_due()
-        if (
-            not (has_task or has_events or retry)
-            or get_session_status(self.bundle, self.session, self.started) != "idle"
-            or TITLE.is_resuming(self.session)
-        ):
+        status = get_session_status(self.bundle, self.session, self.started)
+        resuming = TITLE.is_resuming(self.session)
+        if not (has_task or has_events or retry) or status != "idle" or resuming:
+            self.hold(has_events and f"the session is {'resuming' if resuming else status}")
             return None
+        self.hold(None)
         if has_task:
             return self.take_task()
         if retry:
@@ -351,6 +355,25 @@ class Waker:
             return GO_ON.encode()
         told = PRWATCH.take(self.events)
         return " ".join(told).encode() if told else None
+
+    def describe_draft(self):
+        """What Seb typed since his last Enter, counted, never its text."""
+        if not self.draft:
+            return "a key of Seb within 2 s"
+        if not self.line:
+            return "a slash command of Seb"
+        printable = sum(32 <= byte < 127 for byte in self.line)
+        escapes, erased = self.line.count(b"\x1b"), self.line.count(b"\x7f")
+        return f"a draft of Seb: {printable} printable, {escapes} escapes, {erased} backspaces"
+
+    def hold(self, why):
+        """Note in prwatch.log why a PR event waits, once per reason: the counts of a draft that
+        grows are not a new one."""
+        reason = why and why.partition(":")[0]
+        if reason and reason != self.held:
+            with contextlib.suppress(OSError), (self.agent / "prwatch.log").open("a") as file:
+                file.write(f"{time.strftime('%H:%M:%S')} an event waits: {why}\n")
+        self.held = reason or None
 
     def is_retry_due(self):
         """The transcript is read once it has not changed for RETRY_AFTER, and once per change: a
