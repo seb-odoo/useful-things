@@ -411,6 +411,8 @@ def serve(queue, handler, caller, body, router=None):
         handler.wfile.write(json.dumps({"remote": remote}).encode() + b"\n")
         print(f"run routed {caller} {kind} to {remote}", flush=True)
         return
+    if router and body.get("route"):
+        print(f"run kept {caller} {kind}: no worker starts it soon", flush=True)
     if body.get("shell"):
         pid = get_parent(pid)
     run = queue.request(caller, pid, kind, workers, label)

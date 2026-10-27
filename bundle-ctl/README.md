@@ -153,7 +153,9 @@ repo, which has its own README (the sandbox, the load, the sync). Agents change 
   variable. `twc` too: a shell function, which `bctl.py` cannot start, and interactive.
 - `POST /run` with `route`: when a worker of `BUNDLE_CTL_WORKERS` (names, comma separated) has
   answered `status` in the last minute, is not drained, and would start a run within 120 s, the
-  daemon answers `{"remote": NAME}` and keeps no run of its own. Else the run waits here as any.
+  daemon answers `{"remote": NAME}` and keeps no run of its own. Else the run waits here as any,
+  and the journal says `run kept BUNDLE KIND`. The counts of `run routed` and `run kept` give the
+  share of the movable runs that left the laptop.
 - `client/remote.py` then sends each worktree as a snapshot (`client/snapshot.py`: the index and
   `.git` are never written), the DB the command names when it exists here, submits, and prints
   the job's output as it comes. A DB the command made, or changed with `-i` or `-u`, comes back
