@@ -30,7 +30,7 @@ case "$1 $*" in
 \t\t\tsleep 0.2
 \t\t\tprintf '\\007after\\033]52;c;?\\007'
 \t\t}
-\t\tIFS= read -r -t 0.1 line && printf '%s\\n' "$line" >>"$STATE/typed"
+\t\tIFS= read -r -t 0.1 part && { printf '%s\\n' "$line$part" >>"$STATE/typed"; line=; } || line+=$part
 \tdone ;;
 "exec "*agent-takeover.py*) touch "$AGENT/handoff" ;;
 "exec "*) cat >/dev/null ;;
