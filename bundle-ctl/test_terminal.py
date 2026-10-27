@@ -248,7 +248,7 @@ def check_clipboard(case):
 def check_wake(case):
     """A PR event is typed, then Enter, in an idle session of the claude this terminal started
     only, and not over a draft of Seb: a key he typed since his last Enter keeps it waiting, a
-    mouse move does not."""
+    mouse move or the answer of the terminal to a query of claude does not."""
     events = case.agent / "pr-events"
     events.mkdir()
     typed = case.state / "typed"
@@ -278,8 +278,9 @@ def check_wake(case):
     case.check("his Enter lets it go, after his prompt",
                wait(lambda: lines()[1:] == ["ab", "PR event: two"]))
     os.write(case.terminal.fd, b"\x1b[<35;10;5M\x1b[I")
+    os.write(case.terminal.fd, b"\x1b]11;rgb:0000/0000/0000\x07\x1b[?65;1;9c\x1bP>|VTE(7800)\x1b\\")
     (events / "3.txt").write_text("PR event: three")
-    case.check("a mouse move or a focus is no draft",
+    case.check("a mouse move, a focus or the answers of the terminal to claude are no draft",
                wait(lambda: lines()[-1:] and lines()[-1].endswith("PR event: three")))
     os.write(case.terminal.fd, b"/config\r")
     (events / "4.txt").write_text("PR event: four")
