@@ -142,9 +142,11 @@ hook on agent commands, the order of the queue, and real clients on a socket of 
 A run can go to a remote worker instead of the laptop's cores: a machine of the `remote-runs`
 repo, which has its own README (the sandbox, the load, the sync). Agents change nothing.
 
-- `client/run-hook.py` wraps a lone `odoo-bin` call that stops after init on a DB it names
-  (`-d` or `--database`), its program written once in the text: `bctl.py run --route ... --
-  ./odoo-bin ...` in place of the line in front. Anything else keeps the line in front and runs
+- `client/run-hook.py` wraps a lone `odoo-bin` call, alone or behind its python, that stops after
+  init on a DB it names (`-d` or `--database`), its program written once in the text: `bctl.py
+  run --route ... -- ./odoo-bin ...` in place of the line in front. The worker's image has the
+  venvs at the laptop's path, so `/home/seb/virtualenvs/odoo20/bin/python odoo-bin` runs there
+  as here. Anything else keeps the line in front and runs
   here: servers, shells, `ott`, scripts, a text with two runs. The Hoot engine stays here until
   the relay of the bundle's server is built.
 - `POST /run` with `route`: when a worker of `BUNDLE_CTL_WORKERS` (names, comma separated) has

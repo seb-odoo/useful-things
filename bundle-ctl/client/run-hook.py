@@ -296,14 +296,16 @@ def classify(text, folder=".", depth=0):
 
 def wrap(text, found):
     """The text with its one movable run started by `bctl.py run --route`, which may send it to a
-    remote worker (README.md, "Remote runs"), or None. Movable: a lone `odoo-bin` call that
-    stops after init, on a DB it names, its program written once in the text.
+    remote worker (README.md, "Remote runs"), or None. Movable: a lone `odoo-bin` call, alone or
+    behind its python, that stops after init, on a DB it names, its program written once in the
+    text.
     """
     if not found or len(found) != 1:
         return None
     kind, workers, words = found[0]
     words = strip_wrappers(words)
-    if kind != "odoo" or not words or os.path.basename(words[0]) != "odoo-bin":
+    program = words[1:2] if words and PYTHON.fullmatch(os.path.basename(words[0])) else words[:1]
+    if kind != "odoo" or not program or os.path.basename(program[0]) != "odoo-bin":
         return None
     flags = {word.partition("=")[0] for word in words}
     if "--stop-after-init" not in flags or not {"-d", "--database"} & flags:
