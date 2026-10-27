@@ -2,8 +2,10 @@
 
 The worktrees go as snapshots (snapshot.py), the DB the command names goes along when it exists
 here, the output comes back as it is written, and a DB the command made or changed comes back
-under its name. Anything that fails before the job started returns None: the caller runs the
-command here instead, so the agent never depends on the worker.
+under its name. A Hoot engine run takes along the bundle's server it points at: its DB, its
+addons path and its options, read in /proc, from which the worker starts that server in the job.
+Anything that fails before the job started returns None: the caller runs the command here
+instead, so the agent never depends on the worker.
 """
 
 import io
@@ -33,6 +35,19 @@ FILESTORE = pathlib.Path.home() / ".local" / "share" / "Odoo" / "filestore"
 DB_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")
 CHANGES_DB = {"-i", "--init", "-u", "--update"}
 MAX_WAIT = 600
+NOT_STARTED = 125
+ENGINE = re.compile(r"engine-linux-\w+|test-warden-engine")
+ENGINE_SERVER = re.compile(r"http://(?:localhost|127\.0\.0\.1):([0-9]{1,5})(?:/\S*)?")
+VENV_PYTHON = re.compile(r"/(odoo[0-9]{2})/bin/python[0-9.]*$")
+VENV = re.compile(r"odoo[0-9]{2}")
+SERVER_OPTIONS = {"dev", "load", "log-handler", "log-level", "server-wide-modules"}
+SERVER_DROPPED = {
+    "--db-filter", "--db_host", "--db_password", "--db_port", "--db_user", "--gevent-port",
+    "--http-interface", "--http-port", "--limit-memory-hard", "--limit-memory-soft",
+    "--limit-request", "--limit-time-cpu", "--limit-time-real", "--limit-time-real-cron",
+    "--logfile", "--longpolling-port", "--max-cron-threads", "--no-database-list", "--pidfile",
+    "--proxy-mode", "--with-demo", "--without-demo", "--workers", "--x-sendfile", "-p", "-r", "-w",
+}
 
 
 class Fallback(Exception):
@@ -237,8 +252,8 @@ def sync(worker, base):
     return snaps
 
 
-def submit(worker, argv, kind, workers, base):
-    cwd = pathlib.Path.cwd()
+def get_databases(argv, cwd):
+    """The DBs an odoo-bin run sends to the worker, and the ones it gets back."""
     if cwd != WORKSPACE and WORKSPACE not in cwd.parents:
         raise Fallback("not run from /workspace")
     database = get_database(argv)
@@ -254,6 +269,130 @@ def submit(worker, argv, kind, workers, base):
                 dbs_out.append(database)
         else:
             dbs_out.append(database)
+    return dbs_in, dbs_out
+
+
+def get_port(argv):
+    for index, word in enumerate(argv):
+        name, equal, value = word.partition("=")
+        if name in ("--server", "-server"):
+            url = value if equal else "".join(argv[index + 1 : index + 2])
+            if match := ENGINE_SERVER.fullmatch(url):
+                return int(match[1])
+    raise Fallback("no --server http://localhost:PORT")
+
+
+def find_server(port):
+    """The /proc folder of the odoo-bin of this bundle that listens on PORT."""
+    sockets = set()
+    for table in ("tcp", "tcp6"):
+        try:
+            lines = (pathlib.Path("/proc/net") / table).read_text().splitlines()[1:]
+        except OSError:
+            continue
+        for fields in map(str.split, lines):
+            if fields[3] == "0A" and int(fields[1].rpartition(":")[2], 16) == port:
+                sockets.add(f"socket:[{fields[9]}]")
+    for proc in sorted(pathlib.Path("/proc").glob("[0-9]*"), key=lambda path: int(path.name)):
+        try:
+            if sockets.isdisjoint(os.readlink(fd) for fd in (proc / "fd").iterdir()):
+                continue
+            words = (proc / "cmdline").read_bytes().split(b"\0")
+        except OSError:
+            continue
+        if any(os.path.basename(word) == b"odoo-bin" for word in words):
+            return proc
+    raise Fallback(f"no odoo-bin of this bundle listens on port {port}")
+
+
+def get_venv(python, environ):
+    """The venv of the server's python: its path, else the VIRTUAL_ENV of its environment."""
+    if python:
+        program = python[0]
+        if "/" not in program:
+            program = shutil.which(program, path=environ.get("PATH", "")) or program
+        if match := VENV_PYTHON.search(program):
+            return match[1]
+    name = pathlib.Path(environ.get("VIRTUAL_ENV", "")).name
+    if VENV.fullmatch(name):
+        return name
+    raise Fallback("the server runs the python of no odooNN venv")
+
+
+def get_addons(path, cwd):
+    full = pathlib.Path(os.path.normpath(cwd / os.path.expanduser(path)))
+    if WORKSPACE not in full.parents or full.relative_to(WORKSPACE).parts[0] not in REPOS:
+        raise Fallback(f"the addons path {path} is not in a worktree of the bundle")
+    return str(full.relative_to(WORKSPACE))
+
+
+def read_server(port):
+    """The venv and the server of a hoot job: the DB, the addons path and the options of the
+    bundle's server on PORT. An option of the laptop (port, log file, DB access) is dropped, any
+    other one runs the command here.
+    """
+    proc = find_server(port)
+    try:
+        words = (proc / "cmdline").read_bytes().decode().rstrip("\0").split("\0")
+        cwd = pathlib.Path(os.readlink(proc / "cwd"))
+        environ = dict(
+            line.partition("=")[::2]
+            for line in (proc / "environ").read_bytes().decode(errors="replace").split("\0")
+        )
+    except (OSError, UnicodeDecodeError) as error:
+        raise Fallback(f"the server on port {port}: {error}") from error
+    programs = [index for index, word in enumerate(words) if os.path.basename(word) == "odoo-bin"]
+    at = programs[0] if programs else 0
+    if pathlib.Path(os.path.normpath(cwd / words[at])) != WORKSPACE / "odoo" / "odoo-bin":
+        raise Fallback(f"the server runs {words[at]}, not {WORKSPACE}/odoo/odoo-bin")
+    venv = get_venv(words[:at], environ)
+    args = words[at + 1 :]
+    args = args[1:] if args[:1] == ["server"] else args
+    database, addons, options, index = None, [], [], 0
+    while index < len(args):
+        word = args[index]
+        index += 1
+        name, equal, value = word.partition("=")
+        if not name.startswith("-"):
+            raise Fallback(f"the server word {word!r}")
+        if not name.startswith("--") and len(name) > 2:
+            name, equal, value = name[:2], "=", word[2:]
+        if not equal and index < len(args) and not args[index].startswith("-"):
+            equal, value = "=", args[index]
+            index += 1
+        if name in ("-d", "--database"):
+            database = value
+        elif name == "--addons-path":
+            addons = [get_addons(path, cwd) for path in value.split(",") if path]
+        elif name.removeprefix("--") in SERVER_OPTIONS and equal:
+            options.append(f"{name}={value}")
+        elif name not in SERVER_DROPPED:
+            raise Fallback(f"the server option {name}")
+    if not database or not DB_NAME.fullmatch(database) or not exists(database):
+        raise Fallback(f"the server on port {port} names no DB of this bundle")
+    return venv, {"database": database, "addons_path": addons, "options": options}
+
+
+def get_engine_run(argv, cwd):
+    """The engine's command as the job runs it, the venv and the server of the job."""
+    folder = os.environ.get("TESTWARDEN")
+    program = pathlib.Path(os.path.normpath(cwd / argv[0]))
+    movable = folder and "/" in argv[0] and pathlib.Path(folder) in program.parents
+    if not movable or not ENGINE.fullmatch(program.name):
+        raise Fallback(f"{argv[0]} is not an engine of TESTWARDEN")
+    venv, server = read_server(get_port(argv))
+    return [str(program), *argv[1:]], venv, server
+
+
+def submit(worker, argv, kind, workers, base):
+    cwd = pathlib.Path.cwd()
+    venv = pathlib.Path(os.environ.get("VIRTUAL_ENV") or "odoo20").name
+    server = None
+    if kind == "hoot":
+        argv, venv, server = get_engine_run(argv, cwd)
+        cwd, dbs_in, dbs_out = WORKSPACE, [server["database"]], []
+    else:
+        dbs_in, dbs_out = get_databases(argv, cwd)
     snaps = sync(worker, base)
     for name in dbs_in:
         call(worker, "put", name, body=pack_database(name))
@@ -263,11 +402,13 @@ def submit(worker, argv, kind, workers, base):
         "kind": kind if kind in ("hoot", "odoo") else "other",
         "workers": workers,
         "snaps": snaps,
-        "venv": pathlib.Path(os.environ.get("VIRTUAL_ENV") or "odoo20").name,
+        "venv": venv,
         "dbs_in": dbs_in,
         "dbs_out": dbs_out,
         "max_wait": MAX_WAIT,
     }
+    if server:
+        spec["server"] = server
     answer = call(worker, "submit", body=json.dumps(spec).encode())
     if "refused" in answer:
         raise Fallback(f"refused: {answer['refused']}")
@@ -340,6 +481,9 @@ def run(argv, worker, kind, workers, base):
         reason = "the stream broke"
     if code is None:
         say(f"lost job {job} on {worker} ({reason}), runs here again")
+        return None
+    if code == NOT_STARTED:
+        say(f"runs here, not on {worker}: job {job} did not start")
         return None
     if dbs_out:
         try:

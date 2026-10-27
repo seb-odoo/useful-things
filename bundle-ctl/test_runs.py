@@ -81,7 +81,29 @@ KINDS = [
 ]
 
 
-ROUTE = "python3 {client} run --route --kind odoo --workers 1 -- "
+ROUTE = "python3 {client} run --route --kind {kind} --workers {workers} -- "
+TW = "/home/seb/repo/TestWarden/engine"
+HOOT = f"cd {TW} && ./dist/engine-linux-amd64 --server http://127.0.0.1:$PORT"
+HOOT_WRAPS = [
+    (f"{HOOT} --suite-names '@mail' --workers 2 > $L/mail.jsonl; echo EXIT=$?", f"cd {TW} && ", 2),
+    (f"PORT=$(cat x/port); {HOOT} --test 'a b' --workers 1", f"PORT=$(cat x/port); cd {TW} && ", 1),
+    (f"{ENGINE} --suite-names '@mail' --workers 2", "", 2),
+    (f"{TW}/test-warden-engine --server=http://localhost:8070 --workers 1", "", 1),
+    (
+        "for p in 8070 8071; do ./dist/engine-linux-amd64 --server http://127.0.0.1:$p; done",
+        "for p in 8070 8071; do ",
+        4,
+    ),
+    (f"{ENGINE} --debug --test x", None, 1),
+    (f"{ENGINE} --visible", None, 1),
+    (f"{ENGINE} --pause-before-exit --workers 1", None, 1),
+    ("./dist/engine-linux-amd64 --suite-names '@mail' --workers 2", None, 2),
+    ("./dist/engine-linux-amd64 --server http://runbot.odoo.com --workers 2", None, 2),
+    (f"{ENGINE} --server http://localhost:8072 --workers 2", None, 2),
+    (f"E={TW}/dist/engine-linux-amd64; $E --server http://localhost:8070", None, 4),
+    (f"{ENGINE} --workers 1; pgrep -af engine-linux-amd64", None, 1),
+    ("twc --once -m '@mail' --server-url http://localhost:8070", None, 4),
+]
 WRAPS = [
     ("cd /workspace/odoo && ./odoo-bin -d x -u mail --stop-after-init; echo $?", "cd /workspace/odoo && "),
     ("DB=$(testdb) && timeout 900 ./odoo-bin -d $DB -i web --stop-after-init", "DB=$(testdb) && timeout 900 "),
@@ -94,21 +116,21 @@ WRAPS = [
     ("./odoo-bin -d x -i mail --stop-after-init && ./odoo-bin -d x --http-port 8070 &", None),
     ("bash -c './odoo-bin -d x -i mail --stop-after-init'", None),
     ("ott /mail:TestUi", None),
-    (f"{ENGINE} --suite-names '@mail' --workers 2", None),
 ]
 
 
 def check_wraps(failures):
     """Which commands the hook lets go to a remote worker, and where it puts `bctl run --route`."""
     hook = load_hook()
-    for text, before in WRAPS:
-        expected = None if before is None else (
-            before + ROUTE.format(client=hook.CLIENT) + text[len(before):]
-        )
+    cases = [(text, before, "odoo", 1) for text, before in WRAPS]
+    cases += [(text, before, "hoot", workers) for text, before, workers in HOOT_WRAPS]
+    for text, before, kind, workers in cases:
+        route = ROUTE.format(client=hook.CLIENT, kind=kind, workers=workers)
+        expected = None if before is None else before + route + text[len(before):]
         found = hook.wrap(text, hook.find_runs(text))
         if found != expected:
             failures.append(f"wrap of {text!r}: {found!r}, expected {expected!r}")
-    return len(WRAPS)
+    return len(cases)
 
 
 def load_hook():

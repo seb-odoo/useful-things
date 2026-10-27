@@ -30,6 +30,8 @@ FALLBACK = (
     ("server", r"odoo-bin\s+-"),
 )
 HELP = {"--help", "--version", "-h"}
+INTERACTIVE = {"debug", "pause-before-exit", "visible"}
+LOCAL_SERVER = re.compile(r"http://(?:localhost|127\.0\.0\.1):\S")
 HEREDOC = re.compile(r"<<(-?)[ \t]*(?:'([^'\n]*)'|\"([^\"\n]*)\"|\\?([^\s;&|<>()'\"]+))")
 KEYWORDS = {"!", "do", "elif", "else", "if", "then", "until", "while", "{"}
 LABEL = 120
@@ -294,24 +296,41 @@ def classify(text, folder=".", depth=0):
     return run and (run[0], run[1], " ".join(run[2]))
 
 
+def is_movable(kind, words):
+    """A lone `odoo-bin` call, alone or behind its python, that stops after init on a DB it
+    names, or a run of the TestWarden engine against a server of the bundle, never interactive.
+    """
+    flags = {word.partition("=")[0] for word in words}
+    if kind == "hoot":
+        name = os.path.basename(words[0])
+        engine = name == "test-warden-engine" or name.startswith("engine-linux-")
+        servers = [
+            value if equal else "".join(words[index + 1 : index + 2])
+            for index, (flag, equal, value) in enumerate(word.partition("=") for word in words)
+            if flag in ("--server", "-server")
+        ]
+        local = len(servers) == 1 and bool(LOCAL_SERVER.match(servers[0]))
+        return engine and local and not INTERACTIVE & {flag.lstrip("-") for flag in flags}
+    program = words[1:2] if PYTHON.fullmatch(os.path.basename(words[0])) else words[:1]
+    if kind != "odoo" or not program or os.path.basename(program[0]) != "odoo-bin":
+        return False
+    return "--stop-after-init" in flags and bool({"-d", "--database"} & flags)
+
+
 def wrap(text, found):
-    """The text with its one movable run started by `bctl.py run --route`, which may send it to a
-    remote worker (README.md, "Remote runs"), or None. Movable: a lone `odoo-bin` call, alone or
-    behind its python, that stops after init, on a DB it names, its program written once in the
-    text.
+    """The text with its one movable run (`is_movable`) started by `bctl.py run --route`, which
+    may send it to a remote worker (README.md, "Remote runs"), or None. Its program is written
+    once in the text.
     """
     if not found or len(found) != 1:
         return None
     kind, workers, words = found[0]
     words = strip_wrappers(words)
-    program = words[1:2] if words and PYTHON.fullmatch(os.path.basename(words[0])) else words[:1]
-    if kind != "odoo" or not program or os.path.basename(program[0]) != "odoo-bin":
+    if not words or not is_movable(kind, words):
         return None
-    flags = {word.partition("=")[0] for word in words}
-    if "--stop-after-init" not in flags or not {"-d", "--database"} & flags:
-        return None
+    name = "odoo-bin" if kind == "odoo" else os.path.basename(words[0])
     starts = list(re.finditer(rf"(?:^|(?<=[\s;&|(])){re.escape(words[0])}(?=\s)", text))
-    if not SAFE_WORD.fullmatch(words[0]) or len(starts) != 1 or text.count("odoo-bin") != 1:
+    if not SAFE_WORD.fullmatch(words[0]) or len(starts) != 1 or text.count(name) != 1:
         return None
     route = f"python3 {CLIENT} run --route --kind {kind} --workers {workers} -- "
     return text[: starts[0].start()] + route + text[starts[0].start() :]
