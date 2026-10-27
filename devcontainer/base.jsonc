@@ -49,9 +49,9 @@
     "source=@SHARED_CLAUDE@,target=/home/vscode/.claude-project,type=bind,readonly,z",
     "source=@WORKTREE_ROOT@/.vscode,target=@WORKTREE_ROOT@/.vscode,type=bind,Z",
     "source=@USEFUL_THINGS@/odools.toml,target=@USEFUL_THINGS@/odools.toml,type=bind,readonly,Z",
-    // The node_modules of the base, where odoo/ and enterprise/ link (initialize.py). Read-only, as
-    // the ESLint of every bundle of the base loads it.
-    "source=${localWorkspaceFolder}/../node_modules,target=/opt/node_modules,type=bind,readonly,z",
+    // The store of node_modules, one tree per package.json, where odoo/ and enterprise/ link
+    // (initialize.py). Read-only, as the ESLint of every bundle on that package.json loads it.
+    "source=@WORKTREE_ROOT@/.node_modules,target=/opt/node_modules,type=bind,readonly,z",
     "source=@HOME@/.claude,target=/home/vscode/.claude,type=bind,Z",
     // What a session takes as orders or runs comes back read-only over it: the host's Claude reads
     // the same files, so a hook written from a bundle would run on the host. The root stays

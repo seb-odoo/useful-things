@@ -52,14 +52,28 @@ A bundle gets a worktree of each repo of `folder_by_repo` in `config.py` (`desig
 
 ### Shared node_modules
 
-The bundles of one base share one `node_modules` (`WORKTREE_ROOT/<base>/node_modules`, with its
-`package.json` and `package-lock.json` beside it), which only the host writes. Each container
-mounts the one of its base read-only at `/opt/node_modules`, and the `node_modules` of its `odoo/`
-and `enterprise/` is a link there. `_install_js_tooling` makes it after `enable.sh`, and
-`devcontainer/initialize.py` makes it again before each start: a container that started bare got
-its worktrees from `bctl build` after its start, so only the first one links them. A folder of
-their own there goes at that start: the hard links of the base a bundle had before 2026-10-21 let
-it write the files that the ESLint of every other bundle of the base loads.
+The bundles share a store of `node_modules`, one tree per `package.json` of the web tooling
+(`WORKTREE_ROOT/.node_modules/<key>/`, with that `package.json` and its `package-lock.json` beside
+the tree), which only the host writes. The key is the start of the sha256 of the file
+(`node_modules_key` in `devcontainer/config.py`), so the bases with the same file share one tree:
+on 2026-10-27, 17.0 to saas-18.4 had one, and 20.0, saas-19.4 and master before its ESLint 10 had
+another. Each container mounts the store read-only at `/opt/node_modules`, and the `node_modules`
+of its `odoo/` and `enterprise/` is a link to `/opt/node_modules/<key>/node_modules`, the key of
+its own `odoo/addons/web/tooling/_package.json`: a bundle not rebased yet keeps the tree of its
+branch when its base moves to another one (2026-10-26, master went to ESLint 10, whose config the
+ESLint 8 of the master bundles not rebased cannot read). `_install_js_tooling` makes the link after
+`enable.sh`, and `devcontainer/initialize.py` makes it again before each start: a container that
+started bare got its worktrees from `bctl build` after its start, so only the first one links them.
+A folder of their own there goes at that start: the hard links of the base a bundle had before
+2026-10-21 let it write the files that the ESLint of every other bundle of the base loads.
+
+A rebase onto a branch with another `package.json` changes the key in a container that runs. Odoo's
+pre-commit hook then reloads the tooling: `disable.sh` deletes the link and `enable.sh` runs
+`npm install`, which reaches no registry from a bundle (403). The `npm` function of
+`container-rw/devcontainer.bashrc` (`BASH_ENV`, so the hook's bash has it) takes that
+`npm install` in an odoo worktree and makes the link to the new key instead; `enable.sh` copies it
+to enterprise with `cp -a`. When the store has no tree for the key, the link waits for it and the
+commit fails with a line that names `bctl node-modules`.
 
 `_install_js_tooling` in `utils.py` runs `enable.sh` for its config files and its hooks, with npm in
 dry run: `npm install` would replace the link with a tree of its own, built from the branch. npm
@@ -68,12 +82,17 @@ up (2026-10-21), and offline it gives up at once; `enable.sh` goes on after npm 
 patch `enable.sh` instead: it is tracked upstream (`odoo/addons/web/tooling/enable.sh`), so a hand
 patch is gone in the next worktree. The fix of a tooling file of Odoo belongs in these scripts.
 
-`bctl node-modules` builds the tree of a base again when the `package.json` of the web tooling of
-its branch changes: npm installs that file with the lock in use, in a box with the network
-(`HOST_BOX`), beside the old tree, which then gives way. A bundle asks it for its own base and waits
-for Seb's yes, which `hok` shows with the change of `package.json`; the host asks it at once. A
-container that runs keeps the old tree until it restarts. A base with no tree yet gets one the
-same way.
+`bctl node-modules` builds the tree of the `package.json` of the web tooling of a base's branch,
+when the store has none: npm installs that file in a box with the network (`HOST_BOX`), in a folder
+of its own that then goes in the store under its key. A tree never changes once there, and a
+bundle linked to its key loads it at once, even in a container that runs. A bundle asks it for its
+own base and waits for Seb's yes, which `hok` shows with the change from the `package.json` of the
+tree it links; the host asks it at once. Nothing deletes a tree yet: one that no bundle links can
+go by hand.
+
+Before 2026-10-27 each base had its own tree, `WORKTREE_ROOT/<base>/node_modules` (and
+`.node_modules.old`). A container started before then still mounts it, and it can go once none
+runs.
 
 A bundle can arrive with only some of its repos. A runbot batch still in preparation lists a
 commit only for the repos pushed so far, so `fetch_bundle` falls back to each missing repo's base
@@ -202,8 +221,8 @@ Commits
 [5.29-5.62] /home/seb/src/odoo/master/master-test--seb ✅️ env npm_config_dry_run=true npm_config_offline=true npm_config_audit=false npm_config_fund=false bash ./odoo/addons/web/tooling/enable.sh
 y
 
-[5.62-5.63] /home/seb/src/odoo/master/master-test--seb ✅️ ln -sfn /opt/node_modules /home/seb/src/odoo/master/master-test--seb/odoo/node_modules
-[5.63-5.64] /home/seb/src/odoo/master/master-test--seb ✅️ ln -sfn /opt/node_modules /home/seb/src/odoo/master/master-test--seb/enterprise/node_modules
+[5.62-5.63] /home/seb/src/odoo/master/master-test--seb ✅️ ln -sfn /opt/node_modules/d0ab58a5b38e43e2/node_modules /home/seb/src/odoo/master/master-test--seb/odoo/node_modules
+[5.63-5.64] /home/seb/src/odoo/master/master-test--seb ✅️ ln -sfn /opt/node_modules/d0ab58a5b38e43e2/node_modules /home/seb/src/odoo/master/master-test--seb/enterprise/node_modules
 [5.64-5.64] /home/seb/src/odoo/master/master-test--seb ✅️ touch /home/seb/src/odoo/master/master-test--seb/.made
 [5.64-5.80] /home/seb/src/odoo/master/master-test--seb ✅️ code --folder-uri vscode-remote://dev-container+<hex>/workspace
 Done

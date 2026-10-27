@@ -30,6 +30,7 @@ import socketserver
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -84,7 +85,6 @@ from commands import (  # noqa: E402
     get_repo_folder,
     get_repos,
     get_sticky_bundles,
-    get_worktree_base_folder,
     get_worktree_bundle_folder,
     get_worktree_bundle_repo_folder,
     get_worktree_container_folder,
@@ -94,6 +94,8 @@ from config import (  # noqa: E402
     CLAUDE_CONFIG_CONTAINER,
     HOST_BOX,
     STICKY_BUNDLES,
+    WORKTREE_CONTAINER,
+    node_modules_key,
 )
 from utils import UtilsRunner  # noqa: E402
 
@@ -2482,7 +2484,7 @@ def send_held(item):
         job = jobs[answer["job"]]
         wait_job(job)
         if job["state"] == "done":
-            return f"the node_modules of {base} is built again: a bundle loads it at its next start"
+            return f"the node_modules of {base} is built: the bundles on its package.json load it"
         return f"the node_modules of {base} is being built, see {job['log']}"
     if "bundle" in item["send"]:
         return send_deletion(item)
@@ -2577,51 +2579,56 @@ def read_package(base):
     return res.stdout
 
 
+def node_modules_tree(package):
+    """The folder of the store of node_modules (scripts/README.md) built from `package`."""
+    return pathlib.Path(WORKTREE_CONTAINER) / ".node_modules" / node_modules_key(package.encode())
+
+
 def refresh_node_modules(log, base, package):
-    """npm installs `package` beside the node_modules of the base, with the lock in use, boxed and
-    with the network when HOST_BOX is set. The new tree then takes the place of the old one, which
-    stays as .node_modules.old until the next refresh: a container that runs keeps its mount."""
-    folder = pathlib.Path(get_worktree_base_folder(base))
-    fresh, old = folder / ".node_modules.new", folder / ".node_modules.old"
-    shutil.rmtree(fresh, ignore_errors=True)
-    fresh.mkdir()
-    (fresh / "package.json").write_text(package)
-    if (folder / "package-lock.json").is_file():
-        shutil.copy(folder / "package-lock.json", fresh / "package-lock.json")
-    install = ["npm", "install", "--no-audit", "--no-fund"]
-    if HOST_BOX:
-        install = [HOST_BOX, "--net", "--dir", str(fresh), "--", *install]
-    log.write(f"$ {' '.join(install)}\n")
-    log.flush()
-    res = subprocess.run(
-        install,
-        cwd=fresh,
-        stdin=subprocess.DEVNULL,
-        stdout=log,
-        stderr=subprocess.STDOUT,
-        check=False,
-    )
-    if res.returncode or not (fresh / "node_modules" / ".bin").is_dir():
-        raise Refused(f"npm install exited with {res.returncode}")
-    shutil.rmtree(old, ignore_errors=True)
-    if (folder / "node_modules").is_dir():
-        (folder / "node_modules").rename(old)
-    (fresh / "node_modules").rename(folder / "node_modules")
-    for name in ("package.json", "package-lock.json"):
-        (fresh / name).replace(folder / name)
-    fresh.rmdir()
-    return {"base": base}
+    """npm installs `package` in a folder of its own, boxed and with the network when HOST_BOX is
+    set, which then goes in the store under the key of `package`. A tree in the store never
+    changes: a bundle linked to it loads it at once, and the others keep theirs."""
+    tree = node_modules_tree(package)
+    if (tree / "node_modules" / ".bin").is_dir():
+        return {"base": base, "tree": tree.name}
+    tree.parent.mkdir(exist_ok=True)
+    fresh = pathlib.Path(tempfile.mkdtemp(prefix=".node_modules.", dir=WORKTREE_CONTAINER))
+    try:
+        (fresh / "package.json").write_text(package)
+        install = ["npm", "install", "--no-audit", "--no-fund"]
+        if HOST_BOX:
+            install = [HOST_BOX, "--net", "--dir", str(fresh), "--", *install]
+        log.write(f"$ {' '.join(install)}\n")
+        log.flush()
+        res = subprocess.run(
+            install,
+            cwd=fresh,
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        if res.returncode or not (fresh / "node_modules" / ".bin").is_dir():
+            raise Refused(f"npm install exited with {res.returncode}")
+        if not tree.is_dir():
+            fresh.rename(tree)
+    finally:
+        shutil.rmtree(fresh, ignore_errors=True)
+    return {"base": base, "tree": tree.name}
 
 
 def node_modules(caller, query, body):
-    """Build the node_modules of a base again from the package.json of its branch: at once for
-    the host, held for Seb's yes for a bundle, which asks for its own base only."""
+    """Build the node_modules of the package.json of a base's branch, when the store has none:
+    at once for the host, held for Seb's yes for a bundle, which asks for its own base only."""
     base = body.get("base") or ("" if caller == HOST else get_base_from_bundle_name(caller))
     if base not in STICKY_BUNDLES:
         raise ValueError(f"base must be one of {', '.join(STICKY_BUNDLES)}")
     if caller != HOST and base != get_base_from_bundle_name(caller):
         raise Refused("a bundle asks for the node_modules of its own base only")
     package = read_package(base)
+    tree = node_modules_tree(package)
+    if (tree / "node_modules" / ".bin").is_dir():
+        return 200, {"base": base, "tree": tree.name}
     if caller == HOST:
         return start_job(
             caller,
@@ -2630,21 +2637,23 @@ def node_modules(caller, query, body):
         )
     if HELD is None:
         raise Refused("no gateway-core beside useful-things: hok cannot list the request")
-    used = read_text(pathlib.Path(get_worktree_base_folder(base)) / "package.json")
+    try:
+        link = os.readlink(f"{get_worktree_bundle_repo_folder(caller, 'odoo')}/node_modules")
+    except OSError:
+        link = ""
+    linked = re.fullmatch(r"/opt/node_modules/([0-9a-f]{16})/node_modules", link)
+    used = linked and read_text(tree.parent / linked[1] / "package.json")
     diff = used and list(difflib.unified_diff(used.splitlines(), package.splitlines(), lineterm=""))
     item = {
         "client": caller,
         "key": f"node-modules {base}",
-        "lines": diff[2:] if diff else [
-            "the same package.json as the one in use" if used else "no package.json in use yet:",
-            *([] if used else package.splitlines()),
-        ],
+        "lines": diff[2:] if diff else ["no tree in use yet:", *package.splitlines()],
         "reason": str(body.get("reason") or ""),
         "send": {"node_modules": {"base": base, "package": package}},
-        "title": f"build the node_modules of {base} again",
+        "title": f"build the node_modules of the package.json of {base}",
         "yes": (
-            "npm installs this package.json in a box, with the network: the bundles of"
-            f" {base} load the new node_modules at their next start"
+            "npm installs this package.json in a box, with the network: the bundles on it load"
+            " the new node_modules at once"
         ),
     }
     return 200, {"base": base, "held": f"{HELD_LETTER}{HELD.add(HELD_DIR, item)}"}

@@ -100,10 +100,10 @@ last answer of the agent is kept on the host. With --wait, bctl waits that
 long for his answer and prints it: exit 0 on his yes, 126 when he refused, 75 when it still waits.
 The same delete asked again takes back the request that waits.
 
-node-modules builds the node_modules of a base again, from the package.json of the web tooling of
-its branch and the lock in use, when that package.json changed: every bundle of the base links its
-node_modules there, read-only. From a bundle, for its own base, it waits for Seb in hok, and
---wait works as for delete. A bundle that runs keeps the old one until its container restarts.
+node-modules builds the node_modules of the package.json of the web tooling of a base's branch,
+when no bundle had it yet: each bundle links its node_modules to the tree of its own package.json,
+read-only, and a bundle that runs loads a new one at once. From a bundle, for its own base, it
+waits for Seb in hok, and --wait works as for delete.
 
 run waits in the run queue of the host until cores and memory are free for a heavy command, then
 runs COMMAND pinned to the cores it got, which it holds until COMMAND ends. Without COMMAND the
@@ -297,9 +297,11 @@ def print_held_task(answer):
 
 
 def print_node_modules(answer):
+    if "tree" in answer:
+        print(f"the node_modules of {answer['base']} is built: /opt/node_modules/{answer['tree']}")
+        return
     print(
-        f"waits for Seb: hok {answer['held']}. His yes builds the node_modules of {answer['base']}"
-        " again.",
+        f"waits for Seb: hok {answer['held']}. His yes builds the node_modules of {answer['base']}.",
     )
 
 
@@ -714,7 +716,7 @@ def main():
             answer = follow(answer["job"])
         else:
             printer = print_node_modules
-            if args.wait:
+            if args.wait and "held" in answer:
                 print_node_modules(answer)
                 sys.stdout.flush()
                 wait_held(answer["held"], args.wait)

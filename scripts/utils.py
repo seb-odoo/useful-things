@@ -14,7 +14,6 @@ from commands import (
     BUNDLE_SUFFIX,
     MADE,
     drop_stale_containers,
-    get_base_from_bundle_name,
     get_devcontainer_config,
     get_remote_dev_branch_name,
     get_remote_dev_repo,
@@ -27,7 +26,7 @@ from commands import (
     get_worktree_bundle_repo_folder,
     get_worktree_container_folder,
 )
-from config import BUNDLE_DB_CONTAINER, HOST_BOX
+from config import BUNDLE_DB_CONTAINER, HOST_BOX, WORKTREE_CONTAINER, node_modules_key
 
 WORKSPACE_FOLDER = "/workspace"
 
@@ -244,11 +243,11 @@ class UtilsRunner(Runner):
         """A node_modules is usable once npm install has created its `.bin` directory."""
         return os.path.isdir(os.path.join(node_modules, ".bin"))
 
-    def _install_js_tooling(self, runner, *, bundle_name, base_folder):
+    def _install_js_tooling(self, runner, *, bundle_name):
         """Give the bundle's repos their web/tooling config files. Their node_modules is a link to
-        the one of the base, which the container mounts read-only at /opt/node_modules. It is made
-        here for a container that started before its worktrees (bare start), and again by
-        devcontainer/initialize.py at each start."""
+        the tree built from the package.json of odoo, in the store the container mounts read-only
+        at /opt/node_modules. It is made here for a container that started before its worktrees
+        (bare start), and again by devcontainer/initialize.py at each start."""
         odoo_wt = get_worktree_bundle_repo_folder(bundle_name, "odoo")
         enterprise_wt = get_worktree_bundle_repo_folder(bundle_name, "enterprise")
         if not os.path.isdir(odoo_wt):
@@ -271,16 +270,22 @@ class UtilsRunner(Runner):
             folder = get_worktree_bundle_folder(bundle_name)
             enable = [HOST_BOX, "--dir", folder, "--", *enable]
         runner.run(enable, input="y\n" if has_enterprise else "n\n")
+        try:
+            with open(f"{odoo_wt}/addons/web/tooling/_package.json", "rb") as file:
+                key = node_modules_key(file.read())
+        except OSError:
+            return
         for repo_wt in repo_wts:
-            runner.run(["ln", "-sfn", "/opt/node_modules", f"{repo_wt}/node_modules"])
-        if not self._node_modules_ready(f"{base_folder}/node_modules"):
-            print("No node_modules yet for this base: `bctl node-modules` builds it.")
+            runner.run(
+                ["ln", "-sfn", f"/opt/node_modules/{key}/node_modules", f"{repo_wt}/node_modules"]
+            )
+        if not self._node_modules_ready(f"{WORKTREE_CONTAINER}/.node_modules/{key}/node_modules"):
+            print("No node_modules yet for this package.json: `bctl node-modules` builds it.")
 
     def finish_worktree_bundle_folder(self, *, bundle_name, open_window=True):
         bundle_folder = get_worktree_bundle_folder(bundle_name)
-        base_folder = get_worktree_base_folder(get_base_from_bundle_name(bundle_name))
         runner = self.with_params(cwd=bundle_folder)
-        self._install_js_tooling(runner, bundle_name=bundle_name, base_folder=base_folder)
+        self._install_js_tooling(runner, bundle_name=bundle_name)
         runner.run(["touch", f"{bundle_folder}/{MADE}"])
         if open_window:
             runner.open_devcontainer_folder(folder=bundle_folder)

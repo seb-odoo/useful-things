@@ -8,10 +8,12 @@ def _load_machine_config():
     spec = importlib.util.spec_from_file_location("odoo_dev_config", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.load()
+    return module
 
 
-_CONFIG = _load_machine_config()
+_MACHINE = _load_machine_config()
+_CONFIG = _MACHINE.load()
+node_modules_key = _MACHINE.node_modules_key
 _ROOT = _CONFIG["REPO_ROOT"]
 BUNDLE_SUFFIX = _CONFIG["BUNDLE_SUFFIX"]
 HOST_BOX = _CONFIG.get("HOST_BOX")

@@ -109,8 +109,8 @@ The container runs as the host user (`--userns=keep-id`), so a file it can write
 trusts. The rule: the host never runs, and never loads as config, a file a bundle container can
 write. So these are read-only in a bundle: the shell helpers (`container-rw/`), the venv, the VS
 Code user settings, TestWarden, DiscussModelParser and runbot-fix-agents (the cache of the
-test-warden engine comes back writable over it), the `node_modules` of its base, which every
-bundle of that base loads (`/opt/node_modules`, see "Shared node_modules" in
+test-warden engine comes back writable over it), the store of `node_modules`, whose trees every
+bundle on the same `package.json` loads (`/opt/node_modules`, see "Shared node_modules" in
 `scripts/README.md`), the browser of the Hoot runs, and what the next paragraphs name.
 
 **The browser of the Hoot runs.** The test-warden engine runs

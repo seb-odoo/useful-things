@@ -215,6 +215,25 @@ function bctl() {
 alias gbs="bctl branches"
 function ocode() { bctl open "${1:-${ODOO_PROXY_HOST}}"; }
 
+# odoo's pre-commit hook reloads the JS tooling when the package.json of the branch changed (a
+# rebase), and the `npm install` of its enable.sh reaches no registry from here: in odoo, link the
+# tree the host built for that package.json instead, as initialize.py does at a start.
+function npm() {
+	if [[ -z "${ODOO_PROXY_HOST}" || "$*" != install || ! -f addons/web/tooling/_package.json ]]; then
+		command npm "$@"
+		return
+	fi
+	local tree
+	tree="/opt/node_modules/$(sha256sum < addons/web/tooling/_package.json | cut -c1-16)/node_modules"
+	rm -rf node_modules
+	ln -s "${tree}" node_modules
+	if [[ ! -d "${tree}" ]]; then
+		echo "No node_modules for this package.json in /opt/node_modules: \`bctl node-modules\`" \
+			"builds it (a container started before 2026-10-27 has to restart first)." >&2
+		return 1
+	fi
+}
+
 # --- model types (DiscussModelParser) ---
 # Regenerates the @types/models.d.ts files from the JS model definitions (community +
 # enterprise). Run it after adding/changing a model, field or store patch; it rewrites

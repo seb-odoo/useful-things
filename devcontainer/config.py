@@ -6,6 +6,7 @@ the default. No absolute path belongs in a committed file, so everything here is
 the home directory or overridden in that config.
 """
 
+import hashlib
 import os
 import pathlib
 import re
@@ -60,6 +61,12 @@ def load():
     values["SHARED_CLAUDE"] = os.path.realpath(f"{values['WORKTREE_ROOT']}/.claude")
     values["USEFUL_THINGS"] = str(REPO)
     return values
+
+
+def node_modules_key(package):
+    """The folder of the tree built from these bytes of package.json, in the store of node_modules
+    (WORKTREE_ROOT/.node_modules, /opt/node_modules in a bundle). devcontainer.bashrc says it too."""
+    return hashlib.sha256(package).hexdigest()[:16]
 
 
 if __name__ == "__main__":

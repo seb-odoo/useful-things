@@ -2,6 +2,7 @@
 """What initialize.py does before the start of a bundle container, with the scripts it runs faked:
 python3 test_initialize.py"""
 
+import hashlib
 import json
 import os
 import pathlib
@@ -20,7 +21,11 @@ FAKE = """import json, sys
 with open(sys.argv[0] + ".calls", "a") as file:
     file.write(json.dumps(sys.argv[1:]) + "\\n")
 """
-INSIDE = "/opt/node_modules"
+PACKAGE = b'{"devDependencies": {"eslint": "^10.12.0"}}\n'
+TARGET = f"/opt/node_modules/{hashlib.sha256(PACKAGE).hexdigest()[:16]}/node_modules"
+FAKE_NPM = """#!/bin/sh
+echo "$*" >> "$0.calls"
+"""
 
 
 def initialize(root, folder):
@@ -29,6 +34,7 @@ def initialize(root, folder):
         "PATH": os.environ["PATH"],
         "REPO_ROOT": str(root / "repo"),
         "STATE_ROOT": str(root / "state"),
+        "WORKTREE_ROOT": str(root / "src"),
     }
     return subprocess.run(
         [sys.executable, str(root / "tools" / "initialize.py"), NAME, str(folder)],
@@ -38,6 +44,36 @@ def initialize(root, folder):
         env=env,
         text=True,
     )
+
+
+def npm(root, folder, args, proxy="bundle"):
+    """`npm ARGS` in the odoo of the bundle, in a shell of the container."""
+    bashrc = HERE.parent / "container-rw" / "devcontainer.bashrc"
+    env = {"HOME": str(root / "home"), "PATH": f"{root / 'bin'}:{os.environ['PATH']}"}
+    return subprocess.run(
+        ["bash", "-c", f'source "{bashrc}" && npm {args}'],
+        capture_output=True,
+        check=False,
+        cwd=folder / "odoo",
+        env={**env, "ODOO_PROXY_HOST": proxy} if proxy else env,
+        text=True,
+    ).returncode
+
+
+def check_npm(root, folder, check):
+    """The npm of the bashrc: the reload of odoo's tooling gets the link of initialize.py."""
+    (root / "bin").mkdir()
+    (root / "bin" / "npm").write_text(FAKE_NPM)
+    (root / "bin" / "npm").chmod(0o755)
+    link = folder / "odoo" / "node_modules"
+    link.unlink()
+    check("npm install, no tree yet", npm(root, folder, "install"), 1)
+    check("npm install links", os.readlink(link), TARGET)
+    check("npm run", npm(root, folder, "run format-staged"), 0)
+    check("npm install --save-dev x", npm(root, folder, "install --save-dev x"), 0)
+    check("npm install on the host", npm(root, folder, "install", proxy=None), 0)
+    calls = (root / "bin" / "npm.calls").read_text().splitlines()
+    check("real npm", calls, ["run format-staged", "install --save-dev x", "install"])
 
 
 def main():
@@ -58,7 +94,7 @@ def main():
             "${localWorkspaceFolder}",
         ],
     )
-    mount = f"source=${{localWorkspaceFolder}}/../node_modules,target={INSIDE},type=bind,readonly,z"
+    mount = "source=@WORKTREE_ROOT@/.node_modules,target=/opt/node_modules,type=bind,readonly,z"
     check("node_modules mount", mount in base_config["mounts"], True)
     mount = "source=@CACHE_ROOT@/warden,target=/home/vscode/.cache/warden,type=bind,readonly,z"
     check("warden mount", mount in base_config["mounts"], True)
@@ -75,6 +111,8 @@ def main():
         (base / "shared.js").write_text("shared\n")
         os.link(base / "shared.js", folder / "odoo" / "node_modules" / "eslint" / "index.js")
         (folder / "enterprise").mkdir()
+        (folder / "odoo" / "addons" / "web" / "tooling").mkdir(parents=True)
+        (folder / "odoo" / "addons" / "web" / "tooling" / "_package.json").write_bytes(PACKAGE)
 
         res = initialize(root, folder)
         check("exit code", (res.returncode, res.stderr), (0, ""))
@@ -85,14 +123,15 @@ def main():
         ]
         check("the name, one argument", calls, [[], [NAME], [NAME, str(folder)], [NAME]])
         check("no shell", (root / "shell-ran").exists(), False)
-        check("mount source", (base / "node_modules").is_dir(), True)
+        check("mount source", (root / "src" / ".node_modules").is_dir(), True)
         for repo in ("odoo", "enterprise"):
             path = folder / repo / "node_modules"
-            check(f"{repo} link", path.is_symlink() and os.readlink(path), INSIDE)
+            check(f"{repo} link", path.is_symlink() and os.readlink(path), TARGET)
         check("hard link gone", os.stat(base / "shared.js").st_nlink, 1)
         (root / "tools" / "warden-chrome.py").write_text("raise SystemExit(1)\n")
         check("again, with no browser", initialize(root, folder).returncode, 0)
-        check("odoo link kept", os.readlink(folder / "odoo" / "node_modules"), INSIDE)
+        check("odoo link kept", os.readlink(folder / "odoo" / "node_modules"), TARGET)
+        check_npm(root, folder, check)
 
         (root / "other" / "node_modules").mkdir(parents=True)
         shutil.rmtree(folder / "odoo")

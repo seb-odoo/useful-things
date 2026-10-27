@@ -41,7 +41,7 @@ repos: a container writes their `.git`, and the jobs run git there (`daemon-git`
 | `GET /held` | what became of a deletion, a task for ops or for another bundle, a build of `node_modules` or a resume this caller asked (`?id=bN`): it waits, or what Seb said in `hok`; `?wait=S` long-polls it, 50 s at most |
 | `GET /hok` | the requests of `hok` that wait for the caller, a bundle its own and the host those of the ops session `?session=`: name, where a yes acts and what it does, when it was asked, put off or not (see the agent list) |
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window; with a task, only its queue entry, as for `create`; refused when the bundle is here, a branch has unpushed commits or, with no task, the disk is short |
-| `POST /node-modules` | the `node_modules` of `base` built again from the `package.json` of the web tooling of its branch, with the lock in use (see `scripts/README.md`, Shared node_modules): a job for the host; from a bundle, for its own base only, held as `bN` for Seb's yes in `hok`, which shows the change of `package.json` |
+| `POST /node-modules` | the `node_modules` of the `package.json` of the web tooling of the branch of `base`, built in the store when it has none (see `scripts/README.md`, Shared node_modules): a job for the host; from a bundle, for its own base only, held as `bN` for Seb's yes in `hok`, which shows the change from the `package.json` of the tree it links; `tree` at once when it is built already |
 | `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle, but for `resume` or `terminal` in a bare folder, whose session knows how to build it. A task from a bundle that is neither that bundle nor its parent waits for Seb's yes as `bN` (see A task for another bundle). On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window, and from a bundle a task alone, held as `bN` for Seb's yes in `hok`; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents). With `cut` and `resume` and no bundle, the resume of every cut session, held as `bN` for one yes of Seb (see Cut sessions) |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
 | `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, its text, whether it resumes the session of its bundle and the session it names, and the memory left on the host, `short` when a start would add to a host that already lacks it |
@@ -146,9 +146,11 @@ repo, which has its own README (the sandbox, the load, the sync). Agents change 
   init on a DB it names (`-d` or `--database`), its program written once in the text: `bctl.py
   run --route ... -- ./odoo-bin ...` in place of the line in front. The worker's image has the
   venvs at the laptop's path, so `/home/seb/virtualenvs/odoo20/bin/python odoo-bin` runs there
-  as here. Anything else keeps the line in front and runs
-  here: servers, shells, `ott`, scripts, a text with two runs. The Hoot engine stays here until
-  the relay of the bundle's server is built.
+  as here. It also wraps a TestWarden engine (`engine-linux-*`, `test-warden-engine`) whose one
+  `--server` is `http://localhost:` or `http://127.0.0.1:` (the port may be a variable), never
+  with `--debug`, `--visible` or `--pause-before-exit`. Anything else keeps the line in front and
+  runs here: servers, shells, `ott`, scripts, a text with two runs, an engine called through a
+  variable. `twc` too: a shell function, which `bctl.py` cannot start, and interactive.
 - `POST /run` with `route`: when a worker of `BUNDLE_CTL_WORKERS` (names, comma separated) has
   answered `status` in the last minute, is not drained, and would start a run within 120 s, the
   daemon answers `{"remote": NAME}` and keeps no run of its own. Else the run waits here as any.
@@ -157,9 +159,18 @@ repo, which has its own README (the sandbox, the load, the sync). Agents change 
   the job's output as it comes. A DB the command made, or changed with `-i` or `-u`, comes back
   under its name: restored beside, then renamed over the old one, with its filestore but the
   assets, which Odoo makes again.
-- Anything that fails before the job started (no connection, refused, a sync error), or a stream
-  lost during it, runs the command here, with one line on stderr: `bctl run: runs here, not on
-  NAME: why`.
+- For an engine run, the client reads the bundle's server that listens on the port of `--server`
+  (`/proc/net/tcp`, then the process that holds that socket and runs `odoo-bin`): its cmdline,
+  its folder and its environment give the venv, the DB, the addons path and the options. It sends
+  that DB, never brought back, and the server as a field of the job, which the worker starts in
+  the job before the engine (`remote-runs` README, "Hoot runs"). The engine's lines come as they
+  are written, then the end of the server's log on stderr. A server option that changes nothing
+  in the job (port, log file, DB access, workers, limits) is dropped; any other one, a config
+  file (`-c`), a server that is not `/workspace/odoo/odoo-bin`, an addons path outside the
+  worktrees, run the command here.
+- Anything that fails before the job started (no connection, refused, a sync error, a job that
+  ends on 125 as its server never answered), or a stream lost during it, runs the command here,
+  with one line on stderr: `bctl run: runs here, not on NAME: why`.
 - `POST /worker/VERB?worker=NAME&arg=...` (`workers.py`) is the relay: from a bundle only, the
   verb and each word checked, then a fixed `ssh -F none -S MASTER -o ControlMaster=no -T worker
   VERB BUNDLE ARGS...` through the connection `worker-mux@NAME` holds, the bundle's bytes passed
