@@ -8,6 +8,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -175,6 +176,10 @@ def test_run():
     check("a gateway down waits before asking again", slept, [prwatch.RETRY[0]])
     check("one line per PR of the bundle, with what to do of it", prwatch.take(),
           [f"PR event: odoo#1: told {prwatch.ADVICE}"])
+    noted = (prwatch.AGENT / "prwatch.log").read_text().splitlines()
+    check("each taken line is noted, with who took it and when it was left",
+          [re.sub(r"^\S+ (.*) after [\d.]+ s:", r"\1:", line) for line in noted],
+          [f"taken by {pathlib.Path(sys.argv[0]).name}: " + f"PR event: odoo#1: told {prwatch.ADVICE}"[:100]])
 
 
 def hooked(event):

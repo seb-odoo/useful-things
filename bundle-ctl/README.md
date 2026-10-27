@@ -760,6 +760,11 @@ what to do: ask Seb to validate, or act.
   terminal types nothing while a key Seb typed since his last Enter may be a draft (a mouse move
   or a focus change is none), nor after a slash command he sent, which may leave a menu open: his
   next prompt then carries the line, by the hook.
+- The terminal looks for a line every 0.2 s (`EVENTS_EVERY`), as an event that comes after Seb
+  starts to type is too late (2026-10-27: "the PR events often arrive after/just as I type
+  something in the terminal to notify myself"). It waits 2 s after his last key, so that the hook
+  of his prompt takes a line that waited behind his draft. `.agent/prwatch.log` notes each line
+  taken, by whom and how many seconds after it was left.
 - What Seb posts himself from Firefox (a review, a comment, an r+), which prwatch.py leaves aside,
   comes the same way (Seb, 2026-10-22: "currently I have to tell it manually"): the helper of
   firefox-gateway runs `pr-posted.py BUNDLE` with one line on stdin that names it, and the script

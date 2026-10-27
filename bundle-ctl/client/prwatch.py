@@ -15,6 +15,7 @@ as the next prompt of an idle session.
     prwatch.py --hook     the lines that wait, as context of a hook
 """
 
+import contextlib
 import datetime
 import fcntl
 import json
@@ -93,9 +94,11 @@ def leave(text, folder=None, advice=ADVICE):
 
 def take(folder=None):
     """The lines that wait, oldest first, each taken by one caller only: the hooks in the container
-    and agent-terminal.py on the host take from the same folder."""
+    and agent-terminal.py on the host take from the same folder. Each one taken is noted in
+    prwatch.log, with who took it and how long after it was left."""
+    folder = folder or EVENTS
     taken = []
-    for path in sorted((folder or EVENTS).glob("[!.]*.txt")):
+    for path in sorted(folder.glob("[!.]*.txt")):
         mine = path.with_name(f".{path.name}.taken")
         try:
             path.rename(mine)
@@ -103,6 +106,10 @@ def take(folder=None):
             mine.unlink()
         except OSError:
             continue
+        waited = (time.time_ns() - int(path.stem)) / 1e9 if path.stem.isdigit() else 0
+        who, stamp = pathlib.Path(sys.argv[0]).name, time.strftime("%H:%M:%S")
+        with contextlib.suppress(OSError), (folder.parent / "prwatch.log").open("a") as file:
+            file.write(f"{stamp} taken by {who} after {waited:.1f} s: {taken[-1][:100]}\n")
     return taken
 
 

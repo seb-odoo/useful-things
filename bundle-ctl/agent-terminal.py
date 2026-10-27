@@ -95,6 +95,7 @@ CLIPBOARD_PART = re.compile(rb"\x1b\]52;[a-z0-9]*(?:;(?:[A-Za-z0-9+/=]*|\?)\x1b?
 CLIPBOARD_START = b"\x1b]52;"
 CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
 ENTER_AFTER = 0.3
+EVENTS_EVERY = 0.2
 GO_ON = "Continue from where you left off."
 MODES = ("acceptEdits", "auto", "default", "plan")
 # Leave the alternate screen and the mouse modes a killed claude stays in, and show the cursor.
@@ -253,21 +254,11 @@ def copy_tty(fd, waker=None):
     enter_at = None
     inputs = [0, fd]
     while True:
-        wait = 0.05 if held or enter_at else WAKE_EVERY if waker else None
+        wait = 0.05 if held or enter_at else EVENTS_EVERY if waker else None
         ready = select.select(inputs, [], [], wait)[0]
         if not ready and len(held) < len(CLIPBOARD_START):
             write_terminal(held)
             held = b""
-        if enter_at and time.monotonic() >= enter_at:
-            enter_at = None
-            with contextlib.suppress(OSError):
-                write_all(fd, b"\r")
-        elif waker and not enter_at:
-            prompt = waker.take()
-            if prompt:
-                with contextlib.suppress(OSError):
-                    write_all(fd, prompt)
-                enter_at = time.monotonic() + ENTER_AFTER
         if fd in ready:
             try:
                 data = os.read(fd, 65536)
@@ -289,6 +280,16 @@ def copy_tty(fd, waker=None):
                 waker.keys(data)
             with contextlib.suppress(OSError):
                 write_all(fd, data)
+        if enter_at and time.monotonic() >= enter_at:
+            enter_at = None
+            with contextlib.suppress(OSError):
+                write_all(fd, b"\r")
+        elif waker and not enter_at:
+            prompt = waker.take()
+            if prompt:
+                with contextlib.suppress(OSError):
+                    write_all(fd, prompt)
+                enter_at = time.monotonic() + ENTER_AFTER
 
 
 class Waker:
@@ -296,7 +297,8 @@ class Waker:
     (.agent/task.md with no run.lock, which it then makes), else the PR events client/prwatch.py
     leaves in .agent/pr-events, when nothing was typed in this terminal since the last Enter: a
     draft of Seb stays his, and a PR event then reaches the agent with his next prompt, by the
-    hook of prwatch.py. Nor after a slash command he sent, which may leave a menu open. Idle is no
+    hook of prwatch.py, which WAKE_EVERY after his last key leaves the time to take it. Nor after
+    a slash command he sent, which may leave a menu open. Idle is no
     turn, no dialog open and no wait for the reset of the usage limit, in the claude this terminal
     started: before it, the line would go to agent-run.sh, and claude would take it with its Enter
     as a paste, left in its prompt (Seb, 2026-10-23: "composer was pre-filled"). With neither,
@@ -312,11 +314,15 @@ class Waker:
         self.line = b""
         self.draft = False
         self.looked = float("-inf")
+        self.keyed = float("-inf")
         self.checked = None
         self.due = False
 
     def keys(self, data):
-        self.line += NOT_TYPED.sub(b"", data)
+        typed = NOT_TYPED.sub(b"", data)
+        if typed:
+            self.keyed = time.monotonic()
+        self.line += typed
         if self.line[-1:] in (b"\r", b"\x03"):
             self.draft = self.line[-1:] == b"\r" and self.line.lstrip()[:1] == b"/"
             self.line = b""
@@ -324,11 +330,13 @@ class Waker:
             self.draft = True
 
     def take(self):
-        if self.draft or time.monotonic() - self.looked < WAKE_EVERY:
+        has_events = any(self.events.glob("[!.]*.txt"))
+        now = time.monotonic()
+        gap = EVENTS_EVERY if has_events else WAKE_EVERY
+        if self.draft or now - self.keyed < WAKE_EVERY or now - self.looked < gap:
             return None
         self.looked = time.monotonic()
         has_task = (self.agent / "task.md").is_file() and not (self.agent / "run.lock").exists()
-        has_events = any(self.events.glob("[!.]*.txt"))
         retry = not (has_task or has_events) and self.is_retry_due()
         if (
             not (has_task or has_events or retry)
