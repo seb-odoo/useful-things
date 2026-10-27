@@ -630,6 +630,19 @@ def run_ops(name):
         keep_open(f"ops: claude ended with code {code}")
 
 
+def attach_remote(bundle):
+    """The agent runs on a worker: this window shows its claude, through its stand-in, and
+    closing it leaves the agent running there (README.md, "Remote agents").
+    """
+    code = run_tty(
+        ["podman", "exec", "--interactive", "--tty", "--detach-keys=",
+         "--env", f"TERM={os.environ.get('TERM', 'xterm')}", f"rrs-{bundle}",
+         "python3", "-I", "/opt/remote-runs/standin/standin.py", "attach"],
+    )
+    if code:
+        keep_open(f"{bundle}: its agent on the worker ended with code {code}")
+
+
 def main():
     bundle = sys.argv[1]
     if bundle.startswith(OPS):
@@ -638,6 +651,9 @@ def main():
     agent = get_agent_folder(bundle)
     if not (agent / "task.md").is_file():
         keep_open(f"{bundle}: no task to start")
+        return
+    if (agent / "remote.json").exists():
+        attach_remote(bundle)
         return
     signal.signal(signal.SIGHUP, stop)
     signal.signal(signal.SIGTERM, stop)

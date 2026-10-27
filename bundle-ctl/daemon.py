@@ -101,6 +101,7 @@ from utils import UtilsRunner  # noqa: E402
 
 import cpulog  # noqa: E402
 import cut  # noqa: E402
+import remote_agent  # noqa: E402
 import runs  # noqa: E402
 import tab_groups  # noqa: E402
 import workers  # noqa: E402
@@ -226,6 +227,10 @@ WORKERS = workers.Workers(
     filter(None, (os.environ.get("BUNDLE_CTL_WORKERS") or CONFIG.get("BUNDLE_CTL_WORKERS") or "")
            .split(",")),
 )
+# `auto` keeps agents here until set: a first agent must run whole on a worker before.
+REMOTE_AUTO = (
+    os.environ.get("BUNDLE_CTL_REMOTE_AGENTS") or CONFIG.get("BUNDLE_CTL_REMOTE_AGENTS")
+) == "auto"
 SESSION_VARIABLES = (
     "DBUS_SESSION_BUS_ADDRESS",
     "DISPLAY",
@@ -257,6 +262,10 @@ WINDOW_CLOSE_WAIT = 30
 bundle_locks = {}
 bundle_rows = {"read": float("-inf"), "rows": []}
 folder_by_container = {}
+FOLDER_LABELS = (
+    '{{index .Config.Labels "devcontainer.local_folder"}}\t'
+    '{{index .Config.Labels "remote-runs.folder"}}'
+)
 git_statuses = {}
 jobs = {}
 kept_reviews = {}
@@ -273,13 +282,16 @@ class Refused(Exception):
 
 
 def get_container_folder(container_id):
+    """The bundle folder of a container, and whether it is the stand-in of a remote agent
+    (remote-runs README, "Agents"), which carries the folder in a label of its own.
+    """
     if container_id not in folder_by_container:
         res = subprocess.run(
             [
                 "podman",
                 "inspect",
                 "--format",
-                '{{index .Config.Labels "devcontainer.local_folder"}}',
+                FOLDER_LABELS,
                 container_id,
             ],
             capture_output=True,
@@ -287,9 +299,16 @@ def get_container_folder(container_id):
             text=True,
         )
         if res.returncode:
-            return ""
-        folder_by_container[container_id] = res.stdout.strip()
+            return "", False
+        folder, _, remote = res.stdout.strip("\n").partition("\t")
+        folder_by_container[container_id] = (folder or remote, bool(remote and not folder))
     return folder_by_container[container_id]
+
+
+def is_standin(connection):
+    """Whether the peer process runs in the stand-in of a remote agent."""
+    match = CONTAINER_ID.search(read_cgroup(connection) or "")
+    return bool(match) and get_container_folder(match[1])[1]
 
 
 def read_cgroup(connection):
@@ -317,7 +336,7 @@ def identify(connection):
     if "libpod" not in cgroup:
         return HOST
     match = CONTAINER_ID.search(cgroup)
-    folder = match and get_container_folder(match[1])
+    folder = match and get_container_folder(match[1])[0]
     if folder and folder == HOST_FOLDER:
         return HOST
     bundle = os.path.basename(folder or "")
@@ -994,6 +1013,8 @@ def check_task(bundle, body, session=None):
             raise ValueError("resume: only with a task")
         if "paused" in body:
             raise ValueError("paused: only with a task")
+        if "where" in body:
+            raise ValueError("where: only with a task")
         return
     task, priority = body["task"], body.get("priority", 0)
     if type(body.get("paused", False)) is not bool:
@@ -1008,6 +1029,8 @@ def check_task(bundle, body, session=None):
         raise ValueError(f"effort: one of {', '.join(EFFORTS)}")
     if body.get("model", DEFAULT_MODEL) not in MODELS:
         raise ValueError(f"model: one of {', '.join(MODELS)}")
+    if body.get("where", "auto") not in ("auto", "local", "worker"):
+        raise ValueError("where: auto, local or worker")
     with state_lock:
         state = read_state()
     queued = [item for item in state["queue"] if item["bundle"] == bundle]
@@ -1068,6 +1091,7 @@ def enqueue(caller, bundle, body, build=None, session=None):
                 "queued": queued,
                 "resume": bool(body.get("resume")),
                 "task": body["task"],
+                **({"where": body["where"]} if body.get("where") else {}),
                 **({"github": True} if body.get("github") else {}),
                 **({"session": session} if session else {}),
             },
@@ -1163,7 +1187,7 @@ def write_task(item, keep=()):
     ):
         history = folder / "history" / time.strftime("%Y%m%d-%H%M%S")
         history.mkdir(parents=True)
-        kept = {"history", *keep, *(("session",) if item.get("resume") else ())}
+        kept = {"history", "where", *keep, *(("session",) if item.get("resume") else ())}
         for path in folder.iterdir():
             if path.name not in kept:
                 path.rename(history / path.name)
@@ -1180,6 +1204,8 @@ def write_task(item, keep=()):
             (folder / name).write_text(f"{item[name]}\n")
         else:
             (folder / name).unlink(missing_ok=True)
+    if item.get("where") in ("local", "worker"):
+        (folder / "where").write_text(f"{item['where']}\n")
 
 
 def launch_queued():
@@ -1279,6 +1305,21 @@ def launch_queued():
             elif item.get("github") and not (GITHUB_MUX / "sock" / "github").is_socket():
                 item["waits_for"] = "the GitHub connection of the host"
                 ask_github()
+            elif remote_agent.is_remote(folder.parent):
+                item["waits_for"] = "the end of its agent on its worker"
+            elif (worker := get_agent_worker(item, folder, is_running))[0]:
+                item["task"] = get_resumed(item)
+                write_task(item)
+                start_job(
+                    item["parent"],
+                    "remote-agent",
+                    lambda log, bundle=bundle, worker=worker[0]: start_remote(log, bundle, worker),
+                    lock=None,
+                    bundle=bundle,
+                )
+                continue
+            elif worker[1]:
+                item["waits_for"] = worker[1]
             elif can_start and starting:
                 item["waits_for"] = f"the agent of {starting} to start"
                 paced = True
@@ -1375,6 +1416,10 @@ def keep_launching():
             delete_safely()
             restart_safely()
             free_safely()
+            try:
+                keep_remote_agents()
+            except Exception:
+                traceback.print_exc()
             if time.monotonic() - checked > REVIEW_CHECK:
                 checked = time.monotonic()
                 drop_reviews_safely()
@@ -1394,6 +1439,99 @@ def launch_safely():
         traceback.print_exc()
         return False
     return paced
+
+
+def get_agent_worker(item, folder, is_running):
+    """(the worker that starts the agent of this task, why it waits): a task goes `auto` by
+    default, to a worker with an agent place, else here; one placed on a worker waits for it
+    (README.md, "Remote agents"). A bundle open in a window stays here.
+    """
+    if is_running or not WORKERS.names:
+        return None, None
+    where = item.get("where") or read_text(folder / "where") or "auto"
+    if where == "local" or (where == "auto" and not REMOTE_AUTO):
+        return None, None
+    wanted = where.removeprefix("worker:") if where.startswith("worker:") else None
+    found = WORKERS.choose_agent(wanted)
+    if found or where == "auto":
+        return found, None
+    return None, f"a place for an agent on {wanted or 'a worker'}"
+
+
+def start_remote(log, bundle, worker):
+    """The agent of the task on WORKER, else here as any task, as it started nowhere."""
+    agent = get_agent_folder(bundle)
+    session = read_text(agent / "session") or str(uuid.uuid4())
+    (agent / "session").write_text(f"{session}\n")
+    transcript = pathlib.Path("~/.claude/projects/-workspace").expanduser() / f"{session}.jsonl"
+    folder = pathlib.Path(get_worktree_bundle_folder(bundle))
+    try:
+        remote_agent.start(
+            log, bundle, folder, worker, WORKERS, get_base_from_bundle_name(bundle), session,
+            transcript.exists(),
+        )
+    except Exception as error:
+        log.write(traceback.format_exc())
+        print(f"{bundle}: its agent starts here, not on {worker}: {error}", flush=True)
+        task = {"task": read_text(agent / "task.md") or GO_ON, "where": "local"}
+        if transcript.exists():
+            task["resume"] = True
+        else:
+            (agent / "session").unlink(missing_ok=True)
+        enqueue(read_text(agent / "parent") or HOST, bundle, task)
+        return
+    print(f"{bundle}: its agent started on {worker}", flush=True)
+
+
+def keep_remote_agents():
+    """Each remote agent: its tunnel up, its end once its job ended, and its job ended once it
+    gave its verdict FREE_AFTER ago, as a terminal closes here.
+    """
+    root = pathlib.Path(get_worktree_container_folder())
+    remotes = sorted(root.glob("*/*/.agent/remote.json"))
+    if remotes:
+        remote_agent.renew_login_soon(remotes[0].parent.parent)
+    for found in remotes:
+        folder = found.parent.parent
+        bundle = folder.name
+        try:
+            line, lost = remote_agent.keep(bundle, folder, WORKERS)
+            done = get_mtime(found.parent / "done")
+            session = read_text(found.parent / "session")
+            if line is None and done and time.time() - done > FREE_AFTER and (
+                get_session_status(bundle, session) != "busy"
+            ):
+                line = remote_agent.end(bundle, folder)
+        except Exception:
+            traceback.print_exc()
+            continue
+        if line:
+            print(line, flush=True)
+        if lost and not (found.parent / "done").exists():
+            transcript = PROJECTS / "-workspace" / f"{read_text(found.parent / 'session')}.jsonl"
+            if transcript.exists():
+                enqueue(HOST, bundle, {"task": GO_ON, "resume": True})
+            else:
+                enqueue(HOST, bundle, {"task": read_text(found.parent / "task.md") or GO_ON})
+
+
+def bring_back(caller, query, body):
+    """The agent of a bundle back from its worker, its session going on in a terminal here
+    (README.md, "Remote agents"). The host or that bundle asks."""
+    bundle = body.get("bundle") or ""
+    if caller not in (HOST, bundle):
+        raise Refused("bring-back: only the host and the bundle itself")
+    if not BUNDLE_NAME.fullmatch(bundle) or not os.path.isdir(get_worktree_bundle_folder(bundle)):
+        raise ValueError(f"no bundle folder for {bundle}")
+    folder = pathlib.Path(get_worktree_bundle_folder(bundle))
+    if not remote_agent.is_remote(folder):
+        raise Refused(f"the agent of {bundle} runs here already")
+
+    def work(log):
+        log.write(remote_agent.move_back(log, bundle, folder, WORKERS) + "\n")
+        open_terminal(log, bundle, takeover=f"{bundle}: back from its worker, same session")
+
+    return start_job(caller, "bring-back", work, lock=None, bundle=bundle)
 
 
 def delete_safely():
@@ -1970,6 +2108,10 @@ def find_cut():
     live = cut.get_live_sessions(
         [*pathlib.Path(CLAUDE_CONFIG_CONTAINER).glob("*/sessions"), PROJECTS.parent / "sessions"],
     )
+    live |= {
+        read_text(path.parent / "session")
+        for path in pathlib.Path(get_worktree_container_folder()).glob("*/*/.agent/remote.json")
+    }
     agents = {
         read_text(path): path.parent.parent.name
         for path in pathlib.Path(get_worktree_container_folder()).glob("*/*/.agent/session")
@@ -2242,6 +2384,8 @@ def stop_container(container):
 def is_in_turn(bundle):
     """Whether a claude of the bundle runs a turn, or waits for an answer in one, as the newest
     record of each session a claude runs says."""
+    if remote_agent.is_remote(pathlib.Path(get_worktree_bundle_folder(bundle))):
+        return True
     live = cut.get_live_sessions([pathlib.Path(CLAUDE_CONFIG_CONTAINER, bundle, "sessions")])
     return any(get_session_status(bundle, session) not in (None, "idle", "shell") for session in live)
 
@@ -2805,6 +2949,8 @@ def open_bundle(caller, query, body):
     goes_on = body.get("resume") or body.get("terminal")
     if not is_made(folder) and not (goes_on and is_bare(pathlib.Path(folder))):
         raise Refused(f"{bundle} is half-made (its create or fetch failed): do it again")
+    if not goes_on and "task" not in body and remote_agent.is_remote(pathlib.Path(folder)):
+        raise Refused(f"its agent runs on a worker: `bctl bring-back {bundle}` first")
     if body.get("terminal"):
         check_terminal(caller, bundle, body)
 
@@ -2883,6 +3029,7 @@ VERBS = {
     ("POST", "/node-modules"): node_modules,
     ("POST", "/open"): open_bundle,
     ("POST", "/requeue"): requeue_agent,
+    ("POST", "/bring-back"): bring_back,
     ("POST", "/schedule"): schedule_task,
     ("POST", "/unqueue"): unqueue,
 }
@@ -2910,6 +3057,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         if self.caller is None:
             code, answer = 403, {"error": "not a bundle container"}
+        elif (url.path == "/run" or url.path.startswith("/worker/")) and is_standin(self.request):
+            code, answer = 403, {"error": "a remote agent runs on its worker already"}
         elif method == "POST" and url.path.startswith("/worker/"):
             code, answer = self.relay(url)
             if code is None:

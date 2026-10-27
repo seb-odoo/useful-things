@@ -114,6 +114,24 @@ class Workers:
                 best = (wait, name)
         return best[1] if best else None
 
+    def choose_agent(self, wanted=None):
+        """The worker that starts an agent now, or None: up, answered lately, not drained, with
+        a place for an agent (README.md, "Remote agents").
+        """
+        now = time.time()
+        for name in self.names if wanted is None else [wanted]:
+            if name not in self.names:
+                continue
+            if not self.is_up(name):
+                self.ask(name)
+                continue
+            with self.lock:
+                seen, status = self.status.get(name, (0, {}))
+            fresh = now - seen <= FRESH and not status.get("draining")
+            if fresh and status.get("agents_free", 0) > 0:
+                return name
+        return None
+
     def check(self, verb, args):
         if verb not in VERBS:
             raise Refused(f"no worker verb {verb}")

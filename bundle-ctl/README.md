@@ -14,7 +14,9 @@ container, test runs first, so that they never take the whole host together (see
 - The caller is identified by the kernel: the peer pid of the connection, its cgroup
   (`libpod-<id>.scope`), then the `devcontainer.local_folder` label of that container. A process on
   the host is `host`, and so is the container of the folder `BUNDLE_CTL_HOST_FOLDER` names, made to
-  work on these tools; any other container that is not a bundle gets 403.
+  work on these tools; any other container that is not a bundle gets 403. The stand-in of a
+  remote agent carries the folder in `remote-runs.folder` and is its bundle too, but for `POST
+  /run` and `/worker/`, refused (see Remote agents).
 - One journal line per request: `journalctl --user -u bundle-ctl -f`. Also `address <ip> <name>`
   for each container that starts (and each one running when the daemon starts), the bundle or the
   container name behind an address, which the gateway logs see alone.
@@ -47,6 +49,7 @@ repos: a container writes their `.git`, and the jobs run git there (`daemon-git`
 | `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, its text, whether it resumes the session of its bundle and the session it names, and the memory left on the host, `short` when a start would add to a host that already lacks it |
 | `POST /force-queue` | the tasks queued now may start over the cap, those that wait for their time (`--after`) or for a manual resume (`--paused`) aside, or with `bundle` the task of that bundle, its time and its pause too; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
 | `POST /move` | the queued task of `bundle` put at `place` (from 1), where it keeps its priority when that priority fits between the tasks around it, else takes the nearest of theirs; then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
+| `POST /bring-back` | the agent of `bundle` back from its worker: its work tree written here, then its session goes on in a terminal (see Remote agents). The host or that bundle asks |
 | `POST /requeue` | the session of the agent of `bundle` queued again, last, paused with `paused`, and its agent window closed once its turn ended, 2 minutes at most: meanwhile `client/run-hook.py` refuses its Bash calls, on a reason that tells it to end its turn, and a turn still running at the end goes on told it was cut (see Cut sessions). With `github`, it waits for the GitHub connection of the host. The host or the ops container asks, or with `github` the bundle itself |
 | `POST /schedule` | when the queued task of `bundle` may start: `when` is `spot` (once a slot, the memory and the CPU let it), `manual` (it waits for a manual resume, until it is scheduled again) or `HH:MM` (that time of the host, today or tomorrow); it no longer goes over the cap. Then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
 | `POST /unqueue` | the queued task of a bundle dropped; the host, that bundle or the one that queued the task asks |
@@ -183,6 +186,58 @@ repo, which has its own README (the sandbox, the load, the sync). Agents change 
 
 `python3 test_runs.py` has the cases of the wrap; the relay and the client are tested from
 `remote-runs` (`test_relay`).
+
+## Remote agents
+
+A task's whole agent can run on a worker of `remote-runs` (its README, "Agents"): its claude, its
+checkout and its runs, so that it takes no slot, no core and no memory here but a stand-in of
+about 30 MB. Seb, 2026-10-27: "all auto, with a way to seamelessly bring back to local if
+necessary. but if we have a good setup, full remote should offer the same possibilities as local."
+
+- `bctl open|create|fetch --where local|worker|auto` (`auto` by default, kept in `.agent/where`).
+  When a task's turn comes, `auto` goes to a worker of `BUNDLE_CTL_WORKERS` that answered lately,
+  is not drained and has a place for an agent (`agents_free` of its `status`), else here as any
+  task; `worker` waits for one. A bundle open in a window stays here. A bundle whose agent ran on
+  a worker goes there again (`.agent/where` is `worker:NAME`) until it is brought back, so that it
+  does not rebuild its DBs on each machine in turn. A task for a bundle whose agent is remote
+  waits for its end. `auto` stays here until `BUNDLE_CTL_REMOTE_AGENTS=auto` is in
+  `~/.config/odoo-dev/config.env`, set once a first agent ran whole on the worker.
+- `remote_agent.py` starts it: the stand-in `rrs-BUNDLE` (the runner image, `standin.py` of
+  remote-runs, on `devnet`, `--cap-drop=ALL`, 256 MB, labels `remote-runs.folder` and
+  `remote-runs.worker`), the files of its start (`standin.py pack`: the branch and base past what
+  the worker's store has, the changes, the untracked files, the session's transcript when it goes
+  on), the parts (claude of the bundle's extension store, the config of `MOUNTS`, the CA), a dummy
+  login in `~/.local/state/claude-switch/dummies/`, then `ssh ... tunnel` and the stand-in joined
+  by `pair.py` in a `systemd-run --user --scope` of their own (`rr-tunnel-BUNDLE`), so that a
+  restart of the daemon cuts no tunnel. Any failure before the job started starts the agent here.
+- `MOUNTS` says, for each mount of a bundle (`devcontainer/base.jsonc`), how the remote agent gets
+  it: sent in its config, served by the stand-in, in the runner image, made in the job, or of no
+  use there. `python3 test_remote_agent.py` fails on a mount it does not name, and checks that the
+  config holds no login.
+- Each pass of the daemon opens a tunnel that dropped again, with its stand-in when it is gone
+  (and asks `worker-mux` when the connection is down: Bitwarden asks Seb once the screen is
+  unlocked, `.agent/remote-down` says since when); stops the claude of an agent that gave its
+  verdict 5 minutes ago and is not busy, as a terminal closes here; and once a job ended
+  (`~/.local/state/bundle-ctl/standin/BUNDLE/ended`, which the worker answers the next tunnel
+  however long the laptop was away), writes its work tree here and drops the stand-in, the dummy
+  login and the tunnel. A job lost on the worker (a reboot) is queued again on its session, and
+  goes on from its tree there. A work tree that cannot come back (the worktree changed here
+  meanwhile) stays in `.agent/remote-back` with the reason in `.agent/remote-conflict`, and the
+  bundle's next task runs here. While a remote agent lives and the main login expires within 4
+  minutes, a one-shot claude in a container that shares it renews it: at night no claude here
+  may. The journal says `BUNDLE: its agent started on NAME` and `BUNDLE: its agent on NAME
+  ended (WHY)`.
+- `agent-terminal.py` of a remote bundle attaches to its claude (`standin.py attach`) and writes
+  no `.agent/terminal`: it takes no slot, and closing it leaves the agent running there. A link
+  down shows since when and waits.
+- `bctl bring-back BUNDLE`: claude stops once idle or in a tool call, its work tree comes back and
+  is written in the worktrees when they are what was sent (else nothing is overwritten, and the
+  commits stay in `refs/remote-runs/BUNDLE/`), the job is cancelled 11 minutes after at most,
+  then the session goes on in a terminal here. A VS Code window on a remote bundle is refused
+  until then, as its tab would start a second claude on the session.
+- What differs from here: its DBs stay on the worker; Remote Control and the claude.ai connectors
+  do not work (they use the login outside what claude-switch serves); a link down longer than a
+  minute (a suspend, a move between home and office) waits for Seb's Bitwarden yes.
 
 ## Memory
 

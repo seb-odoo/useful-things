@@ -490,6 +490,12 @@ def add_task_arguments(parser):
         choices=("low", "medium", "high", "xhigh"),
         help="with a task: the effort of its agent (default medium)",
     )
+    parser.add_argument(
+        "--where",
+        choices=("auto", "local", "worker"),
+        help="with a task: the machine of its agent, auto a worker with a place, else here"
+        " (default auto; README.md, Remote agents)",
+    )
 
 
 def read_task(args):
@@ -627,6 +633,10 @@ def main():
     move = commands.add_parser("move", help="put the queued task of a bundle at another place")
     move.add_argument("bundle")
     move.add_argument("place", type=int, help="from 1, as bctl queue counts")
+    bring = commands.add_parser(
+        "bring-back", help="the agent of a bundle back from its worker, its session going on here"
+    )
+    bring.add_argument("bundle")
     requeue = commands.add_parser(
         "requeue",
         help="queue the session of a bundle's agent again, and close its window after its turn",
@@ -678,6 +688,8 @@ def main():
     elif args.command == "move":
         answer = request("POST", "/move", {"bundle": args.bundle, "place": args.place})
         printer = print_queue
+    elif args.command == "bring-back":
+        answer = follow(request("POST", "/bring-back", {"bundle": args.bundle})["job"])
     elif args.command == "requeue":
         body = {"bundle": args.bundle, "paused": args.paused}
         answer = request("POST", "/requeue", {**body, "github": True} if args.github else body)
@@ -763,6 +775,8 @@ def main():
             body["model"] = args.model
         if args.effort is not None:
             body["effort"] = args.effort
+        if getattr(args, "where", None) is not None:
+            body["where"] = args.where
         answer = request("POST", f"/{args.command}", body)
         if "job" in answer:
             answer = follow(answer["job"])
