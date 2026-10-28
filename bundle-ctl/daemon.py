@@ -476,13 +476,15 @@ def list_bundles():
         )
     for bundle in sorted(set(state.get("builds", {})) - set(repos_by_bundle)):
         folder = get_worktree_bundle_folder(bundle)
+        if not os.path.isdir(folder):
+            continue
         is_open = folder in open_folders
         rows.append(
             {
                 "agent": get_agent(bundle, 0, is_open),
                 "base": get_base_from_bundle_name(bundle),
                 "bundle": bundle,
-                "folder": os.path.isdir(folder),
+                "folder": True,
                 "open": is_open,
                 "opening": False,
                 "repos": {},
@@ -2392,6 +2394,10 @@ def delete_stopped():
             _branches, force = check_deletion(bundle, drop)
             keep_last_answer(bundle)
             run_script(log, "delete_bundle.py", *(["--force"] if force else []), bundle)
+            with state_lock:
+                state = read_state()
+                state.get("builds", {}).pop(bundle, None)
+                write_state(state)
 
         _code, answer = start_job(HOST, f"delete {bundle}", work, bundle=bundle)
         started[bundle] = jobs[answer["job"]]

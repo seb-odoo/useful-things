@@ -797,6 +797,26 @@ def check_build(root):
             == [("later", build, "the agent of new to start")],
         ),
     )
+    stubs = {
+        name: getattr(daemon, name)
+        for name in ("get_agent", "get_open_bundle_folders", "get_repos", "has_write_tree")
+    }
+    daemon.get_agent = lambda bundle, head_date, alive: None
+    daemon.get_open_bundle_folders = set
+    daemon.get_repos = list
+    daemon.has_write_tree = lambda: False
+    state["builds"]["later"] = build
+    try:
+        rows = daemon.list_bundles()
+    finally:
+        vars(daemon).update(stubs)
+        del state["builds"]["later"]
+    checks.append(
+        (
+            "a build whose folder is gone lists no bundle",
+            [(row["bundle"], row["folder"]) for row in rows] == [("new", True)],
+        ),
+    )
     try:
         daemon.build_bundle("later", {}, {"bundle": "new"})
         refusal = None

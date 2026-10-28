@@ -351,8 +351,8 @@ turn comes, the daemon prepares the folder (`.agent` and the links, no worktree)
 agent there, its task opened by a note: nothing is checked out, the base repos are read through
 their `.git`, GitHub through `gh`. The agent drops the task or does it from there, or runs `bctl
 build`, which makes the bundle in that folder, and goes on in the same session. Until then the
-queue says `not built yet` and `status` lists the bundle with no repo. `python3 test_queue.py` has
-the cases.
+queue says `not built yet` and `status` lists the bundle with no repo, as long as its folder is
+there: the deletion of a bare bundle forgets its build too. `python3 test_queue.py` has the cases.
 
 ## Wrong version
 

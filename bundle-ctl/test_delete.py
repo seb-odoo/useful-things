@@ -337,13 +337,14 @@ def check(root):
         ),
     )
     world["running"].clear()
+    world["state"]["builds"] = {CLEAN: ["create_bundle.py", CLEAN]}
     daemon.delete_stopped()
     wait_jobs()
     checks.append(
         (
-            "the stop of the container deletes it",
-            (world["calls"], world["state"]["deletions"])
-            == ([("delete_bundle.py", CLEAN)], []),
+            "the stop of the container deletes it, and its build that never ran",
+            (world["calls"], world["state"]["deletions"], world["state"]["builds"])
+            == ([("delete_bundle.py", CLEAN)], [], {}),
         ),
     )
     answer_later(REFUSED, "no it still runs")
