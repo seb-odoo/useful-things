@@ -370,7 +370,13 @@ def print_runs(answer):
             f"queued {place:<2} {run['bundle']:50} {run['kind']:6} {cores:7} {span:>7}"
             f"  {run['label']}",
         )
-    if answer["running"] or answer["queue"]:
+    for job in answer.get("remote", ()):
+        span, where = format_span(now - job["since"]), f"@{job['worker']}"
+        print(f"{job['state']:9} {job['bundle']:50} {job['kind']:6} {where:7} {span:>7}")
+    for worker in answer.get("silent", ()):
+        last = worker["since"] and time.strftime("%H:%M", time.localtime(worker["since"]))
+        print(f"@{worker['worker']}: no answer " + (f"since {last}" if last else "yet"))
+    if answer["running"] or answer["queue"] or answer.get("remote") or answer.get("silent"):
         print()
     print(
         f"{answer['cores'] - answer['free']}/{answer['cores']} cores taken (CPUs {answer['cpus']}),"

@@ -41,6 +41,7 @@ import contextlib
 import json
 import os
 import pathlib
+import re
 import shlex
 import shutil
 import signal
@@ -92,6 +93,7 @@ WINDOW = """\
       command = "{agent}"
 """
 WMCTRL = shutil.which("wmctrl")
+WORKER = re.compile(r"[a-z][a-z0-9-]{0,39}")
 
 
 def get_config(command):
@@ -129,7 +131,12 @@ def link_plugin():
 
 
 def get_title(bundle, *statuses):
-    command = [sys.executable, str(HERE / "client" / "window-title.py"), bundle, *statuses]
+    try:
+        worker = json.loads(read_text(get_agent_folder(bundle) / "remote.json"))["worker"]
+    except (TypeError, ValueError, KeyError):
+        worker = None
+    where = [f"@{worker}"] if type(worker) is str and WORKER.fullmatch(worker) else []
+    command = [sys.executable, str(HERE / "client" / "window-title.py"), bundle, *where, *statuses]
     title = subprocess.run(command, capture_output=True, check=False, text=True).stdout.strip()
     return title or bundle
 

@@ -185,6 +185,10 @@ repo, which has its own README (the sandbox, the load, the sync). Agents change 
   open forwards on the laptop and send any verb. The verb `admin` is never relayed.
 - No connection: the daemon writes `request/start` of the mux (once every 10 minutes at most),
   which asks Bitwarden while the screen is unlocked, and the run goes here meanwhile.
+- `bctl runs` also lists the jobs and agents of each worker that answered in the last minute,
+  as `running BUNDLE odoo @sebpc 2 min`, and a worker that did not as `@sebpc: no answer since
+  HH:MM`. The worker's `status`, which the daemon asks every 15 seconds as `host`, names every
+  bundle to the daemon alone; `bctl runs` then shows them to any bundle, as the laptop's runs.
 
 `python3 test_runs.py` has the cases of the wrap; the relay and the client are tested from
 `remote-runs` (`test_relay`).
@@ -231,7 +235,8 @@ necessary. but if we have a good setup, full remote should offer the same possib
   ended (WHY)`.
 - `agent-terminal.py` of a remote bundle attaches to its claude (`standin.py attach`) and writes
   no `.agent/terminal`: it takes no slot, and closing it leaves the agent running there. A link
-  down shows since when and waits.
+  down shows since when and waits. Its title says where, `⭐ BUNDLE @sebpc (mine)`, and so do the
+  agent list and `GET /status` (`where` in the agent of the bundle).
 - `bctl bring-back BUNDLE`: claude stops once idle or in a tool call, its work tree comes back and
   is written in the worktrees when they are what was sent (else nothing is overwritten, and the
   commits stay in `refs/remote-runs/BUNDLE/`), the job is cancelled 11 minutes after at most,

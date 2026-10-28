@@ -339,6 +339,10 @@ def main():
         counts = run(folder, "--counts").splitlines()
         if counts[:1] != ["✋ 2"]:
             failures.append(f"counts while a bundle starts {counts!r}, expected ✋ 2 before 🚀")
+        (folder / "windows").write_text(WINDOWS.replace("master-e--seb", "master-e--seb @sebpc"))
+        remote = [row for row in run(folder).splitlines() if "@sebpc" in row]
+        if remote != ["⭐ master-e--seb @sebpc (mine)\0info\x1fmaster-e--seb\x1fmeta\x1f"]:
+            failures.append(f"rows of an agent on sebpc {remote!r}, expected master-e--seb's")
         (folder / "windows").write_text(WAITING)
         rows = run(folder).splitlines()[4:10]
         if rows != WAITING_ROWS:
@@ -427,7 +431,7 @@ def main():
         failures.append(f"--agent {OPS_SESSION}: {found!r}, expected {started!r}")
     for line in failures:
         print(line)
-    cases = 22 + len(PICKS) + len(BRING_UPS) + len(CLOSE_LINES)
+    cases = 23 + len(PICKS) + len(BRING_UPS) + len(CLOSE_LINES)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

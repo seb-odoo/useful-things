@@ -126,7 +126,7 @@ def get_title_patterns():
     words = "|".join(kind for _, kind in kinds)
     ops = next(icon for icon, kind, _ in title.KINDS if kind == "ops")
     return (
-        re.compile(rf"(?:(?:{marks}) )?(?:{icons}) (\S+) \((?:{words})\)"),
+        re.compile(rf"(?:(?:{marks}) )?(?:{icons}) (\S+)(?: @\S+)? \((?:{words})\)"),
         re.compile(rf"(?:(?:{marks}) )?{re.escape(ops)} .+ \(ops\)"),
     )
 

@@ -71,6 +71,7 @@ MARKS = [
     ([], TITLE),
     (["--failed"], f"❌ {TITLE}"),
     (["--starting"], f"🚀 {TITLE}"),
+    (["@sebpc", "--starting"], f"🚀 ⭐ {BUNDLE} @sebpc (mine)"),
     (["a=busy"], f"⏳ {TITLE}"),
     (["seb=shell"], f"✋ {TITLE}"),
     (["pushed=shell"], f"✅ {TITLE}"),

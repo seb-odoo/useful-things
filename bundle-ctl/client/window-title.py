@@ -211,7 +211,7 @@ def get_mark(status_by_session, finished=is_finished):
     return "✅" if all(is_closed(answer, finished) for answer in answers) else "✋"
 
 
-def get_title(bundle, status_by_session=None, flag=None):
+def get_title(bundle, status_by_session=None, flag=None, where=None):
     suffix = os.environ.get("BUNDLE_SUFFIX") or f"--{os.environ.get('USER', 'odoo')}"
     own = bundle.endswith(suffix)
     name = bundle.removesuffix(suffix)
@@ -219,12 +219,14 @@ def get_title(bundle, status_by_session=None, flag=None):
     finished = is_reported if kind == "ops" else is_finished
     mark = FLAGS[flag] if flag else get_mark(status_by_session or {}, finished)
     label = get_topic(bundle.removeprefix(OPS)) if kind == "ops" else bundle
+    label = f"{label} @{where}" if where else label
     return f"{mark} {icon} {label} ({kind})".lstrip()
 
 
 if __name__ == "__main__":
     bundle, *args = sys.argv[1:]
+    where = args.pop(0).removeprefix("@") if args and args[0].startswith("@") else None
     if args and args[0] in FLAGS:
-        print(get_title(bundle, flag=args[0]))
+        print(get_title(bundle, flag=args[0], where=where))
     else:
-        print(get_title(bundle, dict(pair.split("=", 1) for pair in args)))
+        print(get_title(bundle, dict(pair.split("=", 1) for pair in args), where=where))

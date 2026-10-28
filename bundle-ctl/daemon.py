@@ -461,6 +461,8 @@ def list_bundles():
         agent = get_agent(bundle, dates[bundle], is_open or opening)
         if agent and agent["state"] == "stopped":
             agent["task"] = read_text(get_agent_folder(bundle) / "task.md")
+        if agent and (remote := remote_agent.read_remote(pathlib.Path(folder))):
+            agent["where"] = remote["worker"]
         rows.append(
             {
                 "agent": agent,
@@ -827,7 +829,8 @@ def stop_after_turn(bundle, session, why):
 
 
 def list_runs(caller, query, body):
-    return 200, RUNS.describe()
+    remote, silent = WORKERS.list_jobs()
+    return 200, RUNS.describe() | {"remote": remote, "silent": silent}
 
 
 def session_env():

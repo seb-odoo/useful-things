@@ -25,6 +25,9 @@ WORD = {
     "job": re.compile(r"[0-9]{1,12}"),
     "repo": re.compile(r"[a-z][a-z0-9-]{0,39}"),
 }
+BUNDLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,99}")
+STATES = (("running", "running"), ("waiting", "waiting"), ("agent", "agents"))
+MAX_AGE = 10**9
 VERBS = {
     "status": ((), 0),
     "have": (("repo",), 0),
@@ -40,6 +43,19 @@ VERBS = {
 
 class Refused(Exception):
     pass
+
+
+def is_job(job):
+    """Whether a job a worker lists is well formed: its words reach Seb's terminal."""
+    return (
+        type(job) is dict
+        and type(job.get("bundle")) is str
+        and bool(BUNDLE.fullmatch(job["bundle"]))
+        and type(job.get("kind")) is str
+        and bool(WORD["repo"].fullmatch(job["kind"]))
+        and type(job.get("age")) is int
+        and 0 <= job["age"] < MAX_AGE
+    )
 
 
 class Workers:
@@ -86,6 +102,28 @@ class Workers:
             if type(status) is dict and "error" not in status:
                 with self.lock:
                     self.status[name] = (time.time(), status)
+
+    def list_jobs(self):
+        """For `bctl runs`: the jobs and agents of the workers that answered lately (worker,
+        bundle, kind, state: running, waiting or agent, and since when, as the worker counts it),
+        then the workers that did not, with when they last did (0 for never)."""
+        jobs, silent, now = [], [], time.time()
+        with self.lock:
+            statuses = [(name, *self.status.get(name, (0, {}))) for name in self.names]
+        for name, seen, status in statuses:
+            every = status.get("every")
+            if now - seen > FRESH:
+                silent.append({"worker": name, "since": seen})
+                continue
+            for state, group in STATES:
+                listed = every.get(group) if type(every) is dict else None
+                jobs += [
+                    {"worker": name, "state": state, "since": seen - job["age"],
+                     "bundle": job["bundle"], "kind": job["kind"]}
+                    for job in (listed if type(listed) is list else ())
+                    if is_job(job)
+                ]
+        return jobs, silent
 
     def keep_polling(self):
         while True:
