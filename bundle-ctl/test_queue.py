@@ -967,6 +967,18 @@ def check_build(root):
         checks.append((f"{name} in a bare folder: {expected}", found == expected))
     (bare / "odoo").mkdir()
     checks.append(("a worktree makes it no longer bare", not daemon.is_bare(bare)))
+    (bare / ".agent" / "task.md").write_text(TASK)
+    for name, builds, expected in (
+        ("failed", {"bare": build}, "opens"),
+        ("never asked", {}, "refused"),
+    ):
+        state.update(builds=builds, queue=[])
+        try:
+            daemon.open_bundle(daemon.HOST, {}, {"bundle": "bare", "terminal": True})
+            found = "opens"
+        except daemon.Refused:
+            found = "refused"
+        checks.append((f"a terminal where a build {name}: {expected}", found == expected))
     return [f"build: {name}" for name, passed in checks if not passed], len(checks)
 
 

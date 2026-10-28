@@ -3047,7 +3047,9 @@ def open_bundle(caller, query, body):
         raise ValueError(f"no bundle folder for {bundle}")
     folder = get_worktree_bundle_folder(bundle)
     goes_on = body.get("resume") or body.get("terminal")
-    if not is_made(folder) and not (goes_on and is_bare(pathlib.Path(folder))):
+    with state_lock:
+        building = bundle in read_state().get("builds", {})
+    if not is_made(folder) and not (goes_on and (building or is_bare(pathlib.Path(folder)))):
         raise Refused(f"{bundle} is half-made (its create or fetch failed): do it again")
     if not goes_on and "task" not in body and remote_agent.is_remote(pathlib.Path(folder)):
         raise Refused(f"its agent runs on a worker: `bctl bring-back {bundle}` first")
