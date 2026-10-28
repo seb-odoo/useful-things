@@ -73,7 +73,7 @@ def main():
     link_node_modules(pathlib.Path(folder))
     subprocess.run([sys.executable, str(HERE / "warden-chrome.py")], check=False)
     for script, *args in (
-        ("claude-config.py", name),
+        ("claude-config.py", name, "--bundle"),
         ("extensions.py", name, folder),
         ("bundle-db.py", name),
     ):

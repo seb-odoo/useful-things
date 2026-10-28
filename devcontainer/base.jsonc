@@ -52,12 +52,15 @@
     // The store of node_modules, one tree per package.json, where odoo/ and enterprise/ link
     // (initialize.py). Read-only, as the ESLint of every bundle on that package.json loads it.
     "source=@WORKTREE_ROOT@/.node_modules,target=/opt/node_modules,type=bind,readonly,z",
-    "source=@HOME@/.claude,target=/home/vscode/.claude,type=bind,Z",
-    // What a session takes as orders or runs comes back read-only over it: the host's Claude reads
-    // the same files, so a hook written from a bundle would run on the host. The root stays
-    // writable, as the login is saved there by rename. settings.json is a copy of the bundle
-    // (claude-config.py), where a model picked in a tab is kept. HOST_PROJECT holds the memory of
-    // the host sessions. Each name at the root of ~/.claude has its line in the table of README.md.
+    // The Claude config of the bundle is a folder of its own, with a dummy login (claude-config.py):
+    // no credential of the host is in a bundle. What it shares of the host's ~/.claude is mounted
+    // in it: read-only what a session takes as orders or runs, as the host's Claude reads the same
+    // files and a hook written from a bundle would run on the host; writable the transcripts and
+    // memory of the bundles (projects/-workspace), the plans of the dev agents (a folder neither the
+    // host nor the ops container plans in), and the lock of agent starts. settings.json is a copy
+    // of the bundle, where a model picked in a tab is kept. HOST_PROJECT holds the memory of the
+    // host sessions. Each name at the root of ~/.claude has its line in the table of README.md.
+    "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/home,target=/home/vscode/.claude,type=bind,z",
     "source=@HOME@/.claude/CLAUDE.md,target=/home/vscode/.claude/CLAUDE.md,type=bind,readonly,z",
     "source=@HOME@/.claude/agents,target=/home/vscode/.claude/agents,type=bind,readonly,z",
     "source=@HOME@/.claude/bin,target=/home/vscode/.claude/bin,type=bind,readonly,z",
@@ -71,7 +74,10 @@
     "source=@HOME@/.claude/hooks,target=/home/vscode/.claude/hooks,type=bind,readonly,z",
     "source=@HOME@/.claude/output-styles,target=/home/vscode/.claude/output-styles,type=bind,readonly,z",
     "source=@HOME@/.claude/plugins,target=/home/vscode/.claude/plugins,type=bind,readonly,z",
-    "source=@HOME@/.claude/projects/@HOST_PROJECT@,target=/home/vscode/.claude/projects/@HOST_PROJECT@,type=bind,readonly,z",
+    "source=@HOME@/.claude/projects/@HOST_PROJECT@/memory,target=/home/vscode/.claude/projects/@HOST_PROJECT@/memory,type=bind,readonly,z",
+    "source=@HOME@/.claude/projects/-workspace,target=/home/vscode/.claude/projects/-workspace,type=bind,z",
+    "source=@SHARE_ROOT@/claude-plans/dev,target=/home/vscode/.claude/plans,type=bind,z",
+    "source=@HOME@/.claude/agent-start.lock,target=/home/vscode/.claude/agent-start.lock,type=bind,z",
     "source=@HOME@/.claude/review-corpus,target=/home/vscode/.claude/review-corpus,type=bind,readonly,z",
     "source=@HOME@/.claude/routines,target=/home/vscode/.claude/routines,type=bind,readonly,z",
     "source=@HOME@/.claude/rules,target=/home/vscode/.claude/rules,type=bind,readonly,z",
@@ -89,12 +95,6 @@
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/policy-limits.json,target=/home/vscode/.claude/policy-limits.json,type=bind,z",
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/remote-settings-helper-consent,target=/home/vscode/.claude/remote-settings-helper-consent,type=bind,z",
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/remote-settings.json,target=/home/vscode/.claude/remote-settings.json,type=bind,z",
-    // What Claude reads in ~/.claude as the project folder of the home: a session started there
-    // would run a task or a hook a bundle wrote.
-    "source=@HOME@/.claude/launch.json,target=/home/vscode/.claude/launch.json,type=bind,readonly,z",
-    "source=@HOME@/.claude/loop.md,target=/home/vscode/.claude/loop.md,type=bind,readonly,z",
-    "source=@HOME@/.claude/scheduled_tasks.json,target=/home/vscode/.claude/scheduled_tasks.json,type=bind,readonly,z",
-    "source=@HOME@/.claude/settings.local.json,target=/home/vscode/.claude/settings.local.json,type=bind,readonly,z",
     // Claude sources these before each Bash command: the containers get their own.
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/session-env,target=/home/vscode/.claude/session-env,type=bind,z",
     // Claude names a live session's record after its pid, the same few pids in every container.
@@ -226,8 +226,8 @@
     // Like REPO_ROOT and VENV_ROOT below: host values the shell helpers and check-base.sh read, as
     // their $HOME default is wrong here.
     "BUNDLE_SUFFIX": "@BUNDLE_SUFFIX@",
-    // The host's folder, so the login is shared: a refresh is locked and saved in it. Set to keep
-    // .claude.json there too, out of the home a rebuild wipes.
+    // The folder of the bundle above. Set to keep .claude.json there too, out of the home a rebuild
+    // wipes.
     "CLAUDE_CONFIG_DIR": "/home/vscode/.claude",
     // Else each new container copies the 250 MB CLI into its home, where the extension's one runs.
     "DISABLE_AUTOUPDATER": "1",

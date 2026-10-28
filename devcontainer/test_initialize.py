@@ -121,7 +121,8 @@ def main():
             for script in ("warden-chrome.py", "claude-config.py", "extensions.py", "bundle-db.py")
             for line in (root / "tools" / f"{script}.calls").read_text().splitlines()
         ]
-        check("the name, one argument", calls, [[], [NAME], [NAME, str(folder)], [NAME]])
+        expected = [[], [NAME, "--bundle"], [NAME, str(folder)], [NAME]]
+        check("the name, one argument", calls, expected)
         check("no shell", (root / "shell-ran").exists(), False)
         check("mount source", (root / "src" / ".node_modules").is_dir(), True)
         for repo in ("odoo", "enterprise"):

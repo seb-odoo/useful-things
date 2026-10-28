@@ -119,33 +119,50 @@ there when it is missing. A bundle mounts that folder read-only, so
 [`warden-chrome.py`](warden-chrome.py) downloads it on the host before the start of a bundle, once. A bundle started while that download failed (no
 network) has no Hoot run until a later start. For a newer Chrome, delete the folder on the host.
 
-**Claude.** A container uses the host's `~/.claude` as its config folder (`CLAUDE_CONFIG_DIR`), so
-it shares the host's login: a token refresh is locked and saved in that folder. Never give a
-container a copy or a link of `.credentials.json`: a refresh replaces the link with a copy and
-revokes every other one. So the root of the folder stays writable, and each name in it gets the
-mount the table below says. The host's Claude reads the same files, so a hook a bundle could write
-would run on the host. A name Claude Code adds there later is writable from every container until
-it gets its line here: `host-ctl/test_escape.py` holds the same list, and its `claude-entries`
-line is OPEN on a name of the host's `~/.claude` that the list does not hold.
+**Claude.** A bundle has a Claude config folder of its own (`CLAUDE_CONFIG_DIR`,
+`~/.cache/devcontainer/claude-config/<bundle>/home`), where what it shares of the host's
+`~/.claude` is mounted name by name, as the table below says: a name nobody listed stays out of
+the bundle. The host's Claude reads the shared files, so what a session takes as orders is
+read-only there: a hook a bundle could write would run on the host.
+
+Its login is a dummy one, made by [`claude-config.py`](claude-config.py) at each start and named
+for the Claude switch of gateway-core, which sends its requests with the main login in its place
+(gateway-core README, "The Claude switch"): no credential of the host is in a bundle, so code in a
+bundle has no login to send away or swap. The bundle's Claude cannot renew it, and needs not: the
+switch takes the access token of the host's login, which the ops sessions, and bundle-ctl while a
+bundle runs, renew. What it costs (Seb, 2026-10-28): Remote Control and the claude.ai connectors of
+the account, which the settings of a bundle do not load (`disableClaudeAiConnectors`). The ops
+container keeps the host's `~/.claude` as its config folder, the login with it: never give a
+container a copy or a link of `.credentials.json`, as a refresh replaces the link with a copy and
+revokes every other one. `host-ctl/test_escape.py` holds the same list, and its `claude-entries`
+line is OPEN on a name of the host's `~/.claude` that the list does not hold, as the ops container
+writes it.
+
+The plans have three folders, one per scope (Seb, 2026-10-28): the bundles plan in
+`~/.local/share/claude-plans/dev` (a remote agent in its job, which gets none of the others), the
+ops container in `~/.local/share/claude-plans/ops`, the host in `~/.claude/plans`, each mounted at
+`~/.claude/plans` where it plans. A scope writes its own only: the ops container reads the plans
+of the bundles as text at `~/dev-plans`, and a bundle sees no other. Claude's `plansDirectory`
+cannot do it: it takes a folder of the project.
 
 | name in `~/.claude` | in a bundle | in the ops container |
 | --- | --- | --- |
-| `.credentials.json` | shared, writable: the login | same |
+| `.credentials.json` | its own: a dummy login | shared, writable: the login |
 | `CLAUDE.md`, `agents`, `bin`, `commands`, `external`, `hooks`, `output-styles`, `plugins`, `routines`, `rules` (read as the user's own instructions), `skills`, `workflows` | shared, read-only: what a session takes as orders or runs | its draft |
-| `launch.json`, `loop.md`, `scheduled_tasks.json`, `settings.local.json` | shared, read-only: what Claude reads as the project folder of the home | same |
+| `launch.json`, `loop.md`, `scheduled_tasks.json`, `settings.local.json` | its own | shared, read-only: what Claude reads as the project folder of the home |
 | `.git` | shared, read-only, by the fragment of host-ctl: the host commits there | same |
 | `review-corpus` | shared, read-only: the reviews the review skill learns from | shared, writable |
-| `projects` | shared, writable, but the memory of the host sessions, read-only | shared, writable |
+| `projects` | its own, but `-workspace` (the transcripts and the memory of the bundles) shared and writable, and the memory of the host sessions read-only | shared, writable |
 | `.claude.json`, `daemon.json`, `policy-limits.json`, `remote-settings-helper-consent`, `remote-settings.json`, `settings.json` | its own copy, below | same |
 | `backups`, `cache`, `file-history`, `ide`, `session-env`, `sessions`, `shell-snapshots` | its own folder, below | same |
 | `dev-mods` | its own folder, empty and read-only | its own folder |
 | `agent-start.lock` | shared, writable: one lock of agent starts for every container | same |
 | `handoff` | shared, read-only, also at `~/handoff`, where `handoff/<bundle>` is writable: a bundle proposes a change in its own folder only, which `hok` writes on a yes (host-ctl `handoff.py`) | shared, writable |
-| `plans` | shared, writable: what a session plans | same |
-| `history.jsonl`, `paste-cache`, `debug`, `telemetry`, `stats-cache.json`, `.ruff_cache` | shared, writable: prompts, logs and counts, which no session runs | same |
-| `.last-cleanup`, `.last-config-audit`, `.last-update-result.json`, `policy-limits.json.stamp.json`, `remote-settings.json.synced-at`, and the `.signature.json` and `.signature-iat.json` of `policy-limits.json` and `remote-settings.json` | shared, writable: dates and signatures. A copy of its own would need one more bind of the host on itself (below) | same |
-| `.gitignore`, `README.md` | shared, writable: files of the config repo, which the host commits by name | same |
-| `.claude.json.tmp.*` | shared, writable: what a save of `.claude.json` leaves when its rename fails | same |
+| `plans` | the plans of the dev agents, shared by the bundles | the plans of the ops container |
+| `history.jsonl`, `paste-cache`, `debug`, `telemetry`, `stats-cache.json`, `.ruff_cache` | its own | shared, writable: prompts, logs and counts, which no session runs |
+| `.last-cleanup`, `.last-config-audit`, `.last-update-result.json`, `policy-limits.json.stamp.json`, `remote-settings.json.synced-at`, and the `.signature.json` and `.signature-iat.json` of `policy-limits.json` and `remote-settings.json` | its own | shared, writable: dates and signatures. A copy of its own would need one more bind of the host on itself (below) |
+| `.gitignore`, `README.md` | its own | shared, writable: files of the config repo, which the host commits by name |
+| `.claude.json.tmp.*` | its own | shared, writable: what a save of `.claude.json` leaves when its rename fails |
 
 What a tab has to write is a file of the bundle, made by [`claude-config.py`](claude-config.py)
 before every start:
@@ -156,12 +173,13 @@ before every start:
 - the other files Claude writes in its config folder, each a copy of the bundle: the managed
   settings and their cache (`remote-settings.json`, `remote-settings-helper-consent`, which can
   carry hooks), `policy-limits.json`, `daemon.json`.
-- read-only, what Claude reads in `~/.claude` as the project folder of the home, for a session
-  started there: `scheduled_tasks.json` (prompts it runs by itself), `settings.local.json`,
-  `launch.json`, `loop.md`. `claude-config.py` makes them on the host when missing, with nothing
-  in them.
-- `settings.json`, a copy of the host's, where a model picked in a tab is kept. Claude saves it by
-  rename, which fails on a mounted file, and then writes it in place. The copy has no `ask` rule:
+- for the ops container, read-only, what Claude reads in `~/.claude` as the project folder of the
+  home, for a session started there: `scheduled_tasks.json` (prompts it runs by itself),
+  `settings.local.json`, `launch.json`, `loop.md`. `claude-config.py` makes them on the host when
+  missing, with nothing in them.
+- `settings.json`, a copy of the host's, where a model picked in a tab is kept, and which turns off
+  the claude.ai connectors in a bundle. Claude saves it by rename, which fails on a mounted file,
+  and then writes it in place. The copy has no `ask` rule:
   such a rule prompts even when a hook allowed the call, and in a container the hooks decide.
   It also excludes the host path of `~/.claude/CLAUDE.md`: a container that mounts `~/.claude`
   at that path too (the ops container) would load the file a second time, as the project file of

@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""Prepare the Claude folders of one bundle container.
+"""Prepare the Claude folders of one bundle container, or of the ops container.
 
-    python3 claude-config.py <bundle folder name> [workspace]     # initializeCommand, on the host
+    python3 claude-config.py <folder name> --bundle       # initializeCommand of a bundle, on the host
+    python3 claude-config.py <folder name> <workspace>    # the one of the ops container
 
-The container's CLAUDE_CONFIG_DIR is the host's ~/.claude itself, so it shares the host's login:
-Claude locks a token refresh and saves the new token in that folder, and any copy or link of
-.credentials.json elsewhere gets revoked by the next refresh. session-env and shell-snapshots are
+The CLAUDE_CONFIG_DIR of the ops container is the host's ~/.claude itself, so it shares the host's
+login: Claude locks a token refresh and saves the new token in that folder, and any copy or link of
+.credentials.json elsewhere gets revoked by the next refresh. A bundle has a folder of its own
+there instead (home), where what it shares of the host's is mounted (base.jsonc), with a dummy
+login that the Claude switch sends with the main one (gateway-core README, "The Claude switch"):
+its claude has no credential to give away, and loads no claude.ai connector. The dummy is kept out
+of the bundle's reach (dummy-login), and written again at each start over what a /login there
+left. session-env and shell-snapshots are
 mounted from a folder of the bundle, as the host's Claude sources its own. So is sessions, where
 Claude names the record of a live session after its pid: the claude of every container has the
 same few pids, so in a shared folder the records overwrite each other. So is extension-storage,
@@ -26,8 +32,11 @@ files are links and settings.local.json is the bundle's own. What Claude reads i
 project folder of the home (HOME_PROJECT) is made on the host when missing, for a read-only mount.
 """
 
+import hashlib
 import json
+import os
 import pathlib
+import secrets
 import shutil
 import sys
 
@@ -77,9 +86,12 @@ HOME_PROJECT = {
 }
 # Where base.jsonc mounts the shared project folder, read-only.
 SHARED_INSIDE = pathlib.Path("/home/vscode/.claude-project")
+DUMMY = "sk-ant-oat01-rr-"
+# What the Claude switch serves a dummy login: it says it has these scopes only.
+DUMMY_SCOPES = ["user:inference", "user:profile", "user:sessions:claude_code"]
 
 
-def write_settings(claude, own):
+def write_settings(claude, own, bundle):
     path = own / "settings.json"
     if not (claude / "settings.json").is_file():
         path.touch()
@@ -95,7 +107,44 @@ def write_settings(claude, own):
     # An ask rule prompts even when a hook allowed the call, and in a container the hooks decide.
     settings.get("permissions", {}).pop("ask", None)
     settings.setdefault("claudeMdExcludes", []).append(str(claude / "CLAUDE.md"))
+    if bundle:
+        settings["disableClaudeAiConnectors"] = True
     path.write_text(json.dumps(settings, indent=2) + "\n")
+
+
+def write_login(claude, own, name, values):
+    """The dummy login of the bundle, named for the Claude switch, in its folder of its own."""
+    home = own / "home"
+    if home.is_symlink():
+        home.unlink()
+    home.mkdir(exist_ok=True)
+    try:
+        dummy = (own / "dummy-login").read_text().strip()
+    except OSError:
+        dummy = f"{DUMMY}{secrets.token_urlsafe(36)}"
+        (own / "dummy-login").write_text(f"{dummy}\n")
+    dummies = pathlib.Path(values["STATE_ROOT"]) / "claude-switch" / "dummies"
+    dummies.mkdir(parents=True, exist_ok=True)
+    (dummies / hashlib.sha256(dummy.encode()).hexdigest()).write_text(f"{name}\n")
+    try:
+        real = json.loads((claude / ".credentials.json").read_text())["claudeAiOauth"]
+    except (OSError, ValueError, KeyError, TypeError):
+        real = {}
+    login = {
+        "accessToken": dummy,
+        "refreshToken": "sk-ant-ort01-rr-dummy",
+        "expiresAt": 4102444800000,
+        "scopes": DUMMY_SCOPES,
+        "subscriptionType": real.get("subscriptionType") or "max",
+    }
+    if real.get("rateLimitTier"):
+        login["rateLimitTier"] = real["rateLimitTier"]
+    path = home / ".credentials.json"
+    if path.is_symlink():
+        path.unlink()
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as file:
+        file.write(json.dumps({"claudeAiOauth": login}) + "\n")
 
 
 def make_files(claude, own):
@@ -126,17 +175,24 @@ def link_project(shared, project):
 
 
 def main():
+    bundle = "--bundle" in sys.argv
+    args = [arg for arg in sys.argv[1:] if arg != "--bundle"]
     values = config.load()
     claude = pathlib.Path(values["HOME"]) / ".claude"
-    own = pathlib.Path(values["CACHE_ROOT"]) / "devcontainer" / "claude-config" / sys.argv[1]
+    own = pathlib.Path(values["CACHE_ROOT"]) / "devcontainer" / "claude-config" / args[0]
     for name in OWN:
         if (own / name).is_symlink():
             (own / name).unlink()
         (own / name).mkdir(parents=True, exist_ok=True)
-    for name in (*ORDERS, f"handoff/{sys.argv[1]}", f"projects/{values['HOST_PROJECT']}"):
+    shared = (*ORDERS, f"handoff/{args[0]}", f"projects/{values['HOST_PROJECT']}/memory")
+    for name in (*shared, "projects/-workspace"):
         (claude / name).mkdir(parents=True, exist_ok=True)
     (claude / "CLAUDE.md").touch()
-    write_settings(claude, own)
+    (claude / "agent-start.lock").touch()
+    (pathlib.Path(values["SHARE_ROOT"]) / "claude-plans" / "dev").mkdir(parents=True, exist_ok=True)
+    write_settings(claude, own, bundle)
+    if bundle:
+        write_login(claude, own, args[0], values)
     make_files(claude, own)
     link_project(pathlib.Path(values["SHARED_CLAUDE"]), own / "project")
 
@@ -147,7 +203,7 @@ def main():
         if path.is_file():
             state = json.loads(path.read_text())
             break
-    folder = sys.argv[2] if len(sys.argv) > 2 else "/workspace"
+    folder = args[1] if len(args) > 1 else "/workspace"
     workspace = state.setdefault("projects", {}).setdefault(folder, {})
     workspace["hasTrustDialogAccepted"] = True
     workspace["hasClaudeMdExternalIncludesApproved"] = True
