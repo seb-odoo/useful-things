@@ -51,6 +51,7 @@ repos: a container writes their `.git`, and the jobs run git there (`daemon-git`
 | `POST /move` | the queued task of `bundle` put at `place` (from 1), where it keeps its priority when that priority fits between the tasks around it, else takes the nearest of theirs; then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
 | `POST /bring-back` | the agent of `bundle` back from its worker: its work tree written here, then its session goes on in a terminal (see Remote agents). The host or that bundle asks |
 | `POST /requeue` | the session of the agent of `bundle` queued again, last, paused with `paused`, and its agent window closed once its turn ended, 2 minutes at most: meanwhile `client/run-hook.py` refuses its Bash calls, on a reason that tells it to end its turn, and a turn still running at the end goes on told it was cut (see Cut sessions). With `github`, it waits for the GitHub connection of the host. The host or the ops container asks, or with `github` the bundle itself |
+| `POST /close` | the agent window of `bundle` closed with no yes, as after its verdict: its claude and its container stop, its session stays; refused while a claude of the bundle is in a turn or waits for an answer, or while its agent starts (see Agents in a terminal). Refused to a container |
 | `POST /schedule` | when the queued task of `bundle` may start: `when` is `spot` (once a slot, the memory and the CPU let it), `manual` (it waits for a manual resume, until it is scheduled again) or `HH:MM` (that time of the host, today or tomorrow); it no longer goes over the cap. Then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
 | `POST /unqueue` | the queued task of a bundle dropped; the host, that bundle or the one that queued the task asks |
 | `POST /run` | a heavy command waits for cores: one JSON line each time its place changes, then the CPUs it got (see Runs) |
@@ -481,6 +482,15 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   and in the transcript, the agent reads `done`, and `bctl open BUNDLE --terminal` opens the
   session again. The journal says `BUNDLE: its agent ended on its verdict, its terminal closes`.
   `python3 test_restart.py` runs each case.
+- `bctl close BUNDLE` closes that window the same way, minimized or not, with no yes (Seb,
+  2026-10-28: "`bctl close BUNDLE` with no card, idle windows only"; since 10-13, ops agents had
+  sent him 10 scripts in `hok` to close such windows by hand, with `wmctrl -i -c` or a `kill -USR1`
+  of `agent-terminator.py`). It is refused, 409, while a claude of the bundle is in a turn or waits
+  for an answer, with the check of a deletion yes (see Deletion), while its agent starts and its
+  claude does not run yet, and for an agent on a worker, whose turn the host does not see. The
+  daemon waits up to 30 s for the window to end. Only the host asks: a container gets a 403, and
+  the ops container asks it through `hctl run -- bctl close BUNDLE`. `python3 test_delete.py` has
+  the cases.
 - A terminal runs the code it started with. When `agent-terminal.py`, `agent-terminator.py` or a
   script they load changed since, the daemon opens a new terminal on that bundle, which takes the
   session over in the same container, and the old window closes (Seb, 2026-10-20: "can we somehow
@@ -1091,8 +1101,9 @@ prompt. When none is given, `Continue from where you left off.` and, at the laun
 closed and what to check since its last turn. This is how an agent cut before its
 verdict (`stopped`) starts again with what it knew. It is refused when the bundle has no session,
 or is open in a window, where the session goes on in its Claude tab.
-Closing the window of an agent is Seb's call, and so is closing its terminal before its verdict
-(see Agents in a terminal); nothing deletes a bundle without his yes. `done` says the run reached
+Closing the window of an agent is Seb's call, and so is closing its terminal before its verdict,
+but for an idle one with `bctl close` (see Agents in a terminal); nothing deletes a bundle without
+his yes. `done` says the run reached
 its verdict: Seb may still go on in the session, in its terminal while it is on screen, or with
 `bctl open BUNDLE --terminal` once it closed. A task for a bundle whose last
 session still has its terminal goes to that terminal once that session gave its verdict.

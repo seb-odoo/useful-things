@@ -169,7 +169,7 @@ HOK_KEPT = 5
 HOK_WAITING = pathlib.Path(CONFIG["REPO_ROOT"]) / "host-ctl" / "approve.py"
 HOST = "host"
 HOST_FOLDER = CONFIG.get("BUNDLE_CTL_HOST_FOLDER")
-HOST_ONLY = {("POST", "/force-queue")}
+HOST_ONLY = {("POST", "/close"), ("POST", "/force-queue")}
 JOB_WAIT = 50
 MAX_AGENTS = int(
     os.environ.get("BUNDLE_CTL_MAX_AGENTS") or CONFIG.get("BUNDLE_CTL_MAX_AGENTS") or 8,
@@ -765,6 +765,32 @@ def requeue_agent(caller, query, body):
         why = "when it went back to the queue to wait for the GitHub connection of the host"
     threading.Thread(target=stop_after_turn, args=(bundle, session, why), daemon=True).start()
     return 202, {**answer, "wait": PAUSE_WAIT}
+
+
+def close_agent_window(caller, query, body):
+    """Close the agent window of a bundle as close_freed does, once its claude is idle: refused
+    while a claude of the bundle is in a turn or waits for an answer, as for a deletion, and while
+    its agent starts, before its claude runs. Only the host asks (HOST_ONLY)."""
+    bundle = body.get("bundle") or ""
+    if set(body) != {"bundle"} or not BUNDLE_NAME.fullmatch(bundle):
+        raise ValueError("close: a bundle name alone")
+    folder = get_worktree_bundle_folder(bundle)
+    if not os.path.isdir(folder):
+        raise ValueError(f"no bundle folder for {bundle}")
+    if not get_window_pids(bundle):
+        raise ValueError(f"{bundle} has no agent window")
+    if remote_agent.is_remote(pathlib.Path(folder)):
+        raise Refused(f"{bundle}: its agent runs on a worker, this host cannot see its turn")
+    if is_in_turn(bundle):
+        raise Refused(f"{bundle}: its claude is in a turn or waits for an answer")
+    live = cut.get_live_sessions([pathlib.Path(CLAUDE_CONFIG_CONTAINER, bundle, "sessions")])
+    if is_agent_running(bundle) and read_text(get_agent_folder(bundle) / "session") not in live:
+        raise Refused(f"{bundle}: its agent is starting, its claude does not run yet")
+    get_agent_folder(bundle).mkdir(exist_ok=True)
+    close_freed(bundle)
+    if get_window_pids(bundle):
+        raise Refused(f"{bundle}: its agent window is still open {WINDOW_CLOSE_WAIT} s later")
+    return 200, {"bundle": bundle}
 
 
 def stop_after_turn(bundle, session, why):
@@ -3021,6 +3047,7 @@ VERBS = {
     ("GET", "/status"): status,
     ("GET", "/whoami"): whoami,
     ("POST", "/build"): build_bundle,
+    ("POST", "/close"): close_agent_window,
     ("POST", "/create"): create,
     ("POST", "/delete"): delete,
     ("POST", "/fetch"): fetch,

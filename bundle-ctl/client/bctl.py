@@ -7,6 +7,7 @@
     bctl force-queue [BUNDLE]
     bctl move BUNDLE PLACE
     bctl requeue BUNDLE [--paused | --github]
+    bctl close BUNDLE
     bctl schedule BUNDLE spot|manual|HH:MM
     bctl unqueue BUNDLE
     bctl branches [--json]
@@ -55,6 +56,11 @@ turn ended, 2 minutes at most: meanwhile its Bash calls are refused, on a reason
 end its turn. A turn cut there goes on told so. With --paused, it waits for a manual resume. Only
 the host may ask it, but for --github: an agent that GitHub cannot reach asks it for itself, its
 session waits until the GitHub connection of the host is up, and goes on told so.
+
+close closes the agent window of a bundle, with no yes of Seb: its claude and its container stop,
+its Firefox tab groups stay, and open --terminal goes on with its session. It is refused while a
+claude of the bundle is in a turn or waits for an answer, and while its agent starts. Only the host
+may ask it: a container gets a 403, the ops container asks it through hctl.
 
 open --resume gives the task to the last Claude session of the bundle as its next prompt, where a
 task alone starts a new session. Without a task, the session is told to go on.
@@ -266,6 +272,13 @@ def print_requeued(answer):
     print(
         f"{answer['bundle']}: its window closes once its turn ends, in {answer['wait']} seconds at"
         f" most; queued {answer['queued']}, waits for {answer['waits_for']}",
+    )
+
+
+def print_closed(answer):
+    print(
+        f"{answer['bundle']}: its agent window is closed, bctl open {answer['bundle']} --terminal"
+        " goes on with its session",
     )
 
 
@@ -653,6 +666,11 @@ def main():
         action="store_true",
         help="it waits in the queue until the GitHub connection of the host is up",
     )
+    close = commands.add_parser(
+        "close",
+        help="close the agent window of a bundle whose claude is idle (host only)",
+    )
+    close.add_argument("bundle")
     schedule = commands.add_parser("schedule", help="set when the queued task of a bundle starts")
     schedule.add_argument("bundle")
     schedule.add_argument(
@@ -694,6 +712,9 @@ def main():
         body = {"bundle": args.bundle, "paused": args.paused}
         answer = request("POST", "/requeue", {**body, "github": True} if args.github else body)
         printer = print_requeued
+    elif args.command == "close":
+        answer = request("POST", "/close", {"bundle": args.bundle})
+        printer = print_closed
     elif args.command == "schedule":
         answer = request("POST", "/schedule", {"bundle": args.bundle, "when": args.when})
         printer = print_queue

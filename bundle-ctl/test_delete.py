@@ -744,6 +744,110 @@ def check_parked(root):
     return [name for name, passed in checks if not passed], len(checks)
 
 
+def check_close(root):
+    """`bctl close` from the host closes an idle agent window, and from a bundle gets a 403; a turn
+    that runs, a dialog, an agent that starts or one on a worker keeps the window."""
+    idle, busy, starting, remote, stuck, bare = (
+        f"master-{name}--seb" for name in ("idle", "busy", "starting", "remote", "stuck", "bare")
+    )
+    for bundle in (idle, busy, starting, remote, stuck, bare):
+        (root / "master" / bundle / ".agent").mkdir(parents=True)
+        (root / "master" / bundle / ".agent" / "session").write_text(f"{bundle}-session\n")
+    world = {
+        "caller": idle,
+        "closed": [],
+        "windows": {idle, busy, starting, remote, stuck},
+    }
+
+    def close_freed(bundle):
+        world["closed"].append(bundle)
+        if bundle != stuck:
+            world["windows"].discard(bundle)
+
+    daemon.close_freed = close_freed
+    daemon.cut.get_live_sessions = lambda folders: {f"{bundle}-session" for bundle in (idle, busy)}
+    daemon.get_agent_folder = lambda bundle: root / "master" / bundle / ".agent"
+    daemon.get_window_pids = lambda bundle: [1] if bundle in world["windows"] else []
+    daemon.get_worktree_bundle_folder = lambda bundle: str(root / "master" / bundle)
+    daemon.identify = lambda connection: world["caller"]
+    daemon.is_agent_running = lambda bundle: bundle in (idle, busy, starting)
+    daemon.is_in_container = lambda connection: world["caller"] != daemon.HOST
+    daemon.is_in_turn = lambda bundle: bundle in (busy, remote)
+    daemon.remote_agent.is_remote = lambda folder: folder.name == remote
+    path = root / "ctl.sock"
+    server = daemon.Server(str(path), daemon.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    checks = []
+    code, lines = run_client(path, "close", idle)
+    checks.append(
+        (
+            "a bundle cannot close a window, its own neither",
+            (code, lines, world["closed"])
+            == (1, ["bctl: 403 only from the host, a container cannot ask it"], []),
+        ),
+    )
+    world["caller"] = daemon.HOST
+    for name, bundle, error in (
+        (
+            "a turn that runs keeps the window",
+            busy,
+            "its claude is in a turn or waits for an answer",
+        ),
+        (
+            "an agent that starts keeps its window",
+            starting,
+            "its agent is starting, its claude does not run yet",
+        ),
+        (
+            "an agent on a worker keeps its window",
+            remote,
+            "its agent runs on a worker, this host cannot see its turn",
+        ),
+    ):
+        code, lines = run_client(path, "close", bundle)
+        checks.append(
+            (name, (code, lines, world["closed"]) == (1, [f"bctl: 409 {bundle}: {error}"], [])),
+        )
+    code, lines = run_client(path, "close", bare)
+    checks.append(
+        (
+            "a bundle with no agent window says so",
+            (code, lines) == (1, [f"bctl: 400 {bare} has no agent window"]),
+        ),
+    )
+    code, lines = run_client(path, "close", "master-gone--seb")
+    checks.append(
+        (
+            "a bundle with no folder says so",
+            (code, lines) == (1, ["bctl: 400 no bundle folder for master-gone--seb"]),
+        ),
+    )
+    code, lines = run_client(path, "close", idle)
+    checks.append(
+        (
+            "the host closes the window of an idle claude",
+            (code, lines, world["closed"])
+            == (
+                0,
+                [
+                    f"{idle}: its agent window is closed, bctl open {idle} --terminal goes on with its session"
+                ],
+                [idle],
+            ),
+        ),
+    )
+    code, lines = run_client(path, "close", stuck)
+    checks.append(
+        (
+            "a window still open after the close says so",
+            (code, lines) == (1, [f"bctl: 409 {stuck}: its agent window is still open 30 s later"]),
+        ),
+    )
+    server.shutdown()
+    server.server_close()
+    return [name for name, passed in checks if not passed], len(checks)
+
+
 def main():
     with tempfile.TemporaryDirectory() as root:
         failures, total = check(pathlib.Path(root))
@@ -752,6 +856,9 @@ def main():
         failures, total = failures + more, total + count
     with tempfile.TemporaryDirectory() as root:
         more, count = check_parked(pathlib.Path(root))
+        failures, total = failures + more, total + count
+    with tempfile.TemporaryDirectory() as root:
+        more, count = check_close(pathlib.Path(root))
         failures, total = failures + more, total + count
     for name in failures:
         print(f"failed: {name}")
