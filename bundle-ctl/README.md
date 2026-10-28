@@ -212,7 +212,8 @@ necessary. but if we have a good setup, full remote should offer the same possib
 - `bctl open|create|fetch --where local|worker|auto` (`auto` by default, kept in `.agent/where`).
   When a task's turn comes, `auto` goes to a worker of `BUNDLE_CTL_WORKERS` that answered lately,
   is not drained and has a place for an agent (`agents_free` of its `status`), else here as any
-  task; `worker` waits for one. A bundle open in a window stays here. A bundle whose agent ran on
+  task; `worker` waits for one. A bundle open in a window stays here, and so does a bundle not
+  built yet (see Bare start), as its build runs here. A bundle whose agent ran on
   a worker goes there again (`.agent/where` is `worker:NAME`) until it is brought back, so that it
   does not rebuild its DBs on each machine in turn. A task for a bundle whose agent is remote
   waits for its end. `auto` stays here until `BUNDLE_CTL_REMOTE_AGENTS=auto` is in
@@ -315,7 +316,8 @@ daemon reads what is left on the disk of the bundles:
 
 - Under `BUNDLE_CTL_DISK_STOP_GB` (default 30), `create` and `fetch` with no task and `build` are
   refused, and the queue holds its tasks, forced ones too: `waits for disk space (20 GB left, 30
-  needed)`. They start by themselves once the space is back.
+  needed)`. They start by themselves once the space is back. A task that a worker takes goes
+  there meanwhile (see Remote agents): its agent takes no disk here but its stand-in.
 - Under `BUNDLE_CTL_DISK_WARN_GB` (default 60), a desktop notification says what is left, then
   again at each 10 GB less, and again once the disk went 10 GB over that line in between. The
   level warned is kept in `~/.local/state/bundle-ctl/disk-warned`, so a restart of the daemon

@@ -15,6 +15,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -822,6 +823,42 @@ def check_github(root):
     return [f"github: {name}: {state['queue']}" for name in failed], len(checks)
 
 
+def check_disk_worker(root):
+    """Under the disk floor, a task a worker takes goes there, and one not built yet waits; with
+    the disk back, that one starts here, where its build runs."""
+    stubs = {
+        name: getattr(daemon, name)
+        for name in ("REMOTE_AUTO", "WORKERS", "prepare_folder", "start_remote")
+    }
+    daemon.REMOTE_AUTO = True
+    daemon.WORKERS = types.SimpleNamespace(
+        names=["sebpc"], choose_agent=lambda wanted=None: "sebpc"
+    )
+    daemon.prepare_folder = lambda bundle: os.makedirs(daemon.get_worktree_bundle_folder(bundle))
+    started = []
+    daemon.start_remote = lambda log, bundle, worker: started.append((bundle, worker))
+    checks = []
+    try:
+        for disk, expected in [
+            (20.4, ([], ["new: disk space (20 GB left, 30 needed)"])),
+            (100, (["new"], [])),
+        ]:
+            started.clear()
+            state, launched = prepare(root / str(disk), {"built": FRESH, "new": GONE}, 8, disk=disk)
+            state["queue"][1]["build"] = ["fetch_bundle.py", "new", "--no-open"]
+            daemon.launch_queued()
+            found = (
+                list(started),
+                launched,
+                [f"{item['bundle']}: {item['waits_for']}" for item in state["queue"]],
+            )
+            checks.append((disk, found == ([("built", "sebpc")], *expected), found))
+    finally:
+        vars(daemon).update(stubs)
+    failed = [f"disk worker: {disk:.0f} GB left: {found}" for disk, ok, found in checks if not ok]
+    return failed, len(checks)
+
+
 def check_build(root):
     """A task queued with its build starts in the bare folder, told so, and only its own bundle
     builds it; under the disk floor such a task is still queued."""
@@ -1108,6 +1145,7 @@ def main():
         check_requeue,
         check_github,
         check_build,
+        check_disk_worker,
         check_build_cut,
         check_parked,
         check_priority,

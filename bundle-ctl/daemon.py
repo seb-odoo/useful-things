@@ -1348,7 +1348,9 @@ def launch_queued():
                 item["waits_for"] = "the deletion of its checkout"
             elif is_busy(bundle, is_running or bundle in state["launches"]):
                 item["waits_for"] = get_previous_end(folder)
-            elif free < DISK_STOP:
+            elif free < DISK_STOP and (
+                in_terminal or not get_agent_worker(item, folder, is_running)[0]
+            ):
                 item["waits_for"] = f"disk space ({free:.0f} GB left, {DISK_STOP:.0f} needed)"
             elif in_terminal and not (waits_for := get_terminal_wait(item, now)):
                 hand_to_terminal(item)
@@ -1504,9 +1506,10 @@ def launch_safely():
 def get_agent_worker(item, folder, is_running):
     """(the worker that starts the agent of this task, why it waits): a task goes `auto` by
     default, to a worker with an agent place, else here; one placed on a worker waits for it
-    (README.md, "Remote agents"). A bundle open in a window stays here.
+    (README.md, "Remote agents"). A bundle open in a window stays here, and so does one not built
+    yet, as its build runs here.
     """
-    if is_running or not WORKERS.names:
+    if is_running or item.get("build") or not WORKERS.names:
         return None, None
     where = item.get("where") or read_text(folder / "where") or "auto"
     if where == "local" or (where == "auto" and not REMOTE_AUTO):
