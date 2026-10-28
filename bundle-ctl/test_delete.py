@@ -756,6 +756,90 @@ def check_parked(root):
     return [name for name, passed in checks if not passed], len(checks)
 
 
+def check_gone(root):
+    """A bare bundle deleted as unused keeps the session of its agent, and the Agent button of its
+    Firefox group (`bctl open --terminal` from the host) goes on with it in its bare folder made
+    again, which `bctl build` fetches."""
+    bundle, session = "master-19.0-fix--seb-1-fw", "0f897331-3dea-4b5b-a0c4-1c27061e4efc"
+    folder = root / "master" / bundle
+    (folder / ".agent").mkdir(parents=True)
+    (folder / ".agent" / "session").write_text(f"{session}\n")
+    old = time.time() - 30 * 60
+    os.utime(folder / ".agent" / "session", (old, old))
+    transcript = root / f"{session}.jsonl"
+    answer = {"type": "assistant", "message": {"content": [{"type": "text", "text": "done"}]}}
+    transcript.write_text(f"{json.dumps(answer)}\n")
+    state, opened = {"building": [], "builds": {}, "queue": []}, []
+    daemon.CLAUDE_CONFIG_CONTAINER = str(root / "claude-config")
+    daemon.HOK_WAITING = root / "hok-waiting"
+    daemon.STATE = root
+    daemon.get_agent_folder = lambda name: root / "master" / name / ".agent"
+    daemon.get_closed_windows = lambda: {str(folder): old}
+    daemon.get_open_windows = set
+    daemon.get_transcript = lambda name: transcript if name == session else None
+    daemon.get_worktree_bundle_folder = lambda name: str(root / "master" / name)
+    daemon.get_worktree_container_folder = lambda: str(root)
+    daemon.open_terminal = lambda log, name: opened.append(name)
+    daemon.prepare_folder = lambda name: (root / "master" / name / ".claude").mkdir(parents=True)
+    daemon.read_state = lambda: state
+    daemon.tab_groups.ask = lambda request: None
+    daemon.write_state = lambda new: None
+    daemon.drop_idle_reviews()
+    wait_jobs()
+    checks = [
+        (
+            "a bare bundle unused goes, and keeps its session",
+            (folder.exists(), daemon.read_text(root / "deleted" / f"{bundle}.session"))
+            == (False, session),
+        ),
+    ]
+
+    def open_terminal(caller, name=bundle):
+        try:
+            code, _answer = daemon.open_bundle(caller, {}, {"bundle": name, "terminal": True})
+        except (ValueError, daemon.Refused) as error:
+            return str(error)
+        wait_jobs()
+        return code
+
+    checks += [
+        ("a bundle cannot open it", open_terminal("other") == f"no bundle folder for {bundle}"),
+        (
+            "nor the host one with no kept session",
+            open_terminal(daemon.HOST, "master-x--seb") == "no bundle folder for master-x--seb",
+        ),
+        (
+            "the host opens its agent on its session, bare, to build by fetching it",
+            (
+                open_terminal(daemon.HOST),
+                opened,
+                daemon.read_text(folder / ".agent" / "session"),
+                daemon.read_text(folder / ".agent" / "task.md"),
+                daemon.is_bare(folder),
+                state["builds"],
+            )
+            == (
+                202,
+                [bundle],
+                session,
+                "",
+                True,
+                {bundle: ["fetch_bundle.py", bundle, "--no-open"]},
+            ),
+        ),
+    ]
+    shutil.rmtree(folder, ignore_errors=True)
+    state["queue"].append({"bundle": bundle})
+    checks.append(
+        (
+            "not while its task waits in the queue",
+            open_terminal(daemon.HOST)
+            == f"{bundle}: its task waits in the queue, `bctl schedule {bundle} spot`",
+        ),
+    )
+    return [name for name, passed in checks if not passed], len(checks)
+
+
 def check_close(root):
     """`bctl close` from the host closes an idle agent window, and from a bundle gets a 403; a turn
     that runs, a dialog, an agent that starts or one on a worker keeps the window."""
@@ -896,6 +980,9 @@ def main():
         failures, total = failures + more, total + count
     with tempfile.TemporaryDirectory() as root:
         more, count = check_parked(pathlib.Path(root))
+        failures, total = failures + more, total + count
+    with tempfile.TemporaryDirectory() as root:
+        more, count = check_gone(pathlib.Path(root))
         failures, total = failures + more, total + count
     with tempfile.TemporaryDirectory() as root:
         more, count = check_close(pathlib.Path(root))

@@ -53,7 +53,7 @@ the pager. `python3 test_node_modules.py` and `python3 test_delete.py` have the 
 | `GET /hok` | the requests of `hok` that wait for the caller, a bundle its own and the host those of the ops session `?session=`: name, where a yes acts and what it does, when it was asked, put off or not (see the agent list) |
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window; with a task, only its queue entry, as for `create`; refused when the bundle is here, a branch has unpushed commits or, with no task, the disk is short |
 | `POST /node-modules` | the `node_modules` of the `package.json` of the web tooling of the branch of `base`, built in the store when it has none (see `scripts/README.md`, Shared node_modules): a job for the host; from a bundle, for its own base only, held as `bN` for Seb's yes in `hok`, which shows the change from the `package.json` of the tree it links; `tree` at once when it is built already |
-| `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle, but for `resume` or `terminal` in a bare folder or after its `bctl build` failed, whose session knows how to build it. A task from a bundle that is neither that bundle nor its parent waits for Seb's yes as `bN` (see A task for another bundle). On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window, and from a bundle a task alone, held as `bN` for Seb's yes in `hok`; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents). With `cut` and `resume` and no bundle, the resume of every cut session, held as `bN` for one yes of Seb (see Cut sessions) |
+| `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle, but for `resume` or `terminal` in a bare folder or after its `bctl build` failed, whose session knows how to build it. With `terminal` from the host on a deleted bundle, the session kept at its deletion in its bare folder made again. A task from a bundle that is neither that bundle nor its parent waits for Seb's yes as `bN` (see A task for another bundle). On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window, and from a bundle a task alone, held as `bN` for Seb's yes in `hok`; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents). With `cut` and `resume` and no bundle, the resume of every cut session, held as `bN` for one yes of Seb (see Cut sessions) |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
 | `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, its text, whether it resumes the session of its bundle and the session it names, and the memory left on the host, `short` when a start would add to a host that already lacks it |
 | `POST /force-queue` | the tasks queued now may start over the cap, those that wait for their time (`--after`) or for a manual resume (`--paused`) aside, or with `bundle` the task of that bundle, its time and its pause too; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
@@ -341,6 +341,12 @@ for another one. `delete_bundle.py` keeps a bundle with
 uncommitted files or a commit no remote has; that one is tried again only after a new use. Commits of others no remote has (the older
 head of a PR its author rebased since) and commits whose change the base has go with `--force`,
 unless a file is not committed. `bctl fetch` brings a bundle back.
+The session of its agent is kept in `deleted/BUNDLE.session` beside `state.json`, and `bctl open
+BUNDLE --terminal` from the host goes on with it once the bundle is gone: the bare folder is made
+again (see Bare start), with `fetch_bundle.py BUNDLE --no-open` as its build. So the Agent button
+of a Firefox group still opens the agent of a bundle deleted before the group closed, or while
+Firefox was closed (Seb, 2026-10-28: "also can't open from firefox", on a second fw bundle gone
+under its group). Refused while a task of the bundle waits in the queue.
 `python3 test_delete.py` has the cases.
 
 A task that is the session of its agent waiting for a manual resume or for its time (`bctl
@@ -416,7 +422,8 @@ branches again with the same commits, so a commit made after the request still k
   the request shows that report.
 - The last answer of the agent (the last text of its session, else its `result.md`) is copied
   to `deleted/BUNDLE.md` beside `state.json` before `delete_bundle.py` runs, and the answer of
-  the yes names that file.
+  the yes names that file. Its session goes to `deleted/BUNDLE.session`, as for a bundle deleted
+  as unused.
 - The yes also closes the Firefox tab groups of the bundle (Seb, 2026-10-20), which the request
   lists: the helper of firefox-gateway answers on `$XDG_RUNTIME_DIR/firefox-gateway/host.sock`
   (`scripts/tab_groups.py`). `delete_bundle.py` closes them too, so a bundle deleted by gbs, gfa

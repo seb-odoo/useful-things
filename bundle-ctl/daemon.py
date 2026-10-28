@@ -2484,21 +2484,24 @@ def is_in_turn(bundle):
     return any(get_session_status(bundle, session) not in (None, "idle", "shell") for session in live)
 
 
-def get_kept(bundle):
-    """Where the last answer of a bundle's agent is kept once the bundle is deleted."""
-    return STATE / "deleted" / f"{bundle}.md"
+def get_kept(bundle, suffix=".md"):
+    """Where the last answer of a bundle's agent is kept once the bundle is deleted, and its
+    session with the suffix `.session`."""
+    return STATE / "deleted" / f"{bundle}{suffix}"
 
 
 def keep_last_answer(bundle):
-    """Copy the last answer of a bundle's agent out of the folder its deletion removes: the last
-    text of its session, else the report its Stop hook wrote."""
+    """Copy the last answer of a bundle's agent and its session out of the folder its deletion
+    removes: the last text of its session, else the report its Stop hook wrote."""
     agent = get_agent_folder(bundle)
     session = read_text(agent / "session")
     transcript = session and get_transcript(session)
     answer = (transcript and get_last_text(transcript)) or read_text(agent / "result.md")
+    get_kept(bundle).parent.mkdir(parents=True, exist_ok=True)
     if answer:
-        get_kept(bundle).parent.mkdir(parents=True, exist_ok=True)
         get_kept(bundle).write_text(f"{answer.strip()}\n")
+    if transcript:
+        get_kept(bundle, ".session").write_text(f"{session}\n")
 
 
 def get_last_use(bundle):
@@ -2638,6 +2641,7 @@ def drop_idle_reviews():
                 if not is_bare(pathlib.Path(get_worktree_bundle_folder(bundle))):
                     log.write(f"{bundle} was built since\n")
                     return {}
+                keep_last_answer(bundle)
                 shutil.rmtree(get_worktree_bundle_folder(bundle))
                 with state_lock:
                     state = read_state()
@@ -2648,6 +2652,7 @@ def drop_idle_reviews():
                 force = any([get_others_commits(bundle, repo) for repo in local_branches(bundle)])
                 if force:
                     check_uncommitted(bundle)
+                keep_last_answer(bundle)
                 run_script(log, "delete_bundle.py", *(["--force"] if force else []), bundle)
             except Refused:
                 kept_reviews[bundle] = since
@@ -3037,12 +3042,49 @@ def open_ops(caller, bundle, body):
     return start_job(caller, "open", work, ops_lock)
 
 
+def open_deleted(caller, bundle, body):
+    """The agent terminal of a deleted bundle on the session kept at its deletion, for the host: its
+    bare folder is made again, and `bctl build` fetches the bundle if the agent needs the code
+    (Seb, 2026-10-28: the Agent button of a Firefox group whose bundle was gone)."""
+    session = read_text(get_kept(bundle, ".session")) or ""
+    if caller != HOST or not SESSION_ID.fullmatch(session) or not get_transcript(session):
+        raise ValueError(f"no bundle folder for {bundle}")
+    if "task" in body or body.get("resume"):
+        raise ValueError("terminal: only without a task")
+    with state_lock:
+        if any(item["bundle"] == bundle for item in read_state()["queue"]):
+            raise Refused(f"{bundle}: its task waits in the queue, `bctl schedule {bundle} spot`")
+
+    def work(log):
+        if os.path.isdir(get_worktree_bundle_folder(bundle)):
+            raise Refused(f"{bundle} was made again meanwhile: open it again")
+        prepare_folder(bundle)
+        with state_lock:
+            state = read_state()
+            state.setdefault("builds", {})[bundle] = ["fetch_bundle.py", bundle, "--no-open"]
+            write_state(state)
+        agent = get_agent_folder(bundle)
+        agent.mkdir(exist_ok=True)
+        write_text(agent / "session", f"{session}\n")
+        write_text(agent / "task.md", "")
+        open_terminal(log, bundle)
+        return {"bundle": bundle}
+
+    return start_job(caller, "open", work, lock=None, bundle=bundle)
+
+
 def open_bundle(caller, query, body):
     bundle = body.get("bundle") or ""
     if "cut" in body:
         return hold_cut(caller, body)
     if bundle == "ops" or bundle.startswith(OPS):
         return open_ops(caller, bundle, body)
+    if (
+        body.get("terminal")
+        and BUNDLE_NAME.fullmatch(bundle)
+        and not os.path.isdir(get_worktree_bundle_folder(bundle))
+    ):
+        return open_deleted(caller, bundle, body)
     if not BUNDLE_NAME.fullmatch(bundle) or not os.path.isdir(get_worktree_bundle_folder(bundle)):
         raise ValueError(f"no bundle folder for {bundle}")
     folder = get_worktree_bundle_folder(bundle)
