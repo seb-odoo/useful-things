@@ -47,9 +47,11 @@ size and the place of the window, and the height of the queue under its handle, 
 agent-list.json, beside the state of the daemon.
 
 These parts are Agents, which another window can show with rows of its own under each agent (a
-Child each) and rows of its own at the end. When host-ctl is on this machine, a start opens the
-window of hok (hokwin.py), which shows them with the requests of each agent under its row; this
-window opens alone when hok ends with an error within START seconds. There, the 🔑 hok button
+Child each) and rows of its own at the end. When DECK_WINDOW (~/.config/odoo-dev/config.env)
+names the deck-window of deck, a start opens deck, the page of the agents and the requests;
+else, when host-ctl is on this machine, the window of hok (hokwin.py), which shows them with the
+requests of each agent under its row; this window opens alone when both end with an error within
+START seconds. There, the 🔑 hok button
 before the marks keeps the agents with a request under them and the groups of requests, besides
 the rows of the marks pressed, and counts those requests. The kinds pressed keep the groups of
 their kind only, as they do the agents.
@@ -93,7 +95,7 @@ from agents import (  # noqa: E402
     read_text,
 )
 from commands import clean_bundle_name, get_worktree_bundle_folder  # noqa: E402
-from config import HOST_FOLDER, REPO_ROOT  # noqa: E402
+from config import DECK_WINDOW, HOST_FOLDER, REPO_ROOT  # noqa: E402
 
 AGENTS_CHECK = 2
 APPEARANCE = ("org.freedesktop.appearance", "color-scheme")
@@ -637,18 +639,24 @@ def get_all(rows):
         yield from get_all(row.iterchildren())
 
 
-def open_hok(args=()):
-    """Start the window of hok, which shows the agents with the requests of each: whether it
-    runs, or brought up the one open. False when host-ctl is not on this machine, or when hok ends
-    with an error within START seconds."""
-    if not HOK.is_file():
-        return False
-    command = [sys.executable, str(HOK), *args]
+def open_window(command):
+    """Start command, a window that comes up or brings up the one open: whether it runs, or
+    brought one up. False when it ends with an error within START seconds."""
     started = subprocess.Popen(command, start_new_session=True, stdin=subprocess.DEVNULL)
     try:
         return started.wait(START) == 0
     except subprocess.TimeoutExpired:
         return True
+
+
+def open_hok(args=()):
+    """Start the window of deck when DECK_WINDOW names its deck-window, else the window of hok,
+    each of which shows the agents with the requests of each: whether one runs, or brought up the
+    one open. False when neither is on this machine, or each ends with an error at once."""
+    deck = pathlib.Path(DECK_WINDOW) if DECK_WINDOW else None
+    if deck and deck.is_file() and open_window([str(deck), *args]):
+        return True
+    return HOK.is_file() and open_window([sys.executable, str(HOK), *args])
 
 
 def follow(seconds, read, show):

@@ -533,6 +533,22 @@ def check_tree(agent_list):
                 agent_list.HOK.write_text(script)
             if (found := agent_list.open_hok()) != expected:
                 failures.append(f"hok that runs {script!r}: {found!r}, expected {expected!r}")
+        agent_list.HOK.write_text("")
+        agent_list.DECK_WINDOW = str(pathlib.Path(root, "deck-window"))
+        for deck, expected in (("exit 0", ["deck"]), ("exit 1", ["deck", "hok"])):
+            started = []
+            pathlib.Path(agent_list.DECK_WINDOW).write_text(f"#!/bin/sh\n{deck}\n")
+            pathlib.Path(agent_list.DECK_WINDOW).chmod(0o755)
+            opening = agent_list.open_window
+            agent_list.open_window = lambda command, opening=opening, started=started: (
+                started.append("deck" if command[0] == agent_list.DECK_WINDOW else "hok")
+                or opening(command)
+            )
+            agent_list.open_hok()
+            agent_list.open_window = opening
+            if started != expected:
+                failures.append(f"deck-window that runs {deck!r} opened {started}")
+        agent_list.DECK_WINDOW = None
     agent_list.HOK, agent_list.START, agent_list.subprocess = kept
     return failures
 
