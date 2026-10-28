@@ -239,9 +239,9 @@ necessary. but if we have a good setup, full remote should offer the same possib
   login and the tunnel. A job lost on the worker (a reboot) is queued again on its session, and
   goes on from its tree there. A work tree that cannot come back (the worktree changed here
   meanwhile) stays in `.agent/remote-back` with the reason in `.agent/remote-conflict`, and the
-  bundle's next task runs here. While a remote agent lives and the main login expires within 4
-  minutes, a one-shot claude in a container that shares it renews it: at night no claude here
-  may. The journal says `BUNDLE: its agent started on NAME` and `BUNDLE: its agent on NAME
+  bundle's next task runs here. While a remote agent lives or a bundle container runs, and the
+  main login expires within 4 minutes, a one-shot claude in a container that shares it renews
+  it: at night no claude here may, and a bundle has a dummy login (`python3 test_queue.py`). The journal says `BUNDLE: its agent started on NAME` and `BUNDLE: its agent on NAME
   ended (WHY)`.
 - `agent-terminal.py` of a remote bundle attaches to its claude (`standin.py attach`) and writes
   no `.agent/terminal`: it takes no slot, and closing it leaves the agent running there. A link

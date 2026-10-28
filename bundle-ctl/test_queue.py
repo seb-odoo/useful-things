@@ -1125,6 +1125,21 @@ def check_ramp(root):
     return [] if found == 1 else [f"ramp: {found} agents counted, expected 1"], 1
 
 
+def check_renew(root):
+    """The main login is renewed while a bundle container runs, with no remote agent."""
+    prepare(root, {"open": {"session": "s\n", "task.md": TASK, "window": ""}}, 8)
+    renewed = []
+    renew = daemon.remote_agent.renew_login_soon
+    daemon.remote_agent.renew_login_soon = renewed.append
+    try:
+        daemon.keep_remote_agents()
+    finally:
+        daemon.remote_agent.renew_login_soon = renew
+    if renewed != [root / "master" / "open"]:
+        return [f"renew: {renewed}"], 1
+    return [], 1
+
+
 def main():
     failures = []
     for bundles, launched, queue, *options in CASES:
@@ -1154,6 +1169,7 @@ def main():
         check_second_task,
         check_hand_over,
         check_ramp,
+        check_renew,
     ):
         with tempfile.TemporaryDirectory() as root:
             failed, count = check(pathlib.Path(root))

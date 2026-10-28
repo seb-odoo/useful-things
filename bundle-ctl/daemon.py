@@ -1548,12 +1548,15 @@ def start_remote(log, bundle, worker):
 
 def keep_remote_agents():
     """Each remote agent: its tunnel up, its end once its job ended, and its job ended once it
-    gave its verdict FREE_AFTER ago, as a terminal closes here.
+    gave its verdict FREE_AFTER ago, as a terminal closes here. The main login is renewed while
+    a remote agent lives or a bundle container runs: neither can renew it.
     """
     root = pathlib.Path(get_worktree_container_folder())
     remotes = sorted(root.glob("*/*/.agent/remote.json"))
-    if remotes:
-        remote_agent.renew_login_soon(remotes[0].parent.parent)
+    users = [found.parent.parent for found in remotes]
+    users = users or sorted(map(pathlib.Path, get_open_windows()))
+    if users:
+        remote_agent.renew_login_soon(users[0])
     for found in remotes:
         folder = found.parent.parent
         bundle = folder.name
