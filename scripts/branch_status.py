@@ -61,6 +61,8 @@ BEHIND_STYLES = ((501, "red"), (150, "yellow"), (0, "default"))
 CI_RUNNING = "[dim]ci running[/dim]"
 DELEGATE = re.compile(r"@robodoo\b.*\bdelegate[+=]")
 FW_BOT = "fw-bot"
+# A bundle writes the .git/config of these repos: git runs none of the programs it may name there.
+GIT = ("git", "-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null", "-c", "core.pager=cat")
 GROUPS = {
     "open": "Running",
     "me": "Waits on me",
@@ -100,7 +102,7 @@ REVIEW_TAGS = {"APPROVED": "approved", "CHANGES_REQUESTED": "[red]changes[/red]"
 
 def git(repo, *args):
     res = subprocess.run(
-        ["git", *args],
+        [*GIT, *args],
         capture_output=True,
         check=False,
         cwd=get_repo_folder(repo),
@@ -285,7 +287,7 @@ def format_push(push):
 def has_conflict(repo, branch, base_ref, write_tree):
     if write_tree:
         res = subprocess.run(
-            ["git", "merge-tree", "--write-tree", "--name-only", base_ref, branch],
+            [*GIT, "merge-tree", "--write-tree", "--name-only", base_ref, branch],
             capture_output=True,
             check=False,
             cwd=get_repo_folder(repo),
@@ -653,7 +655,7 @@ def delete_merged_branch(repo, branch, pr):
     remote = get_remote_dev_repo(repo)
     res = subprocess.run(
         [
-            "git",
+            *GIT,
             "push",
             f"--force-with-lease=refs/heads/{branch}:{pr['head']}",
             remote,

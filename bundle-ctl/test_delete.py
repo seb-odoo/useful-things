@@ -860,9 +860,37 @@ def check_close(root):
     return [name for name, passed in checks if not passed], len(checks)
 
 
+def check_git_config(root):
+    """The git of the daemon runs none of the programs a bundle can name in the .git/config of a
+    repo: here a core.fsmonitor and a hook that leave a mark, on the status before a deletion."""
+    repo, mark = root / "odoo", root / "mark"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    (repo / "file").write_text("x\n")
+    git(repo, "add", "file")
+    program = root / "program"
+    program.write_text(f'#!/bin/sh\necho "$0 $*" >>{mark}\n')
+    program.chmod(0o755)
+    git(repo, "config", "core.fsmonitor", str(program))
+    (repo / ".git" / "hooks" / "post-index-change").symlink_to(program)
+    (repo / "file").touch()
+    daemon.get_repos = lambda: ["odoo"]
+    daemon.get_worktree_bundle_repo_folder = lambda bundle, name: str(root / name)
+    try:
+        daemon.check_uncommitted("b")
+    except daemon.Refused:
+        pass
+    if mark.exists():
+        return [f"the status ran {mark.read_text()!r}"], 1
+    return [], 1
+
+
 def main():
     with tempfile.TemporaryDirectory() as root:
-        failures, total = check(pathlib.Path(root))
+        failures, total = check_git_config(pathlib.Path(root))
+    with tempfile.TemporaryDirectory() as root:
+        more, count = check(pathlib.Path(root))
+        failures, total = failures + more, total + count
     with tempfile.TemporaryDirectory() as root:
         more, count = check_reviews(pathlib.Path(root))
         failures, total = failures + more, total + count

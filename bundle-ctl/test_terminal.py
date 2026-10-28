@@ -516,8 +516,46 @@ def check_ops_cut(case):
     case.check("quitting claude ends it", wait(case.terminal.has_ended))
 
 
+def check_takeover_container():
+    """A terminal takes the session over in the container the label of the bundle names: the
+    bundle writes .agent/container, here with another container in it."""
+    spec = importlib.util.spec_from_file_location("agent_terminal", HERE / "agent-terminal.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.get_bundle_container = lambda bundle: "c1"
+    with tempfile.TemporaryDirectory() as folder:
+        root = pathlib.Path(folder)
+        agent = root / "b1" / ".agent"
+        agent.mkdir(parents=True)
+        (root / "bin").mkdir()
+        (root / "bin" / "podman").write_text(PODMAN)
+        (root / "bin" / "podman").chmod(0o755)
+        held = "import os, sys, time\nwhile not os.path.exists(sys.argv[1]): time.sleep(0.05)"
+        holder = subprocess.Popen([sys.executable, "-c", held, str(agent / "handoff"), "b1"])
+        (agent / "terminal").write_text(f"{holder.pid}\n")
+        (agent / "container").write_text("other\n")
+        env = {"AGENT": str(agent), "LOG": str(root / "log")}
+        env["PATH"] = f"{root / 'bin'}:{os.environ['PATH']}"
+        saved = {name: os.environ.get(name) for name in env}
+        os.environ.update(env)
+        try:
+            container, _cut = module.take_over(agent, "b1")
+        finally:
+            holder.kill()
+            for name, value in saved.items():
+                if value is None:
+                    os.environ.pop(name)
+                else:
+                    os.environ[name] = value
+        log = (root / "log").read_text().splitlines()
+    found = container, [line.split()[3] for line in log if line.startswith("exec")]
+    if found != ("c1", ["c1"]):
+        return [f"takeover container: {found}, expected ('c1', ['c1'])"], 1
+    return [], 1
+
+
 def main():
-    failures, total = [], 0
+    failures, total = check_takeover_container()
     tabs = {
         check_from_window: CUT,
         check_from_idle_window: ENDED,

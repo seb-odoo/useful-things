@@ -83,9 +83,9 @@ patch `enable.sh` instead: it is tracked upstream (`odoo/addons/web/tooling/enab
 patch is gone in the next worktree. The fix of a tooling file of Odoo belongs in these scripts.
 
 `bctl node-modules` builds the tree of the `package.json` of the web tooling of a base's branch,
-when the store has none: npm installs that file in a box with the network (`HOST_BOX`), in a folder
-of its own that then goes in the store under its key. A tree never changes once there, and a
-bundle linked to its key loads it at once, even in a container that runs. A bundle asks it for its
+when the store has none: npm installs that file in a box with the network (`HOST_BOX`, refused
+without it), in a folder of its own that then goes in the store under its key. A tree never
+changes once there, and a bundle linked to its key loads it at once, even in a container that runs. A bundle asks it for its
 own base and waits for Seb's yes, which `hok` shows with the change from the `package.json` of the
 tree it links; the host asks it at once. The daemon also asks it itself, every minute, for each
 base whose odoo head moved since it last looked and whose `package.json` has no tree: the bundles
@@ -113,8 +113,9 @@ a plain `git push`, which creates it on the dev remote and tracks it there
 Runs web tooling setup, writes `.made`, and opens the bundle in VS Code. `.made` comes last: a
 bundle cut before it (a restart of bundle-ctl kills its jobs) is half-made, and the same command
 again finishes it.
-The setup script (`enable.sh`) comes from the branch: with `HOST_BOX` in `config.env` it runs boxed,
-with no network.
+The setup script (`enable.sh`) comes from the branch: it runs in `HOST_BOX` of `config.env`, with
+no network, and a create or a fetch stops before it when `HOST_BOX` is not set
+(`test_optional_repos.py`).
 
 ```bash
 $ python scripts/create_bundle.py master test

@@ -40,10 +40,15 @@ def prepare(root):
             git(root, "init", "--quiet", "--bare", str(bare))
             git(folder, "remote", "add", remote, str(bare))
         git(folder, "push", "--quiet", remote_by_repo[repo], "master")
+    box = root / "box"
+    box.write_text('#!/bin/sh\nwhile [ "$1" != -- ]; do shift; done\nshift\nexec "$@"\n')
+    box.chmod(0o755)
+    (root / "config" / "odoo-dev").mkdir(parents=True)
+    (root / "config" / "odoo-dev" / "config.env").write_text(f"HOST_BOX={box}\n")
     return dict(
         os.environ,
         BUNDLE_SUFFIX="--me",
-        HOST_BOX="",
+        XDG_CONFIG_HOME=str(root / "config"),
         OWL_DEV_REMOTE="origin",
         REPO_ROOT=str(root / "repo"),
         SHARE_ROOT=str(root / "share"),
@@ -124,6 +129,18 @@ def check(root):
         ends.append((code, made.exists()))
     checks.append(("a create killed in enable.sh leaves no .made, and the same create finishes it",
                    ends == [(-15, False), (0, True)]))
+    config = root / "config" / "odoo-dev" / "config.env"
+    boxed = config.read_text()
+    config.write_text("")
+    (odoo / "addons" / "web" / "tooling" / "enable.sh").write_text(f"touch {root / 'enabled'}\n")
+    git(odoo, "commit", "--quiet", "--all", "-m", "enable.sh")
+    git(odoo, "push", "--quiet", "odoo", "master")
+    code, out = run(env, "create_bundle.py", "master", "g", "--no-push", "--no-open",
+                    "--branch-repo", "odoo")
+    config.write_text(boxed)
+    checks.append(("with no HOST_BOX, the create stops before enable.sh",
+                   (bool(code), "no HOST_BOX" in out, (root / "enabled").exists())
+                   == (True, True, False)))
     for bundle, folder in (("master-d--me", None), ("master-e--me", root / "src" / "master" / "master-e--me")):
         if folder:
             folder.mkdir()

@@ -68,6 +68,7 @@ from agents import (  # noqa: E402
     get_transcript,
     has_window,
     read_text,
+    write_text,
 )
 from commands import (  # noqa: E402
     drop_stale_containers,
@@ -521,7 +522,8 @@ def take_over(agent, bundle):
 
     if not is_held():
         return None, False
-    container = read_text(agent / "container")
+    # The bundle writes .agent/container: only whether the file exists is used, never its value.
+    container = (agent / "container").exists() and get_bundle_container(bundle)
     if not container:
         raise Failure("its agent starts in another terminal")
     why = os.environ.get("BUNDLE_CTL_TAKEOVER") or "taking the session over from its other terminal"
@@ -552,7 +554,7 @@ def leave_window(agent, bundle):
     if not container or not has_window(container):
         return None, False
     print(f"{bundle}: waiting for its VS Code window to close", flush=True)
-    (agent / "close-window").touch()
+    write_text(agent / "close-window", "")
     deadline = time.monotonic() + WINDOW_WAIT
     try:
         while container := get_bundle_container(bundle):
@@ -567,7 +569,7 @@ def leave_window(agent, bundle):
     (agent / "tab-opened").unlink(missing_ok=True)
     mode, cut = get_resume(TRANSCRIPTS / f"{read_text(agent / 'session')}.jsonl")
     if mode:
-        (agent / "mode").write_text(mode)
+        write_text(agent / "mode", mode)
     return container, cut
 
 
@@ -670,7 +672,7 @@ def main():
         (agent / name).unlink(missing_ok=True)
     ending = session = None
     handed = hung_up = taken_over = False
-    (agent / "terminal").write_text(f"{os.getpid()}\n")
+    write_text(agent / "terminal", f"{os.getpid()}\n")
     try:
         if not container:
             container, window_cut = leave_window(agent, bundle)
@@ -684,10 +686,10 @@ def main():
         return
     try:
         session = read_text(agent / "session") or str(uuid.uuid4())
-        (agent / "session").write_text(f"{session}\n")
+        write_text(agent / "session", f"{session}\n")
         container = container or up(get_worktree_bundle_folder(bundle))
         copy_gitconfig(container)
-        (agent / "container").write_text(f"{container}\n")
+        write_text(agent / "container", f"{container}\n")
         code = run_tty(
             ["podman", "exec", "--interactive", "--tty", "--detach-keys=", "--user", USER]
             + ["--workdir", "/workspace", "--env", f"TERM={os.environ.get('TERM', 'xterm')}"]
@@ -702,8 +704,8 @@ def main():
         raise
     except Failure as error:
         ending = str(error)
-        (agent / "result.md").write_text(f"{ending}\n")
-        (agent / "done").write_text("failed\n")
+        write_text(agent / "result.md", f"{ending}\n")
+        write_text(agent / "done", "failed\n")
     finally:
         container = container or get_bundle_container(bundle)
         window = bool(container) and has_window(container)

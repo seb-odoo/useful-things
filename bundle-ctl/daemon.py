@@ -27,6 +27,7 @@ import shutil
 import signal
 import socket
 import socketserver
+import stat
 import struct
 import subprocess
 import sys
@@ -42,7 +43,9 @@ SCRIPTS = HERE.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 from agents import (  # noqa: E402
+    EFFORTS,
     LAUNCH_GRACE,
+    MODELS,
     OPS,
     PROJECTS,
     SESSION_ID,
@@ -62,8 +65,10 @@ from agents import (  # noqa: E402
     is_agent_running,
     read_state,
     read_text,
+    write_text,
 )
 from branch_status import (  # noqa: E402
+    GIT,
     PR_URL,
     get_github_repo,
     get_local_branches,
@@ -156,11 +161,10 @@ DISK_WARN = float(
     os.environ.get("BUNDLE_CTL_DISK_WARN_GB") or CONFIG.get("BUNDLE_CTL_DISK_WARN_GB") or 60,
 )
 DISK_WARNED = STATE / "disk-warned"
-EFFORTS = ("low", "medium", "high", "xhigh")
 FREE_AFTER = 5 * 60
 GITHUB_ASK = 600
 GITHUB_MUX = pathlib.Path.home() / ".local" / "state" / "ssh-github-mux"
-GITHUB_OWNER = re.compile(r"[A-Za-z0-9-]{1,39}")
+GITHUB_OWNER = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}")
 GO_ON = "Continue from where you left off."
 HELD = load_held()
 HELD_DIR = STATE / "held"
@@ -179,7 +183,6 @@ MAX_PRIORITY = 100
 MAX_RELAUNCHES = 3
 MAX_TASK = 32 * 1024
 MAX_WIDTH = 400
-MODELS = ("haiku", "opus", "sonnet")
 NAME = re.compile(r"[a-z0-9](?:[a-z0-9.]|-(?!-)){0,79}")
 NOT_BUILT = (
     "Nothing of this bundle is checked out yet: /workspace holds no worktree. The base repos are"
@@ -803,7 +806,7 @@ def stop_after_turn(bundle, session, why):
     cut."""
     pause = get_agent_folder(bundle) / "pause"
     deadline = time.time() + PAUSE_WAIT
-    pause.write_text(f"{deadline}\n")
+    write_text(pause, f"{deadline}\n")
     try:
         busy = get_session_status(bundle, session) == "busy"
         while busy and get_window_pids(bundle) and time.time() < deadline:
@@ -1079,7 +1082,7 @@ def get_task_priority(bundle):
     if bundle == HOST:
         return 0
     text = read_text(get_agent_folder(bundle) / "priority") or "0"
-    return int(text) if re.fullmatch(r"-?\d+", text) else 0
+    return max(-MAX_PRIORITY, min(int(text), MAX_PRIORITY))
 
 
 def get_next_time(text):
@@ -1213,30 +1216,56 @@ def is_deleting(bundle):
 
 def write_task(item, keep=()):
     folder = get_agent_folder(item["bundle"])
+    if folder.is_symlink():
+        folder.unlink()
     if folder.exists() and (
         (folder / "session").exists() or read_text(folder / "task.md") != item["task"].strip()
     ):
-        history = folder / "history" / time.strftime("%Y%m%d-%H%M%S")
-        history.mkdir(parents=True)
         kept = {"history", "where", *keep, *(("session",) if item.get("resume") else ())}
-        for path in folder.iterdir():
-            if path.name not in kept:
-                path.rename(history / path.name)
+        move_to_history(folder, kept)
     folder.mkdir(exist_ok=True)
-    (folder / "parent").write_text(f"{item['parent']}\n")
+    write_text(folder / "parent", f"{item['parent']}\n")
     if "queued" in item:
-        (folder / "queued").write_text(f"{item['queued']}\n")
-    (folder / "priority").write_text(f"{item.get('priority', 0)}\n")
-    (folder / "task.md").write_text(item["task"])
+        write_text(folder / "queued", f"{item['queued']}\n")
+    write_text(folder / "priority", f"{item.get('priority', 0)}\n")
+    write_text(folder / "task.md", item["task"])
     if item.get("session"):
-        (folder / "session").write_text(f"{item['session']}\n")
+        write_text(folder / "session", f"{item['session']}\n")
     for name in ("effort", "model"):
         if item.get(name):
-            (folder / name).write_text(f"{item[name]}\n")
+            write_text(folder / name, f"{item[name]}\n")
         else:
             (folder / name).unlink(missing_ok=True)
     if item.get("where") in ("local", "worker"):
-        (folder / "where").write_text(f"{item['where']}\n")
+        write_text(folder / "where", f"{item['where']}\n")
+
+
+def move_to_history(folder, kept):
+    """Move the files of an `.agent/` folder but `kept` to a new folder of its history, through
+    descriptors of folders that are no link: the bundle writes all of them, and a `history` that
+    is no folder is replaced."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    agent = os.open(folder, flags)
+    try:
+        with contextlib.suppress(FileExistsError):
+            os.mkdir("history", dir_fd=agent)
+        if not stat.S_ISDIR(os.stat("history", dir_fd=agent, follow_symlinks=False).st_mode):
+            os.unlink("history", dir_fd=agent)
+            os.mkdir("history", dir_fd=agent)
+        history = os.open("history", flags, dir_fd=agent)
+        try:
+            os.mkdir(stamp, dir_fd=history)
+            moved = os.open(stamp, flags, dir_fd=history)
+        finally:
+            os.close(history)
+        try:
+            for name in set(os.listdir(agent)) - set(kept):
+                os.rename(name, name, src_dir_fd=agent, dst_dir_fd=moved)
+        finally:
+            os.close(moved)
+    finally:
+        os.close(agent)
 
 
 def launch_queued():
@@ -1493,7 +1522,7 @@ def start_remote(log, bundle, worker):
     """The agent of the task on WORKER, else here as any task, as it started nowhere."""
     agent = get_agent_folder(bundle)
     session = read_text(agent / "session") or str(uuid.uuid4())
-    (agent / "session").write_text(f"{session}\n")
+    write_text(agent / "session", f"{session}\n")
     transcript = pathlib.Path("~/.claude/projects/-workspace").expanduser() / f"{session}.jsonl"
     folder = pathlib.Path(get_worktree_bundle_folder(bundle))
     try:
@@ -1607,7 +1636,7 @@ def local_branches(bundle):
         repo
         for repo in get_repos()
         if subprocess.run(
-            ["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{bundle}"],
+            [*GIT, "rev-parse", "--verify", "--quiet", f"refs/heads/{bundle}"],
             capture_output=True,
             check=False,
             cwd=get_repo_folder(repo),
@@ -1624,7 +1653,7 @@ def is_made(folder):
 def check_unpushed(bundle, script):
     for repo in local_branches(bundle):
         unpushed = subprocess.run(
-            ["git", "log", "--oneline", f"refs/heads/{bundle}", "--not", "--remotes"],
+            [*GIT, "log", "--oneline", f"refs/heads/{bundle}", "--not", "--remotes"],
             capture_output=True,
             check=False,
             cwd=get_repo_folder(repo),
@@ -1655,7 +1684,7 @@ def get_cherry(bundle, repo):
     """
     base = get_remote_ref(get_base_for_repo(get_base_from_bundle_name(bundle), repo), repo)
     lines = subprocess.run(
-        ["git", "cherry", base, f"refs/heads/{bundle}"],
+        [*GIT, "cherry", base, f"refs/heads/{bundle}"],
         capture_output=True,
         check=False,
         cwd=get_repo_folder(repo),
@@ -1672,7 +1701,7 @@ def get_others_commits(bundle, repo, drop=()):
     commits = [
         line.split()
         for line in subprocess.run(
-            ["git", "log", "--format=%H %ce", f"refs/heads/{bundle}", "--not", "--remotes"],
+            [*GIT, "log", "--format=%H %ce", f"refs/heads/{bundle}", "--not", "--remotes"],
             capture_output=True,
             check=False,
             cwd=folder,
@@ -1680,7 +1709,7 @@ def get_others_commits(bundle, repo, drop=()):
         ).stdout.splitlines()
     ]
     me = subprocess.run(
-        ["git", "config", "user.email"],
+        [*GIT, "config", "user.email"],
         capture_output=True,
         check=False,
         cwd=folder,
@@ -1698,7 +1727,7 @@ def check_uncommitted(bundle):
     for repo in get_repos():
         worktree = get_worktree_bundle_repo_folder(bundle, repo)
         if os.path.isdir(worktree) and subprocess.run(
-            ["git", "status", "--porcelain"],
+            [*GIT, "status", "--porcelain"],
             capture_output=True,
             check=False,
             cwd=worktree,
@@ -1716,7 +1745,7 @@ def get_dropped(bundle, commits):
     dropped, left = {}, set(commits)
     for repo in local_branches(bundle):
         for line in subprocess.run(
-            ["git", "log", "--format=%H %s", f"refs/heads/{bundle}", "--not", "--remotes"],
+            [*GIT, "log", "--format=%H %s", f"refs/heads/{bundle}", "--not", "--remotes"],
             capture_output=True,
             check=False,
             cwd=get_repo_folder(repo),
@@ -1740,7 +1769,7 @@ def check_deletion(bundle, drop=()):
     lines, force = {}, False
     for repo in local_branches(bundle):
         pushed = subprocess.run(
-            ["git", "rev-parse", "--verify", "--quiet", get_remote_dev_ref(bundle, repo)],
+            [*GIT, "rev-parse", "--verify", "--quiet", get_remote_dev_ref(bundle, repo)],
             capture_output=True,
             check=False,
             cwd=get_repo_folder(repo),
@@ -1840,8 +1869,7 @@ def delete(caller, query, body):
             " delete_bundle deletes it"
         ),
     }
-    held = f"{HELD_LETTER}{HELD.add(HELD_DIR, item)}"
-    return 200, {"bundle": bundle, "held": held}
+    return 200, {"bundle": bundle, "held": hold(item)}
 
 
 def get_report(bundle):
@@ -2038,7 +2066,7 @@ def close_freed(bundle):
     """Close the agent window of a bundle as Seb would, its Firefox tab groups aside: its `pause`
     keeps them, as they hold the pages its report asks him to open."""
     pause = get_agent_folder(bundle) / "pause"
-    pause.write_text(f"{time.time() + WINDOW_CLOSE_WAIT}\n")
+    write_text(pause, f"{time.time() + WINDOW_CLOSE_WAIT}\n")
     try:
         close_window(bundle)
         deadline = time.monotonic() + WINDOW_CLOSE_WAIT
@@ -2089,6 +2117,19 @@ def hand_to_terminal(item):
     print(f"{item['bundle']}: the task from {item['parent']} goes to its terminal", flush=True)
 
 
+def clean(text):
+    """Text of a caller as a card shows it: an escape sequence could redraw the card."""
+    return "".join(char if char.isprintable() else f"\\x{ord(char):02x}" for char in text)
+
+
+def hold(item):
+    """Hold a request for Seb's yes in hok, the text of its caller cleaned: the id hok lists."""
+    item = {**item, "lines": [clean(line) for line in item["lines"]]}
+    if "reason" in item:
+        item["reason"] = clean(item["reason"])
+    return f"{HELD_LETTER}{HELD.add(HELD_DIR, item)}"
+
+
 def hold_ops_task(caller, task):
     """Hold the task a bundle sends to a new ops agent for Seb's yes in hok. The same task asked
     again takes back the request that waits."""
@@ -2102,7 +2143,7 @@ def hold_ops_task(caller, task):
         "title": "send a task to a new ops agent",
         "yes": "an ops agent window opens on the task below, with hctl and the drafts",
     }
-    return 200, {"bundle": "ops", "held": f"{HELD_LETTER}{HELD.add(HELD_DIR, item)}"}
+    return 200, {"bundle": "ops", "held": hold(item)}
 
 
 def may_queue(caller, bundle):
@@ -2129,7 +2170,7 @@ def hold_task(caller, bundle, body, build=None):
         "title": f"send a task to the bundle {bundle}",
         "yes": f"the task below is queued for {bundle}, whose agent runs it and pushes its branch",
     }
-    return 200, {"bundle": bundle, "held": f"{HELD_LETTER}{HELD.add(HELD_DIR, item)}"}
+    return 200, {"bundle": bundle, "held": hold(item)}
 
 
 def find_cut():
@@ -2252,7 +2293,7 @@ def hold_cut(caller, body):
             " its agent terminal through the queue, on the prompt below"
         ),
     }
-    answer["held"] = f"{HELD_LETTER}{HELD.add(HELD_DIR, item)}"
+    answer["held"] = hold(item)
     return 200, answer
 
 
@@ -2419,7 +2460,7 @@ def close_deleted():
             continue
         elif has_window(container):
             get_agent_folder(bundle).mkdir(exist_ok=True)
-            (get_agent_folder(bundle) / "close-window").touch()
+            write_text(get_agent_folder(bundle) / "close-window", "")
         else:
             stop_container(container)
 
@@ -2766,7 +2807,7 @@ def read_package(base):
     """The package.json of the web tooling of odoo on the base branch."""
     ref = f"{get_remote_ref(base, 'odoo')}:addons/web/tooling/_package.json"
     res = subprocess.run(
-        ["git", "-C", get_repo_folder("odoo"), "show", ref],
+        [*GIT, "-C", get_repo_folder("odoo"), "show", ref],
         capture_output=True,
         check=False,
         text=True,
@@ -2782,19 +2823,21 @@ def node_modules_tree(package):
 
 
 def refresh_node_modules(log, base, package):
-    """npm installs `package` in a folder of its own, boxed and with the network when HOST_BOX is
-    set, which then goes in the store under the key of `package`. A tree in the store never
-    changes: a bundle linked to it loads it at once, and the others keep theirs."""
+    """npm installs `package` in a folder of its own, in HOST_BOX with the network, which then
+    goes in the store under the key of `package`. A tree in the store never changes: a bundle
+    linked to it loads it at once, and the others keep theirs. Refused with no HOST_BOX: npm runs
+    the scripts of the packages."""
     tree = node_modules_tree(package)
     if (tree / "node_modules" / ".bin").is_dir():
         return {"base": base, "tree": tree.name}
+    if not HOST_BOX:
+        raise Refused("no HOST_BOX in config.env: npm would run the package scripts unboxed")
     tree.parent.mkdir(exist_ok=True)
     fresh = pathlib.Path(tempfile.mkdtemp(prefix=".node_modules.", dir=WORKTREE_CONTAINER))
     try:
         (fresh / "package.json").write_text(package)
-        install = ["npm", "install", "--no-audit", "--no-fund"]
-        if HOST_BOX:
-            install = [HOST_BOX, "--net", "--dir", str(fresh), "--", *install]
+        install = [HOST_BOX, "--net", "--dir", str(fresh), "--"]
+        install += ["npm", "install", "--no-audit", "--no-fund"]
         log.write(f"$ {' '.join(install)}\n")
         log.flush()
         res = subprocess.run(
@@ -2879,7 +2922,7 @@ def node_modules(caller, query, body):
             " the new node_modules at once"
         ),
     }
-    return 200, {"base": base, "held": f"{HELD_LETTER}{HELD.add(HELD_DIR, item)}"}
+    return 200, {"base": base, "held": hold(item)}
 
 
 def prepare_folder(bundle):
@@ -3009,8 +3052,8 @@ def open_bundle(caller, query, body):
             agent = get_agent_folder(bundle)
             if not (agent / "session").exists():
                 agent.mkdir(exist_ok=True)
-                (agent / "session").write_text(f"{uuid.uuid4()}\n")
-                (agent / "task.md").write_text("")
+                write_text(agent / "session", f"{uuid.uuid4()}\n")
+                write_text(agent / "task.md", "")
             open_terminal(log, bundle)
             return {"bundle": bundle}
 
@@ -3171,7 +3214,21 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = True
 
 
+def check_box():
+    """Refuse to serve when the git of PATH is not the one host-ctl renders, which runs git in
+    HOST_BOX for the bundle repos: a bundle writes their .git/config (host-ctl README)."""
+    git = shutil.which("git")
+    try:
+        with open(git, "rb") as file:
+            boxed = bool(HOST_BOX) and HOST_BOX.encode() in file.read(1 << 16)
+    except (OSError, TypeError):
+        boxed = False
+    if not boxed:
+        sys.exit(f"bundle-ctl: the git of PATH ({git}) does not run HOST_BOX ({HOST_BOX})")
+
+
 def main():
+    check_box()
     SOCKET.parent.mkdir(parents=True, exist_ok=True)
     SOCKET.unlink(missing_ok=True)
     os.umask(0o077)

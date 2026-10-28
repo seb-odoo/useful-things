@@ -444,7 +444,52 @@ def check_priority(root):
         ),
         ("the host gets 0", daemon.get_task_priority(daemon.HOST) == 0),
     ]
+    (root / "master" / "agent" / ".agent" / "priority").write_text("100000\n")
+    found = daemon.get_task_priority("agent")
+    checks.append(("one the bundle wrote stays in bounds", found == daemon.MAX_PRIORITY))
     return [f"priority: {name}" for name, passed in checks if not passed], len(checks)
+
+
+def check_label(root):
+    """The owner of a runbot label starts as a GitHub login does, never with a dash."""
+    check_disk = daemon.check_disk
+
+    def stop():
+        raise daemon.Refused("past the label")
+
+    daemon.check_disk = stop
+    try:
+        daemon.fetch(daemon.HOST, {}, {"name": "-x:master-y--seb"})
+    except (ValueError, daemon.Refused) as error:
+        found = str(error)
+    finally:
+        daemon.check_disk = check_disk
+    if found != "not a runbot label: -x:master-y--seb":
+        return [f"label: {found}"], 1
+    return [], 1
+
+
+def check_links(root):
+    """A new task follows no link the bundle left in its .agent folder: the files of the last task
+    go to a history folder of its own, and the new ones replace the links."""
+    outside = root / "outside"
+    outside.mkdir()
+    (outside / "file").write_text("kept\n")
+    prepare(root, {"linked": {"session": "s\n", "task.md": "old"}}, 8)
+    agent = root / "master" / "linked" / ".agent"
+    (agent / "history").symlink_to(outside)
+    daemon.write_task({"bundle": "linked", "parent": "host", "queued": QUEUED, "task": TASK})
+    (agent / "parent").unlink()
+    (agent / "parent").symlink_to(outside / "file")
+    daemon.write_task({"bundle": "linked", "parent": "host", "queued": QUEUED, "task": TASK})
+    history = agent / "history"
+    checks = [
+        ("nothing lands where a link goes", [path.name for path in outside.iterdir()] == ["file"]),
+        ("the file a link names is not written", (outside / "file").read_text() == "kept\n"),
+        ("the last task goes to its history", history.is_dir() and not history.is_symlink()),
+        ("a link becomes the file", (agent / "parent").read_text() == "host\n"),
+    ]
+    return [f"links: {name}" for name, passed in checks if not passed], len(checks)
 
 
 def check_second_task(root):
@@ -1066,6 +1111,8 @@ def main():
         check_build_cut,
         check_parked,
         check_priority,
+        check_links,
+        check_label,
         check_second_task,
         check_hand_over,
         check_ramp,

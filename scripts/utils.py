@@ -264,11 +264,13 @@ class UtilsRunner(Runner):
             f"npm_config_{key}"
             for key in ("dry_run=true", "offline=true", "audit=false", "fund=false")
         ]
-        enable = ["env", *npm, "bash", "./odoo/addons/web/tooling/enable.sh"]
-        if HOST_BOX:
-            # enable.sh and what npm runs come from the fetched branch: boxed, with no network.
-            folder = get_worktree_bundle_folder(bundle_name)
-            enable = [HOST_BOX, "--dir", folder, "--", *enable]
+        if not HOST_BOX:
+            raise RuntimeError(
+                "no HOST_BOX in config.env: enable.sh and npm of the branch would run unboxed"
+            )
+        # enable.sh and what npm runs come from the fetched branch: boxed, with no network.
+        enable = [HOST_BOX, "--dir", get_worktree_bundle_folder(bundle_name), "--", "env", *npm]
+        enable += ["bash", "./odoo/addons/web/tooling/enable.sh"]
         runner.run(enable, input="y\n" if has_enterprise else "n\n")
         try:
             with open(f"{odoo_wt}/addons/web/tooling/_package.json", "rb") as file:

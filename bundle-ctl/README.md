@@ -17,6 +17,13 @@ container, test runs first, so that they never take the whole host together (see
   work on these tools; any other container that is not a bundle gets 403. The stand-in of a
   remote agent carries the folder in `remote-runs.folder` and is its bundle too, but for `POST
   /run` and `/worker/`, refused (see Remote agents).
+- The `.agent/` folder sits in the bundle folder, which its container writes. The host takes a
+  value there (`session`, `terminal`, `parent`, `priority`, `queued`, `model`, `effort`, `where`)
+  only in its form, else as none, never follows a link there, and writes its files in place of
+  one. Its history goes through descriptors of folders that are no link. `python3
+  scripts/test_agent_values.py` and `python3 test_queue.py` have the cases.
+- The text of a caller in a hok card (its reason, a task, a report) shows a character that is not
+  printable as its escape, as `hok` does.
 - One journal line per request: `journalctl --user -u bundle-ctl -f`. Also `address <ip> <name>`
   for each container that starts (and each one running when the daemon starts), the bundle or the
   container name behind an address, which the gateway logs see alone.
@@ -26,7 +33,9 @@ container, test runs first, so that they never take the whole host together (see
 See the header of `bundle-ctl.service`. It runs with the odoo20 venv, which the scripts need. The
 unit sets its own PATH, `~/.local/bin` first, where host-ctl puts the git that boxes the bundle
 repos: a container writes their `.git`, and the jobs run git there (`daemon-git` in
-`host-ctl/test_escape.py`).
+`host-ctl/test_escape.py`). The daemon does not start when the git of its PATH does not run
+`HOST_BOX` of `config.env`, and its own git calls also turn off `core.fsmonitor`, the hooks and
+the pager. `python3 test_node_modules.py` and `python3 test_delete.py` have the cases.
 
 ## Verbs
 
@@ -770,11 +779,12 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
 `agent-terminal.py BUNDLE` started on a bundle whose run already began (`run.lock`) does not run
 the task again: it opens the session as it was, in its permission mode (`.agent/mode`) and with
 no prompt. When another terminal holds the session (the pid in `.agent/terminal` lives), it first
-takes the session over as a window does, with `client/agent-takeover.py` in the container that
-terminal recorded: that terminal closes, the container is kept, and a turn cut at a tool call
-goes on (`Continue from where you left off.`). It then removes `handoff` and `restarted`, which
-are for a tab. This is how an agent moves from one terminal to another without a new container
-or a new turn.
+takes the session over as a window does, with `client/agent-takeover.py` in the container of the
+bundle's label, once that terminal wrote `.agent/container` (its value is not read: the bundle
+writes it; `python3 test_terminal.py`): that terminal closes, the container is kept, and a turn
+cut at a tool call goes on (`Continue from where you left off.`). It then removes `handoff` and
+`restarted`, which are for a tab. This is how an agent moves from one terminal to another without
+a new container or a new turn.
 
 A VS Code window opened on the bundle (the folder icon of `gbs`, `ocode`) attaches to the same
 container and takes the session over, before or after its verdict: claude-autoopen sees
@@ -1030,9 +1040,9 @@ any other name, `max` included, and `client/agent-run.sh` runs on `opus` at `med
 `.agent/model` or `.agent/effort` holds anything else. `python3 test_options.py` runs each case.
 `--priority N` (-100 to 100) puts the task ahead of the ones with a lower priority; equal
 priorities leave in arrival order. With none, a task from the host gets 0, and one an agent queues
-the priority of the agent's own task, kept in `.agent/priority` (Seb, 2026-10-15: "same level as
-his, unless it thinks it should be higher"). `--after HH:MM` keeps the task in the queue until that
-time of the host comes, today or tomorrow, whatever its priority: the queue says it waits for `its
+the priority of the agent's own task, kept in `.agent/priority` and held to -100 to 100 as the
+bundle can write it (Seb, 2026-10-15: "same level as his, unless it thinks it should be
+higher"). `--after HH:MM` keeps the task in the queue until that time of the host comes, today or tomorrow, whatever its priority: the queue says it waits for `its
 time, HH:MM`, and the bundle of a review, queued, is not deleted meanwhile (Seb, 2026-10-15: close
 the review agents that wait for him in the evening, and have them check what came on their PR the
 next morning). `--paused` keeps it there until it is scheduled again: it waits for `a manual

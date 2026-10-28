@@ -3,20 +3,25 @@
 Read by the bundle-ctl daemon and by branch_status.py.
 """
 
+import errno
 import importlib.util
 import json
 import os
 import pathlib
 import re
+import stat
 import subprocess
 import time
 
-from commands import get_worktree_bundle_folder
+from commands import BUNDLE_NAME, get_worktree_bundle_folder
 from config import CLAUDE_CONFIG_CONTAINER, STATE_ROOT
 
+EFFORTS = ("low", "medium", "high", "xhigh")
 HANDLED_FOR = 24 * 3600
 IDLE_AFTER = 15 * 60
 LAUNCH_GRACE = 15 * 60
+MAX_VALUE = 128
+MODELS = ("haiku", "opus", "sonnet")
 OPS = "ops-"
 PROJECTS = pathlib.Path.home() / ".claude" / "projects"
 SESSION_ID = re.compile(r"[0-9a-f-]{36}")
@@ -24,15 +29,57 @@ SESSIONS = pathlib.Path.home() / ".claude" / "projects" / "-workspace"
 STATE = pathlib.Path(STATE_ROOT) / "bundle-ctl"
 STATE_FILE = STATE / "state.json"
 TAKEOVER = pathlib.Path(__file__).resolve().parent.parent / "bundle-ctl/client/agent-takeover.py"
+VALUE_FORMS = {
+    "effort": re.compile("|".join(EFFORTS)),
+    "model": re.compile("|".join(MODELS)),
+    "parent": BUNDLE_NAME,
+    "priority": re.compile(r"-?[0-9]{1,9}"),
+    "queued": re.compile(r"[0-9]{1,12}(?:\.[0-9]{1,20})?"),
+    "session": BUNDLE_NAME,
+    "terminal": re.compile(r"[0-9]{1,10}"),
+    "where": re.compile(r"auto|local|worker(?::[a-z][a-z0-9-]{0,39})?"),
+}
 
 title_by_session = {}
 
 
 def read_text(path):
+    """The text of a regular file, None when it cannot be read. The bundle writes its `.agent/`
+    folder: a link there is not followed, and a file of VALUE_FORMS gives None unless its value
+    has its form, as the host puts them in paths, commands and the queue."""
+    form = VALUE_FORMS.get(path.name)
     try:
-        return path.read_text().strip()
+        fd = open_unlinked(path, os.O_RDONLY)
     except OSError:
         return None
+    with open(fd, errors="replace") as file:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        text = file.read(MAX_VALUE if form else -1).strip()
+    return text if form is None or form.fullmatch(text) else None
+
+
+def write_text(path, text):
+    """Write a file of an `.agent/` folder, in place of a link the bundle left there."""
+    with open(open_unlinked(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC), "w") as file:
+        file.write(text)
+
+
+def open_unlinked(path, flags):
+    """The descriptor of `path` opened with `flags`, refused when its folder is a link. A link in
+    place of the file is refused too, or replaced when `flags` create it."""
+    flags |= os.O_NOFOLLOW | os.O_NONBLOCK
+    folder = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        try:
+            return os.open(path.name, flags, 0o644, dir_fd=folder)
+        except OSError as error:
+            if not flags & os.O_CREAT or error.errno != errno.ELOOP:
+                raise
+        os.unlink(path.name, dir_fd=folder)
+        return os.open(path.name, flags, 0o644, dir_fd=folder)
+    finally:
+        os.close(folder)
 
 
 def get_agent_folder(bundle):
