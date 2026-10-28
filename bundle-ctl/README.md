@@ -319,8 +319,11 @@ for `BUNDLE_CTL_REVIEW_CLOSED_MINUTES` since its container stopped (default 10, 
 `BUNDLE_CTL_REVIEW_IDLE_DAYS` when no container ever ran for it (default 2, Seb's choice on
 2026-10-13): no window open, no task queued or being built, and no file newer than that among its
 `.made`, its `.agent/` files, its Claude config (written at each window open and Claude start) and
-the reflog of its worktrees. The daemon looks each minute and runs `delete_bundle.py`, unless the
-bundle was used while the job waited for another one. `delete_bundle.py` keeps a bundle with
+the reflog of its worktrees. Nor while a hok request of it waits or a Firefox tab group of it is
+open (`tab_groups.py`): the Agent and VS Code buttons of that group need the bundle (Seb,
+2026-10-28, on a group his yes opened 80 minutes after its bare fw bundle was gone). The daemon
+looks each minute and runs `delete_bundle.py`, unless the bundle was used while the job waited
+for another one. `delete_bundle.py` keeps a bundle with
 uncommitted files or a commit no remote has; that one is tried again only after a new use. Commits of others no remote has (the older
 head of a PR its author rebased since) and commits whose change the base has go with `--force`,
 unless a file is not committed. `bctl fetch` brings a bundle back.

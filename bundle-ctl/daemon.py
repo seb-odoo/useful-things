@@ -2334,6 +2334,16 @@ def list_hok(caller, query, body):
     session = query.get("session", [""])[0]
     if caller == HOST and not session:
         raise ValueError("the host names the ops session: ?session=")
+    listed = read_hok_waiting()
+    if caller == HOST:
+        mine = [row for row in listed if (row["caller"], row["session"]) == ("ops", session)]
+    else:
+        mine = [row for row in listed if row["caller"] == caller]
+    return 200, {"requests": mine}
+
+
+def read_hok_waiting():
+    """`hok waiting` of host-ctl, read again after HOK_KEPT seconds."""
     with hok_lock:
         if time.monotonic() - hok_read["at"] > HOK_KEPT:
             done = subprocess.run(
@@ -2346,12 +2356,14 @@ def list_hok(caller, query, body):
             if done.returncode:
                 raise Refused(f"hok waiting exited with {done.returncode}: {done.stderr[-300:]}")
             hok_read.update(at=time.monotonic(), listed=json.loads(done.stdout))
-        listed = hok_read["listed"]
-    if caller == HOST:
-        mine = [row for row in listed if (row["caller"], row["session"]) == ("ops", session)]
-    else:
-        mine = [row for row in listed if row["caller"] == caller]
-    return 200, {"requests": mine}
+        return hok_read["listed"]
+
+
+def get_in_hand():
+    """The bundles Seb still has in hand: a hok request of the bundle waits, or a Firefox tab group
+    of it is open, whose Agent and VS Code buttons need the bundle."""
+    waiting = read_hok_waiting() if HOK_WAITING.is_file() else []
+    return {row["caller"] for row in waiting} | set(tab_groups.get_groups())
 
 
 hok_lock = threading.Lock()
@@ -2522,7 +2534,7 @@ def drop_idle_reviews():
     """Delete the bundles of the PRs of others that nobody used for REVIEW_CLOSED since their
     container stopped, or for REVIEW_IDLE when none ever ran: `bctl fetch` brings one back. One
     that holds work is kept until it is used again, but not one that only holds the older head of
-    a PR its author rebased since.
+    a PR its author rebased since. One Seb still has in hand is kept (get_in_hand).
     """
     closed = get_closed_windows()
     open_windows = get_open_windows()
@@ -2535,7 +2547,7 @@ def drop_idle_reviews():
         for job in jobs.values()
         if job["verb"].startswith("delete ") and job["state"] in ("waiting", "running")
     }
-    started = {}
+    started, in_hand = {}, None
     for folder in sorted(pathlib.Path(get_worktree_container_folder()).glob("*/*")):
         bundle = folder.name
         bare = is_bare(folder)
@@ -2553,6 +2565,10 @@ def drop_idle_reviews():
         since = get_unused_since(bundle, closed)
         idle = REVIEW_CLOSED if str(folder) in closed else REVIEW_IDLE
         if time.time() - since < idle or kept_reviews.get(bundle) == since:
+            continue
+        if in_hand is None:
+            in_hand = get_in_hand()
+        if bundle in in_hand:
             continue
 
         def work(log, bundle=bundle, since=since, bare=bare, parked=bundle in parked):

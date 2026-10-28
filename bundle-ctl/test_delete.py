@@ -571,6 +571,8 @@ def check_reviews(root):
         "master-closed-aku",
         "master-commit-aku",
         "master-fixed-aku",
+        "master-grouped-aku",
+        "master-held-aku",
         "master-kept-aku",
         "master-later-aku",
         "master-mine--seb",
@@ -643,6 +645,9 @@ def check_reviews(root):
     daemon.get_worktree_container_folder = lambda: str(root)
     daemon.read_state = lambda: {"building": world["building"], "queue": world["queue"]}
     daemon.run_script = run_script
+    daemon.HOK_WAITING = root / "odoo" / ".git" / "HEAD"
+    daemon.read_hok_waiting = lambda: [{"caller": "master-held-aku"}]
+    daemon.tab_groups.ask = lambda request: {"groups": [{"bundle": "master-grouped-aku"}]}
     checks = []
     daemon.drop_idle_reviews()
     wait_jobs()
@@ -650,6 +655,12 @@ def check_reviews(root):
         (
             "a bundle of others unused for 2 days goes, not one of Seb, open, queued or used since",
             {("master-kept-aku",), ("master-old-aku",)} <= set(calls),
+        ),
+    )
+    checks.append(
+        (
+            "nor one with a hok request waiting or a Firefox tab group open",
+            not {("master-grouped-aku",), ("master-held-aku",)} & set(calls),
         ),
     )
     checks.append(
