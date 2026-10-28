@@ -124,6 +124,7 @@ def main():
         expected = [[], [NAME, "--bundle"], [NAME, str(folder)], [NAME]]
         check("the name, one argument", calls, expected)
         check("no shell", (root / "shell-ran").exists(), False)
+        check("the folder of the agent, for its mount", (folder / ".agent").is_dir(), True)
         check("mount source", (root / "src" / ".node_modules").is_dir(), True)
         for repo in ("odoo", "enterprise"):
             path = folder / repo / "node_modules"
@@ -134,6 +135,10 @@ def main():
         check("odoo link kept", os.readlink(folder / "odoo" / "node_modules"), TARGET)
         check_npm(root, folder, check)
 
+        (folder / ".agent").rmdir()
+        (folder / ".agent").symlink_to(root / "other")
+        initialize(root, folder)
+        check("a link in its place is not mounted", (folder / ".agent").is_symlink(), False)
         (root / "other" / "node_modules").mkdir(parents=True)
         shutil.rmtree(folder / "odoo")
         (folder / "odoo").symlink_to(root / "other")

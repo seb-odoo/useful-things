@@ -70,6 +70,10 @@ def main():
     ):
         path.mkdir(parents=True, exist_ok=True)
     (pathlib.Path(values["WORKTREE_ROOT"]) / ".node_modules").mkdir(exist_ok=True)
+    agent = pathlib.Path(folder) / ".agent"
+    if agent.is_symlink():
+        agent.unlink()
+    agent.mkdir(exist_ok=True)
     link_node_modules(pathlib.Path(folder))
     subprocess.run([sys.executable, str(HERE / "warden-chrome.py")], check=False)
     for script, *args in (

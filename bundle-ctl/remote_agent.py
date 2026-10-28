@@ -55,6 +55,7 @@ renewed = [0]
 # Each mount of a bundle (devcontainer/base.jsonc) for a remote agent, its way there: a mount
 # added to the bundles without a line here fails test_remote_agent.py.
 MOUNTS = {
+    "/workspace/.agent": ("job", "its own, the laptop's stays with the laptop"),
     "@REPO_ROOT@/odoo/.git": ("standin", "the agent's commits come back here, git-gate reads them"),
     "@REPO_ROOT@/enterprise/.git": ("standin", "same"),
     "@REPO_ROOT@/design-themes/.git": ("standin", "same"),
@@ -80,7 +81,10 @@ MOUNTS = {
     "/home/vscode/.claude/hooks": ("send", "hooks"),
     "/home/vscode/.claude/output-styles": ("send", "output styles"),
     "/home/vscode/.claude/plugins": ("send", "plugins"),
-    "/home/vscode/.claude/projects/@HOST_PROJECT@": ("send", "the host memory, read-only"),
+    "/home/vscode/.claude/projects/@HOST_PROJECT@/memory": ("send", "the host memory, read-only"),
+    "/home/vscode/.claude/projects/-workspace": ("send", "the memory of the bundles, the session"),
+    "/home/vscode/.claude/plans": ("job", "its own: no plan of the laptop goes to a worker"),
+    "/home/vscode/.claude/agent-start.lock": ("drop", "the lock of the agent starts of the laptop"),
     "/home/vscode/.claude/review-corpus": ("send", "the review skill reads it"),
     "/home/vscode/.claude/routines": ("send", "routines"),
     "/home/vscode/.claude/rules": ("send", "rules"),
@@ -95,10 +99,6 @@ MOUNTS = {
     "/home/vscode/.claude/policy-limits.json": ("send", "the limits of the account"),
     "/home/vscode/.claude/remote-settings-helper-consent": ("drop", "made again"),
     "/home/vscode/.claude/remote-settings.json": ("drop", "made again"),
-    "/home/vscode/.claude/launch.json": ("send", "launch settings"),
-    "/home/vscode/.claude/loop.md": ("send", "the loop prompt"),
-    "/home/vscode/.claude/scheduled_tasks.json": ("send", "scheduled tasks"),
-    "/home/vscode/.claude/settings.local.json": ("send", "local settings"),
     "/home/vscode/.claude/session-env": ("job", "made by claude"),
     "/home/vscode/.claude/sessions": ("job", "mirrored back"),
     "/home/vscode/.claude/shell-snapshots": ("job", "made by claude"),
@@ -227,10 +227,6 @@ def build_config(bundle_folder):
             "rules",
             "skills",
             "workflows",
-            "launch.json",
-            "loop.md",
-            "scheduled_tasks.json",
-            "settings.local.json",
         ):
             add(claude / name, f"home/.claude/{name}")
         host_project = values.get("HOST_PROJECT") or "-home-seb-repo"
@@ -725,9 +721,10 @@ def renew_login_soon(bundle_folder):
 
 
 def renew_login(bundle_folder):
-    """While a remote agent lives, the main login renewed before it expires: claude-switch sends
-    its requests with it, and at night no claude of the laptop may renew it. A one-shot claude
-    in a container that shares the login, as the bundles do, renews it with their lock.
+    """While a remote agent or a bundle needs it, the main login renewed before it expires:
+    claude-switch sends their requests with it, as both hold a dummy login, and at night no ops
+    session may renew it. A one-shot claude in a container that shares the login, as the ops
+    container does, renews it with their lock.
     """
     try:
         login = json.loads((HOME / ".claude" / ".credentials.json").read_text())["claudeAiOauth"]

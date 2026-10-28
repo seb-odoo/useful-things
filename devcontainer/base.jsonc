@@ -25,6 +25,9 @@
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,Z",
   "workspaceFolder": "/workspace",
   "mounts": [
+    // The host reads and writes the files of .agent by name (bundle-ctl): mounted on itself, the
+    // folder cannot be replaced by a link from the container (initialize.py makes it a folder).
+    "source=${localWorkspaceFolder}/.agent,target=/workspace/.agent,type=bind,Z",
     // The .git file of a worktree holds an absolute `gitdir: @REPO_ROOT@/<repo>/.git/worktrees/<name>`
     // shared with the host, so each base repo's .git is mounted at that same path, or git fails
     // with "not a git repository". A new bundle repo needs its line here.

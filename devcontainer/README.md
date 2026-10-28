@@ -68,11 +68,10 @@ with pip inside. The rest follows from that choice.
     an install of `mail`, about 33 MB of disk beside the databases, thanks to `wal_recycle = off`
     and WAL segments of 1 MB. `max_parallel_workers_per_gather = 0`, as the `/dev/shm` of a
     container is 63 MB.
-  - A bundle made before keeps the host's server and filestore. At its next start,
-    [`bundle-db.py`](bundle-db.py) finds no folder and makes `run` and `odoo` links to them, with
-    an empty `pg`, so `bundle-pg.sh` starts nothing. Over that socket, `--userns=keep-id` gives
-    the container the uid of the host user, so peer authentication sees the same role as on the
-    host.
+  - A bundle made before had `run` and `odoo` linked to the host's server and filestore, which
+    reach every database. At its next start, [`bundle-db.py`](bundle-db.py) makes them folders of
+    its own, with an empty `pg/16`, so it starts on an empty server of its own (Seb, 2026-10-28,
+    security review M12). Its old databases stay on the host's server, which no bundle reaches.
 - **Browser tests run inside.** Odoo starts Chrome with `--no-sandbox --disable-dev-shm-usage`,
   which is enough under `--cap-drop=ALL` and the small `/dev/shm`.
 - **Commits are not signed in a container.** The `.git/config` shared with the host asks for a
@@ -111,7 +110,9 @@ write. So these are read-only in a bundle: the shell helpers (`container-rw/`), 
 Code user settings, TestWarden, DiscussModelParser and runbot-fix-agents (the cache of the
 test-warden engine comes back writable over it), the store of `node_modules`, whose trees every
 bundle on the same `package.json` loads (`/opt/node_modules`, see "Shared node_modules" in
-`scripts/README.md`), the browser of the Hoot runs, and what the next paragraphs name.
+`scripts/README.md`), the browser of the Hoot runs, and what the next paragraphs name. The
+`.agent` folder of the bundle is mounted on itself: bundle-ctl reads and writes its files by name,
+and the container cannot put a link in the place of the folder.
 
 **The browser of the Hoot runs.** The test-warden engine runs
 `~/.cache/warden/chrome-headless-shell`, shared by every bundle and the host, and downloads it
