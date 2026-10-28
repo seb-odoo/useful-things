@@ -1,0 +1,8 @@
+{
+  "verbs": {
+    "reclaim-swap": {
+      "run": ["bash", "reclaim-swap.sh"],
+      "title": "move the swap back to memory when it fits, with sudo in a terminal"
+    }
+  }
+}
