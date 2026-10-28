@@ -98,12 +98,36 @@ def check_env(root):
     check("not what the worker sets", not left & set(env), env)
 
 
+def check_remote(root):
+    """The bundle writes .agent/remote.json too: a value of another form is no remote agent."""
+    agent = root / "bundle" / ".agent"
+    agent.mkdir(parents=True)
+    good = {"worker": "sebpc", "job": "1761660000", "dummy": "a" * 64, "started": 1.5,
+            "session": "8b9b2f6e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"}
+    for name, value, expected in [
+        ("as the daemon writes it", good, good),
+        ("a new session", dict(good, session=""), dict(good, session="")),
+        ("a dummy that names a file of Seb", dict(good, dummy="/home/seb/.bashrc"), None),
+        ("a dummy that climbs", dict(good, dummy="../../x"), None),
+        ("a worker that climbs", dict(good, worker="../mux"), None),
+        ("a job with a word", dict(good, job="1 x"), None),
+        ("a key unknown here", dict(good, extra="x"), None),
+        ("no job", {"worker": "sebpc"}, None),
+        ("a list", ["sebpc"], None),
+        ("a start at infinity", dict(good, started=float("inf")), None),
+    ]:
+        (agent / "remote.json").write_text(json.dumps(value))
+        found = remote_agent.read_remote(root / "bundle")
+        check(f"remote.json {name}", found == expected, found)
+
+
 def main():
     check_mounts()
     with tempfile.TemporaryDirectory() as folder:
         root = pathlib.Path(folder)
         check_config(root)
         check_env(root)
+        check_remote(root)
     for line in failures:
         print(line)
     print(f"{total - len(failures)}/{total} cases as expected")

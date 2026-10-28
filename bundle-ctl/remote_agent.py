@@ -11,6 +11,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import math
 import os
 import pathlib
 import re
@@ -42,6 +43,12 @@ STOP_AGAIN = 300
 MAX_LOSSES = 3
 RENEW_BEFORE = 240
 RENEW_EVERY = 300
+REMOTE_FORMS = {
+    "worker": re.compile(r"[a-z][a-z0-9-]{0,39}"),
+    "job": re.compile(r"[0-9]{1,12}"),
+    "dummy": re.compile(r"[0-9a-f]{64}"),
+    "session": re.compile(r"(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?"),
+}
 finishing = {}
 renewing = threading.Lock()
 renewed = [0]
@@ -148,11 +155,24 @@ def get_agent(bundle_folder):
 
 
 def read_remote(bundle_folder):
-    """The worker and the job of the bundle's agent while it is remote, else None."""
+    """The worker and the job of the bundle's agent while it is remote, else None. The bundle can
+    write this file: the daemon names files, units and ssh words after it, so each value must
+    have its form, and a file with any other value counts as no remote agent.
+    """
     try:
-        return json.loads((get_agent(bundle_folder) / "remote.json").read_text())
+        remote = json.loads((get_agent(bundle_folder) / "remote.json").read_text())
     except (OSError, ValueError):
         return None
+    if type(remote) is not dict or not {"worker", "job"} <= remote.keys():
+        return None
+    for key, value in remote.items():
+        form = REMOTE_FORMS.get(key)
+        if form is None and key in ("started", "tunnel"):
+            if type(value) not in (int, float) or not math.isfinite(value):
+                return None
+        elif form is None or type(value) is not str or not form.fullmatch(value):
+            return None
+    return remote
 
 
 def is_remote(bundle_folder):
