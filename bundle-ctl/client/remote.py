@@ -36,6 +36,8 @@ DB_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")
 CHANGES_DB = {"-i", "--init", "-u", "--update"}
 MAX_WAIT = 600
 NOT_STARTED = 125
+# The worker kills a job past its memory (137), or lost it with its processes (-9).
+KILLED = (137, -9)
 ENGINE = re.compile(r"engine-linux-\w+|test-warden-engine")
 ENGINE_SERVER = re.compile(r"http://(?:localhost|127\.0\.0\.1):([0-9]{1,5})(?:/\S*)?")
 VENV_PYTHON = re.compile(r"/(odoo[0-9]{2})/bin/python[0-9.]*$")
@@ -484,6 +486,9 @@ def run(argv, worker, kind, workers, base):
         return None
     if code == NOT_STARTED:
         say(f"runs here, not on {worker}: job {job} did not start")
+        return None
+    if code in KILLED:
+        say(f"job {job} was killed on {worker} (its memory or its time), runs here again")
         return None
     if dbs_out:
         try:

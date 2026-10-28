@@ -174,8 +174,9 @@ repo, which has its own README (the sandbox, the load, the sync). Agents change 
   file (`-c`), a server that is not `/workspace/odoo/odoo-bin`, an addons path outside the
   worktrees, run the command here.
 - Anything that fails before the job started (no connection, refused, a sync error, a job that
-  ends on 125 as its server never answered), or a stream lost during it, runs the command here,
-  with one line on stderr: `bctl run: runs here, not on NAME: why`.
+  ends on 125 as its server never answered), a stream lost during it, or a job the worker killed
+  (137: its memory or its time; -9: the worker lost it), runs the command here, with one line on
+  stderr: `bctl run: runs here, not on NAME: why`.
 - `POST /worker/VERB?worker=NAME&arg=...` (`workers.py`) is the relay: from a bundle only, the
   verb and each word checked, then a fixed `ssh -F none -S MASTER -o ControlMaster=no -T worker
   VERB BUNDLE ARGS...` through the connection `worker-mux@NAME` holds, the bundle's bytes passed
