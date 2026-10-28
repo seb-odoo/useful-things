@@ -1,12 +1,17 @@
 #!/bin/sh
 dir=~/.local/state/ssh-github-mux
 [ -S "$dir/sock/github" ] && exit 0
-mkdir -p "$dir/request" && date > "$dir/request/now" || exit 1
+# The git command that asks, for the card of ssh-agent-gate: above ssh and the shell of Match exec.
+git=$PPID
+while case $(ps -o comm= -p "$git") in ssh | sh | bash | dash) true ;; *) false ;; esac; do
+    git=$(ps -o ppid= -p "$git" | tr -d ' ')
+done
+mkdir -p "$dir/request" && ps -o args= -p "$git" > "$dir/request/now" || exit 1
 i=0
 while [ $i -lt 120 ]; do
     sleep 0.5
     [ -S "$dir/sock/github" ] && exit 0
-    # Stop waiting when the unit stops, as Bitwarden refused or the network is down.
+    # Stop waiting when the unit stops, as the key was refused or the network is down.
     [ "$dir/sock/stopped" -nt "$dir/request/now" ] && exit 1
     i=$((i + 1))
 done

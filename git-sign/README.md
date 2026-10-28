@@ -1,39 +1,24 @@
 # git-sign
 
-Commits on the host are signed with an SSH key (the dev containers do not sign). Bitwarden asks
-for each signature ("Always"), so here a signing-only key, kept in Bitwarden, is loaded once per
-boot into an ssh-agent that holds it in memory until reboot.
+Commits on the host are signed with an SSH key (the dev containers do not sign): a signing-only
+key, kept in Bitwarden and held by ssh-agent-gate (its own repo) from the login to the reboot.
 
-- `gsign` asks the master password (Tab shows or hides what is typed, a wrong one is asked
-  again), loads `github-seb-odoo-signing` into `ssh-agent-sign.service`, and locks the CLI again.
-  The key goes through a pipe, never a file, and the vault session through `BW_SESSION`, never
-  the command line that `ps` shows.
-- `sign` is `gpg.ssh.program`: it signs with that agent, or asks Bitwarden before `gsign` ran. So
-  when Bitwarden asks at each commit of the host, run `gsign` in a host terminal.
-- `gsign.desktop` opens a terminal running `gsign` at each login, so only the master password is
-  left to type.
-- `bitwarden.desktop` opens the Bitwarden window at each login, for the github.com pushes. The
-  app's own "Start automatically on login" uses `--autostart`, which keeps it hidden in the tray:
-  hardcoded in main.js (`const showWindow = !isAutostart`, a KWin bug workaround), no setting
-  changes it. That setting rewrites `~/snap/bitwarden/current/.config/autostart/bitwarden.desktop`
-  (`Exec=bitwarden --autostart`) at each app start, so a hand edit there does not stick.
+- `sign` is `gpg.ssh.program`: it signs with the agent of ssh-agent-gate. A commit of a host-ctl
+  request is signed at once, Seb said yes to the request; any other commit waits for a card in
+  `hok`, as the rules of the gate say.
+- At login, `ssh-agent-gate-load` asks the master password and loads the key with the others. A
+  commit refused with "the keys are not loaded" means it did not run since the boot, or since
+  the gate restarted.
 
 The key can sign but not push: GitHub knows it as a "Signing Key" only.
 
 ## Install on the host
 
-Once:
+Once, ssh-agent-gate installed:
 
-1. `sudo snap install bw`, then `bw login`.
-2. Bitwarden app: new item, type SSH key, named `github-seb-odoo-signing`.
-3. `ln -sfn ~/repo/useful-things/git-sign/ssh-agent-sign.service ~/.config/systemd/user/`,
-   then `systemctl --user daemon-reload && systemctl --user enable --now ssh-agent-sign.service`.
-4. `gsign`, then `SSH_AUTH_SOCK=$XDG_RUNTIME_DIR/ssh-sign.sock ssh-add -L > ~/.ssh/github-seb-odoo-signing.pub`.
-5. GitHub, Settings > SSH and GPG keys > New SSH key, type "Signing Key", paste that public key.
-6. `git config --file ~/.gitconfig.local gpg.ssh.program $HOME/repo/useful-things/git-sign/sign`
+1. Bitwarden: new item, type SSH key, named `github-seb-odoo-signing`. Its public key in
+   `~/.ssh/github-seb-odoo-signing.pub`, and in the rules of the gate.
+2. GitHub, Settings > SSH and GPG keys > New SSH key, type "Signing Key", paste that public key.
+3. `git config --file ~/.gitconfig.local gpg.ssh.program $HOME/repo/useful-things/git-sign/sign`
    (git does not expand `~` there) and
    `git config --file ~/.gitconfig.local user.signingKey $HOME/.ssh/github-seb-odoo-signing.pub`.
-
-7. `ln -sfn ~/repo/useful-things/git-sign/gsign.desktop ~/.config/autostart/`.
-8. Bitwarden app, Settings: uncheck "Start automatically on login", then
-   `ln -sfn ~/repo/useful-things/git-sign/bitwarden.desktop ~/.config/autostart/`.

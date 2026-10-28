@@ -1,5 +1,5 @@
 #!/bin/sh
-# ExecCondition of ssh-github-mux.service: Bitwarden is asked when the screen is unlocked, and an
+# ExecCondition of ssh-github-mux.service: the key is asked when the screen is unlocked, and an
 # ask nobody answered is not repeated until the next unlock or a git command of the host.
 dir=~/.local/state/ssh-github-mux
 mkdir -p "$dir/request" "$dir/sock"

@@ -15,7 +15,7 @@ ExecStart=/usr/bin/ssh -F none -N \
     -o ControlPath=%h/.local/state/ssh-github-mux/sock/github \
     -o ControlPersist=no \
     -o IdentitiesOnly=yes \
-    -o IdentityAgent=%t/ssh-agent-github/sock \
+    -o IdentityAgent=%t/ssh-agent-gate/sock \
     -o IdentityFile=%h/.ssh/github-seb-odoo.pub \
     -o ServerAliveCountMax=3 \
     -o ServerAliveInterval=10 \
@@ -26,6 +26,7 @@ ExecStartPost=/bin/sh -c 'until [ -S %h/.local/state/ssh-github-mux/sock/github 
 SuccessExitStatus=255
 ExecStopPost=/usr/bin/rm -f %h/.local/state/ssh-github-mux/sock/github
 ExecStopPost=/usr/bin/touch %h/.local/state/ssh-github-mux/sock/stopped
-# No socket in this run: the ask timed out or Bitwarden refused, so hold the next one.
+# No socket in this run: the hok card of the key was not answered in time, or was refused, so
+# hold the next one.
 ExecStopPost=/bin/sh -c '[ -e %h/.local/state/ssh-github-mux/sock/up ] || \
     touch %h/.local/state/ssh-github-mux/request/held'
