@@ -513,6 +513,7 @@ def describe_queue(state):
             session=item.get("session"),
             task=item["task"],
             waits_for=item.get("waits_for"),
+            where=get_task_where(item, get_agent_folder(item["bundle"])),
         )
         for item in state["queue"]
     ]
@@ -633,7 +634,19 @@ def get_queue(caller, query, body):
         "max_agents": MAX_AGENTS,
         "memory": describe_memory(open_windows),
         "queue": describe_queue(state),
+        "remote": get_remote_agents(),
+        "workers": WORKERS.names,
     }
+
+
+def get_remote_agents():
+    """The worker of each bundle whose agent runs on one, as the daemon started it."""
+    root = pathlib.Path(get_worktree_container_folder())
+    agents = {}
+    for found in sorted(root.glob("*/*/.agent/remote.json")):
+        if remote := remote_agent.read_remote(found.parent.parent):
+            agents[found.parent.parent.name] = remote["worker"]
+    return agents
 
 
 def force_queue(caller, query, body):
@@ -800,10 +813,11 @@ def close_agent_window(caller, query, body):
     return 200, {"bundle": bundle}
 
 
-def stop_after_turn(bundle, session, why):
+def stop_after_turn(bundle, session, why, drop_done=False):
     """Close the agent window of a bundle once the turn of its session ended, or at PAUSE_WAIT.
     When that cut the turn, the queued task tells the session so and why, as for a session a crash
-    cut."""
+    cut. With drop_done, a turn that ended on the first verdict of the agent drops the queued task
+    that goes on."""
     pause = get_agent_folder(bundle) / "pause"
     deadline = time.time() + PAUSE_WAIT
     write_text(pause, f"{deadline}\n")
@@ -824,6 +838,17 @@ def stop_after_turn(bundle, session, why):
                 for item in state["queue"]:
                     if item["bundle"] == bundle and item.get("resume") and item["task"] == GO_ON:
                         item["task"] = prompt
+                write_state(state)
+        elif drop_done and (pause.parent / "done").exists():
+            with state_lock:
+                state = read_state()
+                state["queue"] = [
+                    item
+                    for item in state["queue"]
+                    if not (
+                        item["bundle"] == bundle and item.get("resume") and item["task"] == GO_ON
+                    )
+                ]
                 write_state(state)
         close_window(bundle)
         deadline = time.monotonic() + WINDOW_CLOSE_WAIT
@@ -1093,12 +1118,13 @@ def get_next_time(text):
     return (start if start > now else start + datetime.timedelta(days=1)).timestamp()
 
 
-def enqueue(caller, bundle, body, build=None, session=None):
+def enqueue(caller, bundle, body, build=None, session=None, first=False):
     """Queue the task of a bundle. `build` is the script that makes a bundle not made yet: the
     agent starts in its bare folder and runs it with `bctl build` once it needs the code. With no
     priority, the task of an agent takes the one of the agent's own task. `session` is the session
     a resume goes on with, when it is not the last one of the agent: never taken from a request,
-    as the sessions of every bundle share one folder."""
+    as the sessions of every bundle share one folder. `first` puts the task before the other tasks
+    of its bundle."""
     priority = body["priority"] if "priority" in body else get_task_priority(caller)
     after = get_next_time(body["after"]) if "after" in body else None
     effort, model, queued = body.get("effort"), body.get("model"), time.time()
@@ -1110,7 +1136,7 @@ def enqueue(caller, bundle, body, build=None, session=None):
             len(queue),
         )
         behind = [index + 1 for index, item in enumerate(queue) if item["bundle"] == bundle]
-        position = max([position, *behind])
+        position = behind[0] - 1 if first and behind else max([position, *behind])
         queue.insert(
             position,
             {
@@ -1372,6 +1398,8 @@ def launch_queued():
             elif (worker := get_agent_worker(item, folder, is_running))[0]:
                 item["task"] = get_resumed(item)
                 write_task(item)
+                # The job waits for the lock of the bundle: meanwhile no pass starts another task.
+                (folder / "remote-starting").touch()
                 start_job(
                     item["parent"],
                     "remote-agent",
@@ -1503,17 +1531,26 @@ def launch_safely():
     return paced
 
 
+def get_task_where(item, folder):
+    """Where a task starts: `local`, `auto`, `worker` or `worker:NAME`. A task to build starts
+    here, and so does any with no worker, or `auto` until REMOTE_AUTO."""
+    where = item.get("where") or read_text(folder / "where") or "auto"
+    if item.get("build") or not WORKERS.names or (where == "auto" and not REMOTE_AUTO):
+        return "local"
+    return where
+
+
 def get_agent_worker(item, folder, is_running):
     """(the worker that starts the agent of this task, why it waits): a task goes `auto` by
     default, to a worker with an agent place, else here; one placed on a worker waits for it
     (README.md, "Remote agents"). A bundle open in a window stays here, and so does one not built
-    yet, as its build runs here.
+    yet, as its build runs here. One placed on a worker waits for its container to stop here.
     """
-    if is_running or item.get("build") or not WORKERS.names:
+    where = get_task_where(item, folder)
+    if where == "local":
         return None, None
-    where = item.get("where") or read_text(folder / "where") or "auto"
-    if where == "local" or (where == "auto" and not REMOTE_AUTO):
-        return None, None
+    if is_running:
+        return None, None if where == "auto" else "its container here to stop"
     wanted = where.removeprefix("worker:") if where.startswith("worker:") else None
     found = WORKERS.choose_agent(wanted)
     if found or where == "auto":
@@ -1598,6 +1635,91 @@ def bring_back(caller, query, body):
         open_terminal(log, bundle, takeover=f"{bundle}: back from its worker, same session")
 
     return start_job(caller, "bring-back", work, lock=None, bundle=bundle)
+
+
+def place_agent(caller, query, body):
+    """Put the agent of a bundle here (`local`) or on a worker of WORKERS (README.md, "Remote
+    agents"). An agent at work goes on with its session there, first of the tasks of its bundle:
+    after its turn here, as for a requeue, or once its work tree came back from its worker. One
+    that gave its verdict and is idle closes here, and any other bundle keeps the place for its
+    next task. Only the host asks."""
+    bundle, where = body.get("bundle") or "", body.get("where")
+    if caller != HOST:
+        raise Refused("place: only the host and the ops container move an agent")
+    if set(body) != {"bundle", "where"} or where not in ("local", *WORKERS.names):
+        raise ValueError(f"place: a bundle, and where: {', '.join(('local', *WORKERS.names))}")
+    if not BUNDLE_NAME.fullmatch(bundle) or not os.path.isdir(get_worktree_bundle_folder(bundle)):
+        raise ValueError(f"no bundle folder for {bundle}")
+    folder = pathlib.Path(get_worktree_bundle_folder(bundle))
+    agent = get_agent_folder(bundle)
+    remote = remote_agent.read_remote(folder)
+    with state_lock:
+        state = read_state()
+    if remote and remote["worker"] == where:
+        raise Refused(f"the agent of {bundle} runs on {where} already")
+    if not remote and remote_agent.is_remote(folder):
+        raise Refused(f"the agent of {bundle} is starting on a worker: move it once it runs")
+    if bundle in state["launches"]:
+        raise Refused(f"the agent of {bundle} is starting here: move it once it runs")
+    container = get_bundle_container(bundle)
+    if not remote and where != "local" and container and has_window(container):
+        raise Refused(f"{bundle} is open in a window: its agent stays here until it closes")
+    session = read_text(agent / "session")
+    in_terminal = not remote and bool(session and get_window_pids(bundle))
+    if in_terminal and where == "local":
+        raise Refused(f"the agent of {bundle} runs here already")
+    done = (agent / "done").exists()
+    goes_on = (remote or in_terminal) and (
+        not done or get_session_status(bundle, session) == "busy"
+    )
+    if goes_on and any(item["bundle"] == bundle and item.get("resume") for item in state["queue"]):
+        raise Refused(f"the session of {bundle} is queued already")
+    if goes_on and not get_transcript(session):
+        raise Refused(f"the claude of {bundle} has not started yet: move it once it runs")
+    task = {"priority": get_task_priority(bundle), "resume": True, "task": GO_ON}
+    if remote:
+
+        def work(log):
+            log.write(remote_agent.move_back(log, bundle, folder, WORKERS) + "\n")
+            if where == "local":
+                open_terminal(log, bundle, takeover=f"{bundle}: back from its worker, same session")
+                return
+            if (agent / "remote-back").exists() or (agent / "remote-lost").exists():
+                kept = read_text(agent / "where") or "local"
+                log.write(f"{bundle}: its work tree did not come back, it stays {kept}\n")
+            else:
+                set_place(bundle, where)
+            if goes_on:
+                enqueue(caller, bundle, task, first=True)
+                log.write(f"{bundle}: its session is queued to go on, same session\n")
+
+        return start_job(caller, "place", work, lock=None, bundle=bundle)
+    set_place(bundle, where)
+    answer = {"bundle": bundle, "where": where}
+    if not in_terminal:
+        launch_queued()
+        return 200, answer
+    # Queued before the window closes: stop_after_turn tells that task when it cut a turn.
+    if goes_on:
+        answer |= enqueue(caller, bundle, task, first=True)
+    why = f"when Seb moved it to {where}"
+    args = bundle, session, why, not done
+    threading.Thread(target=stop_after_turn, args=args, daemon=True).start()
+    return 202, {**answer, "wait": PAUSE_WAIT}
+
+
+def set_place(bundle, where):
+    """Where the next tasks of a bundle start, `.agent/where` over the `where` of its queued
+    tasks."""
+    agent = get_agent_folder(bundle)
+    agent.mkdir(exist_ok=True)
+    write_text(agent / "where", "local\n" if where == "local" else f"worker:{where}\n")
+    with state_lock:
+        state = read_state()
+        for item in state["queue"]:
+            if item["bundle"] == bundle:
+                item.pop("where", None)
+        write_state(state)
 
 
 def delete_safely():
@@ -3175,6 +3297,7 @@ VERBS = {
     ("POST", "/open"): open_bundle,
     ("POST", "/requeue"): requeue_agent,
     ("POST", "/bring-back"): bring_back,
+    ("POST", "/place"): place_agent,
     ("POST", "/schedule"): schedule_task,
     ("POST", "/unqueue"): unqueue,
 }

@@ -785,6 +785,234 @@ def check_requeue(root):
     return [f"requeue: {name}: {state['queue']}" for name in failed], len(checks)
 
 
+def check_place(root):
+    """Real clients: place puts a queued task on a worker at once; an agent at work in its
+    terminal, or busy again after its verdict, goes on there with its session once its container
+    stopped; an idle one that gave its verdict closes, and its next task goes there; a remote
+    agent comes back first, then goes on here or on the other worker before the tasks of its
+    bundle, unless its work tree stayed there. Only the host asks, for an agent that runs."""
+    stubs = {
+        name: getattr(daemon, name)
+        for name in (
+            "REMOTE_AUTO",
+            "WORKERS",
+            "close_window",
+            "get_session_status",
+            "get_transcript",
+            "remote_agent",
+            "start_remote",
+            "stop_after_turn",
+        )
+    }
+    agents = {
+        "waiting": FRESH,
+        "busy": dict(RUNS_IT),
+        "ended": {**RUNS_IT, "done": "0\n"},
+        "answering": {**RUNS_IT, "done": "0\n"},
+        "window": RUNS_ANOTHER_IN_WINDOW,
+        "starting": {"remote-starting": ""},
+        "launching": {**LAUNCHES_ANOTHER, "session": "s\n"},
+        "unborn": {**RUNS_IT, "session": "unborn\n"},
+        "verdict": {**RUNS_IT, "done": "0\n"},
+        "paused": {"session": "s\n"},
+        "away": {"session": "s\n", "remote.json": "{}"},
+        "stuck": {"session": "s\n", "remote.json": "{}"},
+    }
+    state, launched = prepare(root, agents, 8)
+    state["queue"] = [{**state["queue"][0], "where": "local"}]
+    state["launches"]["launching"] = time.time()
+    windows, stopping = {"busy", "ended", "answering", "unborn", "verdict"}, set()
+    started, closed, moved = [], [], []
+    remote = {"away": "sebpc", "stuck": "sebpc"}
+    daemon.WORKERS = types.SimpleNamespace(
+        names=["sebpc", "vm"], choose_agent=lambda wanted=None: wanted or "sebpc"
+    )
+
+    def move_back(log, bundle, folder, workers):
+        moved.append(bundle)
+        remote.pop(bundle)
+        return f"{bundle}: back"
+
+    daemon.remote_agent = types.SimpleNamespace(
+        is_remote=lambda folder: (
+            folder.name in remote or (folder / ".agent" / "remote-starting").exists()
+        ),
+        move_back=move_back,
+        read_remote=lambda folder: (
+            {"worker": remote[folder.name]} if folder.name in remote else None
+        ),
+    )
+    open_windows = daemon.get_open_windows
+    daemon.get_open_windows = lambda: (
+        open_windows() | {daemon.get_worktree_bundle_folder(bundle) for bundle in stopping}
+    )
+    daemon.get_session_status = lambda bundle, session: "busy" if bundle == "answering" else "idle"
+    daemon.get_window_pids = lambda bundle: [1] * (bundle in windows)
+    daemon.get_transcript = lambda session: session not in (None, "unborn") and root / "t"
+    daemon.close_window = windows.discard
+    daemon.REMOTE_AUTO = False
+    drops = {}
+    daemon.stop_after_turn = lambda bundle, session, why, drop=False: (
+        closed.append((bundle, why)) or drops.update({bundle: drop})
+    )
+    daemon.identify = lambda connection: daemon.HOST
+    path = root / "ctl.sock"
+    server = daemon.Server(str(path), daemon.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    def start_remote(log, bundle, worker):
+        (daemon.get_agent_folder(bundle) / "session").write_text("s\n")
+        remote[bundle] = worker
+        (daemon.get_agent_folder(bundle) / "remote-starting").unlink()
+        started.append((bundle, worker))
+
+    daemon.start_remote = start_remote
+
+    def get_where(bundle):
+        return (daemon.get_agent_folder(bundle) / "where").read_text()
+
+    def close(bundle):
+        windows.discard(bundle)
+        del agents[bundle]["terminal"]
+        (daemon.get_agent_folder(bundle) / "terminal").unlink()
+
+    def get_queue():
+        return [(item["bundle"], item["task"], item.get("waits_for")) for item in state["queue"]]
+
+    checks = []
+    try:
+        found = run_client(path, "place", "waiting", "sebpc"), started, get_where("waiting")
+        said = (0, ["waiting: its next task starts on sebpc"])
+        expected = (said, [("waiting", "sebpc")], "worker:sebpc\n")
+        checks.append(("a queued task placed here starts on the worker", found == expected))
+        code, lines = run_client(path, "place", "busy", "sebpc")
+        item = state["queue"][-1]
+        found = code, item["bundle"], item["resume"], item["task"], closed
+        expected = 0, "busy", True, daemon.GO_ON, [("busy", "when Seb moved it to sebpc")]
+        checks.append(("an agent at work is queued to go on after its turn", found == expected))
+        wait = daemon.PAUSE_WAIT
+        closes = f"busy: its window closes once its turn ends, in {wait} seconds at most"
+        checks.append(("the client says so", lines[:1] == [closes] and "on sebpc" in lines[1]))
+        refused = ["bctl: 409 the session of busy is queued already"]
+        checks.append(
+            ("a second move waits", run_client(path, "place", "busy", "vm") == (1, refused))
+        )
+        close("busy")
+        daemon.launch_queued()
+        found = started[-1], state["queue"]
+        checks.append(("it goes on there once its window closed", found == (("busy", "sebpc"), [])))
+        code, lines = run_client(path, "place", "ended", "vm")
+        found = code, lines[1:], closed[-1], state["queue"], get_where("ended")
+        expected = (
+            0,
+            ["ended: its next task starts on vm"],
+            ("ended", "when Seb moved it to vm"),
+            [],
+            "worker:vm\n",
+        )
+        checks.append(("an idle agent that gave its verdict only closes", found == expected))
+        code, _lines = run_client(path, "place", "answering", "vm")
+        close("answering")
+        stopping.add("answering")
+        daemon.launch_queued()
+        waits = get_queue()
+        stopping.clear()
+        daemon.launch_queued()
+        found = code, waits, started[-1]
+        expected = (
+            0,
+            [("answering", daemon.GO_ON, "its container here to stop")],
+            ("answering", "vm"),
+        )
+        checks.append(
+            ("one busy after its verdict goes on, once its container stopped", found == expected)
+        )
+        paused = {"bundle": "paused", "parent": "host", "queued": QUEUED, "task": daemon.GO_ON}
+        state["queue"].append({**paused, "paused": True, "resume": True})
+        code, lines = run_client(path, "place", "paused", "vm")
+        found = code, get_where("paused"), [item["bundle"] for item in state["queue"]]
+        checks.append(("a paused session takes the place", found == (0, "worker:vm\n", ["paused"])))
+        state["queue"].clear()
+        stubs["stop_after_turn"]("verdict", "s", "when Seb moved it", True)
+        found = "verdict" in windows, state["queue"]
+        checks.append(("a turn that ends on a verdict closes its window", found == (False, [])))
+        state["queue"].append({**paused, "bundle": "verdict", "resume": True})
+        windows.add("verdict")
+        stubs["stop_after_turn"]("verdict", "s", "when Seb moved it", True)
+        found = "verdict" in windows, state["queue"]
+        checks.append(("and drops the session queued to go on", found == (False, [])))
+        found = drops == {"busy": True, "ended": False, "answering": False}
+        checks.append(("only a verdict given during the wait drops the session", found))
+        refusals = (
+            ("unborn", "vm", daemon.HOST, "409 the claude of unborn has not started yet"),
+            ("ended", "local", daemon.HOST, "409 the agent of ended runs here already"),
+            ("window", "sebpc", daemon.HOST, "409 window is open in a window"),
+            ("away", "sebpc", daemon.HOST, "409 the agent of away runs on sebpc already"),
+            ("starting", "local", daemon.HOST, "409 the agent of starting is starting on a worker"),
+            ("launching", "vm", daemon.HOST, "409 the agent of launching is starting here"),
+            ("waiting", "mars", daemon.HOST, "400 place: a bundle, and where: local, sebpc, vm"),
+            ("waiting", "vm", "waiting", "409 place: only the host and the ops container"),
+        )
+        for bundle, where, caller, error in refusals:
+            daemon.identify = lambda connection, caller=caller: caller
+            code, lines = run_client(path, "place", bundle, where)
+            refused = code == 1 and lines[0].startswith(f"bctl: {error}")
+            checks.append((f"place {bundle} {where} from {caller} is refused", refused))
+    finally:
+        server.shutdown()
+        server.server_close()
+    logs = {}
+
+    def start_job(caller, verb, work, lock=None, bundle=None):
+        logs.setdefault(verb, []).append(io.StringIO())
+        work(logs[verb][-1])
+        return 202, {"job": "1"}
+
+    daemon.start_job = start_job
+    state["launches"].clear()
+    try:
+        found = daemon.get_queue(daemon.HOST, {}, {})[1]["remote"]
+        checks.append(
+            ("the queue names the remote agents", found == {"away": "sebpc", "stuck": "sebpc"})
+        )
+        state["queue"] = [{"bundle": "away", "parent": "host", "queued": QUEUED, "task": "new"}]
+        started.clear()
+        daemon.place_agent(daemon.HOST, {}, {"bundle": "away", "where": "vm"})
+        found = moved, started, get_where("away"), get_queue()
+        expected = (
+            ["away"],
+            [("away", "vm")],
+            "worker:vm\n",
+            [("away", "new", "the end of its agent on its worker")],
+        )
+        checks.append(("a remote agent goes on on the other worker, first", found == expected))
+        state["queue"].clear()
+        remote["away"] = "vm"
+        daemon.place_agent(daemon.HOST, {}, {"bundle": "away", "where": "local"})
+        checks.append(("or here, in its terminal", launched[-1:] == ["away"]))
+        (daemon.get_agent_folder("stuck") / "remote-back").mkdir()
+        (daemon.get_agent_folder("stuck") / "where").write_text("local\n")
+        started.clear()
+        daemon.place_agent(daemon.HOST, {}, {"bundle": "stuck", "where": "vm"})
+        found = logs["place"][-1].getvalue().splitlines()[-2:], started, launched[-1:]
+        stays = [
+            "stuck: its work tree did not come back, it stays local",
+            "stuck: its session is queued to go on, same session",
+        ]
+        checks.append(
+            ("a work tree left on its worker keeps it here", found == (stays, [], ["stuck"]))
+        )
+        tasks = [{"bundle": name, "parent": "host", "task": TASK} for name in agents]
+        tasks[1]["where"] = "worker"
+        found = [task["where"] for task in daemon.describe_queue({"queue": tasks})][:5]
+        expected = ["worker:sebpc", "worker", "worker:vm", "worker:vm", "local"]
+        checks.append(("the queue says where each task starts", found == expected))
+    finally:
+        vars(daemon).update(stubs, start_job=START_JOB, get_open_windows=open_windows)
+    failed = [name for name, passed in checks if not passed]
+    return [f"place: {name}: {get_queue()}" for name in failed], len(checks)
+
+
 def check_github(root):
     """A task that waits for the GitHub connection of the host asks for it, GITHUB_ASK seconds
     apart at most, and starts once its socket is there, told so; a force of the queue leaves it,
@@ -1170,6 +1398,7 @@ def main():
         check_after,
         check_pause,
         check_requeue,
+        check_place,
         check_github,
         check_build,
         check_disk_worker,

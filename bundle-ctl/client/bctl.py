@@ -7,6 +7,7 @@
     bctl force-queue [BUNDLE]
     bctl move BUNDLE PLACE
     bctl requeue BUNDLE [--paused | --github]
+    bctl place BUNDLE local|WORKER
     bctl close BUNDLE
     bctl schedule BUNDLE spot|manual|HH:MM
     bctl unqueue BUNDLE
@@ -56,6 +57,12 @@ turn ended, 2 minutes at most: meanwhile its Bash calls are refused, on a reason
 end its turn. A turn cut there goes on told so. With --paused, it waits for a manual resume. Only
 the host may ask it, but for --github: an agent that GitHub cannot reach asks it for itself, its
 session waits until the GitHub connection of the host is up, and goes on told so.
+
+place puts the agent of a bundle here (local) or on a worker of BUNDLE_CTL_WORKERS. An agent at
+work goes on there with its session: after its turn here, as for requeue, or once its work tree
+came back from its worker, before the other tasks of the bundle. An idle one that gave its
+verdict has its window closed here, and any other bundle keeps the place for its next task. Only
+the host may ask it.
 
 close closes the agent window of a bundle, with no yes of Seb: its claude and its container stop,
 its Firefox tab groups stay, and open --terminal goes on with its session. It is refused while a
@@ -273,6 +280,21 @@ def print_requeued(answer):
         f"{answer['bundle']}: its window closes once its turn ends, in {answer['wait']} seconds at"
         f" most; queued {answer['queued']}, waits for {answer['waits_for']}",
     )
+
+
+def print_placed(answer):
+    if "wait" in answer:
+        print(
+            f"{answer['bundle']}: its window closes once its turn ends, in {answer['wait']} seconds"
+            " at most",
+        )
+    if "queued" in answer:
+        print(
+            f"queued {answer['queued']} to go on on {answer['where']}, waits for"
+            f" {answer['waits_for']}",
+        )
+    elif "where" in answer:
+        print(f"{answer['bundle']}: its next task starts on {answer['where']}")
 
 
 def print_closed(answer):
@@ -656,6 +678,11 @@ def main():
         "bring-back", help="the agent of a bundle back from its worker, its session going on here"
     )
     bring.add_argument("bundle")
+    place = commands.add_parser(
+        "place", help="the agent of a bundle here or on a worker, its session going on there"
+    )
+    place.add_argument("bundle")
+    place.add_argument("where", help="local, or a worker of BUNDLE_CTL_WORKERS")
     requeue = commands.add_parser(
         "requeue",
         help="queue the session of a bundle's agent again, and close its window after its turn",
@@ -714,6 +741,12 @@ def main():
         printer = print_queue
     elif args.command == "bring-back":
         answer = follow(request("POST", "/bring-back", {"bundle": args.bundle})["job"])
+    elif args.command == "place":
+        answer = request("POST", "/place", {"bundle": args.bundle, "where": args.where})
+        if "job" in answer:
+            answer = follow(answer["job"])
+        else:
+            printer = print_placed
     elif args.command == "requeue":
         body = {"bundle": args.bundle, "paused": args.paused}
         answer = request("POST", "/requeue", {**body, "github": True} if args.github else body)
