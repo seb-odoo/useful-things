@@ -744,7 +744,8 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   buttons of a line add up, and the two lines cut each other. The
   Branch search beside them (Seb, 2026-10-20: "to look for a branch name (both now and queue)")
   keeps the rows whose name has its text, the groups of `hok` included, and the tasks of the
-  queue whose bundle has it, case
+  queue whose bundle or name has it: an ops task by the title of its conversation too, as its row
+  (Seb, 2026-10-29: "search agent should also work for ops, not only branches"), case
   aside. Its text loses a dev remote prefix (`odoo-dev:`), as for `ocode` (Seb, same day); the
   buttons count only the rows it keeps, and Up and Down move a task past the one shown
   above or below it. When the window, or its side in the window of `hok`, is too narrow for

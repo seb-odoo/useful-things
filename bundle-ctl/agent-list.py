@@ -20,7 +20,8 @@ with du when its row comes, then every 10 minutes.
 The buttons above the rows count the rows of each mark among the kinds pressed, and of each kind
 among the marks pressed. Pressed, they keep the rows of one of the marks pressed and of one of the
 kinds pressed. The Branch search beside them keeps the rows whose name has its text, and the
-tasks of the queue whose bundle has it, case and a dev remote prefix aside; the buttons count
+tasks of the queue whose bundle or name has it (the title of its conversation for an ops task),
+case and a dev remote prefix aside; the buttons count
 only the rows it keeps, and Up and Down move a task past the one shown above or below it. Enter,
 a double click or Terminal brings up the terminal of each selected row (Ctrl+click, Shift+click)
 where it was, the first row last, so that it ends in front. VS Code opens the window of each
@@ -537,8 +538,9 @@ def read_queue():
 
 
 def describe_queue(answer, rows=(), search=""):
-    """The head and the lines of the queue, those of the bundles the search is in. A task whose
-    bundle has a row takes its kind from it, else from the title read with the queue."""
+    """The head and the lines of the queue, those whose bundle or name the search is in: the name
+    of the row of the bundle, else of the title read with the queue, which is the title of the
+    conversation of an ops task (ops-SESSION). A task takes its kind from the same row."""
     if answer is None:
         return "bundle-ctl does not answer", []
     head = f"{answer['agents']}/{answer['max_agents']} agents at work in a terminal"
@@ -548,11 +550,11 @@ def describe_queue(answer, rows=(), search=""):
     found = {row.key: row for row in rows}
     lines = []
     for item in answer["queue"]:
-        if not is_found(item["bundle"], search):
-            continue
         title = item.get("title") or ""
         row = found.get(item["bundle"])
         row = row or picker.Row(None, picker.get_rank(title), title, item["bundle"], None, True)
+        if not (is_found(item["bundle"], search) or is_found(get_name(row), search)):
+            continue
         forced = item.get("forced") and "over the cap"
         state = "paused" if item.get("paused") else forced or "queued"
         lines.append(

@@ -669,6 +669,10 @@ def main():
     searched = [agent_list.describe_queue(QUEUE, search=text) for text in ("X--S", "master-y")]
     if searched != [queue, (queue[0], [])]:
         failures.append(f"queue searched {searched!r}, expected the task of master-x--seb alone")
+    ops = dict(QUEUE, queue=[{"bundle": "ops-1f2e", "priority": 5, "title": "🔧 Refactor (ops)"}])
+    found = [len(agent_list.describe_queue(ops, search=text)[1]) for text in ("refac", "1F2E", "x")]
+    if found != [1, 1, 0]:
+        failures.append(f"ops task searched by its title, its session, other: {found!r}")
     answer = {"queue": [{"bundle": bundle} for bundle in "abcd"]}
     for bundles, at, step, expected in MOVES:
         if (found := agent_list.get_move(answer, bundles, at, step)) != expected:
