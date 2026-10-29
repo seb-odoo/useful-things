@@ -851,6 +851,57 @@ def check_gone(root):
     return [name for name, passed in checks if not passed], len(checks)
 
 
+def check_pairs(root):
+    """The bug and fix trees of serve-for-seb go 10 minutes after the container of their bundle
+    stopped, with the worktree entry of an older pair, and nothing else of the bundle."""
+    now = time.time()
+    closed, recent, old = "master-closed--seb", "master-recent--seb", "master-old--seb"
+    worktrees = root / "odoo" / ".git" / "worktrees"
+    for bundle in (closed, recent, old):
+        folder = root / "master" / bundle
+        for path in (
+            ".bug-fix",
+            "bug-fix-shots",
+            "odoo",
+            f"{bundle}-bug-odoo",
+            f"{bundle}-fix-odoo",
+        ):
+            (folder / path).mkdir(parents=True)
+    for name, gitdir, head in (
+        (f"{old}-bug-odoo", f"/workspace/{old}-bug-odoo/.git", "a" * 40),
+        (f"{old}-fix-odoo", f"/workspace/{old}-fix-odoo/.git", "ref: refs/heads/other"),
+        ("odoo3", "/workspace/odoo/.git", f"ref: refs/heads/{old}"),
+    ):
+        (worktrees / name).mkdir(parents=True)
+        (worktrees / name / "gitdir").write_text(f"{gitdir}\n")
+        (worktrees / name / "HEAD").write_text(f"{head}\n")
+    daemon.get_closed_windows = lambda: {
+        str(root / "master" / closed): now - 20 * 60,
+        str(root / "master" / old): now - 20 * 60,
+        str(root / "master" / recent): now - 5 * 60,
+    }
+    daemon.get_open_windows = set
+    daemon.get_repo_folder = lambda repo_name: str(root / "odoo")
+    daemon.get_repos = lambda: ["odoo"]
+    daemon.drop_closed_pairs()
+
+    def left(bundle):
+        return sorted(path.name for path in (root / "master" / bundle).iterdir())
+
+    checks = [
+        (
+            "a pair goes 10 minutes after its container stopped, its shots and the bundle stay",
+            (left(closed), left(old)) == (["bug-fix-shots", "odoo"], ["bug-fix-shots", "odoo"]),
+        ),
+        (
+            "with the worktree entry of an older pair, not one on a branch",
+            sorted(path.name for path in worktrees.iterdir()) == [f"{old}-fix-odoo", "odoo3"],
+        ),
+        ("a pair stopped 5 minutes ago stays", len(left(recent)) == 5),
+    ]
+    return [name for name, passed in checks if not passed], len(checks)
+
+
 def check_close(root):
     """`bctl close` from the host closes an idle agent window, and from a bundle gets a 403; a turn
     that runs, a dialog, an agent that starts or one on a worker keeps the window."""
@@ -994,6 +1045,9 @@ def main():
         failures, total = failures + more, total + count
     with tempfile.TemporaryDirectory() as root:
         more, count = check_gone(pathlib.Path(root))
+        failures, total = failures + more, total + count
+    with tempfile.TemporaryDirectory() as root:
+        more, count = check_pairs(pathlib.Path(root))
         failures, total = failures + more, total + count
     with tempfile.TemporaryDirectory() as root:
         more, count = check_close(pathlib.Path(root))

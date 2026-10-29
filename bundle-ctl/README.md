@@ -377,6 +377,15 @@ daemon removed the folder alone, and the ops session removed by hand 108 extensi
 14 `bundle-db` folders and 11 containers left behind. The `tasks` folder where its agent wrote the
 tasks it queued (bundle-ctl skill) keeps it bare.
 
+The bug and fix trees that `bug-fix.sh` of the serve-for-seb skill builds in a bundle
+(`BUNDLE-bug-REPO`, `BUNDLE-fix-REPO` and their state `.bug-fix`, 2.4 GB for odoo) go
+`BUNDLE_CTL_REVIEW_CLOSED_MINUTES` after the container of the bundle stopped, whatever its name:
+their servers stopped with it (Seb, 2026-10-29, after 11 such pairs filled the disk).
+`bug-fix-shots/` stays. An older pair, made of worktrees, also loses its entries in `.git/worktrees`
+of the base repo, each one only when it names that tree and no branch. Its databases stay in the
+server of the bundle, where the next `bug-fix.sh build` drops them. `python3 test_delete.py` has the
+cases.
+
 ## Bare start
 
 A bundle takes minutes and about 3 GB to make, and many tasks need none: a PR closed since, a

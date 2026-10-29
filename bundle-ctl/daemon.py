@@ -1750,10 +1750,11 @@ def free_safely():
 
 
 def drop_reviews_safely():
-    try:
-        drop_idle_reviews()
-    except Exception:
-        traceback.print_exc()
+    for drop in (drop_idle_reviews, drop_closed_pairs):
+        try:
+            drop()
+        except Exception:
+            traceback.print_exc()
 
 
 def log_cpu_safely():
@@ -2840,6 +2841,31 @@ def drop_idle_reviews():
         _code, answer = start_job(HOST, f"delete {bundle}", work, bundle=bundle)
         started[bundle] = jobs[answer["job"]]
     return started
+
+
+def drop_closed_pairs():
+    """Remove the bug and fix trees of serve-for-seb from each bundle whose container stopped
+    REVIEW_CLOSED ago, as their servers stopped with it. Their databases stay in the server of the
+    bundle, where the next `bug-fix.sh build` drops them.
+    """
+    open_windows = get_open_windows()
+    for folder, exited in get_closed_windows().items():
+        state = pathlib.Path(folder, ".bug-fix")
+        if not state.is_dir() or folder in open_windows or time.time() - exited < REVIEW_CLOSED:
+            continue
+        bundle = state.parent.name
+        for repo in get_repos():
+            for side in ("bug", "fix"):
+                tree = state.parent / f"{bundle}-{side}-{repo}"
+                entry = pathlib.Path(get_repo_folder(repo), ".git", "worktrees", tree.name)
+                if read_text(entry / "gitdir") == f"/workspace/{tree.name}/.git" and re.fullmatch(
+                    "[0-9a-f]{40}",
+                    read_text(entry / "HEAD") or "",
+                ):
+                    shutil.rmtree(entry, ignore_errors=True)
+                shutil.rmtree(tree, ignore_errors=True)
+        shutil.rmtree(state, ignore_errors=True)
+        print(f"{bundle}: bug and fix trees removed", flush=True)
 
 
 def send_deletion(item):
