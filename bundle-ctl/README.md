@@ -371,8 +371,11 @@ resume waits while the deletion runs. A bare folder with such a task is kept, as
 holds the session. `python3 test_delete.py` and `python3 test_queue.py` have the cases.
 
 A bare folder (an agent and the links of a bundle, no worktree: its agent never asked `build`) goes
-the same way, whatever its name: the daemon removes the folder. The `tasks` folder where its agent
-wrote the tasks it queued (bundle-ctl skill) keeps it bare.
+the same way, whatever its name, with `delete_bundle.py` too: its stopped container, its
+`bundle-db`, its VS Code extensions and its Claude config go with the folder. Until 2026-10-29 the
+daemon removed the folder alone, and the ops session removed by hand 108 extension stores (4.9 GB),
+14 `bundle-db` folders and 11 containers left behind. The `tasks` folder where its agent wrote the
+tasks it queued (bundle-ctl skill) keeps it bare.
 
 ## Bare start
 

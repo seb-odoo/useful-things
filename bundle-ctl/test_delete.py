@@ -769,7 +769,12 @@ def check_gone(root):
     transcript = root / f"{session}.jsonl"
     answer = {"type": "assistant", "message": {"content": [{"type": "text", "text": "done"}]}}
     transcript.write_text(f"{json.dumps(answer)}\n")
-    state, opened = {"building": [], "builds": {}, "queue": []}, []
+    state, opened, calls = {"building": [], "builds": {}, "queue": []}, [], []
+
+    def run_script(log, script, *args):
+        calls.append((script, *args))
+        shutil.rmtree(folder)
+
     daemon.CLAUDE_CONFIG_CONTAINER = str(root / "claude-config")
     daemon.HOK_WAITING = root / "hok-waiting"
     daemon.STATE = root
@@ -779,9 +784,11 @@ def check_gone(root):
     daemon.get_transcript = lambda name: transcript if name == session else None
     daemon.get_worktree_bundle_folder = lambda name: str(root / "master" / name)
     daemon.get_worktree_container_folder = lambda: str(root)
+    daemon.local_branches = lambda name: []
     daemon.open_terminal = lambda log, name: opened.append(name)
     daemon.prepare_folder = lambda name: (root / "master" / name / ".claude").mkdir(parents=True)
     daemon.read_state = lambda: state
+    daemon.run_script = run_script
     daemon.tab_groups.ask = lambda request: None
     daemon.write_state = lambda new: None
     daemon.drop_idle_reviews()
@@ -791,6 +798,10 @@ def check_gone(root):
             "a bare bundle unused goes, and keeps its session",
             (folder.exists(), daemon.read_text(root / "deleted" / f"{bundle}.session"))
             == (False, session),
+        ),
+        (
+            "with delete_bundle.py, which removes its container and its stores",
+            calls == [("delete_bundle.py", bundle)],
         ),
     ]
 

@@ -2816,16 +2816,8 @@ def drop_idle_reviews():
             if parked and not set_rebuild(bundle, read_text(get_agent_folder(bundle) / "session")):
                 log.write(f"{bundle} is kept: its session left the queue\n")
                 return {}
-            if bare:
-                if not is_bare(pathlib.Path(get_worktree_bundle_folder(bundle))):
-                    log.write(f"{bundle} was built since\n")
-                    return {}
-                keep_last_answer(bundle)
-                shutil.rmtree(get_worktree_bundle_folder(bundle))
-                with state_lock:
-                    state = read_state()
-                    state.get("builds", {}).pop(bundle, None)
-                    write_state(state)
+            if bare and not is_bare(pathlib.Path(get_worktree_bundle_folder(bundle))):
+                log.write(f"{bundle} was built since\n")
                 return {}
             try:
                 force = any([get_others_commits(bundle, repo) for repo in local_branches(bundle)])
@@ -2838,6 +2830,11 @@ def drop_idle_reviews():
                 if parked:
                     set_rebuild(bundle, None)
                 raise
+            if bare:
+                with state_lock:
+                    state = read_state()
+                    state.get("builds", {}).pop(bundle, None)
+                    write_state(state)
 
         print(f"delete {bundle}: unused since {format_time(since)}", flush=True)
         _code, answer = start_job(HOST, f"delete {bundle}", work, bundle=bundle)
