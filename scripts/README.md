@@ -510,8 +510,12 @@ the merge, and a branch pushed again since, for a new PR, stays. `test_merged_bu
 each case on scratch repos.
 
 `--json` prints the same data for a script: per bundle its group, issue, handled, open state and agent, per
-repo its head, the subject of that commit (so that triage runs no git in the ops container), push,
-behind, conflict and PR, and under `deleted` the PRs of each bundle it deleted. A dev container cannot run it (no `scripts/`, no
+repo its head, the subject of that commit, its `commits` over the base with their subject and
+`git patch-id` (none past 50), push, behind, conflict and PR, and under `deleted` the PRs of each
+bundle it deleted. The subject and the commits are for triage, so that it runs no git in the ops
+container (its restack compares the patch-ids). They are read with plumbing only: `git show` and
+`git log -p` run the textconv a bundle names in the `.git/config` of a base repo
+(`test_commits.py`). A dev container cannot run it (no `scripts/`, no
 podman, and its `git` refuses the repos of `REPO_ROOT`, a mount point owned by root: dubious
 ownership): there `gbs` is `bctl branches`, and `bctl --json branches` gives the JSON, both run on
 the host. The daemon runs this script as a new process at each call, so a change here needs no
@@ -534,6 +538,12 @@ Each bundle sits in one group, the most urgent among its repos. On screen, in th
 
 A red check stops failing once a `@robodoo override=` of it, in a comment or a review posted after
 the head commit, sets it aside for mergebot: GitHub still shows it red.
+
+A robodoo command (`override=`, `delegate+`) counts from me, my team (the logins of
+`~/.claude/external/mail-agent/logins.json` whose trigram is in its `team.json`), a reviewer asked
+on the PR, or on a fw-bot hop a login fw-bot pings at the start of its comments: the rule of
+triage. Robodoo refuses the command of anyone else, but its text stays, and gbs gives triage the
+failing checks: a stranger's override would hide a red check from it (`test_handled.py`).
 
 When the repos of a bundle disagree, the bundle takes the first of: me, CI, drafts, reviewer,
 mergebot, not mine.
@@ -581,7 +591,8 @@ left to do, dim is background, cyan is a worktree, magenta is merged.
 - The mergebot state is read from `mergebot.odoo.com/<owner>/<repo>/pull/<n>.json`: green for
   `ready` and `staged`, a green `r+` for approved, red for an error. It also tells a PR the bot
   merged from one that was closed, which GitHub shows the same way.
-- `delegated`, in green, is a review or a comment holding `@robodoo delegate+`.
+- `delegated`, in green, is a review or a comment holding `@robodoo delegate+`, from someone whose
+  robodoo commands count.
 - Review threads count apart: a yellow `N threads` when someone else wrote last, a dim
   `N replied` when I did.
 - The state of a colleague's PR is dim as a whole.
@@ -607,6 +618,8 @@ the PR queries worked.
 - Wrapping inside a cell made rich drop words: only the last column wraps, every other one has
   its longest cell as `min_width`.
 - The mergebot JSON has no field for a delegation: gbs reads the last 30 comments and reviews.
+- GitHub prices a GraphQL query by the `first`/`last` of its connections, not by the fields of a
+  node: the authors of the reviews and the reviewers asked cost no point.
 - `state["building"]` of the bundle-ctl daemon covers the 2 minutes create_bundle.py takes before
   an agent is queued. `agents.py` holds the agent reading, shared with the daemon, which imports
   branch_status: gbs cannot import daemon.py.

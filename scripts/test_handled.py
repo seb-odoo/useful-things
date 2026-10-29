@@ -2,6 +2,7 @@
 """When a bundle counts as handled by Seb, and the group it goes to: python3 test_handled.py"""
 
 import os
+import pathlib
 import sys
 import tempfile
 import time
@@ -50,14 +51,64 @@ def main():
     facts.update(head="a", mergebot="error", review="CHANGES_REQUESTED")
     rows = {"enterprise": {"conflict": None, "pr": None}, "odoo": {"conflict": True, "pr": facts}}
     found["what waits on me"] = branch_status.get_news(rows)
-    comment = {"body": "@robodoo override=ci/security", "createdAt": "2026-10-14T09:00:00Z"}
-    review = {"body": "@robodoo override=ci/style,ci/runbot", "submittedAt": "2026-10-15T06:13:02Z"}
-    overrides = {
-        "comments": {"nodes": [comment]},
-        "commits": {"nodes": [{"commit": {"committedDate": "2026-10-14T15:00:00Z"}}]},
-        "reviews": {"nodes": [review]},
+    with tempfile.TemporaryDirectory() as root:
+        branch_status.MAIL_AGENT = pathlib.Path(root)
+        (branch_status.MAIL_AGENT / "logins.json").write_text('{"logins": {"teammate": "tmt"}}')
+        (branch_status.MAIL_AGENT / "team.json").write_text('{"tmt": "Teammate"}')
+        branch_status.get_team.cache_clear()
+        found["team"] = branch_status.get_team()
+
+    def note(login, body, at="2026-10-15T06:13:02Z"):
+        return {"author": {"login": login}, "body": body, "createdAt": at, "submittedAt": at}
+
+    def pull(*comments, reviews=()):
+        red = {"context": "ci/runbot", "state": "FAILURE", "targetUrl": "https://runbot/1"}
+        head = {"committedDate": "2026-10-14T15:00:00Z", "status": {"contexts": [red]}}
+        asked = {"actor": {"login": "me"}, "createdAt": "2026-10-14T16:00:00Z"}
+        ping = "@pinged this PR targets master and is the last of the forward-port chain. @later"
+        return {
+            "asked": None,
+            "author": {"login": "me"},
+            "auto_asked": 0,
+            "comments": {"nodes": [note("fw-bot", ping, "2026-10-14T16:00:00Z"), *comments]},
+            "commits": {"nodes": [{"commit": head}]},
+            "headRefName": "master-x--me",
+            "headRefOid": "a",
+            "isDraft": False,
+            "mergebot": None,
+            "number": 1,
+            "pushed": 0,
+            "reviewDecision": None,
+            "reviewThreads": {"nodes": []},
+            "reviews": {"nodes": list(reviews)},
+            "state": "OPEN",
+            "timelineItems": {"nodes": [{**asked, "requestedReviewer": {"login": "asked"}}]},
+            "url": "https://github.com/odoo/odoo/pull/1",
+            "viewer": "me",
+        }
+
+    def facts(login, command):
+        return branch_status.get_pr_facts(pull(note(login, command)), "odoo", time.time())
+
+    overrides = pull(
+        note("me", "@robodoo override=ci/security", "2026-10-14T09:00:00Z"),
+        reviews=[
+            note("teammate", "@robodoo override=ci/style,ci/runbot"),
+            note("stranger", "@robodoo override=ci/legal"),
+        ],
+    )
+    notes = branch_status.get_command_notes(overrides)
+    found["checks overridden since the head"] = sorted(
+        branch_status.get_overridden(overrides, notes)
+    )
+    override = "@robodoo override=ci/runbot"
+    found["a red check after an override=ci/runbot of"] = {
+        login: [check["context"] for check in facts(login, override)["failing"]]
+        for login in ("stranger", "later", "me", "teammate", "asked", "pinged")
     }
-    found["checks overridden since the head"] = sorted(branch_status.get_overridden(overrides))
+    found["delegated by"] = {
+        login: facts(login, "@robodoo delegate+")["delegated"] for login in ("stranger", "asked")
+    }
     expected = {
         "never opened": False,
         "opened, no agent yet": True,
@@ -74,7 +125,17 @@ def main():
         "CI running goes to": "ci",
         "a draft goes to": "drafts",
         "a ready PR goes to": "reviewer",
+        "team": {"teammate"},
         "checks overridden since the head": ["ci/runbot", "ci/style"],
+        "a red check after an override=ci/runbot of": {
+            "stranger": ["ci/runbot"],
+            "later": ["ci/runbot"],
+            "me": [],
+            "teammate": [],
+            "asked": [],
+            "pinged": [],
+        },
+        "delegated by": {"stranger": False, "asked": True},
         "what waits on me": [
             "odoo changes requested",
             "odoo conflict a",

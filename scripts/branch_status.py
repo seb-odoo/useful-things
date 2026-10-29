@@ -16,6 +16,7 @@ import functools
 import io
 import json
 import os
+import pathlib
 import re
 import subprocess
 import time
@@ -59,6 +60,7 @@ ASKED_STYLES = ((7 * 86400, "red"), (2 * 86400, "yellow"), (0, "dim"))
 AUTO_ASKED_STYLES = ((7 * 86400, "red"), (86400, "yellow"), (0, "dim"))
 BEHIND_STYLES = ((501, "red"), (150, "yellow"), (0, "default"))
 CI_RUNNING = "[dim]ci running[/dim]"
+COMMITS_READ = 50
 DELEGATE = re.compile(r"@robodoo\b.*\bdelegate[+=]")
 FW_BOT = "fw-bot"
 # A bundle writes the .git/config of these repos: git runs none of the programs it may name there.
@@ -75,6 +77,8 @@ GROUPS = {
 }
 GROUP_PRECEDENCE = ("me", "ci", "drafts", "reviewer", "mergebot", "others")
 ISSUE_RANKS = {"review": 0, "wip": 2, "red": 1}
+LEADING_PINGS = re.compile(r"^(?:\s*@[\w-]+)+")
+MAIL_AGENT = pathlib.Path.home() / ".claude" / "external" / "mail-agent"
 MAIN_CHECK_BY_REPO = {
     "design-themes": "ci/design-theme",
     "documentation": "ci/documentation",
@@ -90,6 +94,7 @@ MERGEBOT_TAGS = {
     "ready": "[green]r+ ready[/green]",
     "staged": "[green]staged[/green]",
 }
+MENTION = re.compile(r"(?<![\w/])@([\w-]+)(?![\w/-])")
 MERGEBOT_TIMEOUT = 3
 MINOR_CHECKS = {"ci/security": "dim", "ci/style": "yellow"}
 OVERRIDE = re.compile(r"@robodoo\b.*\boverride=([\w/.,-]+)")
@@ -186,9 +191,10 @@ def read_prs(pairs):
             "{ nodes { author { login } createdAt headRefName headRefOid isDraft number "
             "reviewDecision state url "
             "comments(last: 30) { nodes { author { login } body createdAt } } "
-            "reviews(last: 30) { nodes { body submittedAt } } "
+            "reviews(last: 30) { nodes { author { login } body submittedAt } } "
             "timelineItems(last: 20, itemTypes: [REVIEW_REQUESTED_EVENT]) { nodes { "
-            "... on ReviewRequestedEvent { actor { login } createdAt } } } "
+            "... on ReviewRequestedEvent { actor { login } createdAt "
+            "requestedReviewer { ... on User { login } } } } } "
             "reviewThreads(first: 100) { nodes { isResolved "
             "comments(last: 1) { nodes { author { login } createdAt } } } } "
             "forcePushes: timelineItems(last: 1, itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT]) { "
@@ -305,8 +311,12 @@ def has_conflict(repo, branch, base_ref, write_tree):
     return out is not None and re.search(r"^\+<{7} ", out, re.MULTILINE) is not None
 
 
+def get_base_ref(repo, branch):
+    return get_remote_ref(get_base_for_repo(get_base_from_bundle_name(branch), repo), repo)
+
+
 def get_status(repo, branch, write_tree):
-    base_ref = get_remote_ref(get_base_for_repo(get_base_from_bundle_name(branch), repo), repo)
+    base_ref = get_base_ref(repo, branch)
     if git(repo, "rev-parse", "--verify", "--quiet", base_ref) is None:
         return None
     ahead, behind = map(
@@ -318,6 +328,41 @@ def get_status(repo, branch, write_tree):
         "behind": behind,
         "conflict": behind > 0 and has_conflict(repo, branch, base_ref, write_tree),
     }
+
+
+def get_commits(repo, branch):
+    """The commits of the branch over its base, newest first, with their subject and patch-id, for
+    the restack of triage; None past COMMITS_READ. Plumbing only: `git log -p` and `git show` run
+    the textconv a bundle names in the config."""
+    out = git(
+        repo,
+        "rev-list",
+        f"--max-count={COMMITS_READ + 1}",
+        "--no-commit-header",
+        "--format=%H %s",
+        f"{get_base_ref(repo, branch)}..{branch}",
+    )
+    if out is None:
+        return None
+    commits = [line.partition(" ")[::2] for line in out.splitlines()]
+    if not commits or len(commits) > COMMITS_READ:
+        return None if commits else []
+    shas = "".join(f"{sha}\n" for sha, _subject in commits).encode()
+    folder = get_repo_folder(repo)
+    diff = subprocess.run(
+        [*GIT, "diff-tree", "--stdin", "-p"],
+        capture_output=True,
+        check=True,
+        cwd=folder,
+        input=shas,
+    ).stdout
+    ids = subprocess.run(
+        [*GIT, "patch-id", "--stable"], capture_output=True, check=True, cwd=folder, input=diff
+    ).stdout.decode()
+    patch_ids = {sha: patch_id for patch_id, sha in map(str.split, ids.splitlines())}
+    return [
+        {"patch_id": patch_ids.get(sha), "sha": sha, "subject": subject} for sha, subject in commits
+    ]
 
 
 def format_age(seconds, plain=False):
@@ -354,15 +399,53 @@ def is_mine(pr):
     )
 
 
-def get_overridden(pr):
+@functools.cache
+def get_team():
+    """The logins of my team, as the mail agent reads them: those whose trigram is in team.json."""
+    try:
+        logins = json.loads((MAIL_AGENT / "logins.json").read_text())["logins"]
+        trigrams = json.loads((MAIL_AGENT / "team.json").read_text())
+    except (OSError, ValueError, KeyError):
+        return set()
+    return {login for login, trigram in logins.items() if trigram in trigrams}
+
+
+def get_commanders(pr):
+    """Whose robodoo commands count: me, my team, the reviewers asked on the PR, and on a fw-bot
+    hop the logins fw-bot pings at the start of its comments. Robodoo refuses the command of
+    anyone else, but its text stays."""
+    asked = {
+        (node.get("requestedReviewer") or {}).get("login") for node in pr["timelineItems"]["nodes"]
+    }
+    pings = {
+        login
+        for node in pr["comments"]["nodes"]
+        if (node["author"] or {}).get("login") == FW_BOT
+        and (match := LEADING_PINGS.match(node["body"] or ""))
+        for login in MENTION.findall(match[0])
+    }
+    return ({pr["viewer"]} | get_team() | asked | pings) - {None}
+
+
+def get_command_notes(pr):
+    """The comments and reviews of get_commanders(), as (body, date)."""
+    commanders = get_commanders(pr)
+    return [
+        (node["body"] or "", node[date] or "")
+        for key, date in (("comments", "createdAt"), ("reviews", "submittedAt"))
+        for node in pr[key]["nodes"]
+        if (node["author"] or {}).get("login") in commanders
+    ]
+
+
+def get_overridden(pr, notes):
     """The checks a `@robodoo override=` posted since the head commit sets aside."""
     head_date = pr["commits"]["nodes"][0]["commit"]["committedDate"]
     return {
         context
-        for key, date in (("comments", "createdAt"), ("reviews", "submittedAt"))
-        for node in pr[key]["nodes"]
-        if (node[date] or "") > head_date
-        for match in OVERRIDE.finditer(node["body"])
+        for body, date in notes
+        if date > head_date
+        for match in OVERRIDE.finditer(body)
         for context in match[1].split(",")
     }
 
@@ -371,8 +454,8 @@ def get_pr_facts(pr, repo, now):
     state = "draft" if pr["isDraft"] and pr["state"] == "OPEN" else pr["state"].lower()
     if pr["mergebot"] == "merged":
         state = "merged"
-    bodies = [node["body"] for key in ("comments", "reviews") for node in pr[key]["nodes"]]
-    overridden = get_overridden(pr)
+    notes = get_command_notes(pr)
+    overridden = get_overridden(pr, notes)
     contexts = [
         c
         for c in (pr["commits"]["nodes"][0]["commit"]["status"] or {}).get("contexts", [])
@@ -401,7 +484,7 @@ def get_pr_facts(pr, repo, now):
     return {
         "answers": sorted(t["comments"]["nodes"][0]["createdAt"] for t in to_answer),
         "ask": dict(zip(("style", "label", "date"), get_ask(pr, now))),
-        "delegated": any(DELEGATE.search(body) for body in bodies),
+        "delegated": any(DELEGATE.search(body) for body, _date in notes),
         "failing": [
             {"context": c["context"], "url": c["targetUrl"]}
             for c in contexts
@@ -554,6 +637,7 @@ def get_bundles():
             zip(pairs, executor.map(lambda pair: get_status(*pair, write_tree), pairs)),
         )
         pushes = dict(zip(pairs, executor.map(lambda pair: get_push(*pair), pairs)))
+        commits = dict(zip(pairs, executor.map(lambda pair: get_commits(*pair), pairs)))
         subjects = dict(zip(repos, executor.map(get_subjects, repos)))
         prs, errors = prs_future.result()
         open_folders = open_future.result()
@@ -583,6 +667,7 @@ def get_bundles():
             repos_of_bundle[repo] = {
                 "ahead": status and status["ahead"],
                 "behind": status and status["behind"],
+                "commits": commits[repo, branch],
                 "conflict": status and status["conflict"],
                 "create_pr": get_compare_url(repo, branch) if create_pr else None,
                 "empty": empty,
