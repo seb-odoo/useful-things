@@ -146,6 +146,47 @@ ops container in `~/.local/share/claude-plans/ops`, the host in `~/.claude/plans
 of the bundles as text at `~/dev-plans`, and a bundle sees no other. Claude's `plansDirectory`
 cannot do it: it takes a folder of the project.
 
+**Outside PRs.** A bundle on a PR of an author outside the odoo org reads the memory of the bundles
+from a copy of its own, and what its agent writes there comes to Seb as a handoff card (Seb,
+2026-10-29: "Yes, outside authors only"): a note a stranger's text steered reaches no other bundle
+before his yes. [`scripts/outside.py`](../scripts/outside.py) marks such a bundle with the file
+`outside` of `claude-config/<bundle>`, which no container mounts:
+
+- at a `bctl fetch` of the PR (its author, as `gh api repos/R/pulls/N` reads it with the token of
+  the host), or of the runbot label of a branch of a fork;
+- at each start of the container, when an open PR of an author outside the org has the branch of
+  the bundle as head, in a repo the bundle has (one GraphQL query; GitHub out of reach leaves the
+  mark as it was).
+
+Outside means a GitHub association to the repo other than `MEMBER` or `OWNER`, and a head on
+neither `odoo` nor `odoo-dev`: the forward-ports of fw-bot are inside. A mark stays once set, also when the
+bundle is deleted and made again under its name. A container that runs when its bundle gets marked
+keeps the shared memory until it stops: a mount is fixed for the life of a container.
+
+At its start, the memory of a marked bundle is `claude-config/<bundle>/memory`, the others mount the
+shared one there, through a link. Its copy gets the notes of the shared memory, but the ones it
+changed. bundle-ctl looks at the copy every minute: notes changed since the bundle got them, a
+minute after the last change, go to `~/.claude/handoff/<bundle>@memory/dev-memory/`, merged into
+what the shared memory got since (`git merge-file --union`), and hok shows them as one proposal;
+newer notes wait for its answer. A yes writes them into the shared memory (host-ctl `handoff.py`,
+root `dev-memory`), a no drops them from the copy at its next start. A note the bundle deletes is
+not proposed. `memory-base` beside the copy holds what the bundle got last, read by the host only.
+A remote agent takes the copy too, and its notes come back to it.
+
+**Fake keys.** Each bundle has a GitHub token and an SSH key that look real and are not (Seb,
+2026-10-29: "Yes, one per bundle"): `~/.config/gh/hosts.yml`, `GITHUB_PAT` in the environment of
+its Claude, `~/.ssh/id_ed25519`. None of its tools sends them: gh sends the `GH_TOKEN` of the
+GitHub gateway, git goes through git-gate. So a request that carries one comes from code that read
+the keys of the bundle and tried them. [`claude-config.py`](claude-config.py) makes them once, in
+`claude-config/<bundle>/fake-keys.json`, writes them again at each start, and names them in
+`STATE_ROOT/gateway-callers/fake/<bundle>.json`, which every gateway mounts: a gateway refuses a
+request that carries one (in its target, a header or its body, as sent, URL-encoded or in a JSON
+string) and holds one card in hok for the bundle, and git-gate holds a push that carries one
+(gateway-core README, "Fake keys"; git-gate README). Nothing shows before. What none of them sees:
+a key sent out through the Claude tunnels, which no gateway reads, then used from elsewhere, where
+GitHub only says it is no token; a key encoded otherwise (compressed, in base64 again), or in a
+binary file of a push.
+
 | name in `~/.claude` | in a bundle | in the ops container |
 | --- | --- | --- |
 | `.credentials.json` | its own: a dummy login | shared, writable: the login |
@@ -153,7 +194,7 @@ cannot do it: it takes a folder of the project.
 | `launch.json`, `loop.md`, `scheduled_tasks.json`, `settings.local.json` | its own | shared, read-only: what Claude reads as the project folder of the home |
 | `.git` | shared, read-only, by the fragment of host-ctl: the host commits there | same |
 | `review-corpus` | shared, read-only: the reviews the review skill learns from | shared, writable |
-| `projects` | its own, but `-workspace` (the transcripts and the memory of the bundles) shared and writable, and the memory of the host sessions read-only | shared, writable |
+| `projects` | its own, but `-workspace` (the transcripts and the memory of the bundles) shared and writable, the memory a copy of its own on an outside PR (above), and the memory of the host sessions read-only | shared, writable |
 | `.claude.json`, `daemon.json`, `policy-limits.json`, `remote-settings-helper-consent`, `remote-settings.json`, `settings.json` | its own copy, below | same |
 | `backups`, `cache`, `file-history`, `ide`, `session-env`, `sessions`, `shell-snapshots` | its own folder, below | same |
 | `dev-mods` | its own folder, empty and read-only | its own folder |

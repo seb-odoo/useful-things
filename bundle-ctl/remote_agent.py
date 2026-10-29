@@ -83,6 +83,10 @@ MOUNTS = {
     "/home/vscode/.claude/plugins": ("send", "plugins"),
     "/home/vscode/.claude/projects/@HOST_PROJECT@/memory": ("send", "the host memory, read-only"),
     "/home/vscode/.claude/projects/-workspace": ("send", "the memory of the bundles, the session"),
+    "/home/vscode/.claude/projects/-workspace/memory": (
+        "send",
+        "the memory of the bundles, a copy of its own on an outside PR",
+    ),
     "/home/vscode/.claude/plans": ("job", "its own: no plan of the laptop goes to a worker"),
     "/home/vscode/.claude/agent-start.lock": ("drop", "the lock of the agent starts of the laptop"),
     "/home/vscode/.claude/review-corpus": ("send", "the review skill reads it"),
@@ -112,6 +116,8 @@ MOUNTS = {
         "VS Code",
     ),
     "/home/vscode/.config/Code/User": ("drop", "VS Code"),
+    "/home/vscode/.config/gh": ("send", "the fake GitHub token of the bundle"),
+    "/home/vscode/.ssh": ("send", "the fake SSH key of the bundle"),
     "@VENV_ROOT@": ("image", "the venvs, in the runner image"),
     "/home/vscode/.local/share/postgresql": ("job", "its own postgres"),
     "/var/run/postgresql": ("job", "its own postgres"),
@@ -148,6 +154,13 @@ def get_paths(bundle_folder):
     values = get_values()
     claude_config = pathlib.Path(values["CACHE_ROOT"]) / "devcontainer" / "claude-config"
     return values, claude_config / bundle_folder.name
+
+
+def get_memory(own):
+    """The memory a bundle reads: a copy of its own on an outside PR (scripts/outside.py)."""
+    if (own / "outside").is_file():
+        return own / "memory"
+    return HOME / ".claude" / "projects" / "-workspace" / "memory"
 
 
 def get_agent(bundle_folder):
@@ -234,12 +247,12 @@ def build_config(bundle_folder):
             claude / "projects" / host_project / "memory",
             f"home/.claude/projects/{host_project}/memory",
         )
-        add(
-            claude / "projects" / "-workspace" / "memory", "home/.claude/projects/-workspace/memory"
-        )
+        add(get_memory(own), "home/.claude/projects/-workspace/memory")
         add(own / "settings.json", "home/.claude/settings.json")
         add(own / "policy-limits.json", "home/.claude/policy-limits.json")
         add(own / "project", "workspace/.claude")
+        add(own / "gh", "home/.config/gh")
+        add(own / "ssh", "home/.ssh")
         add(HOME / ".gitconfig", "home/.gitconfig")
         add(HOME / ".gitconfig.local", "home/.gitconfig.local")
         add(HOME / ".local" / "bin" / "gh", "home/.local/bin/gh")
@@ -322,6 +335,7 @@ def start_standin(bundle, bundle_folder, worker, session):
     mounts = [
         (bundle_folder, "/workspace", "rw"),
         (HOME / ".claude" / "projects" / "-workspace", "/mirror/projects", "rw"),
+        (get_memory(own), "/mirror/projects/memory", "rw"),
         (own / "sessions", "/mirror/sessions", "rw"),
         (own / "file-history", "/mirror/file-history", "rw"),
         (HOME / ".claude" / "handoff" / bundle, "/mirror/handoff", "rw"),

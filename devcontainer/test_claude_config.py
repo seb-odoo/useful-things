@@ -6,9 +6,12 @@ import hashlib
 import json
 import os
 import pathlib
+import re
+import string
 import subprocess
 import sys
 import tempfile
+import zlib
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -56,6 +59,11 @@ def check_bundle(root):
     real = {**REAL, "subscriptionType": "team", "rateLimitTier": "tier"}
     (claude / ".credentials.json").write_text(json.dumps({"claudeAiOauth": real}))
     (claude / "settings.json").write_text('{"model": "opus"}\n')
+    gh = root / "home" / ".config" / "gh"
+    gh.mkdir(parents=True)
+    (gh / "hosts.yml").write_text(
+        "github.com:\n    oauth_token: real-host-token\n    user: seb-odoo\n"
+    )
     res = run(root, BUNDLE, "--bundle")
     check("a bundle: exit code", (res.returncode, res.stderr), (0, ""))
     own = root / "cache" / "devcontainer" / "claude-config" / BUNDLE
@@ -79,6 +87,8 @@ def check_bundle(root):
         check(f"mount source {path}", (root / path).is_dir(), True)
     check("mount source of the lock", (claude / "agent-start.lock").is_file(), True)
 
+    check_fakes(root, own, settings)
+
     run(root, BUNDLE, "--bundle")
     check("the same dummy at the next start", read_login(own)["accessToken"], login["accessToken"])
     (own / "home" / ".credentials.json").write_text(json.dumps({"claudeAiOauth": REAL}))
@@ -91,6 +101,41 @@ def check_bundle(root):
     run(root, BUNDLE, "--bundle")
     check("a link left there is not written through", target.read_text(), "kept\n")
     check("but replaced", (own / "home" / ".credentials.json").is_symlink(), False)
+
+
+def check_fakes(root, own, settings):
+    hosts = (own / "gh" / "hosts.yml").read_text()
+    token = re.search(r"oauth_token: (\S+)", hosts)[1]
+    body, checksum = token[4:34], token[34:]
+    crc, digits = zlib.crc32(body.encode()), ""
+    while crc:
+        crc, rest = divmod(crc, 62)
+        digits = (string.digits + string.ascii_uppercase + string.ascii_lowercase)[rest] + digits
+    check(
+        "a token of GitHub's shape",
+        (token[:4], len(token), checksum),
+        ("ghp_", 40, digits.rjust(6, "0")),
+    )
+    check("nothing of the host's gh", "real-host-token" in hosts, False)
+    check("its login", "user: seb-odoo" in hosts, True)
+    check("in its environment too", settings.get("env", {}).get("GITHUB_PAT"), token)
+    key = (own / "ssh" / "id_ed25519").read_text()
+    check("an SSH key", key.startswith("-----BEGIN OPENSSH PRIVATE KEY-----"), True)
+    mode = (own / "ssh" / "id_ed25519").stat().st_mode & 0o777
+    check("for its owner only", oct(mode), "0o600")
+    named = json.loads((root / "state" / "gateway-callers" / "fake" / f"{BUNDLE}.json").read_text())
+    lines = key.splitlines()
+    check("named for the gateways", (named["bundle"], named["token"]), (BUNDLE, token))
+    check("with the lines of its key that no other has", named["key"], lines[2:-1])
+    run(root, BUNDLE, "--bundle")
+    check("the same at the next start", (own / "gh" / "hosts.yml").read_text(), hosts)
+    target = root / "target"
+    target.write_text("kept\n")
+    (own / "gh" / "hosts.yml").unlink()
+    (own / "gh" / "hosts.yml").symlink_to(target)
+    run(root, BUNDLE, "--bundle")
+    check("a link in its gh folder is not written through", target.read_text(), "kept\n")
+    check("but replaced", (own / "gh" / "hosts.yml").read_text(), hosts)
 
 
 def check_ops(root):
@@ -114,6 +159,9 @@ def check_mounts():
     check("the Claude folder of a bundle is its own", targets.get("/home/vscode/.claude"), folder)
     plans = targets.get("/home/vscode/.claude/plans")
     check("its plans, the dev ones", plans, "@SHARE_ROOT@/claude-plans/dev")
+    own = "@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}"
+    found = [targets.get("/home/vscode/.config/gh"), targets.get("/home/vscode/.ssh")]
+    check("its gh and ssh folders are its own", found, [f"{own}/gh", f"{own}/ssh"])
     host = ("@HOME@/.claude", "@HOME@/.claude/plans", "@HOME@/.claude/projects")
     check("no mount of the host's folder or plans", [s for s in targets.values() if s in host], [])
 

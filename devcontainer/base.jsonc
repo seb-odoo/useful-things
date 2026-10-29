@@ -79,6 +79,9 @@
     "source=@HOME@/.claude/plugins,target=/home/vscode/.claude/plugins,type=bind,readonly,z",
     "source=@HOME@/.claude/projects/@HOST_PROJECT@/memory,target=/home/vscode/.claude/projects/@HOST_PROJECT@/memory,type=bind,readonly,z",
     "source=@HOME@/.claude/projects/-workspace,target=/home/vscode/.claude/projects/-workspace,type=bind,z",
+    // The memory of the bundles: a link to the shared one, or for a bundle on a PR of an author
+    // outside odoo a copy of its own, whose changes go to Seb as a card (scripts/outside.py).
+    "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/memory,target=/home/vscode/.claude/projects/-workspace/memory,type=bind,z",
     "source=@SHARE_ROOT@/claude-plans/dev,target=/home/vscode/.claude/plans,type=bind,z",
     "source=@HOME@/.claude/agent-start.lock,target=/home/vscode/.claude/agent-start.lock,type=bind,z",
     "source=@HOME@/.claude/review-corpus,target=/home/vscode/.claude/review-corpus,type=bind,readonly,z",
@@ -113,6 +116,10 @@
     // Where the Claude tab stores the permission mode of each session: kept over a rebuild.
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/extension-storage,target=/home/vscode/.vscode-server/data/User/globalStorage/anthropic.claude-code,type=bind,z",
     "source=@CONFIG_ROOT@/Code/User,target=/home/vscode/.config/Code/User,type=bind,readonly,Z",
+    // A fake GitHub token and SSH key of the bundle, which none of its tools sends: a gateway or
+    // git-gate that gets one holds a card in hok (claude-config.py).
+    "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/gh,target=/home/vscode/.config/gh,type=bind,z",
+    "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/ssh,target=/home/vscode/.ssh,type=bind,z",
     "source=@VENV_ROOT@,target=@VENV_ROOT@,type=bind,readonly,Z",
     // The databases of the bundle: its postgres server, its socket at PGHOST, its filestore. A
     // bundle made before its own server has links to the host's there (bundle-db.py).

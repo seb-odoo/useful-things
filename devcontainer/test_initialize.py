@@ -105,6 +105,8 @@ def main():
             shutil.copy(HERE / script, root / "tools" / script)
         for script in ("warden-chrome.py", "claude-config.py", "extensions.py", "bundle-db.py"):
             (root / "tools" / script).write_text(FAKE)
+        (root / "scripts").mkdir()
+        (root / "scripts" / "outside.py").write_text(FAKE)
         base = root / "src" / "master"
         folder = base / NAME
         (folder / "odoo" / "node_modules" / "eslint").mkdir(parents=True)
@@ -116,12 +118,14 @@ def main():
 
         res = initialize(root, folder)
         check("exit code", (res.returncode, res.stderr), (0, ""))
+        scripts = ("warden-chrome.py", "claude-config.py", "../scripts/outside.py")
         calls = [
             json.loads(line)
-            for script in ("warden-chrome.py", "claude-config.py", "extensions.py", "bundle-db.py")
+            for script in (*scripts, "extensions.py", "bundle-db.py")
             for line in (root / "tools" / f"{script}.calls").read_text().splitlines()
         ]
-        expected = [[], [NAME, "--bundle"], [NAME, str(folder)], [NAME]]
+        outside = ["start", NAME, str(folder)]
+        expected = [[], [NAME, "--bundle"], outside, [NAME, str(folder)], [NAME]]
         check("the name, one argument", calls, expected)
         check("no shell", (root / "shell-ran").exists(), False)
         check("the folder of the agent, for its mount", (folder / ".agent").is_dir(), True)

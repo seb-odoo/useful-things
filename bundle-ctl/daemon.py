@@ -106,6 +106,7 @@ from utils import UtilsRunner  # noqa: E402
 
 import cpulog  # noqa: E402
 import cut  # noqa: E402
+import outside  # noqa: E402
 import remote_agent  # noqa: E402
 import runs  # noqa: E402
 import tab_groups  # noqa: E402
@@ -1508,6 +1509,7 @@ def keep_launching():
             free_safely()
             try:
                 keep_remote_agents()
+                outside.collect_all()
             except Exception:
                 traceback.print_exc()
             if time.monotonic() - checked > REVIEW_CHECK:
@@ -2925,6 +2927,7 @@ def fetch(caller, query, body):
         raise Refused(f"{bundle} is already here, open it instead")
     check_unpushed(bundle, "pfb")
     check_task(bundle, body)
+    outside.check_fetch(bundle, name)
     if "task" in body and get_agent_folder(bundle).is_dir() and not may_queue(caller, bundle):
         return hold_task(caller, bundle, body, ["fetch_bundle.py", name, "--no-open"])
     if "task" in body:
