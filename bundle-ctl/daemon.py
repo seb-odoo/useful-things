@@ -86,6 +86,7 @@ from commands import (  # noqa: E402
     get_base_from_bundle_name,
     get_bundle_name_from_base_and_name,
     get_remote_dev_ref,
+    get_remote_dev_repo,
     get_remote_ref,
     get_repo_folder,
     get_repos,
@@ -163,6 +164,7 @@ DISK_WARN = float(
     os.environ.get("BUNDLE_CTL_DISK_WARN_GB") or CONFIG.get("BUNDLE_CTL_DISK_WARN_GB") or 60,
 )
 DISK_WARNED = STATE / "disk-warned"
+FETCH_TIMEOUT = 60
 FREE_AFTER = 5 * 60
 GITHUB_ASK = 600
 GITHUB_MUX = pathlib.Path.home() / ".local" / "state" / "ssh-github-mux"
@@ -1836,16 +1838,40 @@ def is_made(folder):
     return os.path.exists(f"{folder}/{MADE}") or os.path.islink(f"{folder}/.devcontainer")
 
 
-def check_unpushed(bundle, script):
-    for repo in local_branches(bundle):
-        unpushed = subprocess.run(
-            [*GIT, "log", "--oneline", f"refs/heads/{bundle}", "--not", "--remotes"],
+def get_unpushed(bundle, repo):
+    return subprocess.run(
+        [*GIT, "log", "--oneline", f"refs/heads/{bundle}", "--not", "--remotes"],
+        capture_output=True,
+        check=False,
+        cwd=get_repo_folder(repo),
+        text=True,
+    ).stdout.strip()
+
+
+def fetch_dev_branch(bundle, repo):
+    """Whether the branch of the bundle was fetched from its dev remote. A push git-gate held goes
+    out from the gate at Seb's yes, so the dev remote ref of the base repo stays on the head
+    before."""
+    refspec = f"+refs/heads/{bundle}:{get_remote_dev_ref(bundle, repo)}"
+    try:
+        return not subprocess.run(
+            [*GIT, "fetch", "--quiet", "--no-write-fetch-head", "--no-auto-maintenance"]
+            + [get_remote_dev_repo(repo), refspec],
             capture_output=True,
             check=False,
             cwd=get_repo_folder(repo),
-            text=True,
-        ).stdout.strip()
-        if unpushed:
+            env=session_env(),
+            timeout=FETCH_TIMEOUT,
+        ).returncode
+    except subprocess.TimeoutExpired:
+        return False
+
+
+def check_unpushed(bundle, script):
+    for repo in local_branches(bundle):
+        if get_unpushed(bundle, repo) and (
+            not fetch_dev_branch(bundle, repo) or get_unpushed(bundle, repo)
+        ):
             raise Refused(f"{bundle} has unpushed commits in {repo}, {script} would reset them")
 
 

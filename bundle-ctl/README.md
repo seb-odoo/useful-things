@@ -82,6 +82,13 @@ the cgroup of the unit: `bctl build` then asks its build again once the daemon i
 `package.json`, the agent no word, and the pre-commit hook of Odoo removed the `node_modules`
 links of the bundle. `python3 test_queue.py` and `scripts/test_optional_repos.py` have the cases.
 
+`create`, `fetch` and `build` refuse a bundle whose branch has a commit no remote of the base repo
+has, as their script would reset it. A push that git-gate held goes out from the gate at Seb's
+yes, so the dev remote ref of the base repo stays on the head before it. So before it refuses, the
+daemon fetches that branch from the dev remote, 60 seconds at most, and refuses only when the
+commit is still on no remote (2026-10-29: the triage got the refusal each hour on a fw bundle whose
+agent pushed at hok g292, until a fetch by hand). `python3 test_queue.py` has the cases.
+
 `add-repo`, `create`, `fetch` and `open` answer 202 with a job id, and the jobs run one at a time, as two
 fetches of one repo collide on its remote refs. The jobs of one bundle also wait for each other. The
 agent terminal of a bundle (`open --terminal`, the start of a queued task) waits only for the jobs

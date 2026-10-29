@@ -23,6 +23,7 @@ sys.path.insert(0, str(HERE))
 import daemon  # noqa: E402
 
 START_JOB = daemon.start_job
+CHECK_UNPUSHED = daemon.check_unpushed
 QUEUED = 1760000000.0
 TASK = "do"
 
@@ -1316,6 +1317,59 @@ def check_build(root):
     return [f"build: {name}" for name, passed in checks if not passed], len(checks)
 
 
+def check_gate_push(root):
+    """A push git-gate sent at Seb's yes leaves the dev remote ref of the base repo on the head
+    before it: the check fetches that branch before it refuses a fetch."""
+    dev, repo = root / "dev.git", root / "repo"
+    subprocess.run(["git", "init", "-q", "--bare", str(dev)], check=True)
+    subprocess.run(["git", "init", "-q", "-b", "fw", str(repo)], check=True)
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+    git += ["-c", "commit.gpgsign=false"]
+    subprocess.run([*git, "remote", "add", "odoo-dev", str(dev)], check=True)
+
+    def commit(message):
+        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", message], check=True)
+
+    def check():
+        try:
+            CHECK_UNPUSHED("fw", "pfb")
+        except daemon.Refused as error:
+            return str(error)
+
+    commit("first")
+    subprocess.run([*git, "push", "-q", "odoo-dev", "fw"], check=True)
+    commit("fix")
+    subprocess.run([*git, "push", "-q", str(dev), "fw"], check=True)
+    stubs = {
+        name: vars(daemon)[name] for name in ("local_branches", "get_repo_folder", "session_env")
+    }
+    daemon.local_branches = lambda bundle: ["odoo"]
+    daemon.get_repo_folder = lambda name: str(repo)
+    daemon.session_env = lambda: dict(os.environ)
+    try:
+        sent = check()
+        tracked = subprocess.run(
+            [*git, "rev-parse", "refs/remotes/odoo-dev/fw", "fw"],
+            capture_output=True,
+            check=True,
+            text=True,
+        ).stdout.split()
+        commit("unpushed")
+        unpushed = check()
+        subprocess.run([*git, "push", "-q", str(dev), "--delete", "fw"], check=True)
+        gone = check()
+    finally:
+        vars(daemon).update(stubs)
+    refusal = "fw has unpushed commits in odoo, pfb would reset them"
+    checks = [
+        ("a head the gate sent passes", sent is None),
+        ("its dev remote ref is fetched", tracked[0] == tracked[1]),
+        ("a commit not pushed is refused", unpushed == refusal),
+        ("a branch gone from the dev remote is refused", gone == refusal),
+    ]
+    return [f"gate push: {name}" for name, passed in checks if not passed], len(checks)
+
+
 def check_build_cut(root):
     """A restart of the daemon kills the build a client follows: the client asks it again of the
     new daemon, which no longer knows the job."""
@@ -1684,6 +1738,7 @@ def main():
         check_place,
         check_github,
         check_build,
+        check_gate_push,
         check_disk_worker,
         check_build_cut,
         check_build_disk,
