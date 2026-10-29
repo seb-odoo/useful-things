@@ -15,6 +15,8 @@ HERE = pathlib.Path(__file__).resolve().parent
 SCRIPT = HERE / "worktree-admin.py"
 GIT = ["git", "-c", "user.name=me", "-c", "user.email=me@localhost", "-c", "commit.gpgsign=false"]
 ENV = {**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}
+# Set by the ops container, where git with no config read trusts no repo.
+ENV.pop("GIT_TEST_ASSUME_DIFFERENT_OWNER", None)
 INSIDE = """set -e
 git_dir=$1; own=$2; other=$3; side=$4
 mount --bind "$git_dir/worktrees/$own" "$side"

@@ -19,6 +19,8 @@ import daemon  # noqa: E402
 
 BASE = "refs/remotes/odoo/master"
 ENV = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+# Set by the ops container, where git with no config read trusts no repo.
+ENV.pop("GIT_TEST_ASSUME_DIFFERENT_OWNER", None)
 NAME = ("-c", "user.name=t", "-c", "user.email=t@t")
 
 
