@@ -174,7 +174,7 @@ HOK_KEPT = 5
 HOK_WAITING = pathlib.Path(CONFIG["REPO_ROOT"]) / "host-ctl" / "approve.py"
 HOST = "host"
 HOST_FOLDER = CONFIG.get("BUNDLE_CTL_HOST_FOLDER")
-HOST_ONLY = {("POST", "/close"), ("POST", "/force-queue")}
+HOST_ONLY = {("POST", "/close"), ("POST", "/force-queue"), ("POST", "/tell")}
 JOB_WAIT = 50
 MAX_AGENTS = int(
     os.environ.get("BUNDLE_CTL_MAX_AGENTS") or CONFIG.get("BUNDLE_CTL_MAX_AGENTS") or 8,
@@ -183,6 +183,7 @@ MAX_BODY = 64 * 1024
 MAX_PRIORITY = 100
 MAX_RELAUNCHES = 3
 MAX_TASK = 32 * 1024
+MAX_TOLD = 2000
 MAX_WIDTH = 400
 NAME = re.compile(r"[a-z0-9](?:[a-z0-9.]|-(?!-)){0,79}")
 NOT_BUILT = (
@@ -2532,6 +2533,59 @@ def read_hok_waiting():
         return hok_read["listed"]
 
 
+def tell(caller, query, body):
+    """`POST /tell {session, text}`: one line of hok, once Seb answered a card of a Claude session,
+    for the agent window that runs that session, as a PR event (README.md, "hok events"). Only the
+    host asks (HOST_ONLY): the line is typed as a prompt."""
+    session, text = body.get("session"), body.get("text")
+    if not isinstance(session, str) or not SESSION_ID.fullmatch(session):
+        raise ValueError("session: a session id")
+    if not isinstance(text, str) or not text.isprintable() or not 0 < len(text) <= MAX_TOLD:
+        raise ValueError(f"text: one line of at most {MAX_TOLD} characters")
+    agent = get_session_agent(session)
+    if agent is None:
+        return 404, {"error": f"no agent window runs {session}"}
+    try:
+        if agent.startswith(OPS):
+            get_agent_folder(agent).mkdir(parents=True, exist_ok=True)
+        leave_event(get_agent_folder(agent), text)
+    except OSError as error:
+        raise Refused(f"{agent}: the line was not left: {error}") from error
+    print(f"{agent}: told {text[:100]}", flush=True)
+    return 200, {"bundle": agent}
+
+
+def get_session_agent(session):
+    """The agent window that runs a session: ops-SESSION, or the bundle whose .agent/session it
+    is. None when no agent-terminal.py runs it: a tab has nothing to type in."""
+    if is_agent_running(f"{OPS}{session}"):
+        return f"{OPS}{session}"
+    for bundle in get_terminals():
+        if read_text(get_agent_folder(bundle) / "session") == session:
+            return bundle
+    return None
+
+
+def leave_event(agent, text):
+    """Leave a line in the pr-events/ folder of an agent, as client/prwatch.py does, with no link
+    followed: a bundle writes its .agent/ folder."""
+    folder = os.open(agent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        with contextlib.suppress(FileExistsError):
+            os.mkdir("pr-events", 0o755, dir_fd=folder)
+        events = os.open("pr-events", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=folder)
+    finally:
+        os.close(folder)
+    try:
+        name = f"{time.time_ns()}.txt"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+        with open(os.open(f".{name}", flags, 0o644, dir_fd=events), "w") as file:
+            file.write(text)
+        os.rename(f".{name}", name, src_dir_fd=events, dst_dir_fd=events)
+    finally:
+        os.close(events)
+
+
 def get_in_hand():
     """The bundles Seb still has in hand: a hok request of the bundle waits, or a Firefox tab group
     of it is open, whose Agent and VS Code buttons need the bundle."""
@@ -3302,6 +3356,7 @@ VERBS = {
     ("POST", "/bring-back"): bring_back,
     ("POST", "/place"): place_agent,
     ("POST", "/schedule"): schedule_task,
+    ("POST", "/tell"): tell,
     ("POST", "/unqueue"): unqueue,
 }
 

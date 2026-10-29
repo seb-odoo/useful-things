@@ -616,7 +616,7 @@ def run_ops(name):
         code = run_tty(
             ["podman", "exec", "--interactive", "--tty", "--detach-keys=", "--user", USER]
             + ["--workdir", REPO_ROOT, "--env", f"TERM={os.environ.get('TERM', 'xterm')}"]
-            + ["--env", "SHELL=/bin/bash", container, *claude],
+            + ["--env", "SHELL=/bin/bash", "--env", f"AGENT_WINDOW={name}", container, *claude],
             Waker(agent, os.path.basename(HOST_FOLDER), session),
         )
     except HangUp:
@@ -695,6 +695,7 @@ def main():
         code = run_tty(
             ["podman", "exec", "--interactive", "--tty", "--detach-keys=", "--user", USER]
             + ["--workdir", "/workspace", "--env", f"TERM={os.environ.get('TERM', 'xterm')}"]
+            + ["--env", f"AGENT_WINDOW={bundle}"]
             + [container, "bash", str(HERE / "client" / "agent-run.sh"), "--terminal", session]
             + ([GO_ON] if cut else []),
             Waker(agent, bundle, session),

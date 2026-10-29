@@ -891,6 +891,28 @@ what to do: ask Seb to validate, or act.
 `python3 test_prwatch.py` runs the looks on a fake GitHub and a real git repo, the wait on a fake
 gateway, the hooks, the Stop hook and pr-posted.py; `test_terminal.py` the typing.
 
+## hok events
+
+An agent learns when Seb answered in `hok` what it asked (a request of `hctl`, a push of
+git-gate), as a PR event: it no longer waits for his yes in the foreground (Seb, 2026-10-29: an
+ops session polled `hctl job` 16 h for a yes given the next morning). Once a card is answered,
+`hok` asks `POST /tell {session, text}` with one line for the conversation that asked (host-ctl
+README, "What hok tells the conversation that asked"). Only the host asks it: the line is typed as
+a prompt.
+
+- The daemon looks for the agent window that runs the conversation: `ops-SESSION` while its
+  `agent-terminal.py` runs, else the bundle whose `.agent/session` it is, with its terminal
+  running. It leaves the line in `pr-events/` of that agent folder, with no link followed, and the
+  line reaches the agent as a PR event does: typed by the terminal, idle or busy, and in a bundle
+  also by the hook or the Stop hook.
+- No window runs it (a tab of a VS Code window, a closed window): 404, nothing is left. The claude
+  of an agent window has `AGENT_WINDOW` (the bundle, or `ops-SESSION`) in its environment, so a
+  conversation knows whether it is told: in a window it ends its turn on a wait for Seb's answer,
+  in a tab it keeps a background `hctl job N --wait 86400`, or `hok-answer gN` with no `--wait`.
+- A conversation whose window closed while it waited, then moved to a tab, is told nothing.
+
+`python3 test_tell.py` runs the verb on fake agent folders, and the environment of both windows.
+
 ## Ops agents
 
 A Claude session of the ops container (`BUNDLE_CTL_HOST_FOLDER`) can run in an agent window of
