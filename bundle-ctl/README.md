@@ -63,6 +63,8 @@ the pager. `python3 test_node_modules.py` and `python3 test_delete.py` have the 
 | `POST /place` | the agent of `bundle` put `where`: `local`, or a worker of `BUNDLE_CTL_WORKERS` (see Remote agents). The host or the ops container asks |
 | `POST /requeue` | the session of the agent of `bundle`, or of an ops agent window with `ops-SESSION` (see Ops agents), queued again, last, paused with `paused`, and its agent window closed once its turn ended, 2 minutes at most: meanwhile `client/run-hook.py` refuses the Bash calls of a bundle, on a reason that tells it to end its turn, and a turn still running at the end goes on told it was cut (see Cut sessions). With `github`, it waits for the GitHub connection of the host. The host or the ops container asks, or with `github` the bundle itself |
 | `POST /close` | the agent window of `bundle` closed with no yes, as after its verdict: its claude and its container stop, its session stays; refused while a claude of the bundle is in a turn or waits for an answer, or while its agent starts (see Agents in a terminal). Refused to a container |
+| `POST /prompt` | a prompt Seb sent from deck, typed as his own in the window of `agent` (a bundle, or `ops-SESSION`) while it runs `session`; 404 otherwise (see Prompts from deck). Refused to a container |
+| `POST /stop` | Escape in the window of `agent` while it runs `session`, in a turn or a dialog (see Prompts from deck). Refused to a container |
 | `POST /schedule` | when the queued task of `bundle` may start: `when` is `spot` (once a slot, the memory and the CPU let it), `manual` (it waits for a manual resume, until it is scheduled again) or `HH:MM` (that time of the host, today or tomorrow); it no longer goes over the cap. Then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
 | `POST /unqueue` | the queued task of a bundle dropped; the host, that bundle or the one that queued the task asks |
 | `POST /run` | a heavy command waits for cores: one JSON line each time its place changes, then the CPUs it got (see Runs) |
@@ -942,6 +944,34 @@ a prompt.
   Agent windows).
 
 `python3 test_tell.py` runs the verb on fake agent folders, and the environment of both windows.
+
+## Prompts from deck
+
+The chat of deck sends a prompt to an agent window from any device of Seb, and stops its turn
+(Seb, 2026-10-29: "so I can view/chat in agents from other places too"; deck README, "Chat"). The
+feed of deck asks, on the host: `POST /prompt {agent, session, text}` and `POST /stop {agent,
+session}`, where `agent` is the bundle of the row, or `ops-SESSION` for an ops agent. The window
+of that agent must run that session here: else 404, nothing is left, nothing starts (a closed
+window, a tab of VS Code, a session the agent does not run). Not by the session alone, as a bundle
+may claim the session of another in its `.agent/session`. An agent on a worker is refused too.
+
+- The daemon leaves the prompt in `~/.local/state/bundle-ctl/deck/AGENT/SESSION/` of the host,
+  never in `.agent/`: a bundle writes that folder, and its own lines there would be typed as Seb's.
+  The terminal types it as one paste, then Enter, as Seb would: in an idle session, and in a busy
+  one, where claude shows it queued and reads it at its next tool call. It waits behind the same
+  things as a PR event (a draft of Seb in that terminal, a dialog, a slash command he sent), after
+  a task the daemon left, before the PR events, and a second after an Escape. Several that wait go
+  as one paste. No hook takes it: it reaches claude as typed by Seb, `origin: human` in the
+  transcript.
+- A prompt holds any text but control characters (new lines and tabs pass), 32 KB at most: an
+  escape would end the paste and type keys. The terminal drops one that has one all the same, and
+  one older than an hour, as its session may resume days later. A slash command is refused: it may
+  open a menu that deck does not show, where the next prompt would land.
+- A stop leaves `stop` in that folder. The terminal takes it within 0.2 s and sends Escape while a
+  turn runs or a dialog waits (the dialog closes, as with his key), once in 5 s at most, as a second
+  Escape opens the rewind of claude. A stop left with no turn, or older than 5 s, is dropped.
+
+`python3 test_tell.py` runs both verbs on fake agent folders, `test_terminal.py` the typing.
 
 ## Ops agents
 

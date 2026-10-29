@@ -16,7 +16,8 @@ as long as that window.
 A terminal closed while such a window is attached hands its session to that window the same way.
 The claude runs in a pty of the wrapper, which hands its clipboard escapes (OSC 52), ignored by
 terminator, to xclip while the window has the focus, and types in an idle session the task the
-daemon leaves for it, the PR events of client/prwatch.py, and GO_ON after an API error.
+daemon leaves for it, the prompts and the Escape of deck, the PR events of client/prwatch.py, and
+GO_ON after an API error.
 
 Started on a bundle whose run already began, it goes on with that session and does not run the
 task again. When another terminal holds the session, it takes it over as a window does, in the
@@ -59,6 +60,7 @@ sys.path.insert(0, str(HERE.parent / "scripts"))
 import tab_groups  # noqa: E402
 from agents import (  # noqa: E402
     OPS,
+    STATE,
     get_agent_folder,
     get_bundle_container,
     get_container,
@@ -96,6 +98,8 @@ CLIPBOARD_LIMIT = 1 << 22
 CLIPBOARD_PART = re.compile(rb"\x1b\]52;[a-z0-9]*(?:;(?:[A-Za-z0-9+/=]*|\?)\x1b?)?")
 CLIPBOARD_START = b"\x1b]52;"
 CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
+CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+DECK = STATE / "deck"
 ENTER_AFTER = 0.3
 EVENTS_EVERY = 0.2
 GO_ON = "Continue from where you left off."
@@ -108,10 +112,13 @@ NOT_TYPED = re.compile(
 )
 PASTE_END = b"\x1b[201~"
 PASTE_START = b"\x1b[200~"
+PROMPT_TIME = 3600
 RETRY_AFTER = 5 * 60
 SELECTIONS = {"c": "clipboard", "p": "primary"}
 START_LOCK = pathlib.Path.home() / ".claude" / "agent-start.lock"
 START_SPACE = 10
+STOP_GAP = 1
+STOP_TIME = 5
 TAKEOVER_WAIT = 30
 TRANSCRIPTS = pathlib.Path.home() / ".claude" / "projects" / "-workspace"
 USER = "vscode"
@@ -290,8 +297,12 @@ def copy_tty(fd, waker=None):
             with contextlib.suppress(OSError):
                 write_all(fd, b"\r")
         elif waker and not enter_at:
-            prompt = waker.take()
-            if prompt:
+            escape = waker.take_stop()
+            prompt = None if escape else waker.take()
+            if escape:
+                with contextlib.suppress(OSError):
+                    write_all(fd, escape)
+            elif prompt:
                 with contextlib.suppress(OSError):
                     write_all(fd, prompt)
                 enter_at = time.monotonic() + ENTER_AFTER
@@ -299,8 +310,9 @@ def copy_tty(fd, waker=None):
 
 class Waker:
     """Types as the next prompt of an idle session the task the daemon left for this terminal
-    (.agent/task.md with no run.lock, which it then makes), else the PR events client/prwatch.py
-    leaves in .agent/pr-events, in a busy session too, where claude shows them queued at once
+    (.agent/task.md with no run.lock, which it then makes), else the prompts Seb sent from deck
+    (DECK/NAME/SESSION of the host, one paste), else the PR events client/prwatch.py leaves in
+    .agent/pr-events, both in a busy session too, where claude shows them queued at once
     (Seb, 2026-10-27), when nothing was typed in this terminal since the last Enter: a
     draft of Seb stays his, and a PR event then reaches the agent with his next prompt, by the
     hook of prwatch.py, which WAKE_EVERY after his last key leaves the time to take it. Nor after
@@ -311,9 +323,10 @@ class Waker:
     GO_ON once the session has been idle RETRY_AFTER on an API error that a new request may pass,
     at most TITLE.RETRIES times in a row: the daemon then puts it back in the queue."""
 
-    def __init__(self, agent, bundle, session):
+    def __init__(self, agent, bundle, session, name=None):
         self.agent = agent
         self.events = agent / "pr-events"
+        self.prompts = DECK / (name or bundle) / session
         self.bundle = bundle
         self.session = session
         self.started = time.time() * 1000
@@ -324,6 +337,7 @@ class Waker:
         self.held = None
         self.checked = None
         self.due = False
+        self.stopped = float("-inf")
 
     def keys(self, data):
         typed = NOT_TYPED.sub(b"", data)
@@ -337,8 +351,10 @@ class Waker:
             self.draft = True
 
     def take(self):
-        has_events = PRWATCH.has_lines(self.events)
+        has_events = PRWATCH.has_lines(self.events) or PRWATCH.has_lines(self.prompts)
         now = time.monotonic()
+        if now - self.stopped < STOP_GAP:
+            return None
         gap = EVENTS_EVERY if has_events else WAKE_EVERY
         if self.draft or now - self.keyed < WAKE_EVERY:
             self.hold(has_events and self.describe_draft())
@@ -360,8 +376,49 @@ class Waker:
         if retry:
             self.due = False
             return GO_ON.encode()
+        if prompts := self.take_prompts():
+            return PASTE_START + "\n\n".join(prompts).encode() + PASTE_END
         told = PRWATCH.take(self.events)
         return " ".join(told).encode() if told else None
+
+    def take_stop(self):
+        """Escape, Seb's key, once the daemon left `stop` for this terminal (deck's Stop) within
+        STOP_TIME, while a turn runs or a dialog waits; one in STOP_TIME at most, as a second
+        Escape opens the rewind of claude."""
+        stop = self.prompts / "stop"
+        try:
+            made = stop.lstat().st_mtime
+            stop.unlink()
+        except OSError:
+            return None
+        now = time.monotonic()
+        if time.time() - made > STOP_TIME or now - self.stopped < STOP_TIME:
+            return None
+        if get_session_status(self.bundle, self.session, self.started) not in ("busy", "waiting"):
+            return None
+        self.stopped = now
+        return b"\x1b"
+
+    def take_prompts(self):
+        """The prompts deck left for this session, oldest first, each once. One older than
+        PROMPT_TIME is dropped, as the session it waited for may resume days later, and so is one
+        with a control character, which would end the paste and type keys."""
+        try:
+            names = sorted(filter(PRWATCH.is_line, os.listdir(self.prompts)))
+        except OSError:
+            return []
+        prompts = []
+        for name in names:
+            try:
+                text = (self.prompts / name).read_text()
+                (self.prompts / name).unlink()
+            except (OSError, ValueError):
+                continue
+            stem = name.removesuffix(".txt")
+            young = stem.isdigit() and time.time_ns() - int(stem) < PROMPT_TIME * 10**9
+            if young and not CONTROL.search(text):
+                prompts.append(text)
+        return prompts
 
     def describe_draft(self):
         """What Seb typed since his last Enter, counted, never its text."""
@@ -625,7 +682,7 @@ def run_ops(name):
             ["podman", "exec", "--interactive", "--tty", "--detach-keys=", "--user", USER]
             + ["--workdir", REPO_ROOT, "--env", f"TERM={os.environ.get('TERM', 'xterm')}"]
             + ["--env", "SHELL=/bin/bash", "--env", f"AGENT_WINDOW={name}", container, *claude],
-            Waker(agent, os.path.basename(HOST_FOLDER), session),
+            Waker(agent, os.path.basename(HOST_FOLDER), session, name),
         )
     except HangUp:
         # podman exec does not pass the hang-up on: the claude of the container still runs.

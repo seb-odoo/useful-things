@@ -103,6 +103,7 @@ def run_wrapper(root, bundle):
         pathlib.Path(os.environ["STATE"]) / "window"
     ).exists()
     module.TRANSCRIPTS = root
+    module.DECK = root / "deck"
     module.WINDOW_WAIT = float(os.environ.get("WINDOW_WAIT") or module.WINDOW_WAIT)
     sys.argv = ["agent-terminal.py", bundle]
     module.main()
@@ -334,6 +335,48 @@ def check_task(case):
     case.check("the task begins the run", (case.agent / "run.lock").is_dir())
     time.sleep(3)
     case.check("typed once", lines() == pasted)
+    (case.state / "quit").touch()
+    case.check_stopped("quitting claude")
+
+
+def check_deck(case):
+    """A prompt Seb sent from deck, in the folder of the host for this agent and session, is typed
+    as one paste, in a busy session too, before a PR event that waits; one older than an hour, or
+    with an escape, is dropped. A stop is Escape while a turn runs, once in STOP_TIME: one with no
+    turn, or left long ago, is dropped."""
+    typed = case.state / "typed"
+
+    def lines():
+        return typed.read_text().splitlines() if typed.exists() else []
+
+    case.start()
+    deck = case.root / "deck" / "b1" / "s1"
+    deck.mkdir(parents=True)
+    (case.agent / "pr-events").mkdir()
+    (case.agent / "pr-events" / "1.txt").write_text("PR event: one")
+    (deck / "1000.txt").write_text("too old")
+    (deck / f"{time.time_ns()}.txt").write_text("look\nagain")
+    (deck / f"{time.time_ns()}.txt").write_text("keys\x1b[201~\x1b[Z")
+    (case.state / "status").write_text("busy")
+    pasted = ["\x1b[200~look", "again\x1b[201~", "PR event: one"]
+    case.check("a busy one gets the prompt, then the event", wait(lambda: lines() == pasted))
+    case.check("an old prompt and one with an escape are dropped", not any(deck.glob("*.txt")))
+    stop = deck / "stop"
+    (case.state / "status").write_text("idle")
+    stop.touch()
+    case.check("a stop with no turn is dropped", wait(lambda: not stop.exists()))
+    (case.state / "status").write_text("busy")
+    stop.touch()
+    os.utime(stop, (time.time() - 60, time.time() - 60))
+    case.check("an old stop is dropped", wait(lambda: not stop.exists()))
+    stop.touch()
+    case.check("a stop in a turn is taken", wait(lambda: not stop.exists()))
+    stop.touch()
+    case.check("a second one at once is taken too", wait(lambda: not stop.exists()))
+    (deck / f"{time.time_ns()}.txt").write_text("after")
+    time.sleep(0.5)
+    case.check("a prompt waits a second after an Escape", lines()[-1:] == ["PR event: one"])
+    case.check("then goes", wait(lambda: lines()[-1:] == ["\x1b\x1b[200~after\x1b[201~"]))
     (case.state / "quit").touch()
     case.check_stopped("quitting claude")
 
@@ -581,7 +624,8 @@ def main():
         check_ops_resume: CUT,
         check_ops_cut: CUT,
     }
-    checks = (check_quit, check_clipboard, check_wake, check_task, check_retry, check_sigterm)
+    checks = (check_quit, check_clipboard, check_wake, check_task, check_deck, check_retry)
+    checks += (check_sigterm,)
     checks += (check_close,)
     checks += (check_requeue,)
     checks += (check_shutdown, check_close_window)

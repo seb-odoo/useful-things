@@ -87,6 +87,61 @@ def check_tell(root, check):
     check("the verb is served", daemon.VERBS.get(("POST", "/tell")) is daemon.tell)
 
 
+def ask(verb, session, **body):
+    try:
+        return verb(daemon.HOST, {}, {"session": session, **body})
+    except (daemon.Refused, ValueError) as error:
+        return type(error).__name__, str(error)
+
+
+def check_prompt(root, check):
+    """A prompt of deck waits in the folder of the host for the agent named and its session, a
+    stop as `stop` there; a bundle that claims the session of another gets neither."""
+    agents = {"b4": root / "b4" / ".agent", "b5": root / "b5" / ".agent"}
+    for folder in agents.values():
+        folder.mkdir(parents=True)
+        (folder / "session").write_text(f"{BUNDLE_SESSION}\n")
+    daemon.get_agent_folder = agents.__getitem__
+    daemon.get_terminals = lambda: {"b4": 1, "b5": 2}
+    daemon.is_agent_running = {f"ops-{OPS_SESSION}"}.__contains__
+    daemon.get_worktree_bundle_folder = lambda name: str(root / name)
+    daemon.DECK_DIR = root / "deck"
+    remote = set()
+    daemon.remote_agent.is_remote = lambda folder: folder.name in remote
+
+    def prompts(agent, session):
+        return sorted(path.read_text() for path in (root / "deck" / agent / session).glob("*.txt"))
+
+    text = f"Pourquoi{chr(0xA0)}? Look again\n\tat the test \U0001f468{chr(0x200D)}\U0001f4bb"
+    found = ask(daemon.prompt_window, OPS_SESSION, agent=f"ops-{OPS_SESSION}", text=text)
+    check("a prompt to an ops window", prompts(f"ops-{OPS_SESSION}", OPS_SESSION) == [text], found)
+    found = ask(daemon.prompt_window, BUNDLE_SESSION, agent="b4", text="go on")
+    check("a prompt to a bundle terminal", prompts("b4", BUNDLE_SESSION) == ["go on"], found)
+    check("b5, which claims the same session, gets nothing", prompts("b5", BUNDLE_SESSION) == [])
+    for agent, session in (("b6", BUNDLE_SESSION), ("b4", STOPPED_SESSION), ("ops-x", OPS_SESSION)):
+        found = ask(daemon.prompt_window, session, agent=agent, text="go on")
+        check(f"{agent} on {session[:8]} is not told", found[0] == 404, found)
+    remote.add("b4")
+    found = ask(daemon.prompt_window, BUNDLE_SESSION, agent="b4", text="go on")
+    check("an agent on a worker is not told", found[0] == 404 and "worker" in found[1]["error"])
+    remote.clear()
+    found = ask(daemon.prompt_window, BUNDLE_SESSION, agent="b4", text=" /model opus")
+    check("a slash command is refused", found[0] == "Refused", found)
+    for bad in ("a\x1b[201~b", "a\rb", "  \n", "a" * (daemon.MAX_TASK + 1)):
+        found = ask(daemon.prompt_window, BUNDLE_SESSION, agent="b4", text=bad)
+        check(f"a prompt {bad[:8]!r} is refused", found[0] == "ValueError", found)
+    found = ask(daemon.prompt_window, BUNDLE_SESSION, agent="../b4", text="go on")
+    check("a bad agent is refused", found[0] == "ValueError", found)
+    found = ask(daemon.stop_window, BUNDLE_SESSION, agent="b4")
+    stop = root / "deck" / "b4" / BUNDLE_SESSION / "stop"
+    check("a stop leaves stop", found[0] == 200 and stop.is_file(), found)
+    check("nothing goes to the folders of the bundles", not any(root.glob("b*/.agent/prompts")))
+    for path in ("/prompt", "/stop"):
+        check(f"only the host asks {path}", ("POST", path) in daemon.HOST_ONLY)
+    served = (daemon.VERBS.get(("POST", "/prompt")), daemon.VERBS.get(("POST", "/stop")))
+    check("the verbs are served", served == (daemon.prompt_window, daemon.stop_window))
+
+
 def check_window(root, check):
     """The claude of an ops window and of a bundle terminal gets AGENT_WINDOW, its window."""
     terminal = load("agent_terminal", HERE / "agent-terminal.py")
@@ -125,11 +180,12 @@ def main():
         fake.chmod(0o755)
         os.environ["PATH"] = f"{root / 'bin'}{os.pathsep}{os.environ['PATH']}"
         check_tell(root, check)
+        check_prompt(root, check)
         check_window(root, check)
         check("no podman ran", not (root / "podman.log").exists())
     for line in failures:
         print(line)
-    print(f"{17 - len(failures)}/17 cases as expected")
+    print(f"{35 - len(failures)}/35 cases as expected")
     sys.exit(1 if failures else 0)
 
 

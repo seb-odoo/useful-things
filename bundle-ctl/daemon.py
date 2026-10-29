@@ -151,6 +151,7 @@ AGENT_TERMINAL = CONFIG.get("AGENT_TERMINAL") or "gnome-terminal --window --titl
 BARE_FOLDER = frozenset({".agent", ".claude", ".devcontainer", ".vscode", "odools.toml", "tasks"})
 BRANCHES_TIMEOUT = 120
 CONTAINER_ID = re.compile(r"/libpod-(?:payload-)?([0-9a-f]{64})")
+CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 CPU_LOG = cpulog.CpuLog(get_worktree_container_folder())
 DEFAULT_EFFORT = "medium"
 DEFAULT_MODEL = "opus"
@@ -169,12 +170,19 @@ GITHUB_OWNER = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}")
 GO_ON = "Continue from where you left off."
 HELD = load_held()
 HELD_DIR = STATE / "held"
+DECK_DIR = STATE / "deck"
 HELD_LETTER = "b"
 HOK_KEPT = 5
 HOK_WAITING = pathlib.Path(CONFIG["REPO_ROOT"]) / "host-ctl" / "approve.py"
 HOST = "host"
 HOST_FOLDER = CONFIG.get("BUNDLE_CTL_HOST_FOLDER")
-HOST_ONLY = {("POST", "/close"), ("POST", "/force-queue"), ("POST", "/tell")}
+HOST_ONLY = {
+    ("POST", "/close"),
+    ("POST", "/force-queue"),
+    ("POST", "/prompt"),
+    ("POST", "/stop"),
+    ("POST", "/tell"),
+}
 JOB_WAIT = 50
 MAX_AGENTS = int(
     os.environ.get("BUNDLE_CTL_MAX_AGENTS") or CONFIG.get("BUNDLE_CTL_MAX_AGENTS") or 8,
@@ -2639,6 +2647,68 @@ def tell(caller, query, body):
     return 200, {"bundle": agent}
 
 
+def get_deck_window(body):
+    """The agent window a request of deck names, `agent` (a bundle, or ops-SESSION), and the
+    folder DECK_DIR/AGENT/SESSION where its terminal looks for what deck sends: on the host, as a
+    bundle writes its .agent/ folder and would type its own prompts as Seb, and by agent, as a
+    bundle may claim the session of another. None, and why, when that window does not run that
+    session here."""
+    session, agent = body.get("session"), body.get("agent")
+    if not isinstance(session, str) or not SESSION_ID.fullmatch(session):
+        raise ValueError("session: a session id")
+    if not isinstance(agent, str) or not (agent.startswith(OPS) or BUNDLE_NAME.fullmatch(agent)):
+        raise ValueError("agent: a bundle or ops-SESSION")
+    if agent.startswith(OPS):
+        runs = agent == f"{OPS}{session}" and is_agent_running(agent)
+    else:
+        runs = agent in get_terminals()
+        runs = runs and read_text(get_agent_folder(agent) / "session") == session
+        if runs and remote_agent.is_remote(pathlib.Path(get_worktree_bundle_folder(agent))):
+            return None, f"{agent} runs on a worker: Move to Laptop first"
+    if not runs:
+        return None, f"no agent window here runs {session} as {agent}"
+    (DECK_DIR / agent).mkdir(parents=True, exist_ok=True)
+    return DECK_DIR / agent / session, None
+
+
+def prompt_window(caller, query, body):
+    """`POST /prompt {agent, session, text}`: a prompt Seb sent from deck, for the agent window
+    that runs that session, which types it as his own (README.md, "Prompts from deck"). Only the
+    host asks (HOST_ONLY)."""
+    text = body.get("text")
+    if not isinstance(text, str) or not 0 < len(text.strip()) <= len(text) <= MAX_TASK:
+        raise ValueError(f"text: a prompt of at most {MAX_TASK} characters")
+    if CONTROL.search(text):
+        raise ValueError("text: no control character but new lines and tabs")
+    if text.lstrip().startswith("/"):
+        raise Refused("a slash command may open a menu deck does not show: type it in the terminal")
+    folder, why = get_deck_window(body)
+    if folder is None:
+        return 404, {"error": why}
+    try:
+        leave_event(folder.parent, text, folder.name)
+    except OSError as error:
+        raise Refused(f"{body['agent']}: the prompt was not left: {error}") from error
+    print(f"{body['agent']}: a prompt from deck, {len(text)} characters", flush=True)
+    return 200, {"bundle": body["agent"]}
+
+
+def stop_window(caller, query, body):
+    """`POST /stop {agent, session}`: Escape in the agent window that runs that session, while a
+    turn runs or a dialog waits (README.md, "Prompts from deck"). Only the host asks
+    (HOST_ONLY)."""
+    folder, why = get_deck_window(body)
+    if folder is None:
+        return 404, {"error": why}
+    try:
+        folder.mkdir(exist_ok=True)
+        write_text(folder / "stop", "")
+    except OSError as error:
+        raise Refused(f"{body['agent']}: the stop was not left: {error}") from error
+    print(f"{body['agent']}: a stop from deck", flush=True)
+    return 200, {"bundle": body["agent"]}
+
+
 def get_session_agent(session):
     """The agent window that runs a session: ops-SESSION, or the bundle whose .agent/session it
     is. None when no agent-terminal.py runs it: a tab has nothing to type in."""
@@ -2650,14 +2720,14 @@ def get_session_agent(session):
     return None
 
 
-def leave_event(agent, text):
-    """Leave a line in the pr-events/ folder of an agent, as client/prwatch.py does, with no link
-    followed: a bundle writes its .agent/ folder."""
+def leave_event(agent, text, kind="pr-events"):
+    """Leave a line in the pr-events/ folder of an agent, as client/prwatch.py does, or a prompt
+    in its prompts/ folder, with no link followed: a bundle writes its .agent/ folder."""
     folder = os.open(agent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         with contextlib.suppress(FileExistsError):
-            os.mkdir("pr-events", 0o755, dir_fd=folder)
-        events = os.open("pr-events", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=folder)
+            os.mkdir(kind, 0o755, dir_fd=folder)
+        events = os.open(kind, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=folder)
     finally:
         os.close(folder)
     try:
@@ -3495,6 +3565,8 @@ VERBS = {
     ("POST", "/bring-back"): bring_back,
     ("POST", "/place"): place_agent,
     ("POST", "/schedule"): schedule_task,
+    ("POST", "/prompt"): prompt_window,
+    ("POST", "/stop"): stop_window,
     ("POST", "/tell"): tell,
     ("POST", "/unqueue"): unqueue,
 }
