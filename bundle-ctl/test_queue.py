@@ -1435,6 +1435,104 @@ def check_hand_over(root):
     return [f"hand over: {name}" for name, passed in checks if not passed], len(checks)
 
 
+def check_tell(root):
+    """A task asked with --resume and a text of its own goes at once to the terminal that runs the
+    session of its bundle, as a line of its pr-events/ that the terminal types, idle or busy: a
+    session opened by hand gives no verdict (hok 519). Its verdict and its old task go to the
+    history, its run.lock stays. Going on alone, a terminal the daemon closes, a task the terminal
+    did not type yet, a bundle with no terminal and a pr-events/ that is a link wait as before."""
+    by_hand = {
+        **RUNS_ANOTHER,
+        "task.md": "",
+        "waiting": "",
+        "container": "c\n",
+        "model": "sonnet\n",
+    }
+    bundles = {
+        "by-hand": by_hand,
+        "ended": {**by_hand, "done": "0\n"},
+        "go-on": by_hand,
+        "closing": {**by_hand, "pause": ""},
+        "untyped": STARTS_ANOTHER,
+        "closed": by_hand,
+        "linked": by_hand,
+    }
+    state, launched = prepare(root, bundles, 8)
+    task = "fix it\nthen push\x1b[201~ it"
+    for item in state["queue"]:
+        item.update(resume=True, task=daemon.GO_ON if item["bundle"] == "go-on" else task)
+    elsewhere = root / "elsewhere"
+    elsewhere.mkdir()
+    (daemon.get_agent_folder("linked") / "pr-events").symlink_to(elsewhere)
+    terminals = daemon.get_terminals
+    running = {*bundles, "bare"} - {"closed"}
+    daemon.get_terminals = lambda: dict.fromkeys(running, 1)
+    try:
+        daemon.launch_queued()
+        agent = daemon.get_agent_folder("by-hand")
+        kept = sorted(path.name for path in agent.iterdir())
+        history = sorted(path.name for path in next((agent / "history").iterdir()).iterdir())
+        lines = {
+            bundle: [path.read_text() for path in agent.glob("pr-events/[!.]*.txt")]
+            for bundle, agent in ((name, daemon.get_agent_folder(name)) for name in bundles)
+        }
+        waits = [
+            SINCE.sub("T", f"{item['bundle']}: {item['waits_for']}") for item in state["queue"]
+        ]
+        bare = {"b0": FRESH, "bare": {**by_hand, "parent": "b0\n"}}
+        prepare(root / "open", bare, 8)[0]["queue"].clear()
+        opened = daemon.open_bundle("b0", {}, {"bundle": "bare", "resume": True, "task": "go"})
+        bare = daemon.get_agent_folder("bare")
+        bare_lines = [path.read_text() for path in bare.glob("pr-events/[!.]*.txt")]
+    finally:
+        daemon.get_terminals = terminals
+    told = "Task from host: fix it\nthen push [201~ it"
+    checks = [
+        ("no window opens", launched == []),
+        (
+            "the session by hand and the one that ended are told",
+            lines["by-hand"] == lines["ended"] == [told],
+        ),
+        (
+            "the others are not",
+            not any(lines[name] for name in bundles if name not in ("by-hand", "ended")),
+        ),
+        ("nothing is written where a link leads", not any(elsewhere.iterdir())),
+        (
+            "its files and its run.lock stay",
+            kept
+            == [
+                "container",
+                "history",
+                "model",
+                "parent",
+                "pr-events",
+                "priority",
+                "queued",
+                "run.lock",
+                "session",
+                "task.md",
+                "terminal",
+            ],
+        ),
+        ("its old task and its wait go to the history", {"task.md", "waiting"} <= set(history)),
+        ("task.md holds the task", daemon.read_text(agent / "task.md") == task.strip()),
+        ("the model of the session stays", daemon.read_text(agent / "model") == "sonnet"),
+        (
+            "the others wait",
+            waits
+            == [f"{name}: {BUSY_SINCE}" for name in ("go-on", "closing")]
+            + [f"untyped: {BUSY}"]
+            + [f"{name}: {BUSY_SINCE}" for name in ("closed", "linked")],
+        ),
+        (
+            "bctl open --resume from its parent goes to it",
+            opened[0] == 202 and bare_lines == ["Task from b0: go"],
+        ),
+    ]
+    return [f"tell: {name}" for name, passed in checks if not passed], len(checks)
+
+
 def check_ramp(root):
     """Only an agent that began its run in the last AGENT_RAMP seconds and gave no verdict counts
     for the memory it takes soon.
@@ -1497,6 +1595,7 @@ def main():
         check_label,
         check_second_task,
         check_hand_over,
+        check_tell,
         check_ramp,
         check_renew,
     ):

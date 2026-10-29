@@ -934,6 +934,8 @@ a prompt.
   conversation knows whether it is told: in a window it ends its turn on a wait for Seb's answer,
   in a tab it keeps a background `hctl job N --wait 86400`, or `hok-answer gN` with no `--wait`.
 - A conversation whose window closed while it waited, then moved to a tab, is told nothing.
+- A `bctl open BUNDLE --resume` with a task takes the same way into a running agent terminal (see
+  Agent windows).
 
 `python3 test_tell.py` runs the verb on fake agent folders, and the environment of both windows.
 
@@ -1216,6 +1218,21 @@ idle`; a task with a time waits for it, and one that names another session waits
 terminal of the previous agent of the bundle to close`. The
 journal says `BUNDLE: the task from PARENT goes to its terminal`. `python3 test_queue.py` and
 `python3 test_terminal.py` have the cases.
+
+A `bctl open BUNDLE --resume` with a task of its own waits for none of this while the agent
+terminal of the bundle runs its session, opened by the queue or by hand (Seb, 2026-10-29: a
+session opened with `bctl open BUNDLE --terminal` gives no verdict, and a resume queued behind it
+waited until an ops session left the line itself, hok 519). The daemon leaves the task in
+`.agent/pr-events/`, opened by `Task from PARENT:`, as `POST /tell` leaves a line of hok (see hok
+events), and the terminal types it at once, idle or busy. A control character of the task but a
+new line goes as a space: an escape would act as a key. The files of the last run go to
+`.agent/history/` as above, but `run.lock` stays: the turn that takes the line writes `done` or
+`waiting` at its end, and `bctl status` says `running` until then. The model and the effort stay
+the ones of the session. These still go through the queue as above: a resume with no task (go
+on), one whose time has not come, a session the daemon queued again or closes (Back to queue,
+Pause, a build under the disk floor), a task the terminal has not typed yet (no `run.lock`), an
+agent on a worker, and a `pr-events/` the line cannot be left in. The journal says `BUNDLE: the
+task from PARENT is left in its terminal`. `python3 test_queue.py` has the cases.
 
 The agent runs of all the containers start at least 10 seconds apart (a lock in the shared
 `~/.claude`), as claude processes started together fail each other's OAuth token refresh. A

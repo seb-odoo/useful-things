@@ -1379,6 +1379,8 @@ def launch_queued():
                 item["waits_for"] = "a manual resume"
             elif is_deleting(bundle):
                 item["waits_for"] = "the deletion of its checkout"
+            elif goes_to_terminal(item, folder, now) and tell_terminal(item):
+                continue
             elif is_busy(bundle, is_running or bundle in state["launches"]):
                 item["waits_for"] = get_previous_end(folder)
             elif free < DISK_STOP and (
@@ -2252,6 +2254,43 @@ def hand_to_terminal(item):
     model, effort = (read_text(agent / name) for name in ("model", "effort"))
     write_task({**item, "resume": True, "model": model, "effort": effort}, keep=TERMINAL_FILES)
     print(f"{item['bundle']}: the task from {item['parent']} goes to its terminal", flush=True)
+
+
+def goes_to_terminal(item, folder, now):
+    """Whether a `--resume` task with a text of its own goes at once to the agent terminal that
+    runs its session, idle or busy (Seb, 2026-10-29): the queue would wait for a verdict, which a
+    session opened by hand never gives (hok 519). Not a session the daemon queued again, nor while
+    the daemon closes that terminal, nor before the terminal typed the task it holds (no run.lock).
+    """
+    return (
+        item.get("resume")
+        and item["task"] != GO_ON
+        and not item.get("build")
+        and not item.get("session")
+        and (item.get("after") or 0) <= now
+        and (folder / "run.lock").exists()
+        and not (folder / "pause").exists()
+        and not remote_agent.is_remote(folder.parent)
+        and item["bundle"] in get_terminals()
+    )
+
+
+def tell_terminal(item):
+    """Leave the task in the pr-events/ of its terminal, which types it as a hok event, then keep
+    its files as hand_to_terminal does, run.lock too: the turn that takes it writes `done` or
+    `waiting` at its end. False when the line could not be left: the task then waits as before."""
+    agent = get_agent_folder(item["bundle"])
+    text = "".join(char if char.isprintable() or char == "\n" else " " for char in item["task"])
+    try:
+        leave_event(agent, f"Task from {item['parent']}: {text}")
+    except OSError as error:
+        print(f"{item['bundle']}: the task from {item['parent']} was not left: {error}", flush=True)
+        return False
+    model, effort = (read_text(agent / name) for name in ("model", "effort"))
+    item = {**item, "model": model, "effort": effort}
+    write_task(item, keep=(*TERMINAL_FILES, "run.lock"))
+    print(f"{item['bundle']}: the task from {item['parent']} is left in its terminal", flush=True)
+    return True
 
 
 def clean(text):
