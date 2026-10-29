@@ -8,6 +8,7 @@ import importlib.util
 import os
 import pathlib
 import pty
+import re
 import select
 import signal
 import subprocess
@@ -21,6 +22,7 @@ MARKERS = ("terminal", "container")
 PODMAN = """#!/bin/bash
 echo "$*" >>"$LOG"
 case "$1 $*" in
+"exec "*" pkill "*) ;;
 "exec "*agent-run.sh* | "exec "*--session-id* | "exec "*--resume*)
 \twhile [ -d "$STATE" ]; do
 \t\t[ -e "$STATE/quit" ] && { rm -f "$STATE/quit"; exit 0; }
@@ -472,12 +474,19 @@ def check_ops_quit(case):
 
 def check_ops_close(case):
     """A closed ops window stops its own claude, the one podman exec started, and not the claude
-    of a tab on the same session."""
+    of a tab on the same session, nor the claude of another window whose task names its session."""
     case.check("claude runs", wait(case.runs))
     os.close(case.terminal.fd)
     case.check("closing the terminal ends it", wait(case.terminal.has_ended))
-    stopped = wait(lambda: "exec --user vscode c1 pkill --parent 0 -f s2" in case.log())
+    pkill = "exec --user vscode c1 pkill --parent 0 -f "
+    stopped = wait(lambda: any(line.startswith(pkill) for line in case.log()))
     case.check("closing the terminal stops its claude", stopped)
+    patterns = [line.removeprefix(pkill) for line in case.log() if line.startswith(pkill)]
+    pattern = patterns[0] if patterns else "^$"
+    claude = case.runs()[0].partition(" c1 ")[2]
+    other = claude.replace(" s2 ", " s3 ") + " of s2"
+    case.check("the pkill matches its claude", re.search(pattern, claude))
+    case.check("the pkill misses a task that names its session", not re.search(pattern, other))
     case.check("closing the terminal keeps the ops container", "stop c1" not in case.log())
 
 

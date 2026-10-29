@@ -604,6 +604,8 @@ def run_ops(name):
     (agent / "task.md").unlink(missing_ok=True)
     signal.signal(signal.SIGHUP, stop)
     signal.signal(signal.SIGTERM, stop)
+    claude = [CLAUDE, "--model", "opus", "--plugin-dir", str(HERE / "agentbar")]
+    claude += get_ops_start(session, task)
     container = None
     try:
         if not HOST_FOLDER:
@@ -614,16 +616,16 @@ def run_ops(name):
         code = run_tty(
             ["podman", "exec", "--interactive", "--tty", "--detach-keys=", "--user", USER]
             + ["--workdir", REPO_ROOT, "--env", f"TERM={os.environ.get('TERM', 'xterm')}"]
-            + ["--env", "SHELL=/bin/bash", container, CLAUDE, "--model", "opus"]
-            + ["--plugin-dir", str(HERE / "agentbar")]
-            + get_ops_start(session, task),
+            + ["--env", "SHELL=/bin/bash", container, *claude],
             Waker(agent, os.path.basename(HOST_FOLDER), session),
         )
     except HangUp:
         # podman exec does not pass the hang-up on: the claude of the container still runs.
         if container:
-            # Its parent is 0, as podman exec started it: a tab may hold the session too.
-            stop_claude = ["pkill", "--parent", "0", "-f", session]
+            # Its parent is 0, as podman exec started it: a tab may hold the session too. The
+            # match ends at the session id, as the task that follows may name another session.
+            own = " ".join(claude[: claude.index(session) + 1])
+            stop_claude = ["pkill", "--parent", "0", "-f", f"^{own} "]
             subprocess.run(["podman", "exec", "--user", USER, container, *stop_claude], check=False)
         raise
     except Failure as error:

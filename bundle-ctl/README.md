@@ -909,7 +909,10 @@ answer as `bctl delete` does, and the same task sent again takes back the reques
 - `agent-terminal.py` runs `claude --session-id SESSION --model opus --permission-mode auto` in
   the ops container, in the repos, started first when it is not up. Other sessions work in that
   container: quitting claude or closing the window never stops it, and a closed window stops its
-  own claude (`pkill`). A turn that ends on an API error gets `Continue from where you left off.`
+  own claude (`pkill` on its command line up to the session id). The task comes after the id and
+  may name another session: on 2026-10-29 the close of one ops window stopped the claude of the
+  window it had started, on `claude ended with code 143`, as its task named the first session.
+  A turn that ends on an API error gets `Continue from where you left off.`
   as in a bundle terminal (above), 5 times in a row at most; no queue takes it after that. Before,
   three ops windows sat two hours on `502 api.anthropic.com unreachable` (2026-10-23).
 - No cap and no queue: the window opens at once, as a tab would. Opened with a task it opens
