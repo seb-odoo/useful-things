@@ -25,7 +25,9 @@ than the PR target (or with none), its folder sits under the target, which is th
 ### The repos of a bundle
 
 A bundle gets a worktree of each repo of `folder_by_repo` in `config.py` (`design-themes` and
-`documentation` only when they have the branch). owl and sfu differ from the Odoo repos:
+`documentation` only when they have the branch), its folder in the base `.git/worktrees` named
+after the bundle (`devcontainer/worktree-admin.py`, devcontainer/README.md, "What stays open").
+owl and sfu differ from the Odoo repos:
 
 - owl's dev remote is a fork, `OWL_DEV_REMOTE` in `config.env`. Its worktrees start with no
   `node_modules` on purpose. The clone's own install predates the monorepo (npm workspaces,
@@ -261,7 +263,7 @@ than its packs plus 10 GB, as the new pack is written before the old ones go.
 
 Removes a bundle from the local system (worktrees, branches, filestore, databases, images).
 
-- Deletes git worktrees and local branches for each repo
+- Deletes git worktrees and local branches for each repo, and its `.git/worktrees/<bundle>`
 - Removes `~/.local/share/bundle-db/<bundle>`: the postgres server and the filestore of the
   bundle (devcontainer/README.md, "How it runs Odoo")
 - For a bundle made before its own server: drops the matching databases of the host's server and

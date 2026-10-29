@@ -230,6 +230,7 @@ def delete_bundle(
                     f"fatal: '{wt_bundle_repo_folder}' is not a working tree": ignore_error,
                 },
             )
+            runner.run(["rm", "-rf", f"{get_repo_folder(repo)}/.git/worktrees/{bundle_name}"])
             runner.delete_branch_and_remote_ref(
                 repo=repo,
                 bundle_name=bundle_name,

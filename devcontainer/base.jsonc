@@ -58,6 +58,24 @@
     "source=@REPO_ROOT@/owl/.git/hooks,target=@REPO_ROOT@/owl/.git/hooks,type=bind,readonly,z",
     "source=@REPO_ROOT@/sfu/.git/config,target=@REPO_ROOT@/sfu/.git/config,type=bind,readonly,z",
     "source=@REPO_ROOT@/sfu/.git/hooks,target=@REPO_ROOT@/sfu/.git/hooks,type=bind,readonly,z",
+    // Their worktrees read-only but the bundle's own entry, which worktree-admin.py names after it:
+    // a `commondir` written in the entry of another bundle points its git at any config.
+    "source=@REPO_ROOT@/odoo/.git/worktrees,target=@REPO_ROOT@/odoo/.git/worktrees,type=bind,readonly,z",
+    "source=@REPO_ROOT@/odoo/.git/worktrees/${localWorkspaceFolderBasename},target=@REPO_ROOT@/odoo/.git/worktrees/${localWorkspaceFolderBasename},type=bind,z",
+    "source=@REPO_ROOT@/enterprise/.git/worktrees,target=@REPO_ROOT@/enterprise/.git/worktrees,type=bind,readonly,z",
+    "source=@REPO_ROOT@/enterprise/.git/worktrees/${localWorkspaceFolderBasename},target=@REPO_ROOT@/enterprise/.git/worktrees/${localWorkspaceFolderBasename},type=bind,z",
+    "source=@REPO_ROOT@/design-themes/.git/worktrees,target=@REPO_ROOT@/design-themes/.git/worktrees,type=bind,readonly,z",
+    "source=@REPO_ROOT@/design-themes/.git/worktrees/${localWorkspaceFolderBasename},target=@REPO_ROOT@/design-themes/.git/worktrees/${localWorkspaceFolderBasename},type=bind,z",
+    "source=@REPO_ROOT@/documentation/.git/worktrees,target=@REPO_ROOT@/documentation/.git/worktrees,type=bind,readonly,z",
+    "source=@REPO_ROOT@/documentation/.git/worktrees/${localWorkspaceFolderBasename},target=@REPO_ROOT@/documentation/.git/worktrees/${localWorkspaceFolderBasename},type=bind,z",
+    "source=@REPO_ROOT@/upgrade/.git/worktrees,target=@REPO_ROOT@/upgrade/.git/worktrees,type=bind,readonly,z",
+    "source=@REPO_ROOT@/upgrade/.git/worktrees/${localWorkspaceFolderBasename},target=@REPO_ROOT@/upgrade/.git/worktrees/${localWorkspaceFolderBasename},type=bind,z",
+    "source=@REPO_ROOT@/upgrade-util/.git/worktrees,target=@REPO_ROOT@/upgrade-util/.git/worktrees,type=bind,readonly,z",
+    "source=@REPO_ROOT@/upgrade-util/.git/worktrees/${localWorkspaceFolderBasename},target=@REPO_ROOT@/upgrade-util/.git/worktrees/${localWorkspaceFolderBasename},type=bind,z",
+    "source=@REPO_ROOT@/owl/.git/worktrees,target=@REPO_ROOT@/owl/.git/worktrees,type=bind,readonly,z",
+    "source=@REPO_ROOT@/owl/.git/worktrees/${localWorkspaceFolderBasename},target=@REPO_ROOT@/owl/.git/worktrees/${localWorkspaceFolderBasename},type=bind,z",
+    "source=@REPO_ROOT@/sfu/.git/worktrees,target=@REPO_ROOT@/sfu/.git/worktrees,type=bind,readonly,z",
+    "source=@REPO_ROOT@/sfu/.git/worktrees/${localWorkspaceFolderBasename},target=@REPO_ROOT@/sfu/.git/worktrees/${localWorkspaceFolderBasename},type=bind,z",
     // Workspace .claude, .vscode and odools.toml are symlinks in each bundle pointing at these
     // absolute host paths; bind them at the same path (like the .git mounts above) so the symlinks
     // resolve in the container. Without this the workspace settings.json never loads, so

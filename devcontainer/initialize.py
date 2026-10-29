@@ -5,10 +5,10 @@
 
 base.jsonc calls it as an array, so that no shell reads the name of the bundle. It makes the
 folders the container mounts, as a missing mount source stops the container from starting, links
-the node_modules of its package.json, then runs claude-config.py, scripts/outside.py, extensions.py
-and bundle-db.py, and stops at the first that fails. warden-chrome.py and scripts/upstream.py run
-before them and never stop a start: a bundle with no browser for its Hoot runs, or whose first push
-prints two errors, still starts.
+the node_modules of its package.json, then runs worktree-admin.py, claude-config.py,
+scripts/outside.py, extensions.py and bundle-db.py, and stops at the first that fails.
+warden-chrome.py and scripts/upstream.py run before them and never stop a start: a bundle with no
+browser for its Hoot runs, or whose first push prints two errors, still starts.
 """
 
 import os
@@ -80,6 +80,7 @@ def main():
     upstream = HERE.parent / "scripts" / "upstream.py"
     subprocess.run([sys.executable, str(upstream), name], check=False)
     for script, *args in (
+        ("worktree-admin.py", folder),
         ("claude-config.py", name, "--bundle"),
         ("../scripts/outside.py", "start", name, folder),
         ("extensions.py", name, folder),

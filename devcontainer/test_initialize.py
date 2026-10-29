@@ -3,6 +3,7 @@
 python3 test_initialize.py"""
 
 import hashlib
+import importlib.util
 import json
 import os
 import pathlib
@@ -114,12 +115,39 @@ def main():
         [],
     )
     check("eight base repos", len(git_dirs), 8)
+    own = "${localWorkspaceFolderBasename}"
+    check(
+        "the worktrees of each base .git read-only, the bundle's own entry writable",
+        [
+            git_dir
+            for git_dir in git_dirs
+            if f"source={git_dir}/worktrees,target={git_dir}/worktrees,type=bind,readonly,z"
+            not in base_config["mounts"]
+            or f"source={git_dir}/worktrees/{own},target={git_dir}/worktrees/{own},type=bind,z"
+            not in base_config["mounts"]
+        ],
+        [],
+    )
+    spec = importlib.util.spec_from_file_location("worktree_admin", HERE / "worktree-admin.py")
+    worktree_admin = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worktree_admin)
+    check(
+        "worktree-admin.py names the same repos",
+        sorted(worktree_admin.REPOS),
+        sorted(git_dir.split("/")[-2] for git_dir in git_dirs),
+    )
     with tempfile.TemporaryDirectory() as name:
         root = pathlib.Path(name)
         (root / "tools").mkdir()
         for script in ("initialize.py", "config.py"):
             shutil.copy(HERE / script, root / "tools" / script)
-        for script in ("warden-chrome.py", "claude-config.py", "extensions.py", "bundle-db.py"):
+        for script in (
+            "warden-chrome.py",
+            "worktree-admin.py",
+            "claude-config.py",
+            "extensions.py",
+            "bundle-db.py",
+        ):
             (root / "tools" / script).write_text(FAKE)
         (root / "scripts").mkdir()
         (root / "scripts" / "outside.py").write_text(FAKE)
@@ -138,6 +166,7 @@ def main():
         scripts = (
             "warden-chrome.py",
             "../scripts/upstream.py",
+            "worktree-admin.py",
             "claude-config.py",
             "../scripts/outside.py",
         )
@@ -147,7 +176,15 @@ def main():
             for line in (root / "tools" / f"{script}.calls").read_text().splitlines()
         ]
         outside = ["start", NAME, str(folder)]
-        expected = [[], [NAME], [NAME, "--bundle"], outside, [NAME, str(folder)], [NAME]]
+        expected = [
+            [],
+            [NAME],
+            [str(folder)],
+            [NAME, "--bundle"],
+            outside,
+            [NAME, str(folder)],
+            [NAME],
+        ]
         check("the name, one argument", calls, expected)
         check("no shell", (root / "shell-ran").exists(), False)
         check("the folder of the agent, for its mount", (folder / ".agent").is_dir(), True)

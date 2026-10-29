@@ -79,6 +79,14 @@ MOUNTS = {
         for repo in REPOS
         for name in ("config", "hooks")
     },
+    **{f"@REPO_ROOT@/{repo}/.git/worktrees": ("standin", "same") for repo in REPOS},
+    **{
+        f"@REPO_ROOT@/{repo}/.git/worktrees/${{localWorkspaceFolderBasename}}": (
+            "standin",
+            "the bundle's own worktree, writable over it",
+        )
+        for repo in REPOS
+    },
     "@WORKTREE_ROOT@/.claude": ("send", "the project settings of the bundles"),
     "/home/vscode/.claude-project": ("send", "the shared project config"),
     "@WORKTREE_ROOT@/.vscode": ("drop", "VS Code only"),
@@ -359,11 +367,16 @@ def start_standin(bundle, bundle_folder, worker, session):
         (REMOTE_RUNS, "/opt/remote-runs", "ro"),
         (run_folder(bundle), "/run/standin", "rw"),
     ]
+    admin = HERE.parent / "devcontainer" / "worktree-admin.py"
+    subprocess.run([sys.executable, str(admin), str(bundle_folder)], check=True)
     for repo in REPOS:
         git_dir = repo_root / repo / ".git"
         if git_dir.is_dir():
             mounts.append((git_dir, str(git_dir), "rw"))
-            mounts += [(git_dir / name, str(git_dir / name), "ro") for name in ("config", "hooks")]
+            names = ("config", "hooks", "worktrees")
+            mounts += [(git_dir / name, str(git_dir / name), "ro") for name in names]
+            own = git_dir / "worktrees" / bundle_folder.name
+            mounts.append((own, str(own), "rw"))
     argv = [
         "podman",
         "run",

@@ -111,6 +111,8 @@ class UtilsRunner(Runner):
             cwd=repo_folder,
             handle_exceptions={f"'{target_folder}' is already locked": ignore_error},
         )
+        admin = f"{_USEFUL_THINGS_FOLDER}/devcontainer/worktree-admin.py"
+        self.run([sys.executable, admin, os.path.dirname(target_folder), repo, repo_folder])
 
     def _handle_branch_holder(self, *, branch, cwd, retry, target_folder=None, on_existing=None):
         """Build a `handle_exceptions` handler for a command another worktree on `branch` blocks.

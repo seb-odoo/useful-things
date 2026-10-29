@@ -133,9 +133,14 @@ def check_standin(root):
     remote_agent.start_standin("b", root / "bundle", "w", "")
     volumes = set(runs[-1])
     check("the stand-in mounts the base .git", f"{git_dir}:{git_dir}:rw" in volumes, runs[-1])
-    for name in ("config", "hooks"):
+    for name in ("config", "hooks", "worktrees"):
         mount = f"{git_dir / name}:{git_dir / name}:ro"
         check(f"and its {name} read-only over it", mount in volumes, runs[-1])
+    own = git_dir / "worktrees" / "bundle"
+    check("but the folder of its worktree", f"{own}:{own}:rw" in volumes, runs[-1])
+    admin = remote_agent.HERE.parent / "devcontainer" / "worktree-admin.py"
+    named = [sys.executable, str(admin), str(root / "bundle")]
+    check("named after the bundle before", named in runs[:-1], runs)
     check("the config stays a file", (git_dir / "config").is_file())
 
 
