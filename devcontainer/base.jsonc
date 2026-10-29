@@ -146,6 +146,7 @@
     // What Claude keeps for itself and reads again in a later session: its own, as for .claude.json.
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/backups,target=/home/vscode/.claude/backups,type=bind,z",
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/cache,target=/home/vscode/.claude/cache,type=bind,z",
+    "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/feedback,target=/home/vscode/.claude/feedback,type=bind,z",
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/file-history,target=/home/vscode/.claude/file-history,type=bind,z",
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/ide,target=/home/vscode/.claude/ide,type=bind,z",
     // Claude runs a mod of dev-mods/<session> in its own process, a session of the host too: empty.

@@ -23,9 +23,9 @@ as a copy of the host's, with the workspace (/workspace unless given) marked tru
 an agent stops on the question for the runbot-fix-agents CLAUDE.md that the bundle CLAUDE.md
 imports, and the onboarding marked done, or the interactive claude of an agent terminal stops on
 its theme picker. So are what Claude keeps for itself and reads again later (backups, cache,
-file-history, ide) and dev-mods, whose mods run in the Claude process of their session. So are gh
-and ssh, with the fake GitHub token and SSH key of the bundle (fake-keys.json, made once): no
-tool of a bundle sends them, and the gateways and git-gate, which read them in
+feedback, file-history, ide) and dev-mods, whose mods run in the Claude process of their
+session. So are gh and ssh, with the fake GitHub token and SSH key of the bundle (fake-keys.json,
+made once): no tool of a bundle sends them, and the gateways and git-gate, which read them in
 STATE_ROOT/gateway-callers/fake, hold a card when a request carries one.
 
 What a session takes as orders is mounted read-only in a bundle (see README.md), so what a tab has
@@ -71,6 +71,7 @@ OWN = (
     "cache",
     "dev-mods",
     "extension-storage",
+    "feedback",
     "file-history",
     "gh",
     "ide",

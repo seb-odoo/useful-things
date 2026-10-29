@@ -131,6 +131,7 @@ MOUNTS = {
     "/home/vscode/.claude/shell-snapshots": ("job", "made by claude"),
     "/home/vscode/.claude/backups": ("job", "made by claude"),
     "/home/vscode/.claude/cache": ("job", "made by claude"),
+    "/home/vscode/.claude/feedback": ("job", "made by claude"),
     "/home/vscode/.claude/file-history": ("job", "mirrored back"),
     "/home/vscode/.claude/ide": ("drop", "VS Code only"),
     "/home/vscode/.claude/dev-mods": ("drop", "mods of the Claude tab"),

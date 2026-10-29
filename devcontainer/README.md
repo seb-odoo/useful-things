@@ -196,7 +196,7 @@ binary file of a push.
 | `review-corpus` | shared, read-only: the reviews the review skill learns from | shared, writable |
 | `projects` | its own, but `-workspace` (the transcripts and the memory of the bundles) shared and writable, the memory a copy of its own on an outside PR (above), and the memory of the host sessions read-only | shared, writable |
 | `.claude.json`, `daemon.json`, `policy-limits.json`, `remote-settings-helper-consent`, `remote-settings.json`, `settings.json` | its own copy, below | same |
-| `backups`, `cache`, `file-history`, `ide`, `session-env`, `sessions`, `shell-snapshots` | its own folder, below | same |
+| `backups`, `cache`, `feedback`, `file-history`, `ide`, `session-env`, `sessions`, `shell-snapshots` | its own folder, below | same |
 | `dev-mods` | its own folder, empty and read-only | its own folder |
 | `agent-start.lock` | shared, writable: one lock of agent starts for every container | same |
 | `handoff` | shared, read-only, also at `~/handoff`, where `handoff/<bundle>` is writable: a bundle proposes a change in its own folder only, which `hok` writes on a yes (host-ctl `handoff.py`) | shared, writable |
@@ -245,8 +245,9 @@ before every start:
 - `session-env`, `shell-snapshots`, and the storage of the Claude extension (the permission mode
   of each session, kept over a rebuild).
 - what Claude keeps for itself and reads again in a later session, as for `.claude.json`:
-  `backups`, `cache` (the list of models among them), `file-history` (what a rewind writes back
-  in the files of a session) and `ide` (the lock files of the editor windows).
+  `backups`, `cache` (the list of models among them), `feedback` (the feedback drafts a session
+  queues, read again when one is sent), `file-history` (what a rewind writes back in the files of
+  a session) and `ide` (the lock files of the editor windows).
 - `dev-mods`, empty and read-only in a bundle: Claude runs a mod of `dev-mods/<session>` in the
   Claude process of that session, and a session of the host would load one a bundle wrote there.
 - `sessions`, where Claude keeps the record of each live session, named after its pid: the claude
