@@ -942,11 +942,18 @@ a prompt.
   running. It leaves the line in `pr-events/` of that agent folder, with no link followed, and the
   line reaches the agent as a PR event does: typed by the terminal, idle or busy, and in a bundle
   also by the hook or the Stop hook.
-- No window runs it (a tab of a VS Code window, a closed window): 404, nothing is left. The claude
-  of an agent window has `AGENT_WINDOW` (the bundle, or `ops-SESSION`) in its environment, so a
-  conversation knows whether it is told: in a window it ends its turn on a wait for Seb's answer,
-  in a tab it keeps a background `hctl job N --wait 86400`, or `hok-answer gN` with no `--wait`.
-- A conversation whose window closed while it waited, then moved to a tab, is told nothing.
+- An ops window whose claude ended keeps its folder until the window closes, and the line waits
+  there for the window that goes on with the session. All of them end when the ops container goes
+  down: on 2026-10-29 the line of request 542 was lost, as every ops window was down from 13:42 to
+  14:33. The resume of a cut session (Seb's yes in `hok`) closes the old window, which removes its
+  folder, so the lines go to the folder of the new one.
+- No window runs it (a tab of a VS Code window, a closed window, a bundle whose terminal ended):
+  404, nothing is left. The claude of an agent window has `AGENT_WINDOW` (the bundle, or
+  `ops-SESSION`) in its environment, so a conversation knows whether it is told: in a window it
+  ends its turn on a wait for Seb's answer, in a tab it keeps a background `hctl job N --wait
+  86400`, or `hok-answer gN` with no `--wait`.
+- A window closed by hand while its conversation waited removes the lines with its folder: that
+  conversation, in a tab or in a new window, is told nothing.
 - A `bctl open BUNDLE --resume` with a task takes the same way into a running agent terminal (see
   Agent windows).
 

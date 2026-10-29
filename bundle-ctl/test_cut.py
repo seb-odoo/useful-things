@@ -320,11 +320,13 @@ def check_yes(root):
     """Seb's yes: an ops session opens in an ops agent window on its prompt, a bundle session is
     queued on its prompt and its session, and one that runs again since is left. The window where
     the claude of a session ended closes first, but for an agent that runs: the window of an ops
-    session removes its agent folder as it ends."""
+    session removes its agent folder as it ends, and the lines of hok left there go to the new
+    one."""
     events, state, threads = [], {"launches": {}, "queue": []}, []
     ops_taken = f"ops-{OPS_TAKEN}"
     dead = {ops_taken, BUNDLE, MAPPED}
     daemon.get_agent_folder(ops_taken).mkdir(parents=True)
+    daemon.leave_event(daemon.get_agent_folder(ops_taken), "hok event: request 542")
 
     def end_window(name):
         time.sleep(0.2)
@@ -382,6 +384,9 @@ def check_yes(root):
         ("the prompt of an ops session stays", read_text(
             daemon.get_agent_folder(ops_taken) / "task.md",
         ) == prompts[ops_taken]),
+        ("the line of hok for its dead window waits in the new one", [
+            path.read_text() for path in daemon.get_agent_folder(ops_taken).glob("pr-events/*")
+        ] == ["hok event: request 542"]),
         ("the window of an agent that runs stays", MAPPED in dead),
         ("a bundle goes on with its session", read_text(agent / "session") == session("b")),
         ("its last run goes to its history", not (agent / "done").exists()),

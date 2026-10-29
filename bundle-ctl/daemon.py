@@ -2548,12 +2548,16 @@ def hold_cut(caller, body):
 
 def resume_ops(name, prompt):
     """Go on with a cut session of the ops container in an ops agent window, on this prompt, once
-    the window where its claude ended closed."""
+    the window where its claude ended closed. The lines of hok left for that window go to the new
+    one: the window removes its agent folder as it ends."""
     check_ops_session(name, {"bundle": name, "terminal": True})
+    told = [path.read_text() for path in sorted(get_agent_folder(name).glob("pr-events/[!.]*"))]
     close_dead_window(name)
 
     def work(log):
         get_agent_folder(name).mkdir(parents=True, exist_ok=True)
+        for text in told:
+            leave_event(get_agent_folder(name), text)
         (get_agent_folder(name) / "task.md").write_text(prompt)
         open_terminal(log, name)
         return {"bundle": name}
@@ -2737,9 +2741,12 @@ def stop_window(caller, query, body):
 
 def get_session_agent(session):
     """The agent window that runs a session: ops-SESSION, or the bundle whose .agent/session it
-    is. None when no agent-terminal.py runs it: a tab has nothing to type in."""
-    if is_agent_running(f"{OPS}{session}"):
-        return f"{OPS}{session}"
+    is. None when no agent-terminal.py runs it: a tab has nothing to type in. An ops window whose
+    claude ended keeps its folder until it closes, and the window that goes on with its session
+    takes the line: a `podman rm` of the ops container ends them all (2026-10-29)."""
+    ops = f"{OPS}{session}"
+    if is_agent_running(ops) or get_agent_folder(ops).is_dir():
+        return ops
     for bundle in get_terminals():
         if read_text(get_agent_folder(bundle) / "session") == session:
             return bundle

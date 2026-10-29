@@ -6,6 +6,7 @@ that it runs in one, with no podman and no daemon: python3 test_tell.py
 import importlib.util
 import os
 import pathlib
+import shutil
 import sys
 import tempfile
 
@@ -46,7 +47,7 @@ def check_tell(root, check):
     (agents["b1"] / "session").write_text(f"{BUNDLE_SESSION}\n")
     (agents["b2"] / "session").write_text(f"{STOPPED_SESSION}\n")
     running = {f"ops-{OPS_SESSION}"}
-    daemon.get_agent_folder = agents.__getitem__
+    daemon.get_agent_folder = lambda name: agents.get(name, root / "ops" / name)
     daemon.get_terminals = lambda: {"b1": 1}
     daemon.is_agent_running = running.__contains__
 
@@ -65,8 +66,13 @@ def check_tell(root, check):
     check("the terminal takes it as a PR event", taken == [TEXT], taken)
 
     running.clear()
+    ops = agents[f"ops-{OPS_SESSION}"]
     found = tell(OPS_SESSION)
-    check("a closed ops window is not", found[0] == 404, found)
+    check("an ops window whose claude ended is told", found[0] == 200, found)
+    check("its line waits for the window that goes on", get_lines(ops) == [TEXT, TEXT])
+    shutil.rmtree(ops)
+    found = tell(OPS_SESSION)
+    check("a closed ops window is not", found[0] == 404 and not ops.exists(), found)
     found = tell("22222222-2222-3333-4444-555555555555")
     check("a session of no window is not", found[0] == 404, found)
     check("two lines are refused", tell(BUNDLE_SESSION, "a\nb")[0] == "ValueError")
@@ -185,7 +191,7 @@ def main():
         check("no podman ran", not (root / "podman.log").exists())
     for line in failures:
         print(line)
-    print(f"{35 - len(failures)}/35 cases as expected")
+    print(f"{37 - len(failures)}/37 cases as expected")
     sys.exit(1 if failures else 0)
 
 
