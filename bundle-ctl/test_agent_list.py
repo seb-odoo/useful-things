@@ -327,10 +327,14 @@ def check_queue(agent_list):
         agent_list.ask = lambda method, path: dict(QUEUE, queue=queue)
         title = "⏳ ⭐ master-n--seb (mine)"
         rows = [agent_list.picker.Row(None, 3, title, "master-n--seb", "0x5", True)]
-        lines = agent_list.describe_queue(agent_list.read_queue(), rows)[1]
+        answer = agent_list.read_queue()
+        lines = agent_list.describe_queue(answer, rows)[1]
         for found, expected in zip(lines, QUEUED_LINES):
             if found != expected:
                 failures.append(f"queued {found!r}, expected {expected!r}")
+        names = [item["name"] for item in answer["queue"]]
+        if names != [item["bundle"] for item in QUEUED]:
+            failures.append(f"names of the queued tasks: {names!r}")
         path = projects / "-workspace" / "S7.jsonl"
         path.write_text(json.dumps(TRANSCRIPTS["S9"][0], separators=(",", ":")) + "\n")
         if (found := agent_list.get_last_prompt(path)) != "Rebase on master":

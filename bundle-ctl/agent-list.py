@@ -522,7 +522,8 @@ def read_session(bundle, session):
 def read_queue():
     """The answer of GET /queue, None when the daemon does not answer. Each task gets the title,
     the last message and the last answer of the session it goes on with: the one it names, else
-    the one of its bundle when it resumes it. A new task has its own text as last message."""
+    the one of its bundle when it resumes it, and the name of that title, which the search of
+    deck reads. A new task has its own text as last message."""
     answer = ask("GET", "/queue")
     if "error" in answer:
         return None
@@ -534,7 +535,14 @@ def read_queue():
         task = item.get("task") or ""
         message = prompt if task == bctl.GO_ON else " ".join(task.split())
         item.update(title=title, message=message, answer=last)
+        item["name"] = get_name(get_queued_row(item))
     return answer
+
+
+def get_queued_row(item):
+    """The row of a task of the queue, made of the title read with the queue."""
+    title = item.get("title") or ""
+    return picker.Row(None, picker.get_rank(title), title, item["bundle"], None, True)
 
 
 def describe_queue(answer, rows=(), search=""):
@@ -550,9 +558,7 @@ def describe_queue(answer, rows=(), search=""):
     found = {row.key: row for row in rows}
     lines = []
     for item in answer["queue"]:
-        title = item.get("title") or ""
-        row = found.get(item["bundle"])
-        row = row or picker.Row(None, picker.get_rank(title), title, item["bundle"], None, True)
+        row = found.get(item["bundle"]) or get_queued_row(item)
         if not (is_found(item["bundle"], search) or is_found(get_name(row), search)):
             continue
         forced = item.get("forced") and "over the cap"
