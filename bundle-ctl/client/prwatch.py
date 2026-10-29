@@ -21,6 +21,7 @@ import fcntl
 import json
 import os
 import pathlib
+import stat
 import subprocess
 import sys
 import time
@@ -83,33 +84,87 @@ def write_state(state):
         log(f"state not kept: {error}")
 
 
+def open_folder(folder, create=False):
+    """A descriptor of `folder`, refused when it or its parent is a link: on the host, the folder
+    is .agent/pr-events of a bundle, which the bundle writes."""
+    parent = os.open(folder.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        if create:
+            with contextlib.suppress(FileExistsError):
+                os.mkdir(folder.name, dir_fd=parent)
+        return os.open(folder.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+    finally:
+        os.close(parent)
+
+
+def open_file(name, flags, folder):
+    """A descriptor of the regular file `name` of the descriptor `folder`, never through a link."""
+    fd = os.open(name, flags | os.O_NOFOLLOW | os.O_NONBLOCK, 0o644, dir_fd=folder)
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        raise OSError(f"{name} is no regular file")
+    return fd
+
+
+def is_line(name):
+    return not name.startswith(".") and name.endswith(".txt")
+
+
+def has_lines(folder=None):
+    """Whether a line waits, for agent-terminal.py, which takes them on the host."""
+    try:
+        events = open_folder(folder or EVENTS)
+    except OSError:
+        return False
+    try:
+        return any(map(is_line, os.listdir(events)))
+    finally:
+        os.close(events)
+
+
 def leave(text, folder=None, advice=ADVICE):
     """One line for the agent, whole or not at all for whoever takes it."""
-    folder = folder or EVENTS
-    folder.mkdir(exist_ok=True)
-    name = f"{time.time_ns()}.txt"
-    (folder / f".{name}").write_text(f"PR event: {text} {advice}")
-    (folder / f".{name}").replace(folder / name)
+    events = open_folder(folder or EVENTS, create=True)
+    try:
+        name = f"{time.time_ns()}.txt"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        with open(open_file(f".{name}", flags, events), "w") as file:
+            file.write(f"PR event: {text} {advice}")
+        os.rename(f".{name}", name, src_dir_fd=events, dst_dir_fd=events)
+    finally:
+        os.close(events)
 
 
 def take(folder=None):
     """The lines that wait, oldest first, each taken by one caller only: the hooks in the container
     and agent-terminal.py on the host take from the same folder. Each one taken is noted in
     prwatch.log, with who took it and how long after it was left."""
-    folder = folder or EVENTS
+    try:
+        events = open_folder(folder or EVENTS)
+    except OSError:
+        return []
     taken = []
-    for path in sorted(folder.glob("[!.]*.txt")):
-        mine = path.with_name(f".{path.name}.taken")
-        try:
-            path.rename(mine)
-            taken.append(mine.read_text().strip())
-            mine.unlink()
-        except OSError:
-            continue
-        waited = (time.time_ns() - int(path.stem)) / 1e9 if path.stem.isdigit() else 0
-        who, stamp = pathlib.Path(sys.argv[0]).name, time.strftime("%H:%M:%S")
-        with contextlib.suppress(OSError), (folder.parent / "prwatch.log").open("a") as file:
-            file.write(f"{stamp} taken by {who} after {waited:.1f} s: {taken[-1][:100]}\n")
+    try:
+        for name in sorted(filter(is_line, os.listdir(events))):
+            mine = f".{name}.taken"
+            try:
+                os.rename(name, mine, src_dir_fd=events, dst_dir_fd=events)
+                with open(open_file(mine, os.O_RDONLY, events)) as file:
+                    taken.append(file.read().strip())
+                os.unlink(mine, dir_fd=events)
+            except OSError:
+                continue
+            stem = name.removesuffix(".txt")
+            waited = (time.time_ns() - int(stem)) / 1e9 if stem.isdigit() else 0
+            who, stamp = pathlib.Path(sys.argv[0]).name, time.strftime("%H:%M:%S")
+            log = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+            with (
+                contextlib.suppress(OSError),
+                open(open_file("../prwatch.log", log, events), "a") as file,
+            ):
+                file.write(f"{stamp} taken by {who} after {waited:.1f} s: {taken[-1][:100]}\n")
+    finally:
+        os.close(events)
     return taken
 
 

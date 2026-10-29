@@ -20,8 +20,9 @@ container, test runs first, so that they never take the whole host together (see
 - The `.agent/` folder sits in the bundle folder, which its container writes. The host takes a
   value there (`session`, `terminal`, `parent`, `priority`, `queued`, `model`, `effort`, `where`)
   only in its form, else as none, never follows a link there, and writes its files in place of
-  one. Its history goes through descriptors of folders that are no link. `python3
-  scripts/test_agent_values.py` and `python3 test_queue.py` have the cases.
+  one. Its history and `pr-events/` go through descriptors of folders that are no link. `python3
+  scripts/test_agent_values.py`, `python3 test_queue.py` and `python3 test_prwatch.py` have the
+  cases.
 - The text of a caller in a hok card (its reason, a task, a report) shows a character that is not
   printable as its escape, as `hok` does.
 - One journal line per request: `journalctl --user -u bundle-ctl -f`. Also `address <ip> <name>`

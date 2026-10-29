@@ -261,6 +261,32 @@ def test_posted(folder):
     check("nothing left", prwatch.take(), [])
 
 
+def test_link(folder):
+    """The bundle writes its .agent/ folder, which agent-terminal.py and pr-posted.py reach on the
+    host: no link the bundle puts there is followed (security review S8)."""
+    host = folder / "host"
+    host.mkdir()
+    (host / "push-deny.txt").write_text("held")
+    prwatch.leave("a")
+    (prwatch.EVENTS / "0.txt").symlink_to(host / "push-deny.txt")
+    (prwatch.AGENT / "prwatch.log").unlink()
+    (prwatch.AGENT / "prwatch.log").symlink_to(host / "log")
+    check("a line waits", prwatch.has_lines(), True)
+    check("a link in pr-events is not read", prwatch.take(), [f"PR event: a {prwatch.ADVICE}"])
+    check("nor prwatch.log written through a link", sorted(path.name for path in host.iterdir()),
+          ["push-deny.txt"])
+    for path in prwatch.EVENTS.iterdir():
+        path.unlink()
+    prwatch.EVENTS.rmdir()
+    prwatch.EVENTS.symlink_to(host)
+    check("a link in place of pr-events has no line", (prwatch.has_lines(), prwatch.take()),
+          (False, []))
+    with contextlib.suppress(OSError):
+        prwatch.leave("b")
+    check("and the folder it names stays as it was",
+          {path.name: path.read_text() for path in host.iterdir()}, {"push-deny.txt": "held"})
+
+
 def main():
     with tempfile.TemporaryDirectory() as name:
         make_workspace(pathlib.Path(name))
@@ -268,6 +294,7 @@ def main():
         test_run()
         test_hooks(pathlib.Path(name))
         test_posted(pathlib.Path(name))
+        test_link(pathlib.Path(name))
     print("\n".join(failures) or "all good")
     sys.exit(1 if failures else 0)
 

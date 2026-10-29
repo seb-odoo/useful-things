@@ -67,6 +67,7 @@ from agents import (  # noqa: E402
     get_session_status,
     get_transcript,
     has_window,
+    open_unlinked,
     read_text,
     write_text,
 )
@@ -336,7 +337,7 @@ class Waker:
             self.draft = True
 
     def take(self):
-        has_events = any(self.events.glob("[!.]*.txt"))
+        has_events = PRWATCH.has_lines(self.events)
         now = time.monotonic()
         gap = EVENTS_EVERY if has_events else WAKE_EVERY
         if self.draft or now - self.keyed < WAKE_EVERY:
@@ -377,7 +378,11 @@ class Waker:
         grows are not a new one."""
         reason = why and why.partition(":")[0]
         if reason and reason != self.held:
-            with contextlib.suppress(OSError), (self.agent / "prwatch.log").open("a") as file:
+            log = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+            with (
+                contextlib.suppress(OSError),
+                open(open_unlinked(self.agent / "prwatch.log", log), "a") as file,
+            ):
                 file.write(f"{time.strftime('%H:%M:%S')} an event waits: {why}\n")
         self.held = reason or None
 
@@ -394,11 +399,14 @@ class Waker:
         return self.due
 
     def take_task(self):
+        task = read_text(self.agent / "task.md")
+        if task is None:
+            return None
         try:
             (self.agent / "run.lock").mkdir()
         except FileExistsError:
             return None
-        return PASTE_START + (self.agent / "task.md").read_bytes().strip() + PASTE_END
+        return PASTE_START + task.encode() + PASTE_END
 
 
 def write_terminal(data):

@@ -320,7 +320,15 @@ def check_task(case):
     (case.agent / "run.lock").rmdir()
     time.sleep(3)
     case.check("a dialog gets none", not lines())
+    (case.root / "secret").write_text("host file\n")
+    (case.agent / "task.md").rename(case.root / "task.md")
+    (case.agent / "task.md").symlink_to(case.root / "secret")
     (case.state / "status").write_text("idle")
+    time.sleep(3)
+    case.check("a link in place of task.md is not followed",
+               not lines() and not (case.agent / "run.lock").exists())
+    (case.agent / "task.md").unlink()
+    (case.root / "task.md").rename(case.agent / "task.md")
     pasted = ["\x1b[200~next", "task\x1b[201~", "PR event: one"]
     case.check("an idle one gets the task, then the event", wait(lambda: lines() == pasted))
     case.check("the task begins the run", (case.agent / "run.lock").is_dir())
