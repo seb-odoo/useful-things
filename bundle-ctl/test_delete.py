@@ -705,23 +705,26 @@ def check_reviews(root):
 
 def check_parked(root):
     """A review bundle whose session waits paused in the queue loses its checkout once its
-    container stopped, and its task gets the script that fetches it again; a bare one stays, and
-    a refused deletion leaves the task as it was."""
+    container stopped, and its task gets the script that fetches it again; a bare one stays, as
+    does a bare one whose session waits for disk space to build it, and a refused deletion leaves
+    the task as it was."""
     closed = time.time() - 20 * 60
     calls, queue, world_closed = [], [], {}
-    bundles = ("master-bare-aku", "master-parked-aku", "master-refused-aku")
+    bundles = ("master-bare-aku", "master-disk-aku", "master-parked-aku", "master-refused-aku")
     for bundle in bundles:
         folder = root / "master" / bundle
         (folder / ".agent").mkdir(parents=True)
         (folder / ".agent" / "session").write_text(f"{bundle}-session\n")
         paths = [folder / ".agent" / "session"]
-        if bundle != "master-bare-aku":
+        if bundle not in ("master-bare-aku", "master-disk-aku"):
             paths.append(folder / daemon.MADE)
             paths[-1].touch()
         for path in paths:
             os.utime(path, (closed - 60, closed - 60))
         world_closed[str(folder)] = closed
         queue.append({"bundle": bundle, "paused": True, "resume": True, "task": daemon.GO_ON})
+    build = ["fetch_bundle.py", "master-disk-aku", "--no-open"]
+    queue[1].update(build=build, paused=False, session="master-disk-aku-session")
 
     def run_script(log, script, *args):
         calls.append(args[-1])
@@ -744,7 +747,7 @@ def check_parked(root):
     wait_jobs()
     items = {item["bundle"]: item for item in queue}
     checks = [
-        ("a made bundle parked in the queue goes, not a bare one", sorted(calls) == list(bundles[1:])),
+        ("a made bundle parked in the queue goes, not a bare one", sorted(calls) == list(bundles[2:])),
         (
             "its task keeps the session and fetches the bundle again",
             (items["master-parked-aku"].get("build"), items["master-parked-aku"].get("session"))
@@ -752,6 +755,14 @@ def check_parked(root):
         ),
         ("a refused deletion leaves the task to its bundle", "build" not in items["master-refused-aku"]),
         ("the bare one keeps its folder", (root / "master" / "master-bare-aku" / ".agent").is_dir()),
+        (
+            "the bare one that waits for disk space keeps its folder and its build",
+            (
+                (root / "master" / "master-disk-aku" / ".agent").is_dir(),
+                items["master-disk-aku"].get("build"),
+            )
+            == (True, build),
+        ),
     ]
     return [name for name, passed in checks if not passed], len(checks)
 

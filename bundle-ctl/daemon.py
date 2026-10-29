@@ -210,6 +210,10 @@ RESUMED = (
     " changed since your last turn where your work depends on it (a PR: its threads, its head, its"
     " CI; its base), as they say for a resume."
 )
+RESUMED_BUILD = (
+    f"{GO_ON}\n\nYour `bctl build` of {{time}} found the disk of the host short, and this session"
+    " waited in the queue for space since. The space is back: run `bctl build` again."
+)
 REVIEW_CHECK = 60
 REVIEW_CLOSED = 60 * float(
     os.environ.get("BUNDLE_CTL_REVIEW_CLOSED_MINUTES")
@@ -3143,9 +3147,33 @@ def prepare_folder(bundle):
     UtilsRunner().prepare_worktree_bundle_folder(bundle_name=bundle)
 
 
+def queue_build(bundle, build):
+    """Queue the session of the agent that asked a build under the disk floor, with that build and
+    first of the tasks of its bundle, and close its window once its turn ended, as for a requeue:
+    its bare folder stays while it waits, and it goes on there once the space is back. None when no
+    agent window holds the session, or the session is queued already."""
+    agent = get_agent_folder(bundle)
+    session = read_text(agent / "session")
+    if not session or not get_window_pids(bundle):
+        return None
+    with state_lock:
+        if any(item["bundle"] == bundle and item.get("resume") for item in read_state()["queue"]):
+            return None
+    task = {
+        "priority": get_task_priority(bundle),
+        "resume": True,
+        "task": RESUMED_BUILD.format(time=format_time(time.time())),
+    }
+    answer = enqueue(read_text(agent / "parent") or HOST, bundle, task, build, session, first=True)
+    why = "when its `bctl build` went back to the queue to wait for disk space"
+    threading.Thread(target=stop_after_turn, args=(bundle, session, why), daemon=True).start()
+    return answer
+
+
 def build_bundle(caller, query, body):
     """Make the bundle whose agent started in its bare folder, with the script its task was queued
-    with: only that bundle or the host may ask it."""
+    with: only that bundle or the host may ask it. Under the disk floor, the agent that asks it in
+    its terminal goes back to the queue instead (queue_build)."""
     bundle = body.get("bundle") or caller
     if caller not in (HOST, bundle):
         raise Refused("build: a container builds its own bundle only")
@@ -3153,6 +3181,9 @@ def build_bundle(caller, query, body):
         args = read_state().get("builds", {}).get(bundle)
     if not args:
         raise Refused(f"{bundle}: nothing to build, its bundle is made or was never queued")
+    free = read_disk_free()
+    if caller == bundle and free < DISK_STOP and (answer := queue_build(bundle, args)):
+        return 202, {**answer, "free": free, "needed": DISK_STOP, "wait": PAUSE_WAIT}
     check_disk()
     check_unpushed(bundle, "bctl build")
 

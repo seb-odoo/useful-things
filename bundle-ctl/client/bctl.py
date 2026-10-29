@@ -100,7 +100,10 @@ container may ask it.
 
 build makes the bundle of this container, whose agent started in its bare folder: the create or
 fetch its task was queued with runs now, and the worktrees appear in /workspace. A restart of the
-daemon kills the build: bctl asks it again, which finishes the bundle.
+daemon kills the build: bctl asks it again, which finishes the bundle. When the disk of the host is
+short, the session of the agent that asks it in its terminal goes back to the queue with its build
+instead, exit 75: its window closes once its turn ended, and once the space is back the session
+goes on in its bare folder, told to run build again.
 
 branches is gbs run on the host: the table, or with --json the data agents read.
 
@@ -279,6 +282,16 @@ def print_requeued(answer):
     print(
         f"{answer['bundle']}: its window closes once its turn ends, in {answer['wait']} seconds at"
         f" most; queued {answer['queued']}, waits for {answer['waits_for']}",
+    )
+
+
+def print_build_queued(answer):
+    print(
+        f"{answer['free']:.0f} GB left on the disk, under {answer['needed']:.0f}: not built. This"
+        f" session is queued {answer['queued']} with its build, and its window closes once your"
+        f" turn ends, in {answer['wait']} seconds at most: end your turn now. Once the disk is over"
+        f" {answer['needed']:.0f} GB, the session goes on here by itself, told to run bctl build"
+        " again.",
     )
 
 
@@ -763,7 +776,11 @@ def main():
     elif args.command == "build":
 
         def build():
-            return request("POST", "/build", {})["job"]
+            answer = request("POST", "/build", {})
+            if "job" not in answer:
+                print_build_queued(answer)
+                sys.exit(75)
+            return answer["job"]
 
         answer = follow(build(), again=build)
     elif args.command == "add-repo":

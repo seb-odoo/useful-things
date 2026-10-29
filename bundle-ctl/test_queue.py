@@ -1271,6 +1271,84 @@ def check_build_cut(root):
     return [f"build cut: {name}: {lines}" for name, passed in checks if not passed], len(checks)
 
 
+def check_build_disk(root):
+    """Real client: under the disk floor, `bctl build` of the agent of a bare bundle queues its
+    session with its build, first of the tasks of its bundle, and its window closes once its turn
+    ended; the task waits for disk space, then starts that session in the bare folder, told to
+    build again. The host, an agent with no window, or a session queued already get the 409."""
+    build = ["fetch_bundle.py", "bare", "--no-open"]
+    bundles = {"bare": {**RUNS_IT, "parent": "ops\n", "priority": "5\n"}, "tab": RUNS_IT}
+    state, launched = prepare(root, bundles, 8, disk=20.4)
+    state["queue"] = [{"bundle": "bare", "parent": "ops", "queued": QUEUED + 60, "task": "next"}]
+    state["builds"] = {"bare": build, "tab": build}
+    windows = {"bare"}
+    daemon.PAUSE_WAIT = 3
+    daemon.check_unpushed = lambda bundle, script: None
+    daemon.close_window = windows.discard
+    daemon.get_session_status = lambda bundle, session: "idle"
+    daemon.get_transcript = lambda session: None
+    daemon.get_window_pids = lambda bundle: [1] * (bundle in windows)
+    daemon.identify = lambda connection: "bare"
+    path = root / "ctl.sock"
+    server = daemon.Server(str(path), daemon.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    code, lines = run_client(path, "build")
+    said = (
+        "20 GB left on the disk, under 30: not built. This session is queued 1 with its build, and"
+        " its window closes once your turn ends, in 3 seconds at most: end your turn now. Once the"
+        " disk is over 30 GB, the session goes on here by itself, told to run bctl build again."
+    )
+    checks = [("the client says to end the turn, exit 75", (code, lines) == (75, [said]))]
+    item = state["queue"][0]
+    found = (
+        [queued["bundle"] for queued in state["queue"]],
+        {key: item.get(key) for key in ("build", "parent", "priority", "resume", "session")},
+        item["task"].startswith(daemon.GO_ON) and "run `bctl build` again" in item["task"],
+    )
+    expected = (
+        ["bare", "bare"],
+        {"build": build, "parent": "ops", "priority": 5, "resume": True, "session": "s"},
+        True,
+    )
+    checks.append(("its session is queued with its build, first", found == expected))
+    deadline = time.monotonic() + 6
+    while windows and time.monotonic() < deadline:
+        time.sleep(0.1)
+    checks.append(("its window closes once its turn ended", not windows))
+    windows.add("bare")
+    refusals = []
+    for caller, body in (("bare", {}), (daemon.HOST, {"bundle": "bare"}), ("tab", {})):
+        try:
+            daemon.build_bundle(caller, {}, body)
+            refusals.append(None)
+        except daemon.Refused as error:
+            refusals.append(str(error).split(":")[0])
+    windows.clear()
+    refused = ["20 GB left on the disk, under 30"] * 3
+    checks.append(("queued already, the host or no window: the 409", refusals == refused))
+    daemon.get_open_windows = set
+    daemon.launch_queued()
+    waits = [queued["waits_for"].split(" (from")[0] for queued in state["queue"]]
+    expected = [
+        "disk space (20 GB left, 30 needed)",
+        "the task queued before it for the bundle to start",
+    ]
+    checks.append(("it waits for disk space", (launched, waits) == ([], expected)))
+    daemon.read_disk_free = lambda: 100
+    daemon.prepare_folder = lambda bundle: None
+    daemon.launch_queued()
+    agent = daemon.get_agent_folder("bare")
+    found = launched, daemon.read_text(agent / "session"), state["builds"]["bare"]
+    checks.append(("with the space back, its session starts", found == (["bare"], "s", build)))
+    task = agent.joinpath("task.md").read_text()
+    told = task.startswith(f"{daemon.NOT_BUILT}\n\n{daemon.GO_ON}") and "`bctl build` again" in task
+    checks.append(("told it is bare, to build again", told))
+    server.shutdown()
+    server.server_close()
+    failed = [name for name, passed in checks if not passed]
+    return [f"build disk: {name}: {state['queue']}" for name in failed], len(checks)
+
+
 def check_parked(root):
     """A parked session whose checkout went starts bare on that session, told that its window
     closed, and a resume waits while the checkout of its bundle is deleted."""
@@ -1412,6 +1490,7 @@ def main():
         check_build,
         check_disk_worker,
         check_build_cut,
+        check_build_disk,
         check_parked,
         check_priority,
         check_links,

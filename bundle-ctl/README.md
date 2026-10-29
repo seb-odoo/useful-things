@@ -46,7 +46,7 @@ the pager. `python3 test_node_modules.py` and `python3 test_delete.py` have the 
 | `GET /branches` | `gbs --json` run on the host, which deletes the bundles left with merged PRs only; `?format=table&width=N`: its colored table |
 | `GET /status` | every local bundle branch, as read in the last 30 seconds (agents and the helper of firefox-gateway poll it; each git call of the host starts a host-box, so a read runs git again only on a branch whose commit or base commit moved): base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open, and its agent: state (`running`, `waiting`, `done`, or `stopped` when its terminal or its window closed before the verdict: nothing runs it any more, and a new task may replace it; a stopped agent carries its `task` text, to queue it again as it was), when it was queued, when its run started (none for a task no window took), when it ended, `stale` when a branch of the bundle got a commit, or its dev remote ref an update (the mtime of its reflog), after that end, retry, and the last write to a session titled with the bundle, its own or an earlier agent's tab Seb went on in (`active N min ago`, or `idle since HH:MM` after 15 minutes; a tab opened by hand has no title and does not count); the queue, each task with its priority, the bundle that queued it, when, and what it waits for |
 | `POST /add-repo` | `add_repo.py`: the worktree of a repo the bundle was made without (`design-themes`, `documentation`); a container asks for its own only |
-| `POST /build` | the `gnb` or `pfb` a task was queued with, for the bundle whose agent started bare (see Bare start); the bundle itself or the host asks; refused when the disk is short, or when a branch of the bundle has a commit no remote has, which the script would reset |
+| `POST /build` | the `gnb` or `pfb` a task was queued with, for the bundle whose agent started bare (see Bare start); the bundle itself or the host asks; when the disk is short, the session of the agent that asks it in its terminal goes back to the queue with that build (see Disk), and anyone else is refused; refused too when a branch of the bundle has a commit no remote has, which the script would reset |
 | `POST /create` | `gnb` with `--no-push`, then a window; with a task, only its queue entry, the bundle being made when its agent asks (see Bare start); refused when the bundle exists, a branch has unpushed commits or, with no task, the disk is short (see Disk) |
 | `POST /delete` | the deletion of a bundle, held for Seb's yes in `hok` (see Deletion); a container asks for its own, or for the one of a child |
 | `GET /cut` | the Claude sessions a crash or a restart cut, bundles and ops (see Cut sessions); the host and the ops container only |
@@ -333,6 +333,15 @@ daemon reads what is left on the disk of the bundles:
   refused, and the queue holds its tasks, forced ones too: `waits for disk space (20 GB left, 30
   needed)`. They start by themselves once the space is back. A task that a worker takes goes
   there meanwhile (see Remote agents): its agent takes no disk here but its stand-in.
+- The `build` of the agent of a bare bundle, asked in its terminal, is not refused there: its
+  session goes back to the queue with that build, before the other tasks of its bundle, and its
+  window closes once its turn ended, as for `requeue`. `bctl build` says so and exits 75, so the
+  agent ends its turn. The task keeps the bare folder (below), waits for disk space like the
+  others, and once the space is back the session goes on in that folder, told to run `bctl build`
+  again. Seb's yes, 2026-10-29: master-enterprise-init-store-count--seb got the refusal, its
+  window closed, and 10 minutes later its bare folder went with its build, back only by a
+  `fetch_bundle.py` by hand. The host, an agent in a VS Code window and a session queued already
+  still get the 409.
 - Under `BUNDLE_CTL_DISK_WARN_GB` (default 60), a desktop notification says what is left, then
   again at each 10 GB less, and again once the disk went 10 GB over that line in between. The
   level warned is kept in `~/.local/state/bundle-ctl/disk-warned`, so a restart of the daemon
@@ -394,9 +403,11 @@ only queue it, with the script that would make the bundle (Seb's choice on 2026-
 turn comes, the daemon prepares the folder (`.agent` and the links, no worktree) and starts the
 agent there, its task opened by a note: nothing is checked out, the base repos are read through
 their `.git`, GitHub through `gh`. The agent drops the task or does it from there, or runs `bctl
-build`, which makes the bundle in that folder, and goes on in the same session. Until then the
-queue says `not built yet` and `status` lists the bundle with no repo, as long as its folder is
-there: the deletion of a bare bundle forgets its build too. `python3 test_queue.py` has the cases.
+build`, which makes the bundle in that folder, and goes on in the same session. Under the disk
+floor, that `build` sends the session back to the queue until the space is back (see Disk). Until
+then the queue says `not built yet` and `status` lists the bundle with no repo, as long as its
+folder is there: the deletion of a bare bundle forgets its build too. `python3 test_queue.py` has
+the cases.
 
 ## Wrong version
 
