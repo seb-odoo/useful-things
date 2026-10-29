@@ -32,18 +32,31 @@ def main():
     bundles = [f"master-{'a' * n}{suffix}" for n in range(3, 75)]
     bundles += [f"saas-19.2-{'b' * n}{suffix}-578779-fw" for n in range(3, 75)]
     problems = []
-    with tempfile.TemporaryDirectory() as root:
+    with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as worktrees:
         delete_bundle.FILESTORE_CONTAINER = root
+        delete_bundle.WORKTREE_CONTAINER = worktrees
         for bundle in bundles:
-            names = {purpose: testdb(bundle, purpose) for purpose in PURPOSES}
-            out = types.SimpleNamespace(stdout="\n".join(filter(None, names.values())))
-            runner = types.SimpleNamespace(run=lambda *args, out=out, **kwargs: out)
-            found = set(delete_bundle._bundle_databases(runner, bundle))
-            seb = {
+            os.makedirs(f"{worktrees}/base/{bundle.replace(suffix, f'-bar{suffix}', 1)}/odoo")
+
+        def seb_names(bundle):
+            return {
                 bundle + "".join(f"-{letter}" for letter in letters)
                 for size in range(4)
                 for letters in itertools.combinations("etd", size)
             }
+
+        for bundle in bundles:
+            names = {purpose: testdb(bundle, purpose) for purpose in PURPOSES}
+            longer = bundle.replace(suffix, f"-bar{suffix}", 1)
+            of_longer = seb_names(longer) | {testdb(longer, purpose) for purpose in PURPOSES}
+            out = types.SimpleNamespace(
+                stdout="\n".join(filter(None, [*names.values(), *of_longer]))
+            )
+            runner = types.SimpleNamespace(run=lambda *args, out=out, **kwargs: out)
+            found = set(delete_bundle._bundle_databases(runner, bundle))
+            for name in sorted(found & of_longer):
+                problems.append(f"{bundle}: delete_bundle takes {name} of {longer}")
+            seb = seb_names(bundle)
             bug_fix = {f"{bundle}-claude-bug", f"{bundle}-claude-fix", f"{bundle}-bg", f"{bundle}-fx"}
             for purpose, name in names.items():
                 if name is None:

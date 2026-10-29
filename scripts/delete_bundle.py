@@ -104,8 +104,22 @@ def _bundle_databases(runner: UtilsRunner, bundle_name: str):
     Both are asked because neither holds all of them: a run that died before writing an attachment
     leaves a database with no filestore, and a filestore whose database was dropped by hand stays
     on disk. The names are the bundle's own, minus the suffix a database name never carries.
+
+    `master-foo--seb` and `master-foo-bar--seb` both match `master-foo-bar--seb-claude`: a name
+    goes to the existing bundle whose name or prefix covers the most of it, and a tie stays.
     """
     prefixes = get_database_bundle_prefixes(bundle_name)
+
+    def claim(bundle, name):
+        return max(
+            (
+                len(prefix)
+                for prefix in (bundle, *get_database_bundle_prefixes(bundle))
+                if name == prefix or name.startswith(f"{prefix}-")
+            ),
+            default=0,
+        )
+
     found = {
         os.path.basename(path)
         for prefix in prefixes
@@ -116,10 +130,11 @@ def _bundle_databases(runner: UtilsRunner, bundle_name: str):
         handle_exceptions={"could not connect to server": ignore_error},
     )
     found |= {line.strip() for line in (res.stdout if res else "").splitlines() if line.strip()}
+    others = [other for other in _existing_bundles() if other != bundle_name]
     return sorted(
         one
         for one in found
-        if any(one == prefix or one.startswith(f"{prefix}-") for prefix in prefixes)
+        if (own := claim(bundle_name, one)) and all(claim(other, one) < own for other in others)
     )
 
 

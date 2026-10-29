@@ -267,7 +267,9 @@ Removes a bundle from the local system (worktrees, branches, filestore, database
 - Removes `~/.local/share/bundle-db/<bundle>`: the postgres server and the filestore of the
   bundle (devcontainer/README.md, "How it runs Odoo")
 - For a bundle made before its own server: drops the matching databases of the host's server and
-  removes their filestore entries under `~/.local/share/Odoo/filestore/`
+  removes their filestore entries under `~/.local/share/Odoo/filestore/`. A name that also
+  matches a longer existing bundle is left to it (`test_testdb_names.py`): until 2026-10-29,
+  deleting `master-foo--seb` dropped the databases of `master-foo-bar--seb` too
 - Removes the podman images VS Code built for the bundle once its container is gone:
   `localhost/vsc-<bundle>-<sha256 of the bundle folder>`, and the same with `-uid`. The name is
   matched whole (`test_bundle_images.py`): as a prefix, `vsc-master-foo-` also takes the images of
@@ -468,8 +470,8 @@ sources that file too). Two things that bite:
   while it exists upstream.
 - A name in the list that no repo has on the remote is gone, and gfa then calls
   `delete_bundle(force=True)` on it with no prompt, dropping every database and filestore whose
-  name starts with it. Check with `git ls-remote --heads odoo refs/heads/<version>` in odoo,
-  enterprise, design-themes and documentation before adding it.
+  name starts with it and no longer bundle's. Check with `git ls-remote --heads odoo
+  refs/heads/<version>` in odoo, enterprise, design-themes and documentation before adding it.
 
 ### branch_status.py (`gbs`)
 
