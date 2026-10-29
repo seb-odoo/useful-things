@@ -584,6 +584,44 @@ def check_hok_wait(agent_list):
     return failures
 
 
+def check_pause(agent_list):
+    """A row whose window the daemon closes once its turn ended says why after its state: Pause,
+    Back to queue, or a close with no task to go on; an ops row by the session of its record."""
+    failures = []
+    kept = agent_list.get_agent_folder, agent_list.read_state
+    queue = [
+        {"bundle": "master-p--seb", "paused": True, "resume": True},
+        {"bundle": "master-q--seb", "resume": True},
+        {"bundle": "master-c--seb", "paused": True},
+        {"bundle": "ops-S2", "paused": True, "resume": True},
+    ]
+    agent_list.read_state = lambda: {"launches": {}, "queue": queue}
+    busy = {"status": "busy", "sessionId": "S2", "statusUpdatedAt": AGO * 1e3}
+    cases = [
+        ("master-p--seb", "pause", None, "running for 5 min, pausing"),
+        ("master-q--seb", "pause", None, "running for 5 min, back to queue"),
+        ("master-c--seb", "pause", None, "running for 5 min, closing"),
+        ("master-n--seb", "", None, "running for 5 min"),
+        ("0x0b", "pause", busy, "running for 5 min, pausing"),
+        ("0x0b", "", busy, "running for 5 min"),
+    ]
+    with tempfile.TemporaryDirectory() as root:
+        agent_list.get_agent_folder = lambda name: pathlib.Path(root, name, ".agent")
+        for key, pause, record, expected in cases:
+            folder = agent_list.get_agent_folder("ops-S2" if record else key)
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "run.lock").write_text("")
+            os.utime(folder / "run.lock", (AGO,) * 2)
+            (folder / "pause").unlink(missing_ok=True)
+            if pause:
+                (folder / "pause").write_text(f"{time.time() + 120}\n")
+            row = agent_list.picker.Row(None, 3, key, key, "0x0b" if record else "0x01", True)
+            if (found := agent_list.get_info(row, "", record)[0]) != expected:
+                failures.append(f"row {key} with pause {pause!r}: {found!r}, expected {expected!r}")
+    agent_list.get_agent_folder, agent_list.read_state = kept
+    return failures
+
+
 def main():
     failures = []
     agent_list = load_list()
@@ -638,12 +676,12 @@ def main():
     failures += check_filters(agent_list) + check_reads(agent_list) + check_usage(agent_list)
     failures += check_ask(agent_list) + check_queue(agent_list) + check_tabs(agent_list)
     failures += check_tree(agent_list) + check_pick(agent_list) + check_records(agent_list)
-    failures += check_hok_wait(agent_list)
+    failures += check_hok_wait(agent_list) + check_pause(agent_list)
     for line in failures:
         print(line)
     cases = len(AGENTS) + len(OPS_INFOS) + 4 + 1 + len(FACETS) + len(FILTERED) + 2 + 7 + 3 + 3
     cases += len(QUEUED_LINES) + 1 + 2 + len(SEARCHED) + 1 + len(MOVES) + len(TABS) + 2 + 9 + 3
-    cases += 1 + 1 + 1 + 2
+    cases += 1 + 1 + 1 + 2 + 6
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

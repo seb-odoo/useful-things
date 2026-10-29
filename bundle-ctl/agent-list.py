@@ -31,7 +31,8 @@ and its claude stops.
 Back to queue queues the session of each selected bundle again, at the end of the queue (the lowest
 priority there), and the daemon closes its window once its turn ended, 2 minutes
 at most (bctl requeue): the queue starts it again with "Continue from where you left off." when its
-turn comes. Pause does the same, and the task waits in the queue for a manual resume. A right
+turn comes. Pause does the same, and the task waits in the queue for a manual resume. Until the
+window closes, its row says back to queue or pausing after its state. A right
 click on a row opens a menu with these seven. New ops agent runs bctl open ops --terminal.
 
 A task of the queue has its own state (paused, over the cap, else queued) and the kind of its
@@ -92,6 +93,7 @@ from agents import (  # noqa: E402
     get_agent_folder,
     get_mtime,
     get_session_records,
+    read_state,
     read_text,
 )
 from commands import clean_bundle_name, get_worktree_bundle_folder  # noqa: E402
@@ -173,17 +175,33 @@ def get_ops_state(row, record, now):
     return f"done {span} ago", since
 
 
+def get_pause(bundle):
+    """Why the daemon closes the agent window of a bundle, or of an ops agent (ops-SESSION), once
+    its turn ended (its `pause` file): pausing for Pause, back to queue for Back to queue or a
+    wait for GitHub, closing when no task goes on with its session; "" when it closes nothing."""
+    if not (get_agent_folder(bundle) / "pause").exists():
+        return ""
+    queue = read_state()["queue"]
+    item = next((item for item in queue if item["bundle"] == bundle and item.get("resume")), None)
+    if item is None:
+        return "closing"
+    return "pausing" if item.get("paused") else "back to queue"
+
+
 def get_info(row, answer, record=None):
     """The state of the agent of a row and since when, from the .agent/ files of its bundle, or
     from its transcript while its mark waits on a call that waits for Seb's answer in hok, its
     answer, else the first line of its result.md, and that since as a time, 0 when none. An ops
     row has its window as key, and the record of its session in place of such files. A window
-    whose claude ended and that waits for Enter has the error it shows as state."""
+    whose claude ended and that waits for Enter has the error it shows as state. A window the
+    daemon closes once its turn ended says why after it (get_pause)."""
     shown = [] if row.minimized else ["shown"]
     now = time.time()
     if row.key == row.window:
         state, since = get_ops_state(row, record or {}, now)
-        return ", ".join(filter(None, [row.ended or state, *shown])), answer, since
+        session = (record or {}).get("sessionId")
+        pause = get_pause(f"{OPS}{session}") if session else ""
+        return ", ".join(filter(None, [row.ended or state, pause, *shown])), answer, since
     folder = get_agent_folder(row.key)
     if (since := get_mtime(folder / "done")) is not None:
         word = "failed" if read_text(folder / "done") == "failed" else "done"
@@ -199,7 +217,8 @@ def get_info(row, answer, record=None):
     else:
         state = "starting"
     answer = answer or (read_text(folder / "result.md") or "").partition("\n")[0]
-    return ", ".join([row.ended or state, *shown]), answer, since or 0.0
+    pause = get_pause(row.key)
+    return ", ".join(filter(None, [row.ended or state, pause, *shown])), answer, since or 0.0
 
 
 def get_tabs(groups):
