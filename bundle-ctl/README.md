@@ -61,7 +61,7 @@ the pager. `python3 test_node_modules.py` and `python3 test_delete.py` have the 
 | `POST /move` | the queued task of `bundle` put at `place` (from 1), where it keeps its priority when that priority fits between the tasks around it, else takes the nearest of theirs; then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
 | `POST /bring-back` | the agent of `bundle` back from its worker: its work tree written here, then its session goes on in a terminal (see Remote agents). The host or that bundle asks |
 | `POST /place` | the agent of `bundle` put `where`: `local`, or a worker of `BUNDLE_CTL_WORKERS` (see Remote agents). The host or the ops container asks |
-| `POST /requeue` | the session of the agent of `bundle` queued again, last, paused with `paused`, and its agent window closed once its turn ended, 2 minutes at most: meanwhile `client/run-hook.py` refuses its Bash calls, on a reason that tells it to end its turn, and a turn still running at the end goes on told it was cut (see Cut sessions). With `github`, it waits for the GitHub connection of the host. The host or the ops container asks, or with `github` the bundle itself |
+| `POST /requeue` | the session of the agent of `bundle`, or of an ops agent window with `ops-SESSION` (see Ops agents), queued again, last, paused with `paused`, and its agent window closed once its turn ended, 2 minutes at most: meanwhile `client/run-hook.py` refuses the Bash calls of a bundle, on a reason that tells it to end its turn, and a turn still running at the end goes on told it was cut (see Cut sessions). With `github`, it waits for the GitHub connection of the host. The host or the ops container asks, or with `github` the bundle itself |
 | `POST /close` | the agent window of `bundle` closed with no yes, as after its verdict: its claude and its container stop, its session stays; refused while a claude of the bundle is in a turn or waits for an answer, or while its agent starts (see Agents in a terminal). Refused to a container |
 | `POST /schedule` | when the queued task of `bundle` may start: `when` is `spot` (once a slot, the memory and the CPU let it), `manual` (it waits for a manual resume, until it is scheduled again) or `HH:MM` (that time of the host, today or tomorrow); it no longer goes over the cap. Then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
 | `POST /unqueue` | the queued task of a bundle dropped; the host, that bundle or the one that queued the task asks |
@@ -965,6 +965,13 @@ answer as `bctl delete` does, and the same task sent again takes back the reques
   three ops windows sat two hours on `502 api.anthropic.com unreachable` (2026-10-23).
 - No cap and no queue: the window opens at once, as a tab would. Opened with a task it opens
   minimized, as any agent window; with no task it shows in front, for the first prompt.
+- Back to queue and Pause put it in the queue all the same, `bctl requeue ops-SESSION [--paused]`
+  (Seb, 2026-10-29: Pause on an ops agent did nothing, and he chose to have it work as for a
+  bundle). Its window closes once its turn ended, 2 minutes at most, its turn read in the sessions
+  folder of the ops container. Once it is resumed or its time came, its window closed and a slot
+  free, the queue opens its session again in an ops agent window, as for a cut session. No hook
+  refuses its commands meanwhile: the ops container has no `.agent/pause`. Opening the session by
+  hand, in a window or a tab, takes its task out of the queue.
 - The title shows the title of the conversation in place of a name, with 🔧 and `(ops)`:
   `⏳ 🔧 Ops list layout (ops)`. The marks are those of a bundle, the close line first (Seb,
   2026-10-16), but for an idle session whose last answer has none: ✅ when that answer has a Done

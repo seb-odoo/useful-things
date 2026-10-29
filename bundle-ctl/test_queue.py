@@ -785,6 +785,103 @@ def check_requeue(root):
     return [f"requeue: {name}: {state['queue']}" for name in failed], len(checks)
 
 
+def check_ops_requeue(root):
+    """Real clients: an ops agent window goes back to the queue as the agent of a bundle does, its
+    turn read in the sessions of the ops container; its session opens again in an ops agent window
+    once resumed, its window closed and a slot free. A terminal opened on it drops its task."""
+    state, launched = prepare(root, {"b": RUNS_IT}, 8)
+    state["queue"] = []
+    session = "11111111-2222-3333-4444-555555555555"
+    ops = f"{daemon.OPS}{session}"
+    folder_of = daemon.get_agent_folder
+    daemon.get_agent_folder = lambda bundle: (
+        root / "ops" / bundle.removeprefix(daemon.OPS)
+        if bundle.startswith(daemon.OPS)
+        else folder_of(bundle)
+    )
+    host_folder, daemon.HOST_FOLDER = daemon.HOST_FOLDER, str(root / "repo")
+    records = root / "claude-config" / "repo" / "sessions"
+    records.mkdir(parents=True)
+    record = {"sessionId": session, "startedAt": 2, "status": "busy"}
+    (records / "1.json").write_text(json.dumps(record))
+    daemon.CLAUDE_CONFIG_CONTAINER = str(root / "claude-config")
+    sys.modules["agents"].CLAUDE_CONFIG_CONTAINER = daemon.CLAUDE_CONFIG_CONTAINER
+    entry = {"type": "assistant", "entrypoint": "cli", "message": {"content": [{"type": "text"}]}}
+    entry["message"]["content"][0]["text"] = "Nothing left: done."
+    (root / f"{session}.jsonl").write_text(json.dumps(entry) + "\n")
+    windows = {ops}
+    running, daemon.is_agent_running = daemon.is_agent_running, windows.__contains__
+    daemon.PAUSE_WAIT = 3
+    daemon.close_window = windows.discard
+    daemon.get_transcript = lambda name: next(root.glob(f"{name}.jsonl"), None)
+    daemon.get_window_pids = lambda bundle: [1] * (bundle in windows)
+    daemon.identify = lambda connection: daemon.HOST
+    path = root / "ctl.sock"
+    server = daemon.Server(str(path), daemon.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    code, lines = run_client(path, "requeue", ops, "--paused")
+    found = code, lines[-1].endswith("queued 1, waits for a manual resume")
+    checks = [("the client queues it paused", found == (0, True))]
+    item = state["queue"][0]
+    found = item["bundle"], item["paused"], item["resume"], item["session"]
+    checks.append(("its session is queued", found == (ops, True, True, session)))
+    time.sleep(1.5)
+    checks.append(("it stays open while its turn runs", ops in windows))
+    (records / "1.json").write_text(json.dumps({**record, "status": "idle"}))
+    deadline = time.monotonic() + 4
+    while ops in windows and time.monotonic() < deadline:
+        time.sleep(0.1)
+    time.sleep(0.2)
+    found = ops in windows, item["task"]
+    checks.append(("it closes once its turn ended, told to go on", found == (False, daemon.GO_ON)))
+    daemon.launch_queued()
+    checks.append(("paused, it stays in the queue", (launched, len(state["queue"])) == ([], 1)))
+    daemon.schedule_task(daemon.HOST, {}, {"bundle": ops, "when": "spot"})
+    task = (daemon.get_agent_folder(ops) / "task.md").read_text()
+    found = (
+        launched,
+        state["queue"],
+        task.startswith(daemon.GO_ON),
+        "Seb closed your window" in task,
+    )
+    checks.append(("a resume opens its window on its session", found == ([ops], [], True, True)))
+    windows.add(ops)
+    (records / "1.json").write_text(json.dumps(record))
+    daemon.MAX_AGENTS = 1
+    answer = daemon.requeue_agent(daemon.HOST, {}, {"bundle": ops})[1]
+    checks.append(
+        ("it waits for its window to close", answer["waits_for"] == "its window to close")
+    )
+    try:
+        daemon.requeue_agent(daemon.HOST, {}, {"bundle": ops})
+        found = None
+    except daemon.Refused as refusal:
+        found = str(refusal)
+    checks.append(("it is queued once", found == f"{ops} is already queued"))
+    (records / "1.json").write_text(json.dumps({**record, "status": "idle"}))
+    deadline = time.monotonic() + 4
+    while ops in windows and time.monotonic() < deadline:
+        time.sleep(0.1)
+    time.sleep(0.2)
+    daemon.launch_queued()
+    checks.append(("then for a slot", state["queue"][0]["waits_for"] == "a slot"))
+    daemon.open_ops(daemon.HOST, ops, {"bundle": ops, "terminal": True})
+    found = launched, state["queue"]
+    checks.append(("a terminal opened on it drops its task", found == ([ops, ops], [])))
+    for bundle, error in (
+        (f"{daemon.OPS}{session[:-1]}0", f"409 {daemon.OPS}{session[:-1]}0: no conversation"),
+        (f"{daemon.OPS}x", f"400 {daemon.OPS}SESSION: a session id"),
+    ):
+        found = run_client(path, "requeue", bundle)
+        refused = found[0] == 1 and found[1][0].startswith(f"bctl: {error}")
+        checks.append((f"requeue {bundle} is refused", refused))
+    server.shutdown()
+    server.server_close()
+    daemon.is_agent_running, daemon.HOST_FOLDER = running, host_folder
+    failed = [name for name, passed in checks if not passed]
+    return [f"ops requeue: {name}: {state['queue']}" for name in failed], len(checks)
+
+
 def check_place(root):
     """Real clients: place puts a queued task on a worker at once; an agent at work in its
     terminal, or busy again after its verdict, goes on there with its session once its container
@@ -1583,6 +1680,7 @@ def main():
         check_after,
         check_pause,
         check_requeue,
+        check_ops_requeue,
         check_place,
         check_github,
         check_build,

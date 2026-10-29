@@ -759,10 +759,11 @@ def schedule_task(caller, query, body):
 
 
 def requeue_agent(caller, query, body):
-    """Queue the session of a bundle's agent again, last, paused with `paused`, and close its
-    window once its turn ended, PAUSE_WAIT seconds at most. Meanwhile its Bash calls are refused on
-    a reason that tells it to end its turn (client/run-hook.py). The host asks, or with `github`
-    the agent itself: its session then waits for the GitHub connection of the host."""
+    """Queue the session of a bundle's agent, or of an ops agent window (ops-SESSION), again,
+    last, paused with `paused`, and close its window once its turn ended, PAUSE_WAIT seconds at
+    most. Meanwhile the Bash calls of a bundle's agent are refused on a reason that tells it to
+    end its turn (client/run-hook.py). The host asks, or with `github` the agent of a bundle
+    itself: its session then waits for the GitHub connection of the host."""
     bundle = body.get("bundle") or ""
     if caller != HOST and not (caller == bundle and body.get("github") is True):
         raise Refused(
@@ -773,17 +774,27 @@ def requeue_agent(caller, query, body):
         type(body.get(key, False)) is not bool for key in ("github", "paused")
     ):
         raise ValueError("requeue: a bundle, and github or paused true or false")
-    if not BUNDLE_NAME.fullmatch(bundle) or not os.path.isdir(get_worktree_bundle_folder(bundle)):
+    paused, github = body.get("paused", False), body.get("github", False)
+    if bundle.startswith(OPS) and not github:
+        check_ops_session(bundle, {"bundle": bundle})
+        session = bundle.removeprefix(OPS)
+    elif not BUNDLE_NAME.fullmatch(bundle) or not os.path.isdir(get_worktree_bundle_folder(bundle)):
         raise ValueError(f"no bundle folder for {bundle}")
-    session = read_text(get_agent_folder(bundle) / "session")
+    else:
+        session = read_text(get_agent_folder(bundle) / "session")
     if not session or not get_window_pids(bundle):
         raise ValueError(f"{bundle} has no agent window")
-    paused, github = body.get("paused", False), body.get("github", False)
     with state_lock:
         priority = min((item.get("priority", 0) for item in read_state()["queue"]), default=0)
     task = {"github": github, "paused": paused, "priority": priority, "resume": True, "task": GO_ON}
-    check_task(bundle, task)
-    answer = enqueue(caller, bundle, task)
+    if bundle.startswith(OPS):
+        with state_lock:
+            if any(item["bundle"] == bundle for item in read_state()["queue"]):
+                raise Refused(f"{bundle} is already queued")
+        answer = enqueue(caller, bundle, task, session=session)
+    else:
+        check_task(bundle, task)
+        answer = enqueue(caller, bundle, task)
     why = "when Seb put it back in the queue"
     if paused:
         why = "when Seb paused it"
@@ -825,13 +836,17 @@ def stop_after_turn(bundle, session, why, drop_done=False):
     cut. With drop_done, a turn that ended on the first verdict of the agent drops the queued task
     that goes on."""
     pause = get_agent_folder(bundle) / "pause"
+    container = bundle
+    if bundle.startswith(OPS):
+        container = os.path.basename(HOST_FOLDER)
+        pause.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.time() + PAUSE_WAIT
     write_text(pause, f"{deadline}\n")
     try:
-        busy = get_session_status(bundle, session) == "busy"
+        busy = get_session_status(container, session) == "busy"
         while busy and get_window_pids(bundle) and time.time() < deadline:
             time.sleep(1)
-            busy = get_session_status(bundle, session) == "busy"
+            busy = get_session_status(container, session) == "busy"
         try:
             transcript = get_transcript(session)
             row = transcript and cut.read_session(transcript)
@@ -1355,6 +1370,25 @@ def launch_queued():
         for item in state["queue"]:
             bundle = item["bundle"]
             folder = get_agent_folder(bundle)
+            fits = count_agents(open_windows) + len(state["launches"]) < MAX_AGENTS
+            has_room = item.get("forced") or (fits and not memory["short"] and not memory["busy"])
+            if bundle.startswith(OPS):
+                if item.get("paused"):
+                    item["waits_for"] = "a manual resume"
+                elif get_window_pids(bundle):
+                    item["waits_for"] = "its window to close"
+                elif (item.get("after") or 0) > now:
+                    item["waits_for"] = f"its time, {format_time(item['after'])}"
+                elif has_display and has_room:
+                    try:
+                        resume_ops(bundle, get_resumed(item))
+                    except (Refused, ValueError) as error:
+                        print(f"dropped the task of {bundle}: {error}", flush=True)
+                    continue
+                else:
+                    item["waits_for"] = get_room_wait(has_display, fits, memory)
+                queue.append(item)
+                continue
             if not folder.parent.is_dir() and not item.get("build"):
                 print(f"dropped the task of {bundle}: its folder is gone", flush=True)
                 continue
@@ -1365,8 +1399,6 @@ def launch_queued():
                 continue
             is_running = get_worktree_bundle_folder(bundle) in open_windows
             container = is_running and get_bundle_container(bundle)
-            fits = count_agents(open_windows) + len(state["launches"]) < MAX_AGENTS
-            has_room = item.get("forced") or (fits and not memory["short"] and not memory["busy"])
             can_start = has_display and (is_running or has_room)
             in_terminal = (folder / "terminal").exists() and (container or is_held(folder))
             earlier = next((kept for kept in queue if kept["bundle"] == bundle), None)
@@ -1440,18 +1472,22 @@ def launch_queued():
                 )
                 starting = bundle
                 continue
-            elif not has_display:
-                item["waits_for"] = "a desktop session"
-            elif not fits:
-                item["waits_for"] = "a slot"
-            elif memory["short"]:
-                item["waits_for"] = "memory on the host"
             else:
-                item["waits_for"] = "the CPU of the host"
+                item["waits_for"] = get_room_wait(has_display, fits, memory)
             queue.append(item)
         state["queue"] = queue
         write_state(state)
     return paced
+
+
+def get_room_wait(has_display, fits, memory):
+    if not has_display:
+        return "a desktop session"
+    if not fits:
+        return "a slot"
+    if memory["short"]:
+        return "memory on the host"
+    return "the CPU of the host"
 
 
 def log_addresses(*containers):
@@ -1543,9 +1579,12 @@ def launch_safely():
 
 def get_task_where(item, folder):
     """Where a task starts: `local`, `auto`, `worker` or `worker:NAME`. A task to build starts
-    here, and so does any with no worker, or `auto` until REMOTE_AUTO."""
+    here, and so does the session of an ops agent window, any with no worker, or `auto` until
+    REMOTE_AUTO."""
     where = item.get("where") or read_text(folder / "where") or "auto"
-    if item.get("build") or not WORKERS.names or (where == "auto" and not REMOTE_AUTO):
+    if item.get("build") or item["bundle"].startswith(OPS) or not WORKERS.names:
+        return "local"
+    if where == "auto" and not REMOTE_AUTO:
         return "local"
     return where
 
@@ -3292,6 +3331,12 @@ def open_ops(caller, bundle, body):
         raise Refused("ops: only the host and the ops container open it, a bundle sends a task")
     if bundle != "ops":
         check_ops_session(bundle, body)
+        with state_lock:
+            state = read_state()
+            kept = [item for item in state["queue"] if item["bundle"] != bundle]
+            if len(kept) < len(state["queue"]):
+                state["queue"] = kept
+                write_state(state)
     elif body.get("resume") or {"after", "effort", "model", "paused", "priority"} & set(body):
         raise ValueError("ops: only a task or terminal")
     name = bundle

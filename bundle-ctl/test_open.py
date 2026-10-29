@@ -96,6 +96,7 @@ def open_ops(root, caller, body):
         opened.append(f"terminal {name if name in (MOVED, RUNNING) else name[:4]} {given}")
 
     daemon.HOST_FOLDER = "/ops"
+    daemon.read_state = lambda: {"queue": []}
     daemon.get_transcript = lambda session: "ops-" + session in (MOVED, RUNNING) or None
     daemon.is_agent_running = lambda bundle: bundle == RUNNING
     daemon.get_agent_folder = lambda name: root / name
