@@ -5,7 +5,8 @@ dir=~/.local/state/ssh-github-mux
 mkdir -p "$dir/request" "$dir/sock"
 
 hold() {
-    touch "$dir/request/held" "$dir/sock/stopped"
+    touch "$dir/sock/stopped"
+    held=$(mktemp "$dir/held.XXXXXX") && mv -fT "$held" "$dir/request/held"
     exit 1
 }
 

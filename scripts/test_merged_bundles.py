@@ -121,6 +121,11 @@ def main():
         bundles.append(
             bundle("master-unknown-pr-head", {"odoo": row(head, pr_head="1" * 40)}),
         )
+        subjects = {repo: branch_status.get_subjects(repo) for repo in REPOS}
+        found["tip subjects (bctl branches)"] = (
+            (subjects["odoo"]["master-local-after"], subjects["enterprise"]["master-with-empty"]),
+            ("work 1", "base"),
+        )
 
         output = io.StringIO()
         with redirect_stdout(output):

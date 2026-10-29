@@ -344,10 +344,19 @@ psql -d postgres -c "ALTER ROLE $USER NOSUPERUSER NOCREATEROLE"   # keeps CREATE
 
 What stays open, and what closes it:
 
-- the shared `.git` of every repo, config and hooks included, as git has to work in a container
-  (`push -u`, upstreams): a `core.fsmonitor`, an alias or a hook written there runs in the git of
-  the host. So does what the host runs from a bundle folder, like the `enable.sh` of a fetched
-  branch. A machine closes both with `HOST_BOX` in `config.env`: a command that runs its arguments
+- the shared `.git` of every repo, as git has to work in a container. Its `config` and `hooks` are
+  read-only there (security review of 2026-10-29, S1): a `core.fsmonitor`, an alias or a hook
+  written there would run in the git of the host, of the ops container and of every other bundle.
+  The cost, which Seb accepted: `git push -u`, `git remote add`, `git branch -u` and `git branch -m`
+  fail in a container, a branch made there from a remote branch gets no upstream (two errors, the
+  branch is made), and a change of the config on the host reaches a container at its next start
+  (the bind holds the file of its start). So [`initialize.py`](initialize.py) has
+  `scripts/upstream.py` set the upstream of the bundle branch on the dev remote before each start.
+  The rest stays writable: refs and objects, which every bundle shares, and `worktrees/`, where
+  `git worktree add` writes. There, the `commondir` file of another bundle's worktree can point its
+  git at a folder with a config of its own (proved on a copy, 10-29).
+  What the host runs from a bundle folder, like the `enable.sh` of a fetched branch, runs bundle
+  code too. A machine closes both with `HOST_BOX` in `config.env`: a command that runs its arguments
   with the bundle repos and nothing else of the machine. The bundle scripts run `enable.sh` through
   it, with no network, and the git of the host can be a wrapper that does the same for these repos;
 - the filestore and the databases, which the bundles share;

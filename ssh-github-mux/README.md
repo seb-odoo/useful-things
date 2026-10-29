@@ -20,9 +20,12 @@ each push of a container.
   by `wait` for a git command of the host, and by `on-unlock` at unlock
   (`ssh-github-mux-unlock.service`). The queue and the agents write `request/start`, held until
   then, and their tasks wait in the queue as they already do.
-- Containers (`devcontainer/base.jsonc`) get this folder as `/etc/ssh/ssh_config.d` and as
-  `~/.local/share/ssh-github-mux`, `sock/` read-only and `request/` read-write: a container uses
-  the connection but cannot put a socket the host would trust.
+- Where git-gate is installed, its fragment replaces the one at the root of this repo, and no
+  container mounts any of this. Without it, that fragment gives containers this folder as
+  `/etc/ssh/ssh_config.d` and as `~/.local/share/ssh-github-mux`, `sock/` read-only and `request/`
+  read-write: a container uses the connection but cannot put a socket the host would trust. So
+  `wait`, `on-unlock` and `here` write `request/` by renaming a file of `~/.local/state` over the
+  name: a link a container left there is replaced, never followed (`test_request.py`).
 - ssh exits 255 both when GitHub closes the connection and when the key is refused (the gate
   holds no key, no agent). The service is started once the socket is there (`ExecStartPost`): an
   exit before is a failed start, and the unit shows as failed. An exit after, the normal end of

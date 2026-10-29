@@ -49,6 +49,16 @@ REMOTE_FORMS = {
     "dummy": re.compile(r"[0-9a-f]{64}"),
     "session": re.compile(r"(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?"),
 }
+REPOS = (
+    "odoo",
+    "enterprise",
+    "design-themes",
+    "documentation",
+    "upgrade",
+    "upgrade-util",
+    "owl",
+    "sfu",
+)
 finishing = {}
 renewing = threading.Lock()
 renewed = [0]
@@ -64,6 +74,11 @@ MOUNTS = {
     "@REPO_ROOT@/upgrade-util/.git": ("standin", "same"),
     "@REPO_ROOT@/owl/.git": ("standin", "same"),
     "@REPO_ROOT@/sfu/.git": ("standin", "same"),
+    **{
+        f"@REPO_ROOT@/{repo}/.git/{name}": ("standin", "read-only over the .git above")
+        for repo in REPOS
+        for name in ("config", "hooks")
+    },
     "@WORKTREE_ROOT@/.claude": ("send", "the project settings of the bundles"),
     "/home/vscode/.claude-project": ("send", "the shared project config"),
     "@WORKTREE_ROOT@/.vscode": ("drop", "VS Code only"),
@@ -344,19 +359,11 @@ def start_standin(bundle, bundle_folder, worker, session):
         (REMOTE_RUNS, "/opt/remote-runs", "ro"),
         (run_folder(bundle), "/run/standin", "rw"),
     ]
-    for repo in (
-        "odoo",
-        "enterprise",
-        "design-themes",
-        "documentation",
-        "upgrade",
-        "upgrade-util",
-        "owl",
-        "sfu",
-    ):
+    for repo in REPOS:
         git_dir = repo_root / repo / ".git"
         if git_dir.is_dir():
             mounts.append((git_dir, str(git_dir), "rw"))
+            mounts += [(git_dir / name, str(git_dir / name), "ro") for name in ("config", "hooks")]
     argv = [
         "podman",
         "run",
@@ -378,7 +385,8 @@ def start_standin(bundle, bundle_folder, worker, session):
         f"STANDIN_SESSION={session}",
     ]
     for source, target, mode in mounts:
-        pathlib.Path(source).mkdir(parents=True, exist_ok=True)
+        if not pathlib.Path(source).exists():
+            pathlib.Path(source).mkdir(parents=True)
         argv += ["-v", f"{source}:{target}:{mode}"]
     subprocess.run(["podman", "rm", "-f", standin_name(bundle)], capture_output=True, check=False)
     subprocess.run([*argv, STANDIN_IMAGE, "sleep", "infinity"], capture_output=True, check=True)

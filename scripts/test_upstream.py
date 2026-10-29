@@ -2,11 +2,13 @@
 """The upstream a bundle branch gets, on scratch repos: python3 test_upstream.py"""
 
 import os
+import pathlib
 import subprocess
 import sys
 import tempfile
 
 import commands
+import upstream
 from rich.console import Console
 from rich.live import Live
 from utils import UtilsRunner
@@ -41,20 +43,28 @@ def main():
         git(repo, "push", "odoo-dev", f"HEAD:refs/heads/{FETCHED}")
         git(repo, "fetch", "--all")
 
-        def upstream(branch):
+        def upstream_of(branch):
             return git(repo, "for-each-ref", "--format=%(upstream:short)", f"refs/heads/{branch}")
 
         for bundle in (NEW, FETCHED):
             os.makedirs(commands.get_worktree_bundle_folder(bundle))
         folder = commands.get_worktree_bundle_repo_folder(NEW, REPO)
         runner.add_worktree(repo=REPO, bundle_name=NEW, make_branch=True, target_ref="odoo/master")
-        found["upstream of a branch created from the base"] = (upstream(NEW), "")
+        found["upstream of a branch created from the base"] = (upstream_of(NEW), "")
         runner.switch_to_branch(repo=REPO, branch=NEW, target_ref="odoo/master")
-        found["upstream of a branch reset on the base"] = (upstream(NEW), "")
+        found["upstream of a branch reset on the base"] = (upstream_of(NEW), "")
         runner.set_push_remote(repo=REPO, branch=NEW)
+        found["the start sets the upstream of a new branch"] = (
+            (upstream.set_upstream(REPO, NEW), upstream_of(NEW)),
+            (True, f"odoo-dev/{NEW}"),
+        )
+        config = pathlib.Path(repo, ".git", "config")
+        before = (config.stat().st_ino, config.stat().st_mtime_ns, config.read_text())
         git(folder, "commit", "--allow-empty", "-m", "work")
         git(folder, "push")
-        found["upstream after a plain push"] = (upstream(NEW), f"odoo-dev/{NEW}")
+        after = (config.stat().st_ino, config.stat().st_mtime_ns, config.read_text())
+        found["a plain push then writes no config, read-only in a bundle"] = (after, before)
+        found["upstream after a plain push"] = (upstream_of(NEW), f"odoo-dev/{NEW}")
         found["remotes holding it after a plain push"] = (
             [remote for remote in REMOTES if git(repo, "ls-remote", "--heads", remote, NEW)],
             ["odoo-dev"],
@@ -67,8 +77,17 @@ def main():
             track=True,
         )
         found["upstream of a branch fetched from the dev remote"] = (
-            upstream(FETCHED),
+            upstream_of(FETCHED),
             f"odoo-dev/{FETCHED}",
+        )
+        git(repo, "branch", "--set-upstream-to", "odoo/master", FETCHED)
+        found["the start keeps an upstream set"] = (
+            (upstream.set_upstream(REPO, FETCHED), upstream_of(FETCHED)),
+            (False, "odoo/master"),
+        )
+        found["and makes no branch"] = (
+            (upstream.set_upstream(REPO, "master-none--me"), upstream_of("master-none--me")),
+            (False, ""),
         )
     failures = [
         f"{case}: {got!r}, expected {expected!r}"

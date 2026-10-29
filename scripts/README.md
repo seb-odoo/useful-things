@@ -107,9 +107,11 @@ Creates a new bundle locally for a given base branch across all configured repos
 (`--branch-repo`): 0.7 GB less per bundle. `add_repo.py` adds one later.
 Fetches the base branch, creates worktrees, and (if run from inside a repo dir) pushes a local branch to the dev remote.
 The base is never the upstream of the new branch. With `--no-push` the branch has no upstream until
-a plain `git push`, which creates it on the dev remote and tracks it there
-(`branch.<name>.pushRemote`, and `push.autoSetupRemote` in the config of the repo;
-`test_upstream.py`).
+its container starts: `upstream.py`, run by `devcontainer/initialize.py` before each start, sets it
+on the dev remote, as a container reads the config of the repo read-only. `git status` there says
+the upstream is gone until the first plain `git push`, which creates the branch on the dev remote.
+On the host, that push sets the upstream itself (`branch.<name>.pushRemote`, and
+`push.autoSetupRemote` in the config of the repo; `test_upstream.py`).
 Runs web tooling setup, writes `.made`, and opens the bundle in VS Code. `.made` comes last: a
 bundle cut before it (a restart of bundle-ctl kills its jobs) is half-made, and the same command
 again finishes it.
@@ -508,8 +510,8 @@ the merge, and a branch pushed again since, for a new PR, stays. `test_merged_bu
 each case on scratch repos.
 
 `--json` prints the same data for a script: per bundle its group, issue, handled, open state and agent, per
-repo its head, push, behind, conflict and PR, and under `deleted` the PRs of each bundle it
-deleted. A dev container cannot run it (no `scripts/`, no
+repo its head, the subject of that commit (so that triage runs no git in the ops container), push,
+behind, conflict and PR, and under `deleted` the PRs of each bundle it deleted. A dev container cannot run it (no `scripts/`, no
 podman, and its `git` refuses the repos of `REPO_ROOT`, a mount point owned by root: dubious
 ownership): there `gbs` is `bctl branches`, and `bctl --json branches` gives the JSON, both run on
 the host. The daemon runs this script as a new process at each call, so a change here needs no

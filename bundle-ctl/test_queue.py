@@ -1031,6 +1031,15 @@ def check_github(root):
     os.utime(start, (0, 0))
     daemon.launch_queued()
     checks.append(("it asks again later", start.read_text() != asked))
+    victim = root / "victim"
+    victim.write_text("kept\n")
+    start.unlink()
+    start.symlink_to(victim)
+    os.utime(start, (0, 0), follow_symlinks=False)
+    os.utime(victim, (0, 0))
+    daemon.launch_queued()
+    found = victim.read_text(), start.is_symlink()
+    checks.append(("a link left in request/ is replaced, not followed", found == ("kept\n", False)))
     (root / "mux" / "sock").mkdir()
     with socket.socket(socket.AF_UNIX) as listener:
         listener.bind(str(root / "mux" / "sock" / "github"))

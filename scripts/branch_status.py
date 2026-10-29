@@ -150,6 +150,13 @@ def get_local_branches(repo):
     ]
 
 
+def get_subjects(repo):
+    """{branch: the subject of its tip}, read here so that the ops container runs no git in a repo
+    the bundles write (triage)."""
+    out = git(repo, "for-each-ref", "--format=%(refname:short)%00%(subject)", "refs/heads/")
+    return dict(line.split("\0", 1) for line in out.splitlines())
+
+
 @functools.cache
 def get_github_repo(repo, remote=None):
     url = git(repo, "remote", "get-url", remote or get_remote_repo(repo))
@@ -547,6 +554,7 @@ def get_bundles():
             zip(pairs, executor.map(lambda pair: get_status(*pair, write_tree), pairs)),
         )
         pushes = dict(zip(pairs, executor.map(lambda pair: get_push(*pair), pairs)))
+        subjects = dict(zip(repos, executor.map(get_subjects, repos)))
         prs, errors = prs_future.result()
         open_folders = open_future.result()
 
@@ -583,6 +591,7 @@ def get_bundles():
                 "issue": issue,
                 "pr": facts,
                 "push": push,
+                "subject": subjects[repo].get(branch),
             }
         rows = [row for row in repos_of_bundle.values() if not row["empty"]]
         rows = rows or list(repos_of_bundle.values())

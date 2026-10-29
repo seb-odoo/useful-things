@@ -121,6 +121,24 @@ def check_remote(root):
         check(f"remote.json {name}", found == expected, found)
 
 
+def check_standin(root):
+    git_dir = root / "repos" / "odoo" / ".git"
+    (git_dir / "hooks").mkdir(parents=True)
+    (git_dir / "config").write_text("[core]\n")
+    remote_agent.get_values = lambda: {"REPO_ROOT": str(root / "repos"), "CACHE_ROOT": str(root)}
+    remote_agent.HOME = remote_agent.STATE = root
+    remote_agent.REMOTE_RUNS = root / "remote-runs"
+    runs = []
+    remote_agent.subprocess.run = lambda argv, **kwargs: runs.append(argv)
+    remote_agent.start_standin("b", root / "bundle", "w", "")
+    volumes = set(runs[-1])
+    check("the stand-in mounts the base .git", f"{git_dir}:{git_dir}:rw" in volumes, runs[-1])
+    for name in ("config", "hooks"):
+        mount = f"{git_dir / name}:{git_dir / name}:ro"
+        check(f"and its {name} read-only over it", mount in volumes, runs[-1])
+    check("the config stays a file", (git_dir / "config").is_file())
+
+
 def main():
     check_mounts()
     with tempfile.TemporaryDirectory() as folder:
@@ -128,6 +146,7 @@ def main():
         check_config(root)
         check_env(root)
         check_remote(root)
+        check_standin(root)
     for line in failures:
         print(line)
     print(f"{total - len(failures)}/{total} cases as expected")

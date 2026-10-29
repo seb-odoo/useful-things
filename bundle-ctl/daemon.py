@@ -1232,7 +1232,8 @@ def ask_github():
     start = GITHUB_MUX / "request" / "start"
     if time.time() - (get_mtime(start) or 0) >= GITHUB_ASK:
         start.parent.mkdir(parents=True, exist_ok=True)
-        start.write_text(f"{time.time()}\n")
+        with contextlib.suppress(OSError):
+            write_text(start, f"{time.time()}\n")
 
 
 def is_deleting(bundle):

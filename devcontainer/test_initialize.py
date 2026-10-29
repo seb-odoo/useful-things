@@ -98,6 +98,22 @@ def main():
     check("node_modules mount", mount in base_config["mounts"], True)
     mount = "source=@CACHE_ROOT@/warden,target=/home/vscode/.cache/warden,type=bind,readonly,z"
     check("warden mount", mount in base_config["mounts"], True)
+    git_dirs = [
+        mount.split(",")[1].removeprefix("target=")
+        for mount in base_config["mounts"]
+        if mount.split(",")[1].endswith("/.git")
+    ]
+    check(
+        "the config and hooks of each base .git, read-only",
+        [
+            path
+            for git_dir in git_dirs
+            for path in (f"{git_dir}/config", f"{git_dir}/hooks")
+            if f"source={path},target={path},type=bind,readonly,z" not in base_config["mounts"]
+        ],
+        [],
+    )
+    check("eight base repos", len(git_dirs), 8)
     with tempfile.TemporaryDirectory() as name:
         root = pathlib.Path(name)
         (root / "tools").mkdir()
@@ -107,6 +123,7 @@ def main():
             (root / "tools" / script).write_text(FAKE)
         (root / "scripts").mkdir()
         (root / "scripts" / "outside.py").write_text(FAKE)
+        (root / "scripts" / "upstream.py").write_text(FAKE)
         base = root / "src" / "master"
         folder = base / NAME
         (folder / "odoo" / "node_modules" / "eslint").mkdir(parents=True)
@@ -118,14 +135,19 @@ def main():
 
         res = initialize(root, folder)
         check("exit code", (res.returncode, res.stderr), (0, ""))
-        scripts = ("warden-chrome.py", "claude-config.py", "../scripts/outside.py")
+        scripts = (
+            "warden-chrome.py",
+            "../scripts/upstream.py",
+            "claude-config.py",
+            "../scripts/outside.py",
+        )
         calls = [
             json.loads(line)
             for script in (*scripts, "extensions.py", "bundle-db.py")
             for line in (root / "tools" / f"{script}.calls").read_text().splitlines()
         ]
         outside = ["start", NAME, str(folder)]
-        expected = [[], [NAME, "--bundle"], outside, [NAME, str(folder)], [NAME]]
+        expected = [[], [NAME], [NAME, "--bundle"], outside, [NAME, str(folder)], [NAME]]
         check("the name, one argument", calls, expected)
         check("no shell", (root / "shell-ran").exists(), False)
         check("the folder of the agent, for its mount", (folder / ".agent").is_dir(), True)
@@ -136,6 +158,8 @@ def main():
         check("hard link gone", os.stat(base / "shared.js").st_nlink, 1)
         (root / "tools" / "warden-chrome.py").write_text("raise SystemExit(1)\n")
         check("again, with no browser", initialize(root, folder).returncode, 0)
+        (root / "scripts" / "upstream.py").write_text("raise SystemExit(1)\n")
+        check("again, with no upstream set", initialize(root, folder).returncode, 0)
         check("odoo link kept", os.readlink(folder / "odoo" / "node_modules"), TARGET)
         check_npm(root, folder, check)
 

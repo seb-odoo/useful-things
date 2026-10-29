@@ -39,6 +39,25 @@
     "source=@REPO_ROOT@/upgrade-util/.git,target=@REPO_ROOT@/upgrade-util/.git,type=bind,Z",
     "source=@REPO_ROOT@/owl/.git,target=@REPO_ROOT@/owl/.git,type=bind,Z",
     "source=@REPO_ROOT@/sfu/.git,target=@REPO_ROOT@/sfu/.git,type=bind,Z",
+    // Their config and hooks read-only: the host, every bundle and the ops container read them, and
+    // a `core.fsmonitor` or a hook written there runs in all of their git. initialize.py writes the
+    // upstream a bundle needs before the start, and the container sees the config of its start.
+    "source=@REPO_ROOT@/odoo/.git/config,target=@REPO_ROOT@/odoo/.git/config,type=bind,readonly,z",
+    "source=@REPO_ROOT@/odoo/.git/hooks,target=@REPO_ROOT@/odoo/.git/hooks,type=bind,readonly,z",
+    "source=@REPO_ROOT@/enterprise/.git/config,target=@REPO_ROOT@/enterprise/.git/config,type=bind,readonly,z",
+    "source=@REPO_ROOT@/enterprise/.git/hooks,target=@REPO_ROOT@/enterprise/.git/hooks,type=bind,readonly,z",
+    "source=@REPO_ROOT@/design-themes/.git/config,target=@REPO_ROOT@/design-themes/.git/config,type=bind,readonly,z",
+    "source=@REPO_ROOT@/design-themes/.git/hooks,target=@REPO_ROOT@/design-themes/.git/hooks,type=bind,readonly,z",
+    "source=@REPO_ROOT@/documentation/.git/config,target=@REPO_ROOT@/documentation/.git/config,type=bind,readonly,z",
+    "source=@REPO_ROOT@/documentation/.git/hooks,target=@REPO_ROOT@/documentation/.git/hooks,type=bind,readonly,z",
+    "source=@REPO_ROOT@/upgrade/.git/config,target=@REPO_ROOT@/upgrade/.git/config,type=bind,readonly,z",
+    "source=@REPO_ROOT@/upgrade/.git/hooks,target=@REPO_ROOT@/upgrade/.git/hooks,type=bind,readonly,z",
+    "source=@REPO_ROOT@/upgrade-util/.git/config,target=@REPO_ROOT@/upgrade-util/.git/config,type=bind,readonly,z",
+    "source=@REPO_ROOT@/upgrade-util/.git/hooks,target=@REPO_ROOT@/upgrade-util/.git/hooks,type=bind,readonly,z",
+    "source=@REPO_ROOT@/owl/.git/config,target=@REPO_ROOT@/owl/.git/config,type=bind,readonly,z",
+    "source=@REPO_ROOT@/owl/.git/hooks,target=@REPO_ROOT@/owl/.git/hooks,type=bind,readonly,z",
+    "source=@REPO_ROOT@/sfu/.git/config,target=@REPO_ROOT@/sfu/.git/config,type=bind,readonly,z",
+    "source=@REPO_ROOT@/sfu/.git/hooks,target=@REPO_ROOT@/sfu/.git/hooks,type=bind,readonly,z",
     // Workspace .claude, .vscode and odools.toml are symlinks in each bundle pointing at these
     // absolute host paths; bind them at the same path (like the .git mounts above) so the symlinks
     // resolve in the container. Without this the workspace settings.json never loads, so

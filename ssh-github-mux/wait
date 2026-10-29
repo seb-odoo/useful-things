@@ -6,7 +6,9 @@ git=$PPID
 while case $(ps -o comm= -p "$git") in ssh | sh | bash | dash) true ;; *) false ;; esac; do
     git=$(ps -o ppid= -p "$git" | tr -d ' ')
 done
-mkdir -p "$dir/request" && ps -o args= -p "$git" > "$dir/request/now" || exit 1
+# Renamed over request/now: a link a container left there is replaced, never followed.
+mkdir -p "$dir/request" && now=$(mktemp "$dir/now.XXXXXX") || exit 1
+ps -o args= -p "$git" > "$now" && mv -fT "$now" "$dir/request/now" || exit 1
 i=0
 while [ $i -lt 120 ]; do
     sleep 0.5
