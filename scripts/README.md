@@ -541,9 +541,12 @@ the head commit, sets it aside for mergebot: GitHub still shows it red.
 
 A robodoo command (`override=`, `delegate+`) counts from me, my team (the logins of
 `~/.claude/external/mail-agent/logins.json` whose trigram is in its `team.json`), a reviewer asked
-on the PR, or on a fw-bot hop a login fw-bot pings at the start of its comments: the rule of
-triage. Robodoo refuses the command of anyone else, but its text stays, and gbs gives triage the
-failing checks: a stranger's override would hide a red check from it (`test_handled.py`).
+on the PR, or on a fw-bot hop a login fw-bot pings at the start of its comments, and from a member
+of the odoo org (GitHub `authorAssociation`) but fw-bot and robodoo: the rule of triage. A team
+request asks no reviewer by name, so the member rule is what counts the reviewer it brings, and
+the texts of the bots quote `@robodoo r+`. Robodoo refuses the command of anyone else, but its
+text stays, and gbs gives triage the failing checks: a stranger's override would hide a red check
+from it (`test_handled.py`).
 
 When the repos of a bundle disagree, the bundle takes the first of: me, CI, drafts, reviewer,
 mergebot, not mine.
@@ -619,7 +622,8 @@ the PR queries worked.
   its longest cell as `min_width`.
 - The mergebot JSON has no field for a delegation: gbs reads the last 30 comments and reviews.
 - GitHub prices a GraphQL query by the `first`/`last` of its connections, not by the fields of a
-  node: the authors of the reviews and the reviewers asked cost no point.
+  node: the authors of the reviews, their `authorAssociation` and the reviewers asked cost no
+  point.
 - `state["building"]` of the bundle-ctl daemon covers the 2 minutes create_bundle.py takes before
   an agent is queued. `agents.py` holds the agent reading, shared with the daemon, which imports
   branch_status: gbs cannot import daemon.py.

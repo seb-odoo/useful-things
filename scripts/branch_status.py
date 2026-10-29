@@ -59,6 +59,7 @@ ASK_SEVERITIES = {"dim": 2, "red": 0, "yellow": 1}
 ASKED_STYLES = ((7 * 86400, "red"), (2 * 86400, "yellow"), (0, "dim"))
 AUTO_ASKED_STYLES = ((7 * 86400, "red"), (86400, "yellow"), (0, "dim"))
 BEHIND_STYLES = ((501, "red"), (150, "yellow"), (0, "default"))
+BOTS = ("fw-bot", "robodoo")
 CI_RUNNING = "[dim]ci running[/dim]"
 COMMITS_READ = 50
 DELEGATE = re.compile(r"@robodoo\b.*\bdelegate[+=]")
@@ -97,6 +98,7 @@ MERGEBOT_TAGS = {
 MENTION = re.compile(r"(?<![\w/])@([\w-]+)(?![\w/-])")
 MERGEBOT_TIMEOUT = 3
 MINOR_CHECKS = {"ci/security": "dim", "ci/style": "yellow"}
+ORG_MEMBERS = ("MEMBER", "OWNER")
 OVERRIDE = re.compile(r"@robodoo\b.*\boverride=([\w/.,-]+)")
 PR_STYLES = {"closed": "red", "draft": "dim", "merged": "magenta"}
 PR_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
@@ -190,8 +192,8 @@ def read_prs(pairs):
             "orderBy: {field: CREATED_AT, direction: DESC}) "
             "{ nodes { author { login } createdAt headRefName headRefOid isDraft number "
             "reviewDecision state url "
-            "comments(last: 30) { nodes { author { login } body createdAt } } "
-            "reviews(last: 30) { nodes { author { login } body submittedAt } } "
+            "comments(last: 30) { nodes { author { login } authorAssociation body createdAt } } "
+            "reviews(last: 30) { nodes { author { login } authorAssociation body submittedAt } } "
             "timelineItems(last: 20, itemTypes: [REVIEW_REQUESTED_EVENT]) { nodes { "
             "... on ReviewRequestedEvent { actor { login } createdAt "
             "requestedReviewer { ... on User { login } } } } } "
@@ -428,13 +430,16 @@ def get_commanders(pr):
 
 
 def get_command_notes(pr):
-    """The comments and reviews of get_commanders(), as (body, date)."""
+    """The comments and reviews whose robodoo commands count, as (body, date): from
+    get_commanders(), or from a member of the odoo org, such as a reviewer a team request brought,
+    but its bots, whose texts quote commands."""
     commanders = get_commanders(pr)
     return [
         (node["body"] or "", node[date] or "")
         for key, date in (("comments", "createdAt"), ("reviews", "submittedAt"))
         for node in pr[key]["nodes"]
-        if (node["author"] or {}).get("login") in commanders
+        if (login := (node["author"] or {}).get("login")) in commanders
+        or (node["authorAssociation"] in ORG_MEMBERS and login not in BOTS)
     ]
 
 

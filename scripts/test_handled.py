@@ -59,7 +59,14 @@ def main():
         found["team"] = branch_status.get_team()
 
     def note(login, body, at="2026-10-15T06:13:02Z"):
-        return {"author": {"login": login}, "body": body, "createdAt": at, "submittedAt": at}
+        member = "MEMBER" if login in ("member", "fw-bot", "robodoo") else "NONE"
+        return {
+            "author": {"login": login},
+            "authorAssociation": member,
+            "body": body,
+            "createdAt": at,
+            "submittedAt": at,
+        }
 
     def pull(*comments, reviews=()):
         red = {"context": "ci/runbot", "state": "FAILURE", "targetUrl": "https://runbot/1"}
@@ -104,10 +111,11 @@ def main():
     override = "@robodoo override=ci/runbot"
     found["a red check after an override=ci/runbot of"] = {
         login: [check["context"] for check in facts(login, override)["failing"]]
-        for login in ("stranger", "later", "me", "teammate", "asked", "pinged")
+        for login in ("stranger", "later", "robodoo", "me", "teammate", "asked", "pinged", "member")
     }
     found["delegated by"] = {
-        login: facts(login, "@robodoo delegate+")["delegated"] for login in ("stranger", "asked")
+        login: facts(login, "@robodoo delegate+")["delegated"]
+        for login in ("stranger", "asked", "member")
     }
     expected = {
         "never opened": False,
@@ -130,12 +138,14 @@ def main():
         "a red check after an override=ci/runbot of": {
             "stranger": ["ci/runbot"],
             "later": ["ci/runbot"],
+            "robodoo": ["ci/runbot"],
             "me": [],
             "teammate": [],
             "asked": [],
             "pinged": [],
+            "member": [],
         },
-        "delegated by": {"stranger": False, "asked": True},
+        "delegated by": {"stranger": False, "asked": True, "member": True},
         "what waits on me": [
             "odoo changes requested",
             "odoo conflict a",
