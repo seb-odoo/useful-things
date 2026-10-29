@@ -900,6 +900,13 @@ what to do: ask Seb to validate, or act.
   `agent-terminal.py`, which types the line, then Enter, as the next prompt of an idle session,
   or in a busy one, where claude shows it queued at once and reads it at its next tool call, as
   the hook would (Seb, 2026-10-27: he then sees it came and does not type it himself).
+- The terminal types a line as keys, not in a paste, and the bundle writes `pr-events/`: code in
+  its container could leave there an escape or a control key (the end of a paste, Shift+Tab,
+  Ctrl+U, a `1` then Enter on a permission dialog), which claude would take as Seb's keys. So the
+  terminal drops a line with a control character but a new line (a tab too), or with no letter
+  first (a slash command, `!` for the shell of claude), and notes it in `prwatch.log`, its keys
+  escaped (review of deck stage 4, 2026-10-29). What a line says is still the bundle's own text,
+  typed as a prompt. The hook and the Stop hook give the line as context, not as keys.
 - Idle is the `idle` status of the session in the records of claude: no turn, no dialog open
   (a question or a permission is `waiting`), and no wait for the reset of the usage limit. Only
   the record of the claude the terminal started counts: one stopped with its container leaves its

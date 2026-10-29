@@ -378,7 +378,7 @@ class Waker:
             return GO_ON.encode()
         if prompts := self.take_prompts():
             return PASTE_START + "\n\n".join(prompts).encode() + PASTE_END
-        told = PRWATCH.take(self.events)
+        told = self.take_events()
         return " ".join(told).encode() if told else None
 
     def take_stop(self):
@@ -420,6 +420,18 @@ class Waker:
                 prompts.append(text)
         return prompts
 
+    def take_events(self):
+        """The PR events that wait, as typed keys, not in a paste: the bundle writes its
+        pr-events/, so one with a control key (an escape, a tab) or no letter first (a slash
+        command, the shell of claude) is dropped, and noted with its keys escaped."""
+        told = []
+        for line in PRWATCH.take(self.events):
+            if line[:1].isalpha() and not CONTROL.search(line) and "\t" not in line:
+                told.append(line)
+            else:
+                self.note(f"dropped a line that would type keys: {line[:100]!r}")
+        return told
+
     def describe_draft(self):
         """What Seb typed since his last Enter, counted, never its text."""
         if not self.draft:
@@ -435,13 +447,16 @@ class Waker:
         grows are not a new one."""
         reason = why and why.partition(":")[0]
         if reason and reason != self.held:
-            log = os.O_WRONLY | os.O_APPEND | os.O_CREAT
-            with (
-                contextlib.suppress(OSError),
-                open(open_unlinked(self.agent / "prwatch.log", log), "a") as file,
-            ):
-                file.write(f"{time.strftime('%H:%M:%S')} an event waits: {why}\n")
+            self.note(f"an event waits: {why}")
         self.held = reason or None
+
+    def note(self, text):
+        log = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+        with (
+            contextlib.suppress(OSError),
+            open(open_unlinked(self.agent / "prwatch.log", log), "a") as file,
+        ):
+            file.write(f"{time.strftime('%H:%M:%S')} {text}\n")
 
     def is_retry_due(self):
         """The transcript is read once it has not changed for RETRY_AFTER, and once per change: a

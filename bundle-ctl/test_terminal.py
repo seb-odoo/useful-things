@@ -291,7 +291,19 @@ def check_wake(case):
     case.check("a slash command keeps it waiting", (events / "4.txt").exists())
     os.write(case.terminal.fd, b"x\r")
     case.check("until the next Enter", wait(lambda: lines()[-2:] == ["x", "PR event: four"]))
+    (events / "5.txt").write_text("PR event: five\x1b[Z")
+    (events / "6.txt").write_text("PR event:\tsix")
+    (events / "7.txt").write_text("/logout")
+    (events / "8.txt").write_text("PR event: eight")
+    case.check("a line with a control key, or no letter first, is dropped",
+               wait(lambda: lines()[-1:] == ["PR event: eight"]) and not any(events.iterdir()))
     log = case.agent / "prwatch.log"
+    dropped = [line.split(" ", 1)[1] for line in log.read_text().splitlines() if " dropped " in line]
+    case.check("and noted, its keys escaped", dropped == [
+        "dropped a line that would type keys: 'PR event: five\\x1b[Z'",
+        "dropped a line that would type keys: 'PR event:\\tsix'",
+        "dropped a line that would type keys: '/logout'",
+    ])
     held = [line.split(" ", 1)[1] for line in log.read_text().splitlines() if " an event waits: " in line]
     case.check("why an event waits, once per reason, a draft by its counts only", held == [
         "an event waits: the session is None",
