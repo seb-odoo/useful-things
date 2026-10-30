@@ -276,20 +276,18 @@ def build_config(bundle_folder):
         add(get_memory(own), "home/.claude/projects/-workspace/memory")
         add(own / "settings.json", "home/.claude/settings.json")
         add(own / "policy-limits.json", "home/.claude/policy-limits.json")
-        project = own / "project" / "settings.json"
-        if (own / "project").is_dir():
-            tar.add(
-                own / "project",
-                arcname="workspace/.claude",
-                filter=lambda info: (
-                    None if info.name == "workspace/.claude/settings.json" else keep_regular(info)
-                ),
-            )
-        if project.is_file():
-            hooks = project.read_text().replace(str(HERE / "client"), JOB_CLIENT).encode()
-            info = tarfile.TarInfo("workspace/.claude/settings.json")
-            info.size = len(hooks)
-            tar.addfile(info, io.BytesIO(hooks))
+        project = own / "project"
+        shared = pathlib.Path(values["SHARED_CLAUDE"])
+        for path in sorted(project.iterdir()) if project.is_dir() else ():
+            source = shared / path.name if path.is_symlink() else path
+            if not source.is_file():
+                continue
+            data = source.read_bytes()
+            if path.name == "settings.json":
+                data = data.replace(str(HERE / "client").encode(), JOB_CLIENT.encode())
+            info = tarfile.TarInfo(f"workspace/.claude/{path.name}")
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
         add(own / "gh", "home/.config/gh")
         add(own / "ssh", "home/.ssh")
         add(HOME / ".gitconfig", "home/.gitconfig")

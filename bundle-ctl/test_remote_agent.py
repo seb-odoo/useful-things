@@ -58,14 +58,20 @@ def check_config(root):
         "hasCompletedOnboarding": True, "mcpServers": {"x": {"headers": {"Authorization": "t"}}},
     }))
     (own / "settings.json").write_text("{}\n")
-    (own / "project").mkdir()
+    shared = root / "worktrees" / ".claude"
+    shared.mkdir(parents=True)
     stop = f"python3 {remote_agent.HERE / 'client' / 'agent-stop.py'}"
-    (own / "project" / "settings.json").write_text(json.dumps({"hooks": {"Stop": stop}}))
-    (own / "project" / "CLAUDE.md").write_text("project\n")
+    (shared / "settings.json").write_text(json.dumps({"hooks": {"Stop": stop}}))
+    (shared / "CLAUDE.md").write_text("project\n")
+    (own / "project").mkdir()
+    for name in ("settings.json", "CLAUDE.md"):
+        (own / "project" / name).symlink_to(f"/home/vscode/.claude-project/{name}")
+    (own / "project" / "settings.local.json").write_text("{}\n")
     remote_agent.HOME = home
     remote_agent.get_values = lambda: {"CACHE_ROOT": str(root / "cache"),
                                        "REPO_ROOT": str(root / "repo"),
                                        "WORKTREE_ROOT": str(root / "worktrees"),
+                                       "SHARED_CLAUDE": str(shared),
                                        "HOST_PROJECT": "-home-seb-repo"}
     data = remote_agent.build_config(root / "b1")
     names, contents = [], {}
@@ -82,7 +88,9 @@ def check_config(root):
           project == {"hooks": {"Stop": "python3 /job/home/bundle-ctl/client/agent-stop.py"}},
           project)
     check("once", names.count("workspace/.claude/settings.json") == 1, names)
-    check("the rest of the project goes", "workspace/.claude/CLAUDE.md" in names, names)
+    check("the project rules, from the shared folder the link names",
+          contents.get("workspace/.claude/CLAUDE.md") == b"project\n", names)
+    check("and its own files", "workspace/.claude/settings.local.json" in names, names)
     check("never the login", not any("credentials" in name for name in names), names)
     check("nor a link out of the tree", "home/.claude/skills/a/out" not in names, names)
     kept = json.loads(contents["home/.claude/.claude.json"])
