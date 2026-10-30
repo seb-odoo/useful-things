@@ -355,6 +355,8 @@ At rest the daemon asks podman little (Seb, 2026-10-30: "laptop still as overloa
   podman for each request that waits. `python3 test_hok.py` and `python3 test_open_folders.py`
   have the cases.
 - `GET /branches` runs gbs, which keeps its git answers by commit (scripts README, gbs).
+- `agent-terminator.py` loads `client/window-title.py` in its own process, again once that file
+  changed: a python3 that ran it took 0.1 s of CPU, every 10 s for each ops or busy window.
 
 ## Disk
 

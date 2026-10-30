@@ -446,6 +446,27 @@ def get_running():
     return failures
 
 
+def get_reloaded(home):
+    """agent-terminator.py loads client/window-title.py again once that file changed: its window
+    stays open for days."""
+    spec = importlib.util.spec_from_file_location("terminator", HERE / "agent-terminator.py")
+    terminator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(terminator)
+    title = home / "window-title.py"
+    title.write_text((HERE / "client" / "window-title.py").read_text())
+    terminator.TITLE = title
+    before = terminator.get_title(BUNDLE)
+    title.write_text(title.read_text().replace("def get_title(", "def get_old_title("))
+    title.write_text(
+        f"{title.read_text()}\n\ndef get_title(bundle, *args, **kwargs):\n    return 'new'\n"
+    )
+    os.utime(title, (time.time() + 5, time.time() + 5))
+    after = terminator.get_title(BUNDLE)
+    if (before == "new", after) != (False, "new"):
+        return [f"agent-terminator.py: titled {before!r}, then {after!r} on new code"]
+    return []
+
+
 def main():
     failures = []
     with tempfile.TemporaryDirectory() as root:
@@ -460,6 +481,7 @@ def main():
         failures += get_loaded()
         failures += get_configs(home)
         failures += get_running()
+        failures += get_reloaded(home)
         titles, closed, taken = get_followed(home)
         for found, expected in zip(titles, FOLLOWED, strict=True):
             if found != expected:
@@ -472,7 +494,7 @@ def main():
         print(line)
     cases = len(MARKS) + len(OPS_MARKS) + len(HOK_WAITS) + len(CLOSE_LINES) + len(CONFIGS)
     cases += len(API_ERRORS)
-    cases += len(FOLLOWED) + 5
+    cases += len(FOLLOWED) + 6
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

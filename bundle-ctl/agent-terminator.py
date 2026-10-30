@@ -38,6 +38,7 @@ two claude processes on one session would each go on from where they loaded it.
 """
 
 import contextlib
+import importlib.util
 import json
 import os
 import pathlib
@@ -76,6 +77,7 @@ PLUGIN_FILE = HERE / "shift_enter_newline.py"
 PLUGINS_KEY = "enabled_plugins"
 REFRESH = 10
 RUNTIME = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR") or pathlib.Path.home() / ".cache")
+TITLE = HERE / "client" / "window-title.py"
 WINDOW = """\
   [[{layout}]]
     [[[window]]]
@@ -94,6 +96,8 @@ WINDOW = """\
 """
 WMCTRL = shutil.which("wmctrl")
 WORKER = re.compile(r"[a-z][a-z0-9-]{0,39}")
+
+titles = {}
 
 
 def get_config(command):
@@ -130,15 +134,32 @@ def link_plugin():
             link.symlink_to(PLUGIN_FILE)
 
 
+def load_title():
+    """client/window-title.py, loaded again once it changed, as the window stays open for days: a
+    python3 that ran it took 0.1 s of CPU, every REFRESH seconds for each ops or busy window."""
+    stamp = get_mtime(TITLE)
+    if titles.get("stamp") != stamp:
+        spec = importlib.util.spec_from_file_location("title", TITLE)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        titles.update(stamp=stamp, module=module)
+    return titles["module"]
+
+
 def get_title(bundle, *statuses):
     try:
         worker = json.loads(read_text(get_agent_folder(bundle) / "remote.json"))["worker"]
     except (TypeError, ValueError, KeyError):
         worker = None
-    where = [f"@{worker}"] if type(worker) is str and WORKER.fullmatch(worker) else []
-    command = [sys.executable, str(HERE / "client" / "window-title.py"), bundle, *where, *statuses]
-    title = subprocess.run(command, capture_output=True, check=False, text=True).stdout.strip()
-    return title or bundle
+    where = worker if type(worker) is str and WORKER.fullmatch(worker) else None
+    try:
+        title = load_title()
+        if statuses and statuses[0] in title.FLAGS:
+            return title.get_title(bundle, flag=statuses[0], where=where) or bundle
+        pairs = dict(status.split("=", 1) for status in statuses)
+        return title.get_title(bundle, pairs, where=where) or bundle
+    except Exception:  # noqa: BLE001
+        return bundle
 
 
 def get_record(bundle, since):
