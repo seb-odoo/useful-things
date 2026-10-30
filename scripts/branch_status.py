@@ -685,7 +685,7 @@ def get_bundles():
         pairs = [(repo, branch) for branch, dates in bundles.items() for repo in dates]
         prs_future = executor.submit(get_prs, pairs)
         open_future = executor.submit(get_open_bundle_folders)
-        facts = read_git_facts(executor, heads, write_tree)
+        known = read_git_facts(executor, heads, write_tree)
         subjects = dict(zip(repos, executor.map(get_subjects, repos)))
         prs, errors = prs_future.result()
         open_folders = open_future.result()
@@ -699,8 +699,8 @@ def get_bundles():
         for repo in sorted(dates, key=lambda repo: repo != "odoo"):
             pr = (prs or {}).get((repo, branch))
             facts = get_pr_facts(pr, repo, now) if pr else None
-            status = facts[repo, branch]["status"]
-            push = facts[repo, branch]["push"]
+            status = known[repo, branch]["status"]
+            push = known[repo, branch]["push"]
             delegated |= (
                 bool(facts) and facts["delegated"] and facts["mergebot"] not in R_PLUS_STATES
             )
@@ -715,7 +715,7 @@ def get_bundles():
             repos_of_bundle[repo] = {
                 "ahead": status and status["ahead"],
                 "behind": status and status["behind"],
-                "commits": facts[repo, branch]["commits"],
+                "commits": known[repo, branch]["commits"],
                 "conflict": status and status["conflict"],
                 "create_pr": get_compare_url(repo, branch) if create_pr else None,
                 "empty": empty,

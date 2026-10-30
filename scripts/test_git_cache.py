@@ -85,6 +85,19 @@ def main():
         branch_status.GIT_CACHE.write_text("[1, 2")
         read()
         found["a broken cache: git again"] = len(computed)
+        stubs = {
+            "get_repos": lambda: ["odoo"],
+            "get_prs": lambda pairs: ({}, []),
+            "get_open_bundle_folders": set,
+            "read_state": lambda: {"launches": {}, "queue": []},
+            "get_agent": lambda bundle, alive: None,
+            "is_handled": lambda bundle, news, is_open: False,
+        }
+        vars(branch_status).update(stubs)
+        bundles, _errors = branch_status.get_bundles()
+        found["gbs lists both branches with their git facts"] = sorted(
+            (row["bundle"], row["repos"]["odoo"]["behind"]) for row in bundles
+        )
     expected = {
         "the first read asks git for each branch": 6,
         "a branch pushed, one not": ({"ahead": 0, "behind": 0}, None),
@@ -93,6 +106,7 @@ def main():
         "the base moved: both, now behind": (6, [1, 1]),
         "a push: that branch only": ["master-b--me"],
         "a broken cache: git again": 6,
+        "gbs lists both branches with their git facts": [("master-a--me", 1), ("master-b--me", 1)],
     }
     failures = [
         f"{case}: {found[case]}, expected {value}"
