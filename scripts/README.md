@@ -52,6 +52,13 @@ owl and sfu differ from the Odoo repos:
   (`tests/rtc.test.ts` asserts a CPU-count-dependent `NUM_WORKERS` and fails on some machines,
   upstream, not a local breakage).
 
+A build killed in `git worktree add` (a restart of bundle-ctl, see its README) leaves a worktree
+whose checkout never ended: its `.git` names no gitdir, or one with no index, so git sees its
+files as untracked. `add_worktree` removes such a worktree before it adds it again, so the same
+build sent again finishes. On 2026-10-29 a restart at 09:38 cut the odoo and enterprise worktrees
+of a fw bundle, its build asked again failed twice, and its agent repaired them by hand: the bundle
+never got `.made`. `test_cut_checkout.py` has the cases.
+
 ### Shared node_modules
 
 The bundles share a store of `node_modules`, one tree per `package.json` of the web tooling

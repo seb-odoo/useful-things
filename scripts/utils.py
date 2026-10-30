@@ -90,6 +90,7 @@ class UtilsRunner(Runner):
     ):
         target_folder = get_worktree_bundle_repo_folder(bundle_name, repo)
         repo_folder = get_repo_folder(repo)
+        self._drop_cut_checkout(repo_folder=repo_folder, target_folder=target_folder)
         cmd = (
             ["git", "worktree", "add"]
             + (["-B", bundle_name, "--track" if track else "--no-track"] if make_branch else [])
@@ -113,6 +114,25 @@ class UtilsRunner(Runner):
         )
         admin = f"{_USEFUL_THINGS_FOLDER}/devcontainer/worktree-admin.py"
         self.run([sys.executable, admin, os.path.dirname(target_folder), repo, repo_folder])
+
+    def _drop_cut_checkout(self, *, repo_folder, target_folder):
+        """Remove a worktree whose checkout a kill cut, which a build asked again cannot reuse: its
+        `.git` names no gitdir, or one with no index, so git sees its files as untracked."""
+        if os.path.islink(target_folder):
+            return
+        try:
+            with open(f"{target_folder}/.git") as file:
+                gitdir = file.read().removeprefix("gitdir:").strip()
+        except OSError:
+            return
+        gitdir = os.path.join(target_folder, gitdir)
+        if os.path.isfile(f"{gitdir}/index"):
+            return
+        if os.path.isdir(gitdir):
+            remove = ["git", "worktree", "remove", "--force", "--force", target_folder]
+            self.run(remove, cwd=repo_folder)
+        else:
+            self.run(["rm", "-rf", target_folder])
 
     def _handle_branch_holder(self, *, branch, cwd, retry, target_folder=None, on_existing=None):
         """Build a `handle_exceptions` handler for a command another worktree on `branch` blocks.
