@@ -58,6 +58,10 @@ def check_config(root):
         "hasCompletedOnboarding": True, "mcpServers": {"x": {"headers": {"Authorization": "t"}}},
     }))
     (own / "settings.json").write_text("{}\n")
+    (own / "project").mkdir()
+    stop = f"python3 {remote_agent.HERE / 'client' / 'agent-stop.py'}"
+    (own / "project" / "settings.json").write_text(json.dumps({"hooks": {"Stop": stop}}))
+    (own / "project" / "CLAUDE.md").write_text("project\n")
     remote_agent.HOME = home
     remote_agent.get_values = lambda: {"CACHE_ROOT": str(root / "cache"),
                                        "REPO_ROOT": str(root / "repo"),
@@ -73,6 +77,12 @@ def check_config(root):
     check("the skills go", "home/.claude/skills/a/SKILL.md" in names, names)
     check("the rules go", contents.get("home/.claude/CLAUDE.md") == b"rules\n", names)
     check("the bundle's settings go", "home/.claude/settings.json" in names, names)
+    project = json.loads(contents.get("workspace/.claude/settings.json", b"{}"))
+    check("the project hooks run the client the job has",
+          project == {"hooks": {"Stop": "python3 /job/home/bundle-ctl/client/agent-stop.py"}},
+          project)
+    check("once", names.count("workspace/.claude/settings.json") == 1, names)
+    check("the rest of the project goes", "workspace/.claude/CLAUDE.md" in names, names)
     check("never the login", not any("credentials" in name for name in names), names)
     check("nor a link out of the tree", "home/.claude/skills/a/out" not in names, names)
     kept = json.loads(contents["home/.claude/.claude.json"])
@@ -90,10 +100,13 @@ def check_env(root):
         "https_proxy": "x", "CLAUDE_CONFIG_DIR": "/home/vscode/.claude", "PGHOST": "/run",
         "GIT_SSH_COMMAND": "/opt/git-gate/git-gate-ssh", "GH_TOKEN": "read-only-via-proxy",
         "REQUESTS_CA_BUNDLE": "/etc/ssl/certs/ca-certificates.crt",
+        "BUNDLE_CTL_CLIENT": "/home/seb/repo/useful-things/bundle-ctl/client",
     }}))
     env = remote_agent.get_env()
     check("the bundle's helpers go", env.get("BASH_ENV") == "/x/devcontainer.bashrc", env)
     check("and what the gateways read", env.get("GH_TOKEN") == "read-only-via-proxy", env)
+    check("bctl as the job has it",
+          env.get("BUNDLE_CTL_CLIENT") == "/job/home/bundle-ctl/client", env)
     left = {"HTTPS_PROXY", "https_proxy", "CLAUDE_CONFIG_DIR", "PGHOST", "GIT_SSH_COMMAND",
             "REQUESTS_CA_BUNDLE"}
     check("not what the worker sets", not left & set(env), env)

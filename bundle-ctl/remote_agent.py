@@ -35,6 +35,8 @@ STATE = pathlib.Path("~/.local/state/bundle-ctl").expanduser()
 REMOTE_RUNS = pathlib.Path(os.environ.get("REMOTE_RUNS") or HOME / "repo" / "remote-runs")
 STANDIN_IMAGE = os.environ.get("BUNDLE_CTL_STANDIN_IMAGE", "localhost/remote-runs-runner:current")
 DUMMIES = pathlib.Path("~/.local/state/claude-switch/dummies").expanduser()
+# Where the job unpacks home/bundle-ctl/client of the config part: remote-runs sets HOME=/job/home.
+JOB_CLIENT = "/job/home/bundle-ctl/client"
 REPOS = ("odoo", "enterprise", "design-themes", "upgrade", "upgrade-util")
 PAIR_RETRY = 30
 STOP_WAIT = 660
@@ -274,7 +276,20 @@ def build_config(bundle_folder):
         add(get_memory(own), "home/.claude/projects/-workspace/memory")
         add(own / "settings.json", "home/.claude/settings.json")
         add(own / "policy-limits.json", "home/.claude/policy-limits.json")
-        add(own / "project", "workspace/.claude")
+        project = own / "project" / "settings.json"
+        if (own / "project").is_dir():
+            tar.add(
+                own / "project",
+                arcname="workspace/.claude",
+                filter=lambda info: (
+                    None if info.name == "workspace/.claude/settings.json" else keep_regular(info)
+                ),
+            )
+        if project.is_file():
+            hooks = project.read_text().replace(str(HERE / "client"), JOB_CLIENT).encode()
+            info = tarfile.TarInfo("workspace/.claude/settings.json")
+            info.size = len(hooks)
+            tar.addfile(info, io.BytesIO(hooks))
         add(own / "gh", "home/.config/gh")
         add(own / "ssh", "home/.ssh")
         add(HOME / ".gitconfig", "home/.gitconfig")
@@ -547,6 +562,8 @@ def get_env():
         )
         if re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", name) and not any(part in name for part in fixed):
             kept[name] = str(value)[:4096]
+    if "BUNDLE_CTL_CLIENT" in kept:
+        kept["BUNDLE_CTL_CLIENT"] = JOB_CLIENT
     return dict(list(kept.items())[:64])
 
 
