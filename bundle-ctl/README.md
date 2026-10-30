@@ -243,7 +243,8 @@ necessary. but if we have a good setup, full remote should offer the same possib
 
 - `bctl open|create|fetch --where local|worker|auto` (`auto` by default, kept in `.agent/where`).
   When a task's turn comes, `auto` goes to a worker of `BUNDLE_CTL_WORKERS` that answered lately,
-  is not drained and has a place for an agent (`agents_free` of its `status`), else here as any
+  is not drained and has a place for an agent (`agents_free` of its `status`) and 1 GB for it
+  (`gigabytes_free`, as the worker refuses an agent without), else here as any
   task; `worker` waits for one. A bundle open in a window stays here, and so does a bundle not
   built yet (see Bare start), as its build runs here. A bundle whose agent ran on
   a worker goes there again (`.agent/where` is `worker:NAME`) until it is brought back, so that it

@@ -1717,6 +1717,25 @@ def check_renew(root):
     return [], 1
 
 
+def check_choose_agent(root):
+    """A worker takes an agent only with a place and 1 GB free for it, as it refuses one
+    without (2026-10-30: six agents sent to sebpc in three minutes, each refused, then here)."""
+    found = daemon.workers.Workers(["sebpc"])
+    found.is_up = lambda name: True
+    failures = []
+    for status, expected in (
+        ({"agents_free": 1, "gigabytes_free": 0.8}, None),
+        ({"agents_free": 0, "gigabytes_free": 5}, None),
+        ({"agents_free": 1, "gigabytes_free": 1.0}, "sebpc"),
+        ({"agents_free": 1}, None),
+    ):
+        found.status["sebpc"] = (time.time(), status)
+        for wanted in (None, "sebpc"):
+            if found.choose_agent(wanted) != expected:
+                failures.append(f"choose_agent {status} {wanted}: expected {expected}")
+    return failures, 8
+
+
 def main():
     failures = []
     for bundles, launched, queue, *options in CASES:
@@ -1752,6 +1771,7 @@ def main():
         check_tell,
         check_ramp,
         check_renew,
+        check_choose_agent,
     ):
         with tempfile.TemporaryDirectory() as root:
             failed, count = check(pathlib.Path(root))

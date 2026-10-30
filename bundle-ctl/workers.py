@@ -19,6 +19,7 @@ POLL = 15
 FRESH = 60
 ROUTE_MAX_WAIT = 120
 ASK_EVERY = 600
+AGENT_GIGABYTES = 1
 WORD = {
     "commit": re.compile(r"[0-9a-f]{40}"),
     "db": re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}"),
@@ -191,7 +192,7 @@ class Workers:
 
     def choose_agent(self, wanted=None):
         """The worker that starts an agent now, or None: up, answered lately, not drained, with
-        a place for an agent (README.md, "Remote agents").
+        a place and the memory for an agent (README.md, "Remote agents").
         """
         now = time.time()
         for name in self.names if wanted is None else [wanted]:
@@ -203,7 +204,8 @@ class Workers:
             with self.lock:
                 seen, status = self.status.get(name, (0, {}))
             fresh = now - seen <= FRESH and not status.get("draining")
-            if fresh and status.get("agents_free", 0) > 0:
+            room = status.get("gigabytes_free", 0) >= AGENT_GIGABYTES
+            if fresh and room and status.get("agents_free", 0) > 0:
                 return name
         return None
 
