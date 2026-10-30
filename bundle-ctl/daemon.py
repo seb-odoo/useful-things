@@ -3673,6 +3673,9 @@ def open_bundle(caller, query, body):
         check_terminal(caller, bundle, body)
 
         def work(log):
+            if get_window_pids(bundle):
+                log.write(f"{bundle}: its agent window is already open\n")
+                return {"bundle": bundle}
             agent = get_agent_folder(bundle)
             if not (agent / "session").exists():
                 agent.mkdir(exist_ok=True)

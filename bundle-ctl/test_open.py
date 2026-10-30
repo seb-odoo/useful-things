@@ -140,6 +140,35 @@ def open_new(root, agent, start_job):
     return []
 
 
+def open_twice(root, agent, start_job):
+    """A second open --terminal, from a second click on the Agent link while the window of the
+    first still starts, opens no other window."""
+    opened = []
+    windows = []
+
+    def open_terminal(log, name):
+        opened.append(name)
+        window = [sys.executable, "-c", "import time; time.sleep(30)", "agent-terminator.py", name]
+        windows.append(subprocess.Popen(window))
+
+    daemon.STATE = root
+    daemon.open_terminal = open_terminal
+    daemon.start_job = start_job
+    (agent / "session").write_text("x\n")
+    (agent / "task.md").write_text("")
+    body = {"bundle": "bundle", "terminal": True}
+    try:
+        for _click in range(2):
+            _code, answer = daemon.open_bundle(daemon.HOST, {}, body)
+            daemon.wait_job(daemon.jobs[answer["job"]])
+    except (ValueError, daemon.Refused) as error:
+        return [f"open twice: {error}"]
+    finally:
+        for window in windows:
+            window.kill()
+    return [] if opened == ["bundle"] else [f"open twice: opened {opened!r}, expected ['bundle']"]
+
+
 def answer_held(root, start_job):
     """What Seb's yes to the task a bundle sends opens, with the real jobs of the daemon, while a
     job of a bundle runs."""
@@ -248,6 +277,7 @@ def main():
             if found != expected:
                 failures.append(f"{body}: {found!r}, expected {expected!r}")
         failures += open_new(pathlib.Path(root), agent, start_job)
+        failures += open_twice(pathlib.Path(root), agent, start_job)
         for caller, body, expected in OPS_CASES:
             found = open_ops(pathlib.Path(root), caller, body)
             if found != expected:
@@ -270,7 +300,7 @@ def main():
         failures += get_moved(pathlib.Path(root))
     for line in failures:
         print(line)
-    cases = len(CASES) + len(BODIES) + len(OPS_CASES) + len(TASK_CASES) + 4
+    cases = len(CASES) + len(BODIES) + len(OPS_CASES) + len(TASK_CASES) + 5
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 
