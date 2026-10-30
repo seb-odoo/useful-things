@@ -904,6 +904,18 @@ def list_runs(caller, query, body):
     return 200, RUNS.describe() | {"remote": remote, "silent": silent}
 
 
+def look_worker(caller, query, body):
+    """`GET /worker?worker=NAME&what=WHAT&lines=N`: a read of a worker, for any caller."""
+    lines = (query.get("lines") or ["100"])[0]
+    if not lines.isdigit():
+        raise ValueError("lines: a number")
+    name, what = (query.get("worker") or [""])[0], (query.get("what") or [""])[0]
+    try:
+        return 200, WORKERS.look(name, what, int(lines))
+    except workers.Refused as error:
+        return 409, {"error": str(error)}
+
+
 def session_env():
     """The daemon's environment plus the graphical session and SSH agent of the logged-in user.
 
@@ -3707,6 +3719,7 @@ VERBS = {
     ("GET", "/runs"): list_runs,
     ("GET", "/status"): status,
     ("GET", "/whoami"): whoami,
+    ("GET", "/worker"): look_worker,
     ("POST", "/build"): build_bundle,
     ("POST", "/close"): close_agent_window,
     ("POST", "/create"): create,

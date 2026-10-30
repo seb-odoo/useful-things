@@ -226,6 +226,10 @@ repo, which has its own README (the sandbox, the load, the sync). Agents change 
   as `running BUNDLE odoo @sebpc 2 min`, and a worker that did not as `@sebpc: no answer since
   HH:MM`. The worker's `status`, which the daemon asks every 15 seconds as `host`, names every
   bundle to the daemon alone; `bctl runs` then shows them to any bundle, as the laptop's runs.
+- `bctl worker WORKER state|log|memory|disk [--lines N]`: a read of a worker, for any caller, with
+  no card. The daemon asks it as `host` with fixed words, but the line count of the log: `status`
+  for the state, `look` for the rest (remote-runs README, "Verbs"). bctl prints only printable
+  characters, as a worker runs the jobs of every bundle.
 
 `python3 test_runs.py` has the cases of the wrap; the relay and the client are tested from
 `remote-runs` (`test_relay`).

@@ -22,6 +22,7 @@
     bctl free-disk [--reason TEXT] [--wait SECONDS]
     bctl run [--kind KIND] [--workers N] [-- COMMAND...]
     bctl runs [--json]
+    bctl worker WORKER state|log|memory|disk [--lines N] [--json]
 
 TASK is --task TEXT or --task-file FILE, with an optional --priority N, --after HH:MM and
 --paused.
@@ -132,6 +133,10 @@ runs COMMAND pinned to the cores it got, which it holds until COMMAND ends. With
 run is the calling shell: bctl returns once it may go on, and the cores are held until that shell
 ends. A hook of the bundles starts every test run, install and server of an agent this way. When
 the daemon does not answer, the command runs without the queue. runs lists what runs and waits.
+
+worker reads a worker of BUNDLE_CTL_WORKERS, with no yes of Seb: the state of its daemon (every
+job and agent), the units and the last N lines (100) of its daemon's log, its memory and the
+slice of its jobs, or its disk and what its state folder holds. Any bundle may ask it.
 """
 
 import argparse
@@ -143,6 +148,7 @@ import shutil
 import socket
 import sys
 import time
+import urllib.parse
 
 RUN_ANSWER = 60
 RUN_RETRY = 60
@@ -399,6 +405,39 @@ def format_span(seconds):
     if seconds < 90 * 60:
         return f"{round(seconds / 60)} min"
     return f"{seconds / 3600:.1f} h"
+
+
+def format_field(key, value):
+    if key in ("age", "unused", "up", "started", "ended") and type(value) is int:
+        return format_span(value)
+    if type(value) is dict:
+        return "  ".join(f"{name}={format_field(name, item)}" for name, item in value.items())
+    if type(value) is list:
+        return ", ".join(format_field(key, item) for item in value) or "none"
+    return str(value)
+
+
+def print_worker(answer, indent=""):
+    """A worker's answer, a field a line and a line per object of a list, then its log. Only
+    printable characters: the worker runs the jobs of every bundle."""
+
+    def show(text):
+        print("".join(char if char.isprintable() else "?" for char in text))
+
+    for key, value in answer.items():
+        if key == "lines":
+            continue
+        if type(value) is dict and any(type(item) in (dict, list) for item in value.values()):
+            show(f"{indent}{key}:")
+            print_worker(value, indent + "  ")
+        elif type(value) is list and any(type(item) is dict for item in value):
+            show(f"{indent}{key}: {len(value)}")
+            for item in value:
+                show(f"{indent}  {format_field(key, item)}")
+        else:
+            show(f"{indent}{key}: {format_field(key, value)}")
+    for line in answer.get("lines", ()):
+        show(line)
 
 
 def format_cores(count):
@@ -740,6 +779,10 @@ def main():
         help="spot: once a slot is free, manual: once scheduled again, HH:MM: at that time",
     )
     commands.add_parser("runs", help="the heavy commands that run and the ones that wait")
+    worker = commands.add_parser("worker", help="a read of a worker: state, log, memory or disk")
+    worker.add_argument("worker", help="a worker of BUNDLE_CTL_WORKERS")
+    worker.add_argument("what", choices=("state", "log", "memory", "disk"))
+    worker.add_argument("--lines", type=int, default=100, help="the lines of the log, 2000 at most")
     unqueue = commands.add_parser("unqueue", help="drop the queued task of a bundle")
     unqueue.add_argument("bundle")
     args = parser.parse_args()
@@ -754,6 +797,12 @@ def main():
     if args.command == "runs":
         answer = request("GET", "/runs")
         printer = print_runs
+    elif args.command == "worker":
+        query = urllib.parse.urlencode(
+            {"worker": args.worker, "what": args.what, "lines": args.lines}
+        )
+        answer = request("GET", f"/worker?{query}")
+        printer = print_worker
     elif args.command == "whoami":
         answer = request("GET", "/whoami")
     elif args.command == "status":

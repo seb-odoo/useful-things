@@ -28,6 +28,14 @@ WORD = {
 BUNDLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,99}")
 STATES = (("running", "running"), ("waiting", "waiting"), ("agent", "agents"))
 MAX_AGE = 10**9
+LOOKS = {
+    "state": ("status", "host"),
+    "log": ("look", "host", "log"),
+    "memory": ("look", "host", "memory"),
+    "disk": ("look", "host", "disk"),
+}
+MAX_LINES = 2000
+LOOK_TIMEOUT = 60
 VERBS = {
     "status": ((), 0),
     "have": (("repo",), 0),
@@ -124,6 +132,35 @@ class Workers:
                     if is_job(job)
                 ]
         return jobs, silent
+
+    def look(self, name, what, lines):
+        """For `bctl worker`: a read of a worker, asked as `host` with fixed words, but the line
+        count of the log (README.md, "Remote runs")."""
+        if name not in self.names:
+            raise Refused(f"no worker {name}")
+        if what not in LOOKS:
+            raise Refused(f"worker: one of {', '.join(LOOKS)}")
+        if not 1 <= lines <= MAX_LINES:
+            raise Refused(f"worker: 1 to {MAX_LINES} lines")
+        if not self.is_up(name):
+            self.ask(name)
+            raise Refused(f"no connection to {name}")
+        words = [*LOOKS[what], *([str(lines)] if what == "log" else [])]
+        try:
+            result = self.run(
+                self.ssh(name, *words), capture_output=True, timeout=LOOK_TIMEOUT, check=False
+            )
+            answer = json.loads(result.stdout)
+        except subprocess.TimeoutExpired:
+            raise Refused(f"{name}: no answer in {LOOK_TIMEOUT} s") from None
+        except ValueError:
+            raise Refused(f"{name}: not an answer") from None
+        if type(answer) is not dict:
+            raise Refused(f"{name}: not an answer")
+        if "error" in answer:
+            error = "".join(char for char in str(answer["error"])[:300] if char.isprintable())
+            raise Refused(f"{name}: {error}")
+        return answer
 
     def keep_polling(self):
         while True:
