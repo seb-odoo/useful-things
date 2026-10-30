@@ -288,6 +288,9 @@ Removes a bundle from the local system (worktrees, branches, filestore, database
 - Deletes git worktrees and local branches for each repo, and its `.git/worktrees/<bundle>`
 - Removes `~/.local/share/bundle-db/<bundle>`: the postgres server and the filestore of the
   bundle (devcontainer/README.md, "How it runs Odoo")
+- Removes `~/.cache/devcontainer/claude-config/<bundle>`, under `podman unshare` when `rm` is
+  refused: the mount points podman makes in its `home/projects` belong to a sub-uid of keep-id.
+  From 2026-10-28 to 10-30, every bundle started since the change stopped there with exit 1
 - For a bundle made before its own server: drops the matching databases of the host's server and
   removes their filestore entries under `~/.local/share/Odoo/filestore/`. A name that also
   matches a longer existing bundle is left to it (`test_testdb_names.py`): until 2026-10-29,

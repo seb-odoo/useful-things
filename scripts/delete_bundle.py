@@ -265,7 +265,16 @@ def delete_bundle(
     runner.parallel_run(Tree("Repositories"), get_repos(), handle_repo)
     runner.run(["rm", "-rf", get_worktree_bundle_folder(bundle_name)])
     tab_groups.ask({"op": "close", "bundle": bundle_name})
-    runner.run(["rm", "-rf", f"{CLAUDE_CONFIG_CONTAINER}/{bundle_name}"])
+    claude_config = f"{CLAUDE_CONFIG_CONTAINER}/{bundle_name}"
+    # The mount points podman makes under home/projects belong to a sub-uid of keep-id.
+    runner.run(
+        ["rm", "-rf", claude_config],
+        handle_exceptions={
+            "Permission denied": lambda runner: runner.run(
+                ["podman", "unshare", "rm", "-rf", claude_config]
+            ),
+        },
+    )
     runner.run(["rm", "-rf", f"{BUNDLE_DB_CONTAINER}/{bundle_name}"])
     runner.run(["rm", "-rf", f"{EXTENSIONS_CONTAINER}/{bundle_name}"])
 
