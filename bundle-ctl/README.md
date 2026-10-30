@@ -900,9 +900,13 @@ what to do: ask Seb to validate, or act.
   `agent-terminal.py`, which types the line, then Enter, as the next prompt of an idle session,
   or in a busy one, where claude shows it queued at once and reads it at its next tool call, as
   the hook would (Seb, 2026-10-27: he then sees it came and does not type it himself).
-- The terminal types a line as keys, not in a paste, and the bundle writes `pr-events/`: code in
-  its container could leave there an escape or a control key (the end of a paste, Shift+Tab,
-  Ctrl+U, a `1` then Enter on a permission dialog), which claude would take as Seb's keys. So the
+- The line goes as one paste (2026-10-29): typed as keys just as a new claude goes `idle`, it
+  stays in its prompt, and each Enter adds a new line until another key comes. A terminal
+  restarted on new code typed the event of odoo#299270 1 s after its claude resumed, and it
+  waited there. On claude 2.1.312, 6 of 11 such tries stayed, none of 13 as a paste.
+- The bundle writes `pr-events/`: code in its container could leave there an escape or a control
+  key (the end of a paste, Shift+Tab, Ctrl+U, a `1` then Enter on a permission dialog), which
+  claude would take as Seb's keys. So the
   terminal drops a line with a control character but a new line (a tab too), or with no letter
   first (a slash command, `!` for the shell of claude), and notes it in `prwatch.log`, its keys
   escaped (review of deck stage 4, 2026-10-29). What a line says is still the bundle's own text,

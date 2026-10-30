@@ -379,7 +379,7 @@ class Waker:
         if prompts := self.take_prompts():
             return PASTE_START + "\n\n".join(prompts).encode() + PASTE_END
         told = self.take_events()
-        return " ".join(told).encode() if told else None
+        return PASTE_START + " ".join(told).encode() + PASTE_END if told else None
 
     def take_stop(self):
         """Escape, Seb's key, once the daemon left `stop` for this terminal (deck's Stop) within
@@ -421,9 +421,10 @@ class Waker:
         return prompts
 
     def take_events(self):
-        """The PR events that wait, as typed keys, not in a paste: the bundle writes its
-        pr-events/, so one with a control key (an escape, a tab) or no letter first (a slash
-        command, the shell of claude) is dropped, and noted with its keys escaped."""
+        """The PR events that wait, typed as one paste: as keys, a line typed just as a new claude
+        goes idle stays in its prompt, each Enter a new line (2026-10-29). The bundle writes its
+        pr-events/, so one with a control key (an escape that ends the paste, a tab) or no letter
+        first (a slash command, the shell of claude) is dropped, and noted with its keys escaped."""
         told = []
         for line in PRWATCH.take(self.events):
             if line[:1].isalpha() and not CONTROL.search(line) and "\t" not in line:

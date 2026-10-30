@@ -249,9 +249,9 @@ def check_clipboard(case):
 
 
 def check_wake(case):
-    """A PR event is typed, then Enter, in an idle session of the claude this terminal started
-    only, and not over a draft of Seb: a key he typed since his last Enter keeps it waiting, a
-    mouse move or the answer of the terminal to a query of claude does not."""
+    """A PR event is typed as one paste, then Enter, in an idle session of the claude this
+    terminal started only, and not over a draft of Seb: a key he typed since his last Enter keeps
+    it waiting, a mouse move or the answer of the terminal to a query of claude does not."""
     events = case.agent / "pr-events"
     events.mkdir()
     typed = case.state / "typed"
@@ -270,7 +270,8 @@ def check_wake(case):
     time.sleep(3)
     case.check("a dialog gets none", not lines() and (events / "1.txt").exists())
     (case.state / "status").write_text("busy")
-    case.check("a busy one gets it, queued", wait(lambda: lines() == ["PR event: one"]))
+    case.check("a busy one gets it as a paste, queued",
+               wait(lambda: lines() == ["\x1b[200~PR event: one\x1b[201~"]))
     case.check("taken once", not (events / "1.txt").exists())
     (case.state / "status").write_text("idle")
     os.write(case.terminal.fd, b"ab")
@@ -279,24 +280,26 @@ def check_wake(case):
     case.check("a draft of Seb keeps it waiting", (events / "2.txt").exists())
     os.write(case.terminal.fd, b"\r")
     case.check("his Enter lets it go, after his prompt",
-               wait(lambda: lines()[1:] == ["ab", "PR event: two"]))
+               wait(lambda: lines()[1:] == ["ab", "\x1b[200~PR event: two\x1b[201~"]))
     os.write(case.terminal.fd, b"\x1b[<35;10;5M\x1b[I")
     os.write(case.terminal.fd, b"\x1b]11;rgb:0000/0000/0000\x07\x1b[?65;1;9c\x1bP>|VTE(7800)\x1b\\")
     (events / "3.txt").write_text("PR event: three")
     case.check("a mouse move, a focus or the answers of the terminal to claude are no draft",
-               wait(lambda: lines()[-1:] and lines()[-1].endswith("PR event: three")))
+               wait(lambda: lines()[-1:] and lines()[-1].endswith("PR event: three\x1b[201~")))
     os.write(case.terminal.fd, b"/config\r")
     (events / "4.txt").write_text("PR event: four")
     time.sleep(3)
     case.check("a slash command keeps it waiting", (events / "4.txt").exists())
     os.write(case.terminal.fd, b"x\r")
-    case.check("until the next Enter", wait(lambda: lines()[-2:] == ["x", "PR event: four"]))
+    case.check("until the next Enter",
+               wait(lambda: lines()[-2:] == ["x", "\x1b[200~PR event: four\x1b[201~"]))
     (events / "5.txt").write_text("PR event: five\x1b[Z")
     (events / "6.txt").write_text("PR event:\tsix")
     (events / "7.txt").write_text("/logout")
     (events / "8.txt").write_text("PR event: eight")
     case.check("a line with a control key, or no letter first, is dropped",
-               wait(lambda: lines()[-1:] == ["PR event: eight"]) and not any(events.iterdir()))
+               wait(lambda: lines()[-1:] == ["\x1b[200~PR event: eight\x1b[201~"])
+               and not any(events.iterdir()))
     log = case.agent / "prwatch.log"
     dropped = [line.split(" ", 1)[1] for line in log.read_text().splitlines() if " dropped " in line]
     case.check("and noted, its keys escaped", dropped == [
@@ -342,7 +345,7 @@ def check_task(case):
                not lines() and not (case.agent / "run.lock").exists())
     (case.agent / "task.md").unlink()
     (case.root / "task.md").rename(case.agent / "task.md")
-    pasted = ["\x1b[200~next", "task\x1b[201~", "PR event: one"]
+    pasted = ["\x1b[200~next", "task\x1b[201~", "\x1b[200~PR event: one\x1b[201~"]
     case.check("an idle one gets the task, then the event", wait(lambda: lines() == pasted))
     case.check("the task begins the run", (case.agent / "run.lock").is_dir())
     time.sleep(3)
@@ -370,7 +373,7 @@ def check_deck(case):
     (deck / f"{time.time_ns()}.txt").write_text("look\nagain")
     (deck / f"{time.time_ns()}.txt").write_text("keys\x1b[201~\x1b[Z")
     (case.state / "status").write_text("busy")
-    pasted = ["\x1b[200~look", "again\x1b[201~", "PR event: one"]
+    pasted = ["\x1b[200~look", "again\x1b[201~", "\x1b[200~PR event: one\x1b[201~"]
     case.check("a busy one gets the prompt, then the event", wait(lambda: lines() == pasted))
     case.check("an old prompt and one with an escape are dropped", not any(deck.glob("*.txt")))
     stop = deck / "stop"
@@ -387,7 +390,8 @@ def check_deck(case):
     case.check("a second one at once is taken too", wait(lambda: not stop.exists()))
     (deck / f"{time.time_ns()}.txt").write_text("after")
     time.sleep(0.5)
-    case.check("a prompt waits a second after an Escape", lines()[-1:] == ["PR event: one"])
+    case.check("a prompt waits a second after an Escape",
+               lines()[-1:] == ["\x1b[200~PR event: one\x1b[201~"])
     case.check("then goes", wait(lambda: lines()[-1:] == ["\x1b\x1b[200~after\x1b[201~"]))
     (case.state / "quit").touch()
     case.check_stopped("quitting claude")
