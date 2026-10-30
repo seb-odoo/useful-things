@@ -352,7 +352,10 @@ def standin_name(bundle):
 
 
 def start_standin(bundle, bundle_folder, worker, session):
-    """The stand-in: the bundle's mounts the tunnel serves, on devnet, as the bundle."""
+    """The stand-in: the bundle's mounts the tunnel serves, on devnet, as the bundle. Started in
+    a scope of its own, as podman leaves its conmon in the cgroup of the caller, where a stop of
+    bundle-ctl waited 90 s for it.
+    """
     values, own = get_paths(bundle_folder)
     repo_root = pathlib.Path(values["REPO_ROOT"])
     state_root = pathlib.Path(values.get("STATE_ROOT") or HOME / ".local" / "state")
@@ -403,7 +406,10 @@ def start_standin(bundle, bundle_folder, worker, session):
             pathlib.Path(source).mkdir(parents=True)
         argv += ["-v", f"{source}:{target}:{mode}"]
     subprocess.run(["podman", "rm", "-f", standin_name(bundle)], capture_output=True, check=False)
-    subprocess.run([*argv, STANDIN_IMAGE, "sleep", "infinity"], capture_output=True, check=True)
+    scope = ["systemd-run", "--user", "--scope", "--collect", "--quiet"]
+    subprocess.run(
+        [*scope, *argv, STANDIN_IMAGE, "sleep", "infinity"], capture_output=True, check=True
+    )
 
 
 def in_standin(bundle, verb, data=b"", check=True):

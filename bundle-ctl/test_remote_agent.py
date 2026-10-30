@@ -143,6 +143,8 @@ def check_standin(root):
     named = [sys.executable, str(admin), str(root / "bundle")]
     check("named after the bundle before", named in runs[:-1], runs)
     check("the config stays a file", (git_dir / "config").is_file())
+    scope = ["systemd-run", "--user", "--scope", "--collect", "--quiet", "podman", "run"]
+    check("its conmon out of the cgroup of bundle-ctl", runs[-1][:7] == scope, runs[-1])
 
 
 def main():

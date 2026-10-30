@@ -216,7 +216,10 @@ repo, which has its own README (the sandbox, the load, the sync). Agents change 
   verb and each word checked, then a fixed `ssh -F none -S MASTER -o ControlMaster=no -T worker
   VERB BUNDLE ARGS...` through the connection `worker-mux@NAME` holds, the bundle's bytes passed
   both ways, at most what the verb allows. No container gets the master socket: its holder could
-  open forwards on the laptop and send any verb. The verb `admin` is never relayed.
+  open forwards on the laptop and send any verb. The verb `admin` is never relayed. The ssh of
+  `follow`, which takes nothing from the bundle, writes to the bundle's connection itself, from a
+  `systemd-run --user --scope` of its own: a restart of the daemon cuts no job (2026-10-30: three
+  restarts in 80 minutes each sent the runs of the worker back to the laptop).
 - No connection: the daemon writes `request/start` of the mux (once every 10 minutes at most),
   which asks Bitwarden while the screen is unlocked, and the run goes here meanwhile.
 - `bctl runs` also lists the jobs and agents of each worker that answered in the last minute,
@@ -251,6 +254,9 @@ necessary. but if we have a good setup, full remote should offer the same possib
   login in `~/.local/state/claude-switch/dummies/`, then `ssh ... tunnel` and the stand-in joined
   by `pair.py` in a `systemd-run --user --scope` of their own (`rr-tunnel-BUNDLE`), so that a
   restart of the daemon cuts no tunnel. Any failure before the job started starts the agent here.
+  The stand-in starts in a scope of its own too, as podman leaves the conmon of a container in
+  the cgroup of its caller: in the unit's, each stop of bundle-ctl waited 90 s for it, and the
+  socket did not answer meanwhile (3 of the 4 restarts of 2026-10-30).
 - `MOUNTS` says, for each mount of a bundle (`devcontainer/base.jsonc`), how the remote agent gets
   it: sent in its config, served by the stand-in, in the runner image, made in the job, or of no
   use there. `python3 test_remote_agent.py` fails on a mount it does not name, and checks that the

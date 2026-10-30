@@ -181,20 +181,27 @@ class Workers:
                 raise Refused(f"{verb}: not a valid {kind}")
 
     def relay(self, handler, bundle, name, verb, args):
-        """Pass the bundle's stream to the worker and back, at most the size the verb allows."""
+        """Pass the bundle's stream to the worker and back, at most the size the verb allows.
+        A `follow` sends nothing: its ssh writes to the bundle's connection itself, from a scope
+        of its own, so that the job goes on through a restart of the daemon.
+        """
         self.check(verb, args)
         if name not in self.names:
             raise Refused(f"no worker {name}")
         if not self.is_up(name):
             self.ask(name)
             raise Refused(f"no connection to {name}")
-        process = self.popen(self.ssh(name, verb, bundle, *args), stdin=subprocess.PIPE,
-                             stdout=subprocess.PIPE)
         handler.send_response(200)
         handler.send_header("Content-Type", "application/octet-stream")
         handler.send_header("Connection", "close")
         handler.end_headers()
         handler.wfile.flush()
+        if verb == "follow":
+            scope = ["systemd-run", "--user", "--scope", "--collect", "--quiet"]
+            argv = [*scope, *self.ssh(name, verb, bundle, *args)]
+            return self.popen(argv, stdin=subprocess.DEVNULL, stdout=handler.connection).wait()
+        process = self.popen(self.ssh(name, verb, bundle, *args), stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE)
         limit = VERBS[verb][1]
 
         def upload():
