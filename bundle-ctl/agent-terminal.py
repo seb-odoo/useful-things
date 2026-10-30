@@ -355,8 +355,20 @@ class Waker:
         elif self.line:
             self.draft = True
 
+    def get_told(self):
+        """The folder of this session first, then the ones of the earlier sessions of the bundle:
+        a line left for a session that ended before taking it goes to the one that runs the bundle
+        now (Seb, 2026-10-30)."""
+        if self.told == self.events:
+            return [self.told]
+        try:
+            earlier = sorted(path for path in self.told.parent.iterdir() if path != self.told)
+        except OSError:
+            earlier = []
+        return [self.told, *earlier]
+
     def take(self):
-        has_events = any(map(PRWATCH.has_lines, (self.told, self.events, self.prompts)))
+        has_events = any(map(PRWATCH.has_lines, (*self.get_told(), self.events, self.prompts)))
         now = time.monotonic()
         if now - self.stopped < STOP_GAP:
             return None
@@ -433,7 +445,8 @@ class Waker:
         writes its pr-events/: a line there that client/prwatch.py did not write is dropped too,
         as its own text would be typed as Seb's."""
         told = []
-        for line in PRWATCH.take(self.told, self.note):
+        host = [line for folder in self.get_told() for line in PRWATCH.take(folder, self.note)]
+        for line in host:
             if line[:1].isalpha() and not CONTROL.search(line) and "\t" not in line:
                 told.append(line)
             else:

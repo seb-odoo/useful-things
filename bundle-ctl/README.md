@@ -986,6 +986,9 @@ what to do: ask Seb to validate, or act.
   restarts it, idle and minimized: the host leaves its line there, as before. From 12:30 to the
   fix, such lines waited in `told/` and reached no agent (Seb: "I no longer receive github
   events on my agents").
+- A line left for a session of the bundle that ended before taking it (a held line, then a new
+  task) goes to the session that runs the bundle now, after its own lines, a hok answer as a PR
+  event (Seb, 2026-10-30). Before, 6 lines sat in the folders of ended sessions, typed nowhere.
 - Idle is the `idle` status of the session in the records of claude: no turn, no dialog open
   (a question or a permission is `waiting`), and no wait for the reset of the usage limit. Only
   the record of the claude the terminal started counts: one stopped with its container leaves its

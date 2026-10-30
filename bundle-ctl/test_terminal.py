@@ -375,6 +375,25 @@ def check_enter(case):
     case.check_stopped("quitting claude")
 
 
+def check_old_session(case):
+    """A line left for an earlier session of the bundle, which ended before taking it, is typed in
+    the session that runs the bundle now, after the line of that session."""
+    typed = case.state / "typed"
+    old = case.root / "told" / "b1" / "s0"
+    old.mkdir(parents=True)
+    (old / "1.txt").write_text("hok event: Seb said yes to g1 in hok.")
+    (case.root / "told" / "b1" / "s1").mkdir()
+    (case.root / "told" / "b1" / "s1" / "2.txt").write_text("PR event: two")
+    case.start()
+    (case.state / "status").write_text("idle")
+    pasted = "\x1b[200~PR event: two hok event: Seb said yes to g1 in hok.\x1b[201~\n"
+    case.check("the session of the bundle gets it",
+               wait(lambda: typed.exists() and typed.read_text() == pasted))
+    case.check("taken once", not any(old.iterdir()))
+    (case.state / "quit").touch()
+    case.check_stopped("quitting claude")
+
+
 def check_task(case):
     """A task the daemon left for the terminal (task.md, no run.lock) is typed as one paste in an
     idle session, before a PR event that waits, once, and begins the run."""
@@ -697,7 +716,8 @@ def main():
         check_ops_resume: CUT,
         check_ops_cut: CUT,
     }
-    checks = (check_quit, check_clipboard, check_wake, check_enter, check_task, check_deck)
+    checks = (check_quit, check_clipboard, check_wake, check_enter, check_old_session)
+    checks += (check_task, check_deck)
     checks += (check_retry,)
     checks += (check_sigterm,)
     checks += (check_close,)
