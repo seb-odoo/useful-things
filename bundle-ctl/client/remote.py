@@ -8,6 +8,7 @@ Anything that fails before the job started returns None: the caller runs the com
 instead, so the agent never depends on the worker.
 """
 
+import fcntl
 import io
 import json
 import os
@@ -236,18 +237,20 @@ def sync(worker, base):
         worktree = WORKSPACE / repo
         if not (worktree / ".git").exists():
             continue
-        have = call(worker, "have", repo)
         commit = get_base(worktree, base)
         cache = CACHE / repo
         cache.mkdir(parents=True, exist_ok=True)
-        try:
-            snap, data = snapshot.Snapshot(worktree, cache).make(commit, have)
-        except snapshot.Refused as error:
-            raise Fallback(f"{repo}: {error}") from error
-        if data:
-            answer = call(worker, "sync", repo, commit, body=data)
-            if answer.get("snap") != snap:
-                raise Fallback(f"{repo}: the worker got {answer.get('snap')}, not {snap}")
+        with open(cache / "lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            have = call(worker, "have", repo)
+            try:
+                snap, data = snapshot.Snapshot(worktree, cache).make(commit, have)
+            except snapshot.Refused as error:
+                raise Fallback(f"{repo}: {error}") from error
+            if data:
+                answer = call(worker, "sync", repo, commit, body=data)
+                if answer.get("snap") != snap:
+                    raise Fallback(f"{repo}: the worker got {answer.get('snap')}, not {snap}")
         snaps[repo] = snap
     if not snaps:
         raise Fallback("no worktree to send")

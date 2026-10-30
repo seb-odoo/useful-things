@@ -55,6 +55,7 @@ PAUSE = pathlib.Path("/workspace/.agent/pause")
 PAUSE_MARGIN = 60
 PUNCTUATION = "();<>|&\n"
 PYTHON = re.compile(r"python[\d.]*")
+QUOTES = ("", "'", '"')
 SAFE_WORD = re.compile(r"[\w./-]+")
 RANK = ("shell", "server", "odoo", "hoot")
 SHELLS = {"bash", "eval", "sh"}
@@ -144,15 +145,32 @@ def split_commands(text):
 
 
 def expand(words, values):
-    """The words with the variables the text set before put in, split as the shell splits them."""
-    expanded = []
+    """The words with the variables the text set before put in, split as the shell splits them:
+    never the value of an assignment in front of the command.
+    """
+    expanded, leading = [], True
     for word in words:
+        leading = leading and bool(ASSIGNMENT.fullmatch(word))
         new = VARIABLE.sub(lambda match: values.get(match[1] or match[2], match[0]), word)
         try:
-            expanded += [word] if new == word else shlex.split(new)
+            expanded += [new] if new == word or leading else shlex.split(new)
         except ValueError:
             expanded.append(word)
     return expanded
+
+
+def walk(commands):
+    """Each command of `split_commands` as its words as written, the same words with the variables
+    the text set before put in, the heredoc it reads and the files it writes.
+    """
+    values = {}
+    for raw, stdin, outputs in commands:
+        words = expand(raw, values)
+        for word in words:
+            if not ASSIGNMENT.fullmatch(word):
+                break
+            name, _, values[name] = word.partition("=")
+        yield raw, words, stdin, expand(outputs, values)
 
 
 def get_path(path, folder):
@@ -261,20 +279,15 @@ def find_runs(text, folder=".", depth=0):
         commands = split_commands(text)
     except ValueError:
         return None
-    found, values, written = [], {}, {}
-    for words, stdin, outputs in commands:
-        words = expand(words, values)
-        for word in words:
-            if not ASSIGNMENT.fullmatch(word):
-                break
-            name, _, values[name] = word.partition("=")
+    found, written = [], {}
+    for _, words, stdin, outputs in walk(commands):
         if kind := get_kind(words, folder, depth, stdin, written):
             found.append((*kind, words))
         if stdin is not None:
             program = strip_wrappers(words)
             if program and os.path.basename(program[0]) == "tee":
                 outputs += [word for word in program[1:] if not word.startswith("-")]
-            written.update((get_path(path, folder), stdin) for path in expand(outputs, values))
+            written.update((get_path(path, folder), stdin) for path in outputs)
     return found
 
 
@@ -317,23 +330,56 @@ def is_movable(kind, words):
     return "--stop-after-init" in flags and bool({"-d", "--database"} & flags)
 
 
+def get_commands(text):
+    return [(words, stdin) for _, words, stdin, _ in walk(split_commands(text))]
+
+
 def wrap(text, found):
-    """The text with its one movable run (`is_movable`) started by `bctl.py run --route`, which
-    may send it to a remote worker (README.md, "Remote runs"), or None. Its program is written
-    once in the text.
+    """The text with each of its movable runs (`is_movable`) started by `bctl.py run --route`,
+    which may send it to a remote worker (README.md, "Remote runs"), or None when it has none.
+    The other runs stay as they are. None as well when the program of a run is also named where
+    it may run unseen (`$(...)`, a heredoc, another command), or when no place for a route
+    leaves the text running the same commands.
     """
-    if not found or len(found) != 1:
+    commands = list(walk(split_commands(text))) if found else []
+    runs, left = {}, list(found or ())
+    for index, (_, words, _, _) in enumerate(commands):
+        if left and words == left[0][2]:
+            runs[index] = left.pop(0)
+    movable = {
+        index: (kind, workers, strip_wrappers(words))
+        for index, (kind, workers, words) in runs.items()
+        if is_movable(kind, strip_wrappers(words))
+    }
+    if not movable or not all(SAFE_WORD.fullmatch(words[0]) for _, _, words in movable.values()):
         return None
-    kind, workers, words = found[0]
-    words = strip_wrappers(words)
-    if not words or not is_movable(kind, words):
-        return None
-    name = "odoo-bin" if kind == "odoo" else os.path.basename(words[0])
-    starts = list(re.finditer(rf"(?:^|(?<=[\s;&|(])){re.escape(words[0])}(?=\s)", text))
-    if not SAFE_WORD.fullmatch(words[0]) or len(starts) != 1 or text.count(name) != 1:
-        return None
-    route = f"python3 {CLIENT} run --route --kind {kind} --workers {workers} -- "
-    return text[: starts[0].start()] + route + text[starts[0].start() :]
+    named = " ".join(
+        " ".join(raw)
+        for index, (raw, words, _, _) in enumerate(commands)
+        if index in runs or all(ASSIGNMENT.fullmatch(word) for word in words)
+    )
+    for kind, _, words in movable.values():
+        name = "odoo-bin" if kind == "odoo" else os.path.basename(words[0])
+        if text.count(name) != named.count(name):
+            return None
+    expected = get_commands(text)
+    for index, (kind, workers, words) in movable.items():
+        program = strip_wrappers(commands[index][0])
+        if not program:
+            return None
+        route = f"python3 {CLIENT} run --route --kind {kind} --workers {workers} -- "
+        before = expected[index][0][: -len(words)]
+        expected[index] = (before + shlex.split(route) + words, expected[index][1])
+        written = "|".join(re.escape(quote + program[0] + quote) for quote in QUOTES)
+        start = rf"(?<![^\s;&|(])(?:{written})(?![^\s;&|)<>])"
+        for match in re.finditer(start, text):
+            wrapped = text[: match.start()] + route + text[match.start() :]
+            if get_commands(wrapped) == expected:
+                text = wrapped
+                break
+        else:
+            return None
+    return text
 
 
 def get_pause():
@@ -365,17 +411,20 @@ def main():
     command = tool_input.get("command") or ""
     if not os.path.exists(SOCKET) or LEFT_ALONE.search(command):
         return
-    found = classify(command, data.get("cwd") or ".")
+    cwd = data.get("cwd") or "."
+    found = classify(command, cwd)
     if not found:
         return
     kind, workers, label = found
-    wrapped = wrap(command, find_runs(command, data.get("cwd") or "."))
-    if wrapped is None:
+    wrapped = wrap(command, find_runs(command, cwd)) or command
+    here = classify(wrapped, cwd)
+    if here:
+        kind, workers, label = here
         queue = (
             f"python3 {shlex.quote(str(CLIENT))} run --kind {kind} --workers {workers}"
             f" --label={shlex.quote(label[:LABEL])}"
         )
-        wrapped = f"{queue}\n{command}"
+        wrapped = f"{queue}\n{wrapped}"
     answer = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",

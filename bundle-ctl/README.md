@@ -169,22 +169,32 @@ hook on agent commands, the order of the queue, and real clients on a socket of 
 A run can go to a remote worker instead of the laptop's cores: a machine of the `remote-runs`
 repo, which has its own README (the sandbox, the load, the sync). Agents change nothing.
 
-- `client/run-hook.py` wraps a lone `odoo-bin` call, alone or behind its python, that stops after
-  init on a DB it names (`-d` or `--database`), its program written once in the text: `bctl.py
-  run --route ... -- ./odoo-bin ...` in place of the line in front. The worker's image has the
-  venvs at the laptop's path, so `/home/seb/virtualenvs/odoo20/bin/python odoo-bin` runs there
-  as here. It also wraps a TestWarden engine (`engine-linux-*`, `test-warden-engine`) whose one
-  `--server` is `http://localhost:` or `http://127.0.0.1:` (the port may be a variable), never
-  with `--debug`, `--visible` or `--pause-before-exit`. Anything else keeps the line in front and
-  runs here: servers, shells, `ott`, scripts, a text with two runs, an engine called through a
-  variable. `twc` too: a shell function, which `bctl.py` cannot start, and interactive.
+- `client/run-hook.py` writes `bctl.py run --route ... --` in front of the program of each
+  movable run of a text: `bctl.py run --route ... -- ./odoo-bin ...`. A movable run is an
+  `odoo-bin` call, alone or behind its python, that stops after init on a DB it names (`-d` or
+  `--database`). The worker's image has the venvs at the laptop's path, so
+  `/home/seb/virtualenvs/odoo20/bin/python odoo-bin` runs there as here. It is also a TestWarden
+  engine (`engine-linux-*`, `test-warden-engine`) whose one `--server` is `http://localhost:` or
+  `http://127.0.0.1:` (the port may be a variable), never with `--debug`, `--visible` or
+  `--pause-before-exit`. A variable of the text may hold the program, its options too
+  (`E="dist/engine-linux-amd64 --server http://127.0.0.1:$PORT"; $E ...`), and several runs in
+  one text each ask the queue in their turn.
+- The runs that stay keep the line in front, counted from them alone: servers, shells, `ott`,
+  scripts, and `bug-fix.sh` of the serve-for-seb skill, whose install runs in a tree of its own
+  that `remote.py` does not send. `twc` too: a shell function, which `bctl.py` cannot start, and
+  interactive. A wrapped run that the queue keeps here then runs on the cores of that line, as
+  any command of the text. The hook wraps nothing when the name of a program it would wrap is
+  also written where a run could hide (`$(...)`, a heredoc, `pgrep`, `type odoo-bin`), or when
+  the text with the routes in it would not run the same commands, which it checks by splitting
+  that text again.
 - `POST /run` with `route`: when a worker of `BUNDLE_CTL_WORKERS` (names, comma separated) has
   answered `status` in the last minute, is not drained, and would start a run within 120 s, the
   daemon answers `{"remote": NAME}` and keeps no run of its own. Else the run waits here as any,
   and the journal says `run kept BUNDLE KIND`. The counts of `run routed` and `run kept` give the
   share of the movable runs that left the laptop.
 - `client/remote.py` then sends each worktree as a snapshot (`client/snapshot.py`: the index and
-  `.git` are never written), the DB the command names when it exists here, submits, and prints
+  `.git` are never written; two runs of the bundle make theirs one after the other, behind a lock
+  in the cache), the DB the command names when it exists here, submits, and prints
   the job's output as it comes. A DB the command made, or changed with `-i` or `-u`, comes back
   under its name: restored beside, then renamed over the old one, with its filestore but the
   assets, which Odoo makes again.

@@ -4,6 +4,8 @@ start in, and real `bctl run` clients on a socket of their own: python3 test_run
 """
 
 import importlib.util
+import io
+import json
 import math
 import os
 import pathlib
@@ -13,6 +15,7 @@ import sys
 import tempfile
 import threading
 import time
+from contextlib import redirect_stdout
 from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -44,6 +47,7 @@ KINDS = [
     (f"{ODOO} & sleep 20; {ENGINE} --workers 2; kill %1", ("hoot", 2)),
     (f"bash -c '{ODOO} --test-tags /mail'", ("odoo", 1)),
     (f'S=/tmp/x; E="nice -n 19 {ENGINE} --workers 2"; $E --test x > $S/a', ("hoot", 2)),
+    (f'W=2; E="nice -n 19 {ENGINE} --workers $W"; $E --test x', ("hoot", 2)),
     ("S={folder}; bash $S/battery.sh 8331 tag", ("hoot", 3)),
     ("cd {folder} && ./battery.sh", ("hoot", 3)),
     ("bash ~/battery.sh 8331 tag 2>&1 | tail -20", ("hoot", 3)),
@@ -100,7 +104,11 @@ HOOT_WRAPS = [
     ("./dist/engine-linux-amd64 --suite-names '@mail' --workers 2", None, 2),
     ("./dist/engine-linux-amd64 --server http://runbot.odoo.com --workers 2", None, 2),
     (f"{ENGINE} --server http://localhost:8072 --workers 2", None, 2),
-    (f"E={TW}/dist/engine-linux-amd64; $E --server http://localhost:8070", None, 4),
+    (
+        f"E={TW}/dist/engine-linux-amd64; $E --server http://localhost:8070",
+        f"E={TW}/dist/engine-linux-amd64; ",
+        4,
+    ),
     (f"{ENGINE} --workers 1; pgrep -af engine-linux-amd64", None, 1),
     ("twc --once -m '@mail' --server-url http://localhost:8070", None, 4),
 ]
@@ -110,13 +118,35 @@ WRAPS = [
     ("./odoo-bin -d x --test-tags /mail --stop-after-init 2>&1 | tail -50", ""),
     (f"{ODOO} --test-tags /mail --stop-after-init", ""),
     ("cd odoo; python3 ./odoo-bin -d x -i mail --stop-after-init", "cd odoo; "),
-    ("python3 -c 'print(1)'; python3 ./odoo-bin -d x -i mail --stop-after-init", None),
+    (
+        "python3 -c 'print(1)'; python3 ./odoo-bin -d x -i mail --stop-after-init",
+        "python3 -c 'print(1)'; ",
+    ),
     ("./odoo-bin -d x --http-port 8070", None),
     ("./odoo-bin --test-tags /mail --stop-after-init", None),
-    ("./odoo-bin -d x -i mail --stop-after-init && ./odoo-bin -d x --http-port 8070 &", None),
+    ("./odoo-bin -d x -i mail --stop-after-init && ./odoo-bin -d x --http-port 8070 &", ""),
     ("bash -c './odoo-bin -d x -i mail --stop-after-init'", None),
     ("ott /mail:TestUi", None),
 ]
+MULTI_WRAPS = [
+    "P=$(python3 -c 'print(8070)'); <odoo>python3 odoo-bin -d x --stop-after-init --http-port=$P",
+    "<odoo>./odoo-bin -d x -u web --stop-after-init; ls; <odoo>./odoo-bin -d y --stop-after-init",
+    (
+        f"E={TW}/dist/engine-linux-amd64; S=http://127.0.0.1:8070;"
+        ' <hoot2>$E --server $S --workers 2 > a; <hoot1>"$E" --server $S --workers 1 --test x > b'
+    ),
+    f'E="{TW}/dist/engine-linux-amd64 --server http://127.0.0.1:8171"; <hoot2>$E --workers 2',
+    (
+        f'PORT=$(cat port); E="{TW}/dist/engine-linux-amd64 --server http://127.0.0.1:$PORT'
+        ' --workers 2"; <hoot2>$E --suite-names @mail > a; <hoot2>$E --suite-path /web > b'
+    ),
+    f'E="nice -n 19 {TW}/dist/engine-linux-amd64"; $E --server http://127.0.0.1:8070',
+    "X=$(./odoo-bin -d y -i mail --stop-after-init); ./odoo-bin -d x -i mail --stop-after-init",
+    "cat > x.sh <<'EOF'\n./odoo-bin -d y --stop-after-init\nEOF\n./odoo-bin -d x --stop-after-init",
+]
+MARKS = {"<odoo>": ("odoo", 1), "<hoot1>": ("hoot", 1), "<hoot2>": ("hoot", 2)}
+SERVER = "(./odoo-bin -d x --http-port 8174 &); "
+MIXED = f"{SERVER}{TW}/dist/engine-linux-amd64 --server http://127.0.0.1:8174 --workers 2"
 
 
 def check_wraps(failures):
@@ -126,11 +156,38 @@ def check_wraps(failures):
     cases += [(text, before, "hoot", workers) for text, before, workers in HOOT_WRAPS]
     for text, before, kind, workers in cases:
         route = ROUTE.format(client=hook.CLIENT, kind=kind, workers=workers)
-        expected = None if before is None else before + route + text[len(before):]
+        expected = None if before is None else before + route + text[len(before) :]
         found = hook.wrap(text, hook.find_runs(text))
         if found != expected:
             failures.append(f"wrap of {text!r}: {found!r}, expected {expected!r}")
-    return len(cases)
+    for marked in MULTI_WRAPS:
+        text, expected = marked, marked
+        for mark, (kind, workers) in MARKS.items():
+            text = text.replace(mark, "")
+            route = ROUTE.format(client=hook.CLIENT, kind=kind, workers=workers)
+            expected = expected.replace(mark, route)
+        expected = None if expected == text else expected
+        found = hook.wrap(text, hook.find_runs(text))
+        if found != expected:
+            failures.append(f"wrap of {text!r}: {found!r}, expected {expected!r}")
+    return len(cases) + len(MULTI_WRAPS)
+
+
+def check_hook(failures):
+    """A text with a run that moves and one that stays: the line in front queues the one here."""
+    hook = load_hook()
+    hook.SOCKET, hook.PAUSE = __file__, HERE / "no-pause"
+    stdin = json.dumps({"tool_input": {"command": MIXED}})
+    with mock.patch.object(sys, "stdin", io.StringIO(stdin)), redirect_stdout(io.StringIO()) as out:
+        hook.main()
+    command = json.loads(out.getvalue())["hookSpecificOutput"]["updatedInput"]["command"]
+    label = "./odoo-bin -d x --http-port 8174"
+    line = f"python3 {hook.CLIENT} run --kind server --workers 1 --label='{label}'"
+    route = ROUTE.format(client=hook.CLIENT, kind="hoot", workers=2)
+    expected = f"{line}\n{SERVER}{route}{MIXED[len(SERVER) :]}"
+    if command != expected:
+        failures.append(f"hook of {MIXED!r}: {command!r}, expected {expected!r}")
+    return 1
 
 
 def load_hook():
@@ -446,6 +503,7 @@ def main():
     count = (
         check_kinds(failures)
         + check_wraps(failures)
+        + check_hook(failures)
         + check_queue(failures)
         + check_room(failures)
         + check_clients(failures)
