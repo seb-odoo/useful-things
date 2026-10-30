@@ -59,8 +59,9 @@ def get_unsaved_work(runner: UtilsRunner, bundle_name: str):
     """Map the repos of a bundle to the work its deletion would lose, by kind.
 
     A worktree is read the way `git worktree remove` reads it, so the tooling files and the
-    node_modules of a bundle don't count as uncommitted. A commit counts as saved as soon as a
-    remote ref holds it, the dev remote included.
+    node_modules of a bundle don't count as uncommitted: `finish_worktree_bundle_folder` puts each
+    one in the `info/exclude` of its repo. A commit counts as saved as soon as a remote ref holds
+    it, the dev remote included.
     """
     unsaved = {}
     lock = threading.Lock()

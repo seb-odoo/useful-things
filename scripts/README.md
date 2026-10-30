@@ -91,6 +91,21 @@ up (2026-10-21), and offline it gives up at once; `enable.sh` goes on after npm 
 patch `enable.sh` instead: it is tracked upstream (`odoo/addons/web/tooling/enable.sh`), so a hand
 patch is gone in the next worktree. The fix of a tooling file of Odoo belongs in these scripts.
 
+What `enable.sh` and the `node_modules` link write at the root of odoo and enterprise is no work:
+`finish_worktree_bundle_folder` adds each name written there, new or written again, that git does
+not track, to the `info/exclude` of the repo's `.git`, which every worktree of the repo reads. A
+tracked folder is written too when a file appears in it (the `__pycache__` of `odoo`, a module in
+`addons`), so it stays out of that file. So `git status`, delete_bundle, `gbs`, `bctl delete` and
+`git worktree remove` leave these files out, with no rule of their own. The `.gitignore` of a
+branch is not enough: odoo writes `eslint.config.cjs` in enterprise since ESLint 10 (2026-10-26),
+and enterprise ignores it only from that day, so a bundle whose enterprise branch is older has it
+as an untracked file. On 2026-10-29 19 master bundles had it, and none of them could be deleted.
+The names are seen, not listed: a file renamed upstream is left out from the first bundle made or
+fetched with the rename, and the bundles made before are covered by the same line. A file of Seb
+at the same place stays work, as the tooling did not write it, and so does a name with other
+characters than letters, digits, `.`, `_` and `-`: git reads it as a pattern, and `/*` would hide
+every file of Seb at the root of every worktree (`test_tooling_files.py`).
+
 `bctl node-modules` builds the tree of the `package.json` of the web tooling of a base's branch,
 when the store has none: npm installs that file in a box with the network (`HOST_BOX`, refused
 without it), in a folder of its own that then goes in the store under its key. A tree never
@@ -288,7 +303,7 @@ Removes a bundle from the local system (worktrees, branches, filestore, database
 - Accepts `fnmatch` patterns, expanded against the existing worktree folders: `'saas-19.*'`
 - Leaves a bundle untouched, and exits 1, when one of its worktrees holds uncommitted files or its
   branch holds commits no remote has: they are listed, and the other bundles of the run are still
-  deleted
+  deleted. The files of the web tooling are none (Shared node_modules)
 - Leaves a bundle whose dev container still runs, with a yellow line: delete it again once its
   window is closed
 - `--force`: delete such a bundle anyway, unsaved work included

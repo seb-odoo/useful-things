@@ -2,6 +2,7 @@
 
 from collections import defaultdict
 from collections.abc import Iterable
+import fcntl
 import json
 import os
 import re
@@ -306,10 +307,55 @@ class UtilsRunner(Runner):
         if not self._node_modules_ready(f"{WORKTREE_CONTAINER}/.node_modules/{key}/node_modules"):
             print("No node_modules yet for this package.json: `bctl node-modules` builds it.")
 
+    @staticmethod
+    def _root_entries(folder):
+        """The names at the root of `folder`, each with the time it was last written."""
+        with os.scandir(folder) as entries:
+            return {entry.name: entry.stat(follow_symlinks=False).st_mtime_ns for entry in entries}
+
+    @staticmethod
+    def _exclude_at_root(repo, names):
+        """Make git leave out `names` at the root of every worktree of `repo`, as they all read the
+        `info/exclude` of its `.git`."""
+        path = f"{get_repo_folder(repo)}/.git/info/exclude"
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a+") as file:
+            fcntl.flock(file, fcntl.LOCK_EX)
+            file.seek(0)
+            text = file.read()
+            new = [f"/{name}\n" for name in sorted(names) if f"/{name}" not in text.splitlines()]
+            if new:
+                file.write("".join(["\n" if text and not text.endswith("\n") else "", *new]))
+
     def finish_worktree_bundle_folder(self, *, bundle_name, open_window=True):
+        """Give the bundle its web tooling, then mark it made.
+
+        What the tooling writes at the root of odoo and enterprise is no work, and the `.gitignore`
+        of an older branch may miss it. A tracked folder is written too when a file appears in it,
+        so only the names git does not track go to `info/exclude`.
+        """
         bundle_folder = get_worktree_bundle_folder(bundle_name)
         runner = self.with_params(cwd=bundle_folder)
+        before = {
+            repo: self._root_entries(folder)
+            for repo in ("odoo", "enterprise")
+            if os.path.isdir(folder := get_worktree_bundle_repo_folder(bundle_name, repo))
+        }
         self._install_js_tooling(runner, bundle_name=bundle_name)
+        for repo, entries in before.items():
+            folder = get_worktree_bundle_repo_folder(bundle_name, repo)
+            written = [
+                name
+                for name, mtime in self._root_entries(folder).items()
+                # A name like `*` is a pattern to git, and would hide Seb's files.
+                if entries.get(name) != mtime and re.fullmatch(r"[A-Za-z0-9._-]+", name)
+            ]
+            if not written:
+                continue
+            res = runner.run(["git", "ls-files", "-o", "--directory", "--", *written], cwd=folder)
+            untracked = set(res.stdout.splitlines())
+            if names := [name for name in written if {name, f"{name}/"} & untracked]:
+                self._exclude_at_root(repo, names)
         runner.run(["touch", f"{bundle_folder}/{MADE}"])
         if open_window:
             runner.open_devcontainer_folder(folder=bundle_folder)
