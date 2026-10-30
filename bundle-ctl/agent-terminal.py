@@ -310,6 +310,14 @@ def copy_tty(fd, waker=None):
                 enter_at = time.monotonic() + ENTER_AFTER
 
 
+def shows(keys):
+    """Whether keys leave something in the prompt of claude or edit it: a character, an escape (an
+    arrow brings back an older prompt) or a backspace. On 2026-10-30 a byte with nothing to show
+    came after Seb's Enters, and every line of hok waited for his next Enter."""
+    text = keys.decode(errors="ignore")
+    return b"\x1b" in keys or b"\x7f" in keys or any(map(str.isprintable, text))
+
+
 class Waker:
     """Types as the next prompt of an idle session the task the daemon left for this terminal
     (.agent/task.md with no run.lock, which it then makes), else the prompts Seb sent from deck
@@ -352,7 +360,7 @@ class Waker:
         if self.line[-1:] in (b"\r", b"\x03"):
             self.draft = self.line[-1:] == b"\r" and self.line.lstrip()[:1] == b"/"
             self.line = b""
-        elif self.line:
+        elif shows(self.line):
             self.draft = True
 
     def get_told(self):

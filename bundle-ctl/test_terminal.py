@@ -297,8 +297,10 @@ def check_wake(case):
                wait(lambda: lines()[2:] == ["ab", "\x1b[200~PR event: two\x1b[201~"]))
     os.write(case.terminal.fd, b"\x1b[<35;10;5M\x1b[I")
     os.write(case.terminal.fd, b"\x1b]11;rgb:0000/0000/0000\x07\x1b[?65;1;9c\x1bP>|VTE(7800)\x1b\\")
+    os.write(case.terminal.fd, b"\n")
     (events / "3.txt").write_text("PR event: three")
-    case.check("a mouse move, a focus or the answers of the terminal to claude are no draft",
+    case.check("a mouse move, a focus, the answers of the terminal to claude or a key with nothing"
+               " to show are no draft",
                wait(lambda: lines()[-1:] and lines()[-1].endswith("PR event: three\x1b[201~")))
     os.write(case.terminal.fd, b"/config\r")
     (events / "4.txt").write_text("PR event: four")
@@ -344,6 +346,7 @@ def check_wake(case):
         "an event waits: the session is None",
         "an event waits: the session is waiting",
         "an event waits: a draft of Seb: 2 printable, 0 escapes, 0 backspaces",
+        "an event waits: a key of Seb within 2 s",
         "an event waits: a key of Seb within 2 s",
         "an event waits: a slash command of Seb",
         "an event waits: a key of Seb within 2 s",
