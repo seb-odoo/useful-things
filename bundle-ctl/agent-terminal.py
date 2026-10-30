@@ -120,6 +120,7 @@ START_SPACE = 10
 STOP_GAP = 1
 STOP_TIME = 5
 TAKEOVER_WAIT = 30
+TOLD = STATE / "told"
 TRANSCRIPTS = pathlib.Path.home() / ".claude" / "projects" / "-workspace"
 USER = "vscode"
 WAKE_EVERY = 2
@@ -294,8 +295,9 @@ def copy_tty(fd, waker=None):
                 write_all(fd, data)
         if enter_at and time.monotonic() >= enter_at:
             enter_at = None
-            with contextlib.suppress(OSError):
-                write_all(fd, b"\r")
+            if waker.may_enter():
+                with contextlib.suppress(OSError):
+                    write_all(fd, b"\r")
         elif waker and not enter_at:
             escape = waker.take_stop()
             prompt = None if escape else waker.take()
@@ -311,8 +313,9 @@ def copy_tty(fd, waker=None):
 class Waker:
     """Types as the next prompt of an idle session the task the daemon left for this terminal
     (.agent/task.md with no run.lock, which it then makes), else the prompts Seb sent from deck
-    (DECK/NAME/SESSION of the host, one paste), else the PR events client/prwatch.py leaves in
-    .agent/pr-events, both in a busy session too, where claude shows them queued at once
+    (DECK/NAME/SESSION of the host, one paste), else the lines the host left in TOLD/NAME/SESSION
+    and the PR events client/prwatch.py leaves in .agent/pr-events (the pr-events/ of an ops
+    window is the host's), both in a busy session too, where claude shows them queued at once
     (Seb, 2026-10-27), when nothing was typed in this terminal since the last Enter: a
     draft of Seb stays his, and a PR event then reaches the agent with his next prompt, by the
     hook of prwatch.py, which WAKE_EVERY after his last key leaves the time to take it. Nor after
@@ -326,6 +329,7 @@ class Waker:
     def __init__(self, agent, bundle, session, name=None):
         self.agent = agent
         self.events = agent / "pr-events"
+        self.told = self.events if name else TOLD / bundle / session
         self.prompts = DECK / (name or bundle) / session
         self.bundle = bundle
         self.session = session
@@ -351,7 +355,7 @@ class Waker:
             self.draft = True
 
     def take(self):
-        has_events = PRWATCH.has_lines(self.events) or PRWATCH.has_lines(self.prompts)
+        has_events = any(map(PRWATCH.has_lines, (self.told, self.events, self.prompts)))
         now = time.monotonic()
         if now - self.stopped < STOP_GAP:
             return None
@@ -421,17 +425,32 @@ class Waker:
         return prompts
 
     def take_events(self):
-        """The PR events that wait, typed as one paste: as keys, a line typed just as a new claude
-        goes idle stays in its prompt, each Enter a new line (2026-10-29). The bundle writes its
-        pr-events/, so one with a control key (an escape that ends the paste, a tab) or no letter
-        first (a slash command, the shell of claude) is dropped, and noted with its keys escaped."""
+        """The lines of the host, then the PR events, typed as one paste: as keys, a line typed
+        just as a new claude goes idle stays in its prompt, each Enter a new line (2026-10-29). One
+        with a control key (an escape that ends the paste, a tab) or no letter first (a slash
+        command, the shell of claude) is dropped, and noted with its keys escaped. The bundle
+        writes its pr-events/: a line there that client/prwatch.py did not write is dropped too,
+        as its own text would be typed as Seb's."""
         told = []
-        for line in PRWATCH.take(self.events):
+        for line in PRWATCH.take(self.told, self.note):
             if line[:1].isalpha() and not CONTROL.search(line) and "\t" not in line:
                 told.append(line)
             else:
                 self.note(f"dropped a line that would type keys: {line[:100]!r}")
+        for line in PRWATCH.take(self.events) if self.events != self.told else ():
+            if PRWATCH.is_told(line):
+                told.append(line)
+            else:
+                self.note(f"dropped a line that prwatch.py does not write: {line[:100]!r}")
         return told
+
+    def may_enter(self):
+        """Whether the Enter of a typed prompt may go: on a dialog claude opened since the text, it
+        would pick the first answer, mostly a yes."""
+        if get_session_status(self.bundle, self.session, self.started) != "waiting":
+            return True
+        self.note("an Enter not sent: a dialog opened after the text")
+        return False
 
     def describe_draft(self):
         """What Seb typed since his last Enter, counted, never its text."""

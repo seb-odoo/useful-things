@@ -21,6 +21,7 @@ import fcntl
 import json
 import os
 import pathlib
+import re
 import stat
 import subprocess
 import sys
@@ -44,10 +45,22 @@ REVIEWS = {
     "COMMENTED": ("review", "reviews"),
     "DISMISSED": ("dismissed review", "dismissed reviews"),
 }
+COMMENTS = ((("review comment", "review comments"), "pulls"), (("comment", "comments"), "issues"))
 ADVICE = (
     "Read what came with gh before anything else. What is Seb's call (an answer to a reviewer, a"
     " change of approach, work over someone else's push), prepare and ask him; what follows from"
     " your task and his rules, do. Open your reply on what came and what you did with it."
+)
+WORDS = [word for words in [*REVIEWS.values(), *(one for one, _ in COMMENTS)] for word in words]
+SAID = (
+    rf"\d+ (?:{'|'.join(WORDS)}) by [A-Za-z0-9-]+(?:\[bot\])?"
+    r"|its head is now [0-9a-f]{12}, which this bundle does not have"
+    r"|it is closed \(mergebot says whether it was merged\)"
+)
+TOLD_LINE = re.compile(
+    rf"PR event: ([\w.-]+)#(\d+) \(https://github\.com/{OWNER}/\1/pull/\2\), since"
+    rf" \d{{4}}-\d\d-\d\dT\d\d:\d\d:\d\dZ: (?:{SAID})(?:; (?:{SAID}))*\. {re.escape(ADVICE)}",
+    re.ASCII,
 )
 
 
@@ -135,10 +148,17 @@ def leave(text, folder=None, advice=ADVICE):
         os.close(events)
 
 
-def take(folder=None):
+def is_told(line):
+    """Whether a line taken has the shape that leave() gives to what look() found. Code in the
+    bundle writes its pr-events/, and agent-terminal.py types as Seb's only these from there."""
+    return bool(TOLD_LINE.fullmatch(line))
+
+
+def take(folder=None, note=None):
     """The lines that wait, oldest first, each taken by one caller only: the hooks in the container
     and agent-terminal.py on the host take from the same folder. Each one taken is noted in
-    prwatch.log, with who took it and how long after it was left."""
+    prwatch.log beside the folder, or by `note`, with who took it and how long after it was
+    left."""
     try:
         events = open_folder(folder or EVENTS)
     except OSError:
@@ -156,13 +176,17 @@ def take(folder=None):
                 continue
             stem = name.removesuffix(".txt")
             waited = (time.time_ns() - int(stem)) / 1e9 if stem.isdigit() else 0
-            who, stamp = pathlib.Path(sys.argv[0]).name, time.strftime("%H:%M:%S")
+            who = pathlib.Path(sys.argv[0]).name
+            said = f"taken by {who} after {waited:.1f} s: {taken[-1][:100]}"
+            if note:
+                note(said)
+                continue
             log = os.O_WRONLY | os.O_APPEND | os.O_CREAT
             with (
                 contextlib.suppress(OSError),
                 open(open_file("../prwatch.log", log, events), "a") as file,
             ):
-                file.write(f"{stamp} taken by {who} after {waited:.1f} s: {taken[-1][:100]}\n")
+                file.write(f"{time.strftime('%H:%M:%S')} {said}\n")
     finally:
         os.close(events)
     return taken
@@ -230,9 +254,8 @@ def look(pr, repo, seen, me):
         mine = [one for one in reviews if one.get("state") == state]
         said += counted(by_whom(mine, me, since, "submitted_at"), *words)
     quoted = urllib.parse.quote(since)
-    for words, path in ((("review comment", "review comments"), f"pulls/{number}/comments"),
-                        (("comment", "comments"), f"issues/{number}/comments")):
-        got = github(f"{base}/{path}?since={quoted}&per_page=100")
+    for words, kind in COMMENTS:
+        got = github(f"{base}/{kind}/{number}/comments?since={quoted}&per_page=100")
         said += counted(by_whom(got, me, since), *words)
     head = pull["head"]["sha"]
     if head != seen.get("head") and not is_here(repo, head):

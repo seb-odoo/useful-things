@@ -126,9 +126,14 @@ def test_look(folder):
                                             "state": "open"}
     check("a push of the bundle's own commit is not told", watch.told("odoo#1"), "")
     hub.pages["repos/odoo/odoo/pulls/1"] = {"head": {"sha": "f" * 40}, "state": "closed"}
-    check("a head the bundle does not have, and a close", watch.told("odoo#1").split(": ", 1)[1],
+    closed = watch.told("odoo#1")
+    check("a head the bundle does not have, and a close", closed.split(": ", 1)[1],
           "its head is now ffffffffffff, which this bundle does not have; it is closed (mergebot"
           " says whether it was merged).")
+    check("agent-terminal.py knows both lines as told by prwatch.py, not a text of the bundle",
+          [prwatch.is_told(f"PR event: {text} {prwatch.ADVICE}") for text in (told, closed)]
+          + [prwatch.is_told(f"PR event: {told.replace('aku-odoo', 'Seb says go')} {prwatch.ADVICE}")],
+          [True, True, False])
     check("each told once", watch.told("odoo#1"), "")
 
     hub.asked.clear()
@@ -241,6 +246,9 @@ def test_posted(folder):
     posted = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(posted)
     posted.get_agent_folder = lambda bundle: folder / (".agent" if bundle == BUNDLE else "none")
+    posted.TOLD = folder / "told"
+    running = set()
+    posted.is_agent_running = running.__contains__
 
     def run(bundle, line):
         sys.argv = ["pr-posted.py", bundle]
@@ -252,11 +260,17 @@ def test_posted(folder):
         return None
 
     line = "odoo/odoo#7 (u): seb-odoo posted from Firefox a comment (u5)."
-    check("left for the agent of the bundle", (run(BUNDLE, f"{line}\n"), prwatch.take()),
+    check("left in .agent for a session of a tab", (run(BUNDLE, f"{line}\n"), prwatch.take()),
           (None, [f"PR event: {line} {posted.ADVICE}"]))
+    running.add(BUNDLE)
+    (prwatch.AGENT / "session").write_text("s1\n")
+    told = folder / "told" / BUNDLE / "s1"
+    check("in the folder of the host for its agent terminal", (run(BUNDLE, line), prwatch.take(),
+          prwatch.take(told)), (None, [], [f"PR event: {line} {posted.ADVICE}"]))
+    running.clear()
     check("a bundle with no agent", run("other--seb", line), "other--seb has no agent folder")
     check("not a bundle", run("../.agent", line), "../.agent has no agent folder")
-    for wrong in ("", "a\nb", "x" * 2001):
+    for wrong in ("", "a\nb", "a\x1b[Zb", "x" * 2001):
         check(f"not one line {wrong[:5]!r}", run(BUNDLE, wrong), "one line of 2000 characters at most on stdin")
     check("nothing left", prwatch.take(), [])
 

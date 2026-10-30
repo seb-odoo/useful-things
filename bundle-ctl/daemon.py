@@ -173,6 +173,7 @@ GO_ON = "Continue from where you left off."
 HELD = load_held()
 HELD_DIR = STATE / "held"
 DECK_DIR = STATE / "deck"
+TOLD_DIR = STATE / "told"
 HELD_LETTER = "b"
 HOK_KEPT = 5
 HOK_WAITING = pathlib.Path(CONFIG["REPO_ROOT"]) / "host-ctl" / "approve.py"
@@ -2352,13 +2353,16 @@ def goes_to_terminal(item, folder, now):
 
 
 def tell_terminal(item):
-    """Leave the task in the pr-events/ of its terminal, which types it as a hok event, then keep
-    its files as hand_to_terminal does, run.lock too: the turn that takes it writes `done` or
-    `waiting` at its end. False when the line could not be left: the task then waits as before."""
+    """Leave the task in the folder its terminal types from, as a hok event, then keep its files as
+    hand_to_terminal does, run.lock too: the turn that takes it writes `done` or `waiting` at its
+    end. False when the line could not be left: the task then waits as before."""
     agent = get_agent_folder(item["bundle"])
+    session = read_text(agent / "session")
     text = "".join(char if char.isprintable() or char == "\n" else " " for char in item["task"])
     try:
-        leave_event(agent, f"Task from {item['parent']}: {text}")
+        if not session:
+            raise OSError("no session in .agent/session")
+        leave_told(item["bundle"], session, f"Task from {item['parent']}: {text}")
     except OSError as error:
         print(f"{item['bundle']}: the task from {item['parent']} was not left: {error}", flush=True)
         return False
@@ -2671,9 +2675,7 @@ def tell(caller, query, body):
     if agent is None:
         return 404, {"error": f"no agent window runs {session}"}
     try:
-        if agent.startswith(OPS):
-            get_agent_folder(agent).mkdir(parents=True, exist_ok=True)
-        leave_event(get_agent_folder(agent), text)
+        leave_told(agent, session, text)
     except OSError as error:
         raise Refused(f"{agent}: the line was not left: {error}") from error
     print(f"{agent}: told {text[:100]}", flush=True)
@@ -2754,6 +2756,15 @@ def get_session_agent(session):
         if read_text(get_agent_folder(bundle) / "session") == session:
             return bundle
     return None
+
+
+def leave_told(agent, session, text):
+    """Leave a line for the terminal of an agent window to type as it is: in the pr-events/ of an
+    ops window, or in TOLD_DIR/BUNDLE/SESSION, as a bundle writes its .agent/ folder, from where
+    its terminal types only what client/prwatch.py writes (README.md, "PR events")."""
+    folder = get_agent_folder(agent) if agent.startswith(OPS) else TOLD_DIR / agent
+    folder.mkdir(parents=True, exist_ok=True)
+    leave_event(folder, text, "pr-events" if agent.startswith(OPS) else session)
 
 
 def leave_event(agent, text, kind="pr-events"):

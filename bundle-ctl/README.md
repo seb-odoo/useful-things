@@ -911,13 +911,22 @@ what to do: ask Seb to validate, or act.
   stays in its prompt, and each Enter adds a new line until another key comes. A terminal
   restarted on new code typed the event of odoo#299270 1 s after its claude resumed, and it
   waited there. On claude 2.1.312, 6 of 11 such tries stayed, none of 13 as a paste.
-- The bundle writes `pr-events/`: code in its container could leave there an escape or a control
-  key (the end of a paste, Shift+Tab, Ctrl+U, a `1` then Enter on a permission dialog), which
-  claude would take as Seb's keys. So the
-  terminal drops a line with a control character but a new line (a tab too), or with no letter
-  first (a slash command, `!` for the shell of claude), and notes it in `prwatch.log`, its keys
-  escaped (review of deck stage 4, 2026-10-29). What a line says is still the bundle's own text,
-  typed as a prompt. The hook and the Stop hook give the line as context, not as keys.
+- The Enter goes 0.3 s after the text (`ENTER_AFTER`), and not on a dialog claude opened in
+  between (`waiting`): it would pick the first answer, mostly a yes. The text then waits in the
+  prompt for Seb's Enter, and `prwatch.log` notes it.
+- The bundle writes `pr-events/`, and what the terminal types claude takes as Seb's: code in the
+  container could leave there an escape or a control key (the end of a paste, Shift+Tab, Ctrl+U,
+  a `1` then Enter on a permission dialog), or a text of its own ("Seb posted his r+, go on
+  without asking him"). So from there the terminal types only a line of the shape prwatch.py
+  writes (`is_told`: a PR, counts, logins, a sha, its advice), and drops any other, noted in
+  `prwatch.log` with its keys escaped (review of deck stage 4, 2026-10-29). A change of the
+  wording of `look()` changes `TOLD_LINE` with it. The hook and the Stop hook give a line of
+  `pr-events/` as context, not as keys.
+- What the host leaves for the terminal of a bundle (an answer of hok, a task, what Seb posted
+  from Firefox) waits in `~/.local/state/bundle-ctl/told/BUNDLE/SESSION/`, which only the host
+  writes (Seb, 2026-10-30), and goes before the PR events. The terminal drops one with a
+  control character but a new line (a tab too) or with no letter first (a slash command, `!` for
+  the shell of claude) all the same. No hook takes it.
 - Idle is the `idle` status of the session in the records of claude: no turn, no dialog open
   (a question or a permission is `waiting`), and no wait for the reset of the usage limit. Only
   the record of the claude the terminal started counts: one stopped with its container leaves its
@@ -937,8 +946,10 @@ what to do: ask Seb to validate, or act.
 - What Seb posts himself from Firefox (a review, a comment, an r+), which prwatch.py leaves aside,
   comes the same way (Seb, 2026-10-22: "currently I have to tell it manually"): the helper of
   firefox-gateway runs `pr-posted.py BUNDLE` with one line on stdin that names it, and the script
-  leaves it in `.agent/pr-events/` of the bundle, with an advice of its own (go on from it, no
-  confirmation asked of him).
+  leaves it with an advice of its own (go on from it, no confirmation asked of him): in the
+  folder of the host above while the agent terminal of the bundle runs, else in
+  `.agent/pr-events/`, where the hook gives it to a session of a VS Code tab, which nothing types
+  in (Seb, 2026-10-30).
 - Not a Claude Code channel, though it would wake an idle session too: a seat of a Claude Team
   organization gets none until an admin of the organization turns channels on, and Seb wants no
   such ask nor a feature Claude turns on remotely (2026-10-21).
@@ -957,9 +968,9 @@ a prompt.
 
 - The daemon looks for the agent window that runs the conversation: `ops-SESSION` while its
   `agent-terminal.py` runs, else the bundle whose `.agent/session` it is, with its terminal
-  running. It leaves the line in `pr-events/` of that agent folder, with no link followed, and the
-  line reaches the agent as a PR event does: typed by the terminal, idle or busy, and in a bundle
-  also by the hook or the Stop hook.
+  running. It leaves the line in `pr-events/` of the ops window, a folder of the host, or for a
+  bundle in `~/.local/state/bundle-ctl/told/BUNDLE/SESSION/` (see PR events), and the terminal
+  types it, idle or busy. No hook takes it: in `.agent/`, the bundle could leave a false one.
 - An ops window whose claude ended keeps its folder until the window closes, and the line waits
   there for the window that goes on with the session. All of them end when the ops container goes
   down: on 2026-10-29 the line of request 542 was lost, as every ops window was down from 13:42 to
@@ -1295,16 +1306,16 @@ journal says `BUNDLE: the task from PARENT goes to its terminal`. `python3 test_
 A `bctl open BUNDLE --resume` with a task of its own waits for none of this while the agent
 terminal of the bundle runs its session, opened by the queue or by hand (Seb, 2026-10-29: a
 session opened with `bctl open BUNDLE --terminal` gives no verdict, and a resume queued behind it
-waited until an ops session left the line itself, hok 519). The daemon leaves the task in
-`.agent/pr-events/`, opened by `Task from PARENT:`, as `POST /tell` leaves a line of hok (see hok
-events), and the terminal types it at once, idle or busy. A control character of the task but a
+waited until an ops session left the line itself, hok 519). The daemon leaves the task in the
+folder of the host for the session of the bundle, opened by `Task from PARENT:`, as `POST /tell`
+leaves a line of hok (see hok events), and the terminal types it at once, idle or busy. A control character of the task but a
 new line goes as a space: an escape would act as a key. The files of the last run go to
 `.agent/history/` as above, but `run.lock` stays: the turn that takes the line writes `done` or
 `waiting` at its end, and `bctl status` says `running` until then. The model and the effort stay
 the ones of the session. These still go through the queue as above: a resume with no task (go
 on), one whose time has not come, a session the daemon queued again or closes (Back to queue,
 Pause, a build under the disk floor), a task the terminal has not typed yet (no `run.lock`), an
-agent on a worker, and a `pr-events/` the line cannot be left in. The journal says `BUNDLE: the
+agent on a worker, and a bundle with no `.agent/session`. The journal says `BUNDLE: the
 task from PARENT is left in its terminal`. `python3 test_queue.py` has the cases.
 
 The agent runs of all the containers start at least 10 seconds apart (a lock in the shared

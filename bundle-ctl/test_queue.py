@@ -1588,10 +1588,11 @@ def check_hand_over(root):
 
 def check_tell(root):
     """A task asked with --resume and a text of its own goes at once to the terminal that runs the
-    session of its bundle, as a line of its pr-events/ that the terminal types, idle or busy: a
-    session opened by hand gives no verdict (hok 519). Its verdict and its old task go to the
-    history, its run.lock stays. Going on alone, a terminal the daemon closes, a task the terminal
-    did not type yet, a bundle with no terminal and a pr-events/ that is a link wait as before."""
+    session of its bundle, as a line of the host folder the terminal types, idle or busy, whatever
+    the bundle left at .agent/pr-events: a session opened by hand gives no verdict (hok 519). Its
+    verdict and its old task go to the history, its run.lock stays. Going on alone, a terminal the
+    daemon closes, a task the terminal did not type yet and a bundle with no terminal wait as
+    before."""
     by_hand = {
         **RUNS_ANOTHER,
         "task.md": "",
@@ -1618,14 +1619,15 @@ def check_tell(root):
     terminals = daemon.get_terminals
     running = {*bundles, "bare"} - {"closed"}
     daemon.get_terminals = lambda: dict.fromkeys(running, 1)
+    daemon.TOLD_DIR = root / "told"
     try:
         daemon.launch_queued()
         agent = daemon.get_agent_folder("by-hand")
         kept = sorted(path.name for path in agent.iterdir())
         history = sorted(path.name for path in next((agent / "history").iterdir()).iterdir())
         lines = {
-            bundle: [path.read_text() for path in agent.glob("pr-events/[!.]*.txt")]
-            for bundle, agent in ((name, daemon.get_agent_folder(name)) for name in bundles)
+            bundle: [path.read_text() for path in (root / "told" / bundle).glob("s/[!.]*.txt")]
+            for bundle in bundles
         }
         waits = [
             SINCE.sub("T", f"{item['bundle']}: {item['waits_for']}") for item in state["queue"]
@@ -1633,20 +1635,19 @@ def check_tell(root):
         bare = {"b0": FRESH, "bare": {**by_hand, "parent": "b0\n"}}
         prepare(root / "open", bare, 8)[0]["queue"].clear()
         opened = daemon.open_bundle("b0", {}, {"bundle": "bare", "resume": True, "task": "go"})
-        bare = daemon.get_agent_folder("bare")
-        bare_lines = [path.read_text() for path in bare.glob("pr-events/[!.]*.txt")]
+        bare_lines = [path.read_text() for path in (root / "told" / "bare").glob("s/[!.]*.txt")]
     finally:
         daemon.get_terminals = terminals
     told = "Task from host: fix it\nthen push [201~ it"
     checks = [
         ("no window opens", launched == []),
         (
-            "the session by hand and the one that ended are told",
-            lines["by-hand"] == lines["ended"] == [told],
+            "the session by hand, the one that ended and the one with a link are told",
+            lines["by-hand"] == lines["ended"] == lines["linked"] == [told],
         ),
         (
             "the others are not",
-            not any(lines[name] for name in bundles if name not in ("by-hand", "ended")),
+            not any(lines[name] for name in bundles if name not in ("by-hand", "ended", "linked")),
         ),
         ("nothing is written where a link leads", not any(elsewhere.iterdir())),
         (
@@ -1657,7 +1658,6 @@ def check_tell(root):
                 "history",
                 "model",
                 "parent",
-                "pr-events",
                 "priority",
                 "queued",
                 "run.lock",
@@ -1674,7 +1674,7 @@ def check_tell(root):
             waits
             == [f"{name}: {BUSY_SINCE}" for name in ("go-on", "closing")]
             + [f"untyped: {BUSY}"]
-            + [f"{name}: {BUSY_SINCE}" for name in ("closed", "linked")],
+            + [f"closed: {BUSY_SINCE}"],
         ),
         (
             "bctl open --resume from its parent goes to it",

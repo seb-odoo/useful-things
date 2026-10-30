@@ -50,6 +50,8 @@ def check_tell(root, check):
     daemon.get_agent_folder = lambda name: agents.get(name, root / "ops" / name)
     daemon.get_terminals = lambda: {"b1": 1}
     daemon.is_agent_running = running.__contains__
+    daemon.TOLD_DIR = root / "told"
+    host = root / "told" / "b1" / BUNDLE_SESSION
 
     found = tell(OPS_SESSION)
     check("an ops window is told", found == (200, {"bundle": f"ops-{OPS_SESSION}"}), found)
@@ -60,9 +62,11 @@ def check_tell(root, check):
 
     found = tell(BUNDLE_SESSION)
     check("a bundle terminal is told", found == (200, {"bundle": "b1"}), found)
-    check("its line waits in .agent", get_lines(agents["b1"]) == [TEXT])
+    check("its line waits in the folder of the host, not in .agent",
+          [path.read_text() for path in host.glob("[!.]*.txt")] == [TEXT]
+          and not get_lines(agents["b1"]))
     prwatch = load("prwatch", HERE / "client" / "prwatch.py")
-    taken = prwatch.take(agents["b1"] / "pr-events")
+    taken = prwatch.take(host)
     check("the terminal takes it as a PR event", taken == [TEXT], taken)
 
     running.clear()
@@ -81,12 +85,9 @@ def check_tell(root, check):
 
     elsewhere = root / "elsewhere"
     elsewhere.mkdir()
-    for path in (agents["b1"] / "pr-events").iterdir():
-        path.unlink()
-    (agents["b1"] / "pr-events").rmdir()
     (agents["b1"] / "pr-events").symlink_to(elsewhere)
     found = tell(BUNDLE_SESSION)
-    check("a link in place of pr-events is refused", found[0] == "Refused", found)
+    check("a link in place of pr-events changes nothing", found[0] == 200, found)
     check("nothing is written where it leads", not any(elsewhere.iterdir()))
 
     check("only the host asks it", ("POST", "/tell") in daemon.HOST_ONLY)
