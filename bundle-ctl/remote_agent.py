@@ -520,7 +520,8 @@ def get_env():
     """The environment of a bundle the job takes: the containerEnv of the generated config."""
     try:
         root = pathlib.Path(get_values()["WORKTREE_ROOT"])
-        config = json.loads((root / ".devcontainer" / "devcontainer.json").read_text())
+        lines = (root / ".devcontainer" / "devcontainer.json").read_text().splitlines()
+        config = json.loads("\n".join(line for line in lines if line[:2] != "//"))
     except (OSError, ValueError, KeyError):
         return {}
     kept = {}
