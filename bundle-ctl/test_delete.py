@@ -25,6 +25,7 @@ CLOSED = "master-closed-aku"
 COMMITTED = "master-committed--seb"
 DIRTY = "master-dirty-aku"
 DROPPED = "master-dropped--seb"
+LEFT = "master-left--seb"
 MERGED = "master-merged--seb"
 MINE = "master-mine--seb"
 OPENED = "master-opened-aku"
@@ -159,6 +160,11 @@ def prepare(root):
         "windows": {REPORTED, TYPED},
         "state": {"queue": [{"bundle": REPORTED, "parent": CLEAN}]},
     }
+    for folder in ("bundle-db", "extensions"):
+        (root / folder / LEFT).mkdir(parents=True)
+    daemon.BUNDLE_DB_CONTAINER = str(root / "bundle-db")
+    daemon.CLAUDE_CONFIG_CONTAINER = str(root / "claude-config")
+    daemon.EXTENSIONS_CONTAINER = str(root / "extensions")
     daemon.HELD_DIR = root / "held"
     daemon.STATE = root
     daemon.close_window = world["closed"].append
@@ -406,6 +412,32 @@ def check(root):
                 == (f"the branch in odoo: {line}", f"{bundle} deleted", call),
             ),
         )
+    code, lines = run_client(path, "delete", "master-gone--seb", "--reason", "r")
+    checks.append(
+        (
+            "a bundle with no folder nor branch left is refused",
+            (code, lines) == (1, ["bctl: 400 no bundle master-gone--seb"]),
+        ),
+    )
+    code, lines = run_client(path, "delete", LEFT, "--reason", "its deletion failed")
+    number = int(lines[0].partition("hok b")[2].partition(".")[0])
+    item = daemon.HELD.read_json(daemon.HELD_DIR / f"{number}.json")
+    result = answer_yes(number)
+    checks.append(
+        (
+            "the folders a failed deletion left still go, and hok names them",
+            (item["lines"][:3], result["text"], world["calls"][-1])
+            == (
+                [
+                    f"the folder {root / 'bundle-db' / LEFT}",
+                    f"the folder {root / 'extensions' / LEFT}",
+                    "no branch",
+                ],
+                f"{LEFT} deleted",
+                ("delete_bundle.py", LEFT),
+            ),
+        ),
+    )
     world["running"].update(str(root / "master" / bundle) for bundle in (REPORTED, TYPED))
     code, lines = run_client(path, "delete", REPORTED, "--reason", "r")
     number = int(lines[0].partition("hok b")[2].partition(".")[0])

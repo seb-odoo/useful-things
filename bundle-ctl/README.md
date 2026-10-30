@@ -531,6 +531,11 @@ branches again with the same commits, so a commit made after the request still k
   request that waits, under the same `bN`, and waits for it.
 - `delete_bundle` still refuses uncommitted files: the job log in `jobs/` says so. Commits of
   others need its `--force`, which drops such files too: the request is then refused on them.
+- A bundle with no folder nor branch left is still asked while `delete_bundle.py` has a folder of
+  it to remove after the worktrees and branches: its Claude config, its Postgres data and its VS
+  Code extensions. The request lists the ones left, and the yes runs `delete_bundle.py` as usual.
+  On 2026-10-30, 9 deletions failed on a "Permission denied" in the Claude config and left about
+  1 GB each that no request could remove. With none of them, the answer is `no bundle`.
 - `python3 test_delete.py` runs each case on git repos of its own.
 
 ## A task for another bundle

@@ -99,8 +99,10 @@ from commands import (  # noqa: E402
     get_worktree_container_folder,
 )
 from config import (  # noqa: E402
+    BUNDLE_DB_CONTAINER,
     BUNDLE_SUFFIX,
     CLAUDE_CONFIG_CONTAINER,
+    EXTENSIONS_CONTAINER,
     HOST_BOX,
     STICKY_BUNDLES,
     WORKTREE_CONTAINER,
@@ -2076,6 +2078,13 @@ def add_repo(caller, query, body):
     return start_job(caller, "add-repo", work, bundle=bundle)
 
 
+def get_leftovers(bundle):
+    """The folders of a bundle that delete_bundle removes after its worktrees and branches: a
+    failure there leaves them, about 1 GB, with no folder nor branch to name the bundle."""
+    roots = (CLAUDE_CONFIG_CONTAINER, BUNDLE_DB_CONTAINER, EXTENSIONS_CONTAINER)
+    return [path for root in roots if os.path.isdir(path := os.path.join(root, bundle))]
+
+
 def delete(caller, query, body):
     """Hold the deletion of a bundle for Seb's yes in hok. A container asks for its own, or for
     the one of a bundle whose last task it queued."""
@@ -2090,7 +2099,8 @@ def delete(caller, query, body):
     dropped = get_dropped(bundle, body.get("drop") or [])
     drop = [sha for commits in dropped.values() for sha, _subject in commits]
     branches, _force = check_deletion(bundle, drop)
-    if not branches and not os.path.isdir(folder):
+    folders = [folder] if os.path.isdir(folder) else get_leftovers(bundle)
+    if not branches and not folders:
         raise ValueError(f"no bundle {bundle}")
     with state_lock:
         queued = next((item for item in read_state()["queue"] if item["bundle"] == bundle), None)
@@ -2100,7 +2110,7 @@ def delete(caller, query, body):
         "client": caller,
         "key": f"delete {bundle}",
         "lines": [
-            f"the folder {folder}",
+            *(f"the folder {path}" for path in folders),
             *([f"the branch in {repo}: {line}" for repo, line in branches.items()] or ["no branch"]),
             *(
                 f"its commit in {repo} that no remote has, lost: {sha[:12]} {subject}"
