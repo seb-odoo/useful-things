@@ -949,7 +949,10 @@ what to do: ask Seb to validate, or act.
   `client/agent-stop.py`, which keeps the turn going rather than let it end, and
   `agent-terminal.py`, which types the line, then Enter, as the next prompt of an idle session,
   or in a busy one, where claude shows it queued at once and reads it at its next tool call, as
-  the hook would (Seb, 2026-10-27: he then sees it came and does not type it himself).
+  the hook would (Seb, 2026-10-27: he then sees it came and does not type it himself). It types
+  it too when the turn ended on a background command (`shell`), which neither hook reaches: on
+  2026-10-30, the watch of a review Seb had to submit held his own post of it 26 s, until he
+  typed `done` himself.
 - The line goes as one paste (2026-10-29): typed as keys just as a new claude goes `idle`, it
   stays in its prompt, and each Enter adds a new line until another key comes. A terminal
   restarted on new code typed the event of odoo#299270 1 s after its claude resumed, and it

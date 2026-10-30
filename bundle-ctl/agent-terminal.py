@@ -316,10 +316,11 @@ class Waker:
     (DECK/NAME/SESSION of the host, one paste), else the lines the host left in TOLD/NAME/SESSION
     and the PR events client/prwatch.py leaves in .agent/pr-events (the pr-events/ of an ops
     window is the host's), both in a busy session too, where claude shows them queued at once
-    (Seb, 2026-10-27), when nothing was typed in this terminal since the last Enter: a
-    draft of Seb stays his, and a PR event then reaches the agent with his next prompt, by the
-    hook of prwatch.py, which WAKE_EVERY after his last key leaves the time to take it. Nor after
-    a slash command he sent, which may leave a menu open. Idle is no
+    (Seb, 2026-10-27), and in one whose turn left a background command (`shell`), when nothing
+    was typed in this terminal since the last Enter: a draft of Seb stays his, and a PR event
+    then reaches the agent with his next prompt, by the hook of prwatch.py, which WAKE_EVERY
+    after his last key leaves the time to take it. Nor after a slash command he sent, which may
+    leave a menu open. Idle is no
     turn, no dialog open and no wait for the reset of the usage limit, in the claude this terminal
     started: before it, the line would go to agent-run.sh, and claude would take it with its Enter
     as a paste, left in its prompt (Seb, 2026-10-23: "composer was pre-filled"). With neither,
@@ -370,7 +371,7 @@ class Waker:
         retry = not (has_task or has_events) and self.is_retry_due()
         status = get_session_status(self.bundle, self.session, self.started)
         resuming = TITLE.is_resuming(self.session)
-        ready = status == "idle" or status == "busy" and has_events
+        ready = status == "idle" or status in ("busy", "shell") and has_events
         if not (has_task or has_events or retry) or not ready or resuming:
             self.hold(has_events and f"the session is {'resuming' if resuming else status}")
             return None

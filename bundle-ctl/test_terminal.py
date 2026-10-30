@@ -278,6 +278,10 @@ def check_wake(case):
     case.check("a busy one gets it as a paste, queued",
                wait(lambda: lines() == ["\x1b[200~PR event: one\x1b[201~"]))
     case.check("taken once", not (events / "1.txt").exists())
+    (case.state / "status").write_text("shell")
+    (events / "0.txt").write_text("PR event: zero")
+    case.check("so does one whose turn left a background command",
+               wait(lambda: lines()[1:] == ["\x1b[200~PR event: zero\x1b[201~"]))
     (case.state / "status").write_text("idle")
     os.write(case.terminal.fd, b"ab")
     (events / "2.txt").write_text("PR event: two")
@@ -285,7 +289,7 @@ def check_wake(case):
     case.check("a draft of Seb keeps it waiting", (events / "2.txt").exists())
     os.write(case.terminal.fd, b"\r")
     case.check("his Enter lets it go, after his prompt",
-               wait(lambda: lines()[1:] == ["ab", "\x1b[200~PR event: two\x1b[201~"]))
+               wait(lambda: lines()[2:] == ["ab", "\x1b[200~PR event: two\x1b[201~"]))
     os.write(case.terminal.fd, b"\x1b[<35;10;5M\x1b[I")
     os.write(case.terminal.fd, b"\x1b]11;rgb:0000/0000/0000\x07\x1b[?65;1;9c\x1bP>|VTE(7800)\x1b\\")
     (events / "3.txt").write_text("PR event: three")
@@ -329,7 +333,7 @@ def check_wake(case):
         f"dropped a line that prwatch.py does not write: {keyed[:100]!r}",
     ])
     taken = [line for line in log.read_text().splitlines() if " taken by agent-terminal.py " in line]
-    case.check("each line taken is noted in prwatch.log", len(taken) == 11)
+    case.check("each line taken is noted in prwatch.log", len(taken) == 12)
     held = [line.split(" ", 1)[1] for line in log.read_text().splitlines() if " an event waits: " in line]
     case.check("why an event waits, once per reason, a draft by its counts only", held == [
         "an event waits: the session is None",
