@@ -267,6 +267,9 @@ def test_posted(folder):
     told = folder / "told" / BUNDLE / "s1"
     check("in the folder of the host for its agent terminal", (run(BUNDLE, line), prwatch.take(),
           prwatch.take(told)), (None, [], [f"PR event: {line} {posted.ADVICE}"]))
+    posted.reads_told = lambda bundle: False
+    check("in .agent for a terminal of before told/", (run(BUNDLE, line), prwatch.take(told),
+          prwatch.take()), (None, [], [f"PR event: {line} {posted.ADVICE}"]))
     running.clear()
     check("a bundle with no agent", run("other--seb", line), "other--seb has no agent folder")
     check("not a bundle", run("../.agent", line), "../.agent has no agent folder")

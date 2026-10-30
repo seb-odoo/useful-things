@@ -17,7 +17,13 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
-from agents import STATE, get_agent_folder, is_agent_running, read_text  # noqa: E402
+from agents import (  # noqa: E402
+    STATE,
+    get_agent_folder,
+    is_agent_running,
+    read_text,
+    reads_told,
+)
 from commands import BUNDLE_NAME  # noqa: E402
 
 ADVICE = (
@@ -47,7 +53,7 @@ def main():
         sys.exit(f"{bundle} has no agent folder")
     session = read_text(agent / "session")
     folder = agent / "pr-events"
-    if session and is_agent_running(bundle):
+    if session and is_agent_running(bundle) and reads_told(bundle):
         folder = TOLD / bundle / session
         folder.parent.mkdir(parents=True, exist_ok=True)
     load_prwatch().leave(line, folder, ADVICE)

@@ -926,7 +926,11 @@ what to do: ask Seb to validate, or act.
   from Firefox) waits in `~/.local/state/bundle-ctl/told/BUNDLE/SESSION/`, which only the host
   writes (Seb, 2026-10-30), and goes before the PR events. The terminal drops one with a
   control character but a new line (a tab too) or with no letter first (a slash command, `!` for
-  the shell of claude) all the same. No hook takes it.
+  the shell of claude) all the same. No hook takes it. A terminal started before 2026-10-30
+  12:21:57 (`TOLD_SINCE`) reads `.agent/pr-events/` alone, and keeps its code until the daemon
+  restarts it, idle and minimized: the host leaves its line there, as before. From 12:30 to the
+  fix, such lines waited in `told/` and reached no agent (Seb: "I no longer receive github
+  events on my agents").
 - Idle is the `idle` status of the session in the records of claude: no turn, no dialog open
   (a question or a permission is `waiting`), and no wait for the reset of the usage limit. Only
   the record of the claude the terminal started counts: one stopped with its container leaves its

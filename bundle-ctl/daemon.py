@@ -63,8 +63,10 @@ from agents import (  # noqa: E402
     get_window_pids,
     has_window,
     is_agent_running,
+    read_stat,
     read_state,
     read_text,
+    reads_told,
     write_text,
 )
 from branch_status import (  # noqa: E402
@@ -2137,16 +2139,6 @@ def get_terminals():
     return terminals
 
 
-def read_stat(pid):
-    """The parent of a process and when it started, in seconds since the epoch."""
-    fields = pathlib.Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()
-    boot = next(
-        line.split()[1] for line in pathlib.Path("/proc/stat").read_text().splitlines()
-        if line.startswith("btime ")
-    )
-    return int(fields[1]), int(boot) + int(fields[19]) / os.sysconf("SC_CLK_TCK")
-
-
 def is_minimized(pid, env):
     """Whether the windows of this process are all minimized, and it has one."""
     out = subprocess.run(["wmctrl", "-l", "-p"], capture_output=True, check=False, text=True, env=env)
@@ -2761,10 +2753,12 @@ def get_session_agent(session):
 def leave_told(agent, session, text):
     """Leave a line for the terminal of an agent window to type as it is: in the pr-events/ of an
     ops window, or in TOLD_DIR/BUNDLE/SESSION, as a bundle writes its .agent/ folder, from where
-    its terminal types only what client/prwatch.py writes (README.md, "PR events")."""
-    folder = get_agent_folder(agent) if agent.startswith(OPS) else TOLD_DIR / agent
+    its terminal types only what client/prwatch.py writes (README.md, "PR events"). A terminal
+    started before TOLD_SINCE reads pr-events/ alone, so its line goes there, as it did then."""
+    told = not agent.startswith(OPS) and reads_told(agent)
+    folder = TOLD_DIR / agent if told else get_agent_folder(agent)
     folder.mkdir(parents=True, exist_ok=True)
-    leave_event(folder, text, "pr-events" if agent.startswith(OPS) else session)
+    leave_event(folder, text, session if told else "pr-events")
 
 
 def leave_event(agent, text, kind="pr-events"):

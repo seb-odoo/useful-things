@@ -68,6 +68,11 @@ def check_tell(root, check):
     prwatch = load("prwatch", HERE / "client" / "prwatch.py")
     taken = prwatch.take(host)
     check("the terminal takes it as a PR event", taken == [TEXT], taken)
+    daemon.reads_told = lambda bundle: False
+    found = tell(BUNDLE_SESSION)
+    check("a terminal of before told/ gets it in .agent, as then",
+          found[0] == 200 and get_lines(agents["b1"]) == [TEXT] and not prwatch.take(host), found)
+    shutil.rmtree(agents["b1"] / "pr-events")
 
     running.clear()
     ops = agents[f"ops-{OPS_SESSION}"]
@@ -86,6 +91,9 @@ def check_tell(root, check):
     elsewhere = root / "elsewhere"
     elsewhere.mkdir()
     (agents["b1"] / "pr-events").symlink_to(elsewhere)
+    found = tell(BUNDLE_SESSION)
+    check("a link in place of pr-events is not followed", found[0] == "Refused", found)
+    daemon.reads_told = lambda bundle: True
     found = tell(BUNDLE_SESSION)
     check("a link in place of pr-events changes nothing", found[0] == 200, found)
     check("nothing is written where it leads", not any(elsewhere.iterdir()))
@@ -192,7 +200,7 @@ def main():
         check("no podman ran", not (root / "podman.log").exists())
     for line in failures:
         print(line)
-    print(f"{37 - len(failures)}/37 cases as expected")
+    print(f"{40 - len(failures)}/40 cases as expected")
     sys.exit(1 if failures else 0)
 
 

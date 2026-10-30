@@ -29,6 +29,7 @@ SESSIONS = pathlib.Path.home() / ".claude" / "projects" / "-workspace"
 STATE = pathlib.Path(STATE_ROOT) / "bundle-ctl"
 STATE_FILE = STATE / "state.json"
 TAKEOVER = pathlib.Path(__file__).resolve().parent.parent / "bundle-ctl/client/agent-takeover.py"
+TOLD_SINCE = 1793359317
 VALUE_FORMS = {
     "effort": re.compile("|".join(EFFORTS)),
     "model": re.compile("|".join(MODELS)),
@@ -164,6 +165,30 @@ def is_agent_running(bundle):
         if any(arg.endswith(b"agent-terminal.py") for arg in args):
             return True
     return False
+
+
+def read_stat(pid):
+    """The parent of a process and when it started, in seconds since the epoch."""
+    fields = pathlib.Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()
+    boot = next(
+        line.split()[1] for line in pathlib.Path("/proc/stat").read_text().splitlines()
+        if line.startswith("btime ")
+    )
+    return int(fields[1]), int(boot) + int(fields[19]) / os.sysconf("SC_CLK_TCK")
+
+
+def reads_told(bundle):
+    """Whether the agent terminal of a bundle types the lines the host leaves in STATE/told, as one
+    started since TOLD_SINCE (2026-10-30 12:21:57, e9b6141) does. One started before reads only
+    .agent/pr-events, and keeps its old code until the daemon restarts it, idle and minimized."""
+    for path in pathlib.Path("/proc").glob("[0-9]*/cmdline"):
+        try:
+            args = path.read_bytes().split(b"\0")
+            if args[1].endswith(b"/agent-terminal.py") and args[2] == bundle.encode():
+                return read_stat(int(path.parent.name))[1] >= TOLD_SINCE
+        except (OSError, IndexError, ValueError):
+            continue
+    return True
 
 
 def get_window_pids(bundle):
