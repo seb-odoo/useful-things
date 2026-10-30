@@ -1033,6 +1033,8 @@ a prompt.
   running. It leaves the line in `pr-events/` of the ops window, a folder of the host, or for a
   bundle in `~/.local/state/bundle-ctl/told/BUNDLE/SESSION/` (see PR events), and the terminal
   types it, idle or busy. No hook takes it: in `.agent/`, the bundle could leave a false one.
+- A request a gateway held names its bundle, not its conversation: `POST /tell {bundle, text}`
+  types the line in the session the terminal of that bundle runs now, 404 when none runs.
 - An ops window whose claude ended keeps its folder until the window closes, and the line waits
   there for the window that goes on with the session. All of them end when the ops container goes
   down: on 2026-10-29 the line of request 542 was lost, as every ops window was down from 13:42 to

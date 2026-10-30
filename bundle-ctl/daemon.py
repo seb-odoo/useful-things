@@ -2718,14 +2718,23 @@ def read_hok_waiting():
 
 def tell(caller, query, body):
     """`POST /tell {session, text}`: one line of hok, once Seb answered a card of a Claude session,
-    for the agent window that runs that session, as a PR event (README.md, "hok events"). Only the
-    host asks (HOST_ONLY): the line is typed as a prompt."""
-    session, text = body.get("session"), body.get("text")
-    if not isinstance(session, str) or not SESSION_ID.fullmatch(session):
-        raise ValueError("session: a session id")
+    for the agent window that runs that session, as a PR event (README.md, "hok events"). A card
+    a gateway held names its bundle and no session: `{bundle, text}` tells the session its
+    terminal runs. Only the host asks (HOST_ONLY): the line is typed as a prompt."""
+    session, bundle, text = body.get("session"), body.get("bundle"), body.get("text")
     if not isinstance(text, str) or not text.isprintable() or not 0 < len(text) <= MAX_TOLD:
         raise ValueError(f"text: one line of at most {MAX_TOLD} characters")
-    agent = get_session_agent(session)
+    if bundle is not None:
+        if session is not None or not isinstance(bundle, str) or not BUNDLE_NAME.fullmatch(bundle):
+            raise ValueError("bundle: a bundle name, and no session")
+        session = read_text(get_agent_folder(bundle) / "session")
+        if bundle not in get_terminals() or not SESSION_ID.fullmatch(session or ""):
+            return 404, {"error": f"no agent window runs {bundle}"}
+        agent = bundle
+    elif not isinstance(session, str) or not SESSION_ID.fullmatch(session):
+        raise ValueError("session: a session id")
+    else:
+        agent = get_session_agent(session)
     if agent is None:
         return 404, {"error": f"no agent window runs {session}"}
     try:

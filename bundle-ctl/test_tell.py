@@ -32,9 +32,16 @@ def get_lines(folder):
     return sorted(path.read_text() for path in folder.glob("pr-events/[!.]*.txt"))
 
 
-def tell(session, text=TEXT):
+def tell(session, text=TEXT, **body):
     try:
-        return daemon.tell(daemon.HOST, {}, {"session": session, "text": text})
+        return daemon.tell(daemon.HOST, {}, {"session": session, "text": text, **body})
+    except (daemon.Refused, ValueError) as error:
+        return type(error).__name__, str(error)
+
+
+def tell_bundle(bundle, text=TEXT):
+    try:
+        return daemon.tell(daemon.HOST, {}, {"bundle": bundle, "text": text})
     except (daemon.Refused, ValueError) as error:
         return type(error).__name__, str(error)
 
@@ -68,6 +75,15 @@ def check_tell(root, check):
     prwatch = load("prwatch", HERE / "client" / "prwatch.py")
     taken = prwatch.take(host)
     check("the terminal takes it as a PR event", taken == [TEXT], taken)
+    found = tell_bundle("b1")
+    check("a card a gateway held for b1 is told to its session", found == (200, {"bundle": "b1"})
+          and prwatch.take(host) == [TEXT], found)
+    found = tell_bundle("b2")
+    check("a bundle with no terminal is not, by name",
+          found[0] == 404 and not get_lines(agents["b2"]), found)
+    check("a bad bundle name is refused", tell_bundle("../b1")[0] == "ValueError")
+    found = tell(BUNDLE_SESSION, bundle="b1")
+    check("a bundle with a session is refused", found[0] == "ValueError", found)
     daemon.reads_told = lambda bundle: False
     found = tell(BUNDLE_SESSION)
     check("a terminal of before told/ gets it in .agent, as then",
