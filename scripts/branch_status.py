@@ -10,6 +10,7 @@ Examples:
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+import contextlib
 from contextlib import redirect_stdout
 from datetime import datetime
 import functools
@@ -29,7 +30,7 @@ from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 
-from agents import LAUNCH_GRACE, get_agent, is_handled, read_state
+from agents import LAUNCH_GRACE, STATE, get_agent, is_handled, read_state
 from commands import (
     BUNDLE_SUFFIX,
     get_base_for_repo,
@@ -66,6 +67,7 @@ DELEGATE = re.compile(r"@robodoo\b.*\bdelegate[+=]")
 FW_BOT = "fw-bot"
 # A bundle writes the .git/config of these repos: git runs none of the programs it may name there.
 GIT = ("git", "-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null", "-c", "core.pager=cat")
+GIT_CACHE = STATE / "branch-status.json"
 GROUPS = {
     "open": "Running",
     "me": "Waits on me",
@@ -367,6 +369,51 @@ def get_commits(repo, branch):
     ]
 
 
+def read_heads(repo, refs):
+    """{ref: its commit} of these refs of repo, from one git call: a missing ref is left out."""
+    out = git(repo, "for-each-ref", "--format=%(refname) %(objectname)", *refs) if refs else ""
+    return dict(line.split(" ") for line in (out or "").splitlines())
+
+
+def read_git_facts(executor, heads, write_tree):
+    """The status, the push and the commits of each (repo, branch) of heads, which maps them to
+    their commit. On the host each git call starts a host-box, 20 to 40 ms of CPU, and triage
+    reads gbs every 10 minutes: GIT_CACHE keeps them by the commits of the branch, of its base
+    and of its dev branch, and git reads them again only once one of those moved."""
+    refs = {pair: (get_base_ref(*pair), get_remote_dev_ref(pair[1], pair[0])) for pair in heads}
+    repos = sorted({repo for repo, _branch in heads})
+    wanted = [
+        {ref for pair, both in refs.items() if pair[0] == repo for ref in both} for repo in repos
+    ]
+    shas = dict(zip(repos, executor.map(read_heads, repos, wanted)))
+    keys = {
+        pair: [head, *(shas[pair[0]].get(ref) for ref in refs[pair])]
+        for pair, head in heads.items()
+    }
+    try:
+        kept = json.loads(GIT_CACHE.read_text())
+    except (OSError, ValueError):
+        kept = {}
+
+    def read(pair):
+        found = kept.get(" ".join(pair)) if isinstance(kept, dict) else None
+        if isinstance(found, dict) and found.get("key") == keys[pair]:
+            return found
+        return {
+            "commits": get_commits(*pair),
+            "key": keys[pair],
+            "push": get_push(*pair),
+            "status": get_status(*pair, write_tree),
+        }
+
+    facts = dict(zip(heads, executor.map(read, heads)))
+    fresh = GIT_CACHE.with_name(f".{GIT_CACHE.name}.{os.getpid()}")
+    with contextlib.suppress(OSError):
+        fresh.write_text(json.dumps({" ".join(pair): found for pair, found in facts.items()}))
+        fresh.replace(GIT_CACHE)
+    return facts
+
+
 def format_age(seconds, plain=False):
     age = next(
         (f"{int(seconds // size)}{unit}" for unit, size in AGE_UNITS if seconds >= size),
@@ -638,11 +685,7 @@ def get_bundles():
         pairs = [(repo, branch) for branch, dates in bundles.items() for repo in dates]
         prs_future = executor.submit(get_prs, pairs)
         open_future = executor.submit(get_open_bundle_folders)
-        statuses = dict(
-            zip(pairs, executor.map(lambda pair: get_status(*pair, write_tree), pairs)),
-        )
-        pushes = dict(zip(pairs, executor.map(lambda pair: get_push(*pair), pairs)))
-        commits = dict(zip(pairs, executor.map(lambda pair: get_commits(*pair), pairs)))
+        facts = read_git_facts(executor, heads, write_tree)
         subjects = dict(zip(repos, executor.map(get_subjects, repos)))
         prs, errors = prs_future.result()
         open_folders = open_future.result()
@@ -656,8 +699,8 @@ def get_bundles():
         for repo in sorted(dates, key=lambda repo: repo != "odoo"):
             pr = (prs or {}).get((repo, branch))
             facts = get_pr_facts(pr, repo, now) if pr else None
-            status = statuses[repo, branch]
-            push = pushes[repo, branch]
+            status = facts[repo, branch]["status"]
+            push = facts[repo, branch]["push"]
             delegated |= (
                 bool(facts) and facts["delegated"] and facts["mergebot"] not in R_PLUS_STATES
             )
@@ -672,7 +715,7 @@ def get_bundles():
             repos_of_bundle[repo] = {
                 "ahead": status and status["ahead"],
                 "behind": status and status["behind"],
-                "commits": commits[repo, branch],
+                "commits": facts[repo, branch]["commits"],
                 "conflict": status and status["conflict"],
                 "create_pr": get_compare_url(repo, branch) if create_pr else None,
                 "empty": empty,

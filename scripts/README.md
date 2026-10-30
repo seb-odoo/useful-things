@@ -655,6 +655,12 @@ the PR queries worked.
   branch_status: gbs cannot import daemon.py.
 - `main()` deletes for real, `--json` too: to look at its data without that, call
   `get_bundles()` then `get_merged_bundles()`.
+- The status, the push and the commits of each branch are kept in
+  `~/.local/state/bundle-ctl/branch-status.json` by the commits of the branch, of its base and of
+  its dev branch, and git reads them again only once one of those moved. On the host each git call
+  of a bundle repo starts a host-box, 20 to 40 ms of CPU, and the automatic triage runs gbs every
+  10 minutes: a run took hundreds of them, 30 to 70 s of CPU (2026-10-30). `python3
+  test_git_cache.py` has the cases.
 - A PR branch that only exists on the remote is made local by gfa, not listed by gbs. A
   `no remote` row with commits next to an open PR in another repo of its bundle is deleted by the
   next gfa.

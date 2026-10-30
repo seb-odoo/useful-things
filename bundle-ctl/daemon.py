@@ -22,6 +22,7 @@ import os
 import pathlib
 import re
 import secrets
+import select
 import shlex
 import shutil
 import signal
@@ -167,6 +168,7 @@ DISK_WARN = float(
 )
 DISK_WARNED = STATE / "disk-warned"
 FETCH_TIMEOUT = 60
+FOLDERS_KEPT = 60
 FREE_AFTER = 5 * 60
 GITHUB_ASK = 600
 GITHUB_MUX = pathlib.Path.home() / ".local" / "state" / "ssh-github-mux"
@@ -178,7 +180,9 @@ DECK_DIR = STATE / "deck"
 TOLD_DIR = STATE / "told"
 HELD_LETTER = "b"
 HOK_KEPT = 5
+HOK_TIME = 30
 HOK_WAITING = pathlib.Path(CONFIG["REPO_ROOT"]) / "host-ctl" / "approve.py"
+HOK_WORKER = HERE / "hok-waiting.py"
 HOST = "host"
 HOST_FOLDER = CONFIG.get("BUNDLE_CTL_HOST_FOLDER")
 HOST_ONLY = {
@@ -1043,9 +1047,29 @@ def get_open_windows():
     root = f"{get_worktree_container_folder()}/"
     return {
         folder
-        for folder in get_open_bundle_folders()
+        for folder in read_open_folders()
         if folder.startswith(root) and os.path.isdir(folder)
     }
+
+
+def read_open_folders():
+    """The folders of the running containers, read again with `podman ps` (0.3 s of CPU) once a
+    container started or died since, as the events of keep_launching say, else after FOLDERS_KEPT:
+    each pass of the queue, GET /queue and GET /status ask, up to 20 times a minute."""
+    with open_lock:
+        kept = dict(open_folders)
+    if kept["read"] == kept["events"] and time.monotonic() - kept["at"] < FOLDERS_KEPT:
+        return kept["folders"]
+    folders = get_open_bundle_folders()
+    with open_lock:
+        if open_folders["events"] == kept["events"]:
+            open_folders.update(at=time.monotonic(), folders=folders, read=kept["events"])
+    return folders
+
+
+def note_container_event():
+    with open_lock:
+        open_folders["events"] += 1
 
 
 def count_agents(folders):
@@ -1551,6 +1575,7 @@ def keep_launching():
                 text=True,
             )
             for line in proc.stdout:
+                note_container_event()
                 container, _, status = line.strip().partition(" ")
                 if status == "start":
                     log_addresses(container)
@@ -1558,6 +1583,7 @@ def keep_launching():
                 if status == "died":
                     delete_safely()
             proc.wait()
+            note_container_event()
             time.sleep(5)
 
     def on_timer():
@@ -2638,19 +2664,33 @@ def list_hok(caller, query, body):
 
 
 def read_hok_waiting():
-    """`hok waiting` of host-ctl, read again after HOK_KEPT seconds."""
+    """`hok waiting` of host-ctl, read again after HOK_KEPT seconds by hok-waiting.py, a process
+    that stays: started again once it ended, gave no answer within HOK_TIME, or said the code of
+    hok changed."""
     with hok_lock:
         if time.monotonic() - hok_read["at"] > HOK_KEPT:
-            done = subprocess.run(
-                [sys.executable, str(HOK_WAITING), "waiting"],
-                capture_output=True,
-                check=False,
-                text=True,
-                timeout=30,
-            )
-            if done.returncode:
-                raise Refused(f"hok waiting exited with {done.returncode}: {done.stderr[-300:]}")
-            hok_read.update(at=time.monotonic(), listed=json.loads(done.stdout))
+            worker = hok_read.get("worker")
+            if worker is None or worker.poll() is not None:
+                worker = subprocess.Popen(
+                    [sys.executable, str(HOK_WORKER), str(HOK_WAITING)],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    text=True,
+                )
+                hok_read["worker"] = worker
+            try:
+                worker.stdin.write("\n")
+                worker.stdin.flush()
+                ready = select.select([worker.stdout], [], [], HOK_TIME)[0]
+                answer = json.loads(worker.stdout.readline() if ready else "")
+            except (OSError, ValueError):
+                answer = {"error": f"no answer within {HOK_TIME} s"}
+            if answer.get("stale") or "listed" not in answer:
+                hok_read.pop("worker").kill()
+                worker.wait()
+            if "error" in answer:
+                raise Refused(f"hok waiting: {answer['error']}")
+            hok_read.update(at=time.monotonic(), listed=answer["listed"])
         return hok_read["listed"]
 
 
@@ -2790,6 +2830,8 @@ def get_in_hand():
 
 hok_lock = threading.Lock()
 hok_read = {"at": -HOK_KEPT, "listed": []}
+open_lock = threading.Lock()
+open_folders = {"at": -FOLDERS_KEPT, "events": 0, "folders": set(), "read": -1}
 
 
 def delete_stopped():

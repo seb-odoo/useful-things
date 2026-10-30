@@ -333,6 +333,19 @@ use (`test` with a run in the run queue, `agent` with its agent at work and no r
 neither), the busiest containers, processes and hours. It reads the journal in pieces of 2 hours,
 so it also works through `hctl` in the ops container. `python3 test_cpulog.py` has the cases.
 
+At rest the daemon asks podman little (Seb, 2026-10-30: "laptop still as overloaded"; it took
+0.6 core with nothing running):
+
+- The folders of the running containers (`podman ps`, 0.3 s of CPU) are read again once a
+  container started or died, as the `podman events` of the daemon say, else after 60 s. The
+  queue, `GET /queue` and `GET /status` asked them up to 20 times a minute.
+- `GET /hok` reads `hok waiting` from `hok-waiting.py`, one process that stays, started again
+  when the code of hok changed. It keeps what podman says of the containers 30 s, as the hok
+  window does: `approve.py waiting`, started at each read, took 0.2 s to load, then 0.85 s of
+  podman for each request that waits. `python3 test_hok.py` and `python3 test_open_folders.py`
+  have the cases.
+- `GET /branches` runs gbs, which keeps its git answers by commit (scripts README, gbs).
+
 ## Disk
 
 A bundle takes about 3 GB at once, so agents that each make one can fill the disk in minutes. The
@@ -724,7 +737,8 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   open+focus this hok request on the app", "a button to focus the current agent in the agent
   list"), through `bundle_open.py` (scripts README), and reads the requests of its agent with `GET
   /hok`: `hok waiting` of host-ctl, read again after 5 seconds at most, as every agent terminal
-  asks, then kept to the bundle that asks.
+  asks, then kept to the bundle that asks. `hok-waiting.py` reads it, a process that stays (CPU
+  log, below).
 - `agent-list.py`, a GTK window that stays open (Seb, 2026-10-15: "a new display for agents list
   that I can keep open and that updates live"), has the rows of the picker, read again every 2
   seconds, the terminals shown on screen included, and no other window. The mark and the kind of
