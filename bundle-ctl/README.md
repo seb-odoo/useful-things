@@ -1093,7 +1093,10 @@ answer as `bctl delete` does, and the same task sent again takes back the reques
 - `agent-terminal.py` runs `claude --session-id SESSION --model opus --permission-mode auto` in
   the ops container, in the repos, started first when it is not up. Other sessions work in that
   container: quitting claude or closing the window never stops it, and a closed window stops its
-  own claude (`pkill` on its command line up to the session id). The task comes after the id and
+  own claude (`pkill` on its command line up to the session id, past the path of the program:
+  `~/.claude/bin/claude` execs the claude of the VS Code extension, so the process shows that
+  path; until 2026-10-30 the match missed it, and 33 claudes ran on with no window, one of them
+  asking a hok card whose answer had no window to go to). The task comes after the id and
   may name another session: on 2026-10-29 the close of one ops window stopped the claude of the
   window it had started, on `claude ended with code 143`, as its task named the first session.
   A turn that ends on an API error gets `Continue from where you left off.`

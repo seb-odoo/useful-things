@@ -19,6 +19,11 @@ import time
 GO_ON = "Continue from where you left off."
 HERE = pathlib.Path(__file__).resolve().parent
 MARKERS = ("terminal", "container")
+# What ~/.claude/bin/claude execs: the process in the container shows this path, not the wrapper.
+NATIVE = (
+    "/home/vscode/.vscode-server/extensions/anthropic.claude-code-2.1.312-linux-x64"
+    "/resources/native-binary/claude"
+)
 PODMAN = """#!/bin/bash
 echo "$*" >>"$LOG"
 case "$1 $*" in
@@ -600,7 +605,9 @@ def check_ops_close(case):
     case.check("closing the terminal stops its claude", stopped)
     patterns = [line.removeprefix(pkill) for line in case.log() if line.startswith(pkill)]
     pattern = patterns[0] if patterns else "^$"
-    claude = case.runs()[0].partition(" c1 ")[2]
+    wrapper, _, args = case.runs()[0].partition(" c1 ")[2].partition(" ")
+    case.check("podman exec runs the claude wrapper", wrapper == "/home/vscode/.claude/bin/claude")
+    claude = f"{NATIVE} {args}"
     other = claude.replace(" s2 ", " s3 ") + " of s2"
     case.check("the pkill matches its claude", re.search(pattern, claude))
     case.check("the pkill misses a task that names its session", not re.search(pattern, other))

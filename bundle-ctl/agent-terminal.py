@@ -725,8 +725,9 @@ def run_ops(name):
         if container:
             # Its parent is 0, as podman exec started it: a tab may hold the session too. The
             # match ends at the session id, as the task that follows may name another session.
-            own = " ".join(claude[: claude.index(session) + 1])
-            stop_claude = ["pkill", "--parent", "0", "-f", f"^{own} "]
+            # CLAUDE execs the binary of the extension, so the process shows that path instead.
+            own = " ".join(claude[1 : claude.index(session) + 1])
+            stop_claude = ["pkill", "--parent", "0", "-f", f"^[^ ]*/claude {own} "]
             subprocess.run(["podman", "exec", "--user", USER, container, *stop_claude], check=False)
         raise
     except Failure as error:
