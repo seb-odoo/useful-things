@@ -52,6 +52,14 @@ def check_config(root):
     (claude / "CLAUDE.md").write_text("rules\n")
     (claude / ".credentials.json").write_text('{"claudeAiOauth": {"accessToken": "secret"}}')
     (claude / "skills" / "a" / "out").symlink_to("/etc/passwd")
+    fix_agents = root / "repo" / "runbot-fix-agents"
+    (fix_agents / "skills" / "t").mkdir(parents=True)
+    (fix_agents / "skills" / "t" / "SKILL.md").write_text("team skill\n")
+    (claude / "skills" / "t").symlink_to(fix_agents / "skills" / "t")
+    (claude / "skills" / "up").symlink_to(f"{fix_agents}/../secret")
+    (root / "useful").mkdir()
+    (root / "useful" / ".gitconfig").write_text("[user]\n")
+    (home / ".gitconfig").symlink_to(root / "useful" / ".gitconfig")
     own = root / "cache" / "devcontainer" / "claude-config" / "b1"
     own.mkdir(parents=True)
     (own / ".claude.json").write_text(json.dumps({
@@ -74,12 +82,14 @@ def check_config(root):
                                        "SHARED_CLAUDE": str(shared),
                                        "HOST_PROJECT": "-home-seb-repo"}
     data = remote_agent.build_config(root / "b1")
-    names, contents = [], {}
+    names, contents, links = [], {}, {}
     with tarfile.open(fileobj=io.BytesIO(data)) as tar:
         for member in tar:
             names.append(member.name)
             if member.isfile():
                 contents[member.name] = tar.extractfile(member).read()
+            if member.issym():
+                links[member.name] = member.linkname
     check("the skills go", "home/.claude/skills/a/SKILL.md" in names, names)
     check("the rules go", contents.get("home/.claude/CLAUDE.md") == b"rules\n", names)
     check("the bundle's settings go", "home/.claude/settings.json" in names, names)
@@ -93,6 +103,13 @@ def check_config(root):
     check("and its own files", "workspace/.claude/settings.local.json" in names, names)
     check("never the login", not any("credentials" in name for name in names), names)
     check("nor a link out of the tree", "home/.claude/skills/a/out" not in names, names)
+    check("a link into runbot-fix-agents names its copy",
+          links.get("home/.claude/skills/t") == "../../runbot-fix-agents/skills/t", links)
+    skill = contents.get("home/runbot-fix-agents/skills/t/SKILL.md")
+    check("which goes", skill == b"team skill\n", names)
+    check("but not one that climbs out of it", "home/.claude/skills/up" not in names, names)
+    check("~/.gitconfig as the file its link names",
+          contents.get("home/.gitconfig") == b"[user]\n", names)
     kept = json.loads(contents["home/.claude/.claude.json"])
     check(".claude.json by its allow list", kept == {"hasCompletedOnboarding": True}, kept)
     check("everything under home/ or workspace/",

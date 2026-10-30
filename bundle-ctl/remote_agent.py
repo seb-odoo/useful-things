@@ -244,13 +244,15 @@ def build_config(bundle_folder):
     """The config part: what MOUNTS sends, at the paths the job unpacks (home/, workspace/)."""
     values, own = get_paths(bundle_folder)
     claude = HOME / ".claude"
+    repo_root = pathlib.Path(values["REPO_ROOT"])
+    sent = {str(repo_root / "runbot-fix-agents"): "home/runbot-fix-agents"}
     out = io.BytesIO()
     with tarfile.open(fileobj=out, mode="w") as tar:
 
         def add(source, target):
             source = pathlib.Path(source)
             if source.exists():
-                tar.add(source, arcname=target, filter=keep_regular)
+                tar.add(source, arcname=target, filter=lambda info: keep_regular(info, sent))
 
         for name in (
             "CLAUDE.md",
@@ -290,10 +292,10 @@ def build_config(bundle_folder):
             tar.addfile(info, io.BytesIO(data))
         add(own / "gh", "home/.config/gh")
         add(own / "ssh", "home/.ssh")
-        add(HOME / ".gitconfig", "home/.gitconfig")
+        # install.sh makes ~/.gitconfig a link into useful-things, which keep_regular drops.
+        add((HOME / ".gitconfig").resolve(), "home/.gitconfig")
         add(HOME / ".gitconfig.local", "home/.gitconfig.local")
         add(HOME / ".local" / "bin" / "gh", "home/.local/bin/gh")
-        repo_root = pathlib.Path(values["REPO_ROOT"])
         add(repo_root / "git-gate" / "client" / "git-gate-ssh", "home/.git-gate/git-gate-ssh")
         add(repo_root / "runbot-fix-agents", "home/runbot-fix-agents")
         add(HERE / "client", "home/bundle-ctl/client")
@@ -315,12 +317,22 @@ def build_config(bundle_folder):
     return out.getvalue()
 
 
-def keep_regular(info):
-    """Regular files, folders and links inside the tree only: no device, no link out."""
+def keep_regular(info, sent):
+    """Regular files, folders and links inside the tree only: no device, no link out. A link to
+    a folder the part sends too (`sent`, its path here and its name in the part) goes, made to
+    point at that copy: the skills and agent types linked into runbot-fix-agents.
+    """
     if info.isfile() or info.isdir():
         return info
-    if info.issym() and not info.linkname.startswith("/") and ".." not in info.linkname:
+    if not info.issym():
+        return None
+    if not info.linkname.startswith("/") and ".." not in info.linkname:
         return info
+    target = os.path.normpath(info.linkname)
+    for path, name in sent.items():
+        if f"{target}/".startswith(f"{path}/"):
+            info.linkname = os.path.relpath(name + target[len(path) :], os.path.dirname(info.name))
+            return info
     return None
 
 
