@@ -566,6 +566,7 @@ def check_reviews(root):
     """
     now = time.time()
     old, recent, closed, shut = now - 3 * 86400, now - 86400, now - 20 * 60, now - 5 * 60
+    week = now - 8 * 86400
     calls, world = [], {"building": [], "closed": {}, "open": set(), "queue": []}
     bundles = (
         "master-building-aku",
@@ -574,6 +575,7 @@ def check_reviews(root):
         "master-fixed-aku",
         "master-grouped-aku",
         "master-held-aku",
+        "master-idle--seb",
         "master-kept-aku",
         "master-later-aku",
         "master-mine--seb",
@@ -597,6 +599,8 @@ def check_reviews(root):
     commit_as_aku(repo, "before the rebase")
     git(repo, "checkout", "--quiet", "-b", "master-fixed-aku", "master")
     git(repo, "-c", "user.name=t", "commit", "--allow-empty", "-qm", "fix of the review")
+    git(repo, "checkout", "--quiet", "-b", "master-idle--seb", "master")
+    commit_as_aku(repo, "picked from aku")
     for bundle in bundles:
         folder = root / "master" / bundle
         (folder / "odoo").mkdir(parents=True)
@@ -609,13 +613,14 @@ def check_reviews(root):
             root / "claude-config" / bundle / ".claude.json",
         ):
             path.touch()
-            os.utime(path, (old, old))
+            os.utime(path, (week, week) if bundle == "master-idle--seb" else (old, old))
     os.utime(root / "master" / "master-recent-aku" / daemon.MADE, (recent, recent))
     os.utime(root / "wt" / "master-commit-aku" / "logs" / "HEAD", (recent, recent))
     os.utime(root / "claude-config" / "master-tab-aku" / ".claude.json", (recent, recent))
     for bundle, stop in (
         ("master-building-aku", closed),
         ("master-closed-aku", closed),
+        ("master-mine--seb", closed),
         ("master-reopened-aku", closed),
         ("master-shut-aku", shut),
     ):
@@ -673,7 +678,13 @@ def check_reviews(root):
     checks.append(
         (
             "a bundle of others goes 10 minutes after its container stopped, not one being built",
-            ("master-closed-aku",) in calls and len(calls) == 4,
+            ("master-closed-aku",) in calls and len(calls) == 5,
+        ),
+    )
+    checks.append(
+        (
+            "a bundle of Seb goes after 7 days, never with --force, not 10 minutes after its stop",
+            ("master-idle--seb",) in calls and not {("master-mine--seb",)} & set(calls),
         ),
     )
     calls.clear()

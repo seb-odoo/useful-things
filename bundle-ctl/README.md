@@ -379,6 +379,13 @@ Firefox was closed (Seb, 2026-10-28: "also can't open from firefox", on a second
 under its group). Refused while a task of the bundle waits in the queue.
 `python3 test_delete.py` has the cases.
 
+A bundle of Seb (a name with `BUNDLE_SUFFIX`) goes the same way once unused for
+`BUNDLE_CTL_OWN_IDLE_DAYS` (default 7), whether its container ran or not, and never with
+`--force`: uncommitted files or a commit no remote has keep it until a new use. An open PR does
+not keep it, `bctl fetch` brings it back from its PR. Seb's choice, 2026-10-30: the disk reached
+the 30 GB floor 7 times since 10-12, and on 10-30 12 of his bundles idle since 10-22 or before held
+25.5 GB, each with an open PR, which `bctl delete` refuses.
+
 A task that is the session of its agent waiting for a manual resume or for its time (`bctl
 requeue`, Pause in the agent list, `bctl open --resume` with `--paused` or `--after`) does not keep
 such a bundle: its checkout goes the same way, and the task keeps its session and `fetch_bundle.py

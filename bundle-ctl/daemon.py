@@ -233,6 +233,9 @@ REVIEW_CLOSED = 60 * float(
 REVIEW_IDLE = 86400 * float(
     os.environ.get("BUNDLE_CTL_REVIEW_IDLE_DAYS") or CONFIG.get("BUNDLE_CTL_REVIEW_IDLE_DAYS") or 2,
 )
+OWN_IDLE = 86400 * float(
+    os.environ.get("BUNDLE_CTL_OWN_IDLE_DAYS") or CONFIG.get("BUNDLE_CTL_OWN_IDLE_DAYS") or 7,
+)
 RUN_CPUS = os.environ.get("BUNDLE_CTL_RUN_CPUS") or CONFIG.get("BUNDLE_CTL_RUN_CPUS")
 RUN_MIN_FREE = float(
     os.environ.get("BUNDLE_CTL_RUN_MIN_FREE_GB") or CONFIG.get("BUNDLE_CTL_RUN_MIN_FREE_GB") or 4,
@@ -2953,9 +2956,10 @@ def set_rebuild(bundle, session):
 
 def drop_idle_reviews():
     """Delete the bundles of the PRs of others that nobody used for REVIEW_CLOSED since their
-    container stopped, or for REVIEW_IDLE when none ever ran: `bctl fetch` brings one back. One
-    that holds work is kept until it is used again, but not one that only holds the older head of
-    a PR its author rebased since. One Seb still has in hand is kept (get_in_hand).
+    container stopped, or for REVIEW_IDLE when none ever ran, and those of Seb after OWN_IDLE:
+    `bctl fetch` brings one back. One that holds work is kept until it is used again, but not one
+    of others that only holds the older head of a PR its author rebased since. One Seb still has
+    in hand is kept (get_in_hand).
     """
     closed = get_closed_windows()
     open_windows = get_open_windows()
@@ -2972,9 +2976,9 @@ def drop_idle_reviews():
     for folder in sorted(pathlib.Path(get_worktree_container_folder()).glob("*/*")):
         bundle = folder.name
         bare = is_bare(folder)
+        own = BUNDLE_SUFFIX in bundle and not bare
         if (
-            (BUNDLE_SUFFIX in bundle and not bare)
-            or bundle in STICKY_BUNDLES
+            bundle in STICKY_BUNDLES
             or bundle in busy
             or (bare and bundle in parked)
             or not BUNDLE_NAME.fullmatch(bundle)
@@ -2984,7 +2988,7 @@ def drop_idle_reviews():
         ):
             continue
         since = get_unused_since(bundle, closed)
-        idle = REVIEW_CLOSED if str(folder) in closed else REVIEW_IDLE
+        idle = OWN_IDLE if own else REVIEW_CLOSED if str(folder) in closed else REVIEW_IDLE
         if time.time() - since < idle or kept_reviews.get(bundle) == since:
             continue
         if in_hand is None:
@@ -2992,7 +2996,7 @@ def drop_idle_reviews():
         if bundle in in_hand:
             continue
 
-        def work(log, bundle=bundle, since=since, bare=bare, parked=bundle in parked):
+        def work(log, bundle=bundle, since=since, bare=bare, own=own, parked=bundle in parked):
             if (
                 get_worktree_bundle_folder(bundle) in get_open_windows()
                 or get_unused_since(bundle, get_closed_windows()) != since
@@ -3006,7 +3010,9 @@ def drop_idle_reviews():
                 log.write(f"{bundle} was built since\n")
                 return {}
             try:
-                force = any([get_others_commits(bundle, repo) for repo in local_branches(bundle)])
+                force = not own and any(
+                    [get_others_commits(bundle, repo) for repo in local_branches(bundle)],
+                )
                 if force:
                     check_uncommitted(bundle)
                 keep_last_answer(bundle)
