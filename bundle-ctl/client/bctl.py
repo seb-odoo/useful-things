@@ -19,6 +19,7 @@
     bctl build
     bctl delete [BUNDLE] --reason TEXT [--drop COMMIT]... [--wait SECONDS]
     bctl node-modules [BASE] [--reason TEXT] [--wait SECONDS]
+    bctl free-disk [--reason TEXT] [--wait SECONDS]
     bctl run [--kind KIND] [--workers N] [-- COMMAND...]
     bctl runs [--json]
 
@@ -121,6 +122,10 @@ node-modules builds the node_modules of the package.json of the web tooling of a
 when no bundle had it yet: each bundle links its node_modules to the tree of its own package.json,
 read-only, and a bundle that runs loads a new one at once. From a bundle, for its own base, it
 waits for Seb in hok, and --wait works as for delete.
+
+free-disk waits for Seb in hok, with --wait as for delete. His yes removes the stopped
+containers of the bundles, which their next open makes again, and the podman images no tag
+names.
 
 run waits in the run queue of the host until cores and memory are free for a heavy command, then
 runs COMMAND pinned to the cores it got, which it holds until COMMAND ends. Without COMMAND the
@@ -351,6 +356,13 @@ def print_node_modules(answer):
         return
     print(
         f"waits for Seb: hok {answer['held']}. His yes builds the node_modules of {answer['base']}.",
+    )
+
+
+def print_free_disk(answer):
+    print(
+        f"waits for Seb: hok {answer['held']}. His yes removes the stopped containers of the"
+        " bundles and the podman images no tag names.",
     )
 
 
@@ -670,6 +682,9 @@ def main():
     node_modules.add_argument("base", nargs="?", help="default: the base of this container")
     node_modules.add_argument("--reason", help="the line Seb reads before his yes")
     node_modules.add_argument("--wait", default=0, type=int, help="seconds to wait for his answer")
+    free_disk = commands.add_parser("free-disk", help="free disk space, after Seb's yes")
+    free_disk.add_argument("--reason", help="the line Seb reads before his yes")
+    free_disk.add_argument("--wait", default=0, type=int, help="seconds to wait for his answer")
     run_ = commands.add_parser("run", help="a heavy command, once the host has cores for it")
     run_.add_argument(
         "--kind",
@@ -810,6 +825,13 @@ def main():
                 print_node_modules(answer)
                 sys.stdout.flush()
                 wait_held(answer["held"], args.wait)
+    elif args.command == "free-disk":
+        answer = request("POST", "/free-disk", {"reason": args.reason} if args.reason else {})
+        printer = print_free_disk
+        if args.wait:
+            print_free_disk(answer)
+            sys.stdout.flush()
+            wait_held(answer["held"], args.wait)
     elif args.command == "open" and args.cut:
         if args.resume:
             answer = request("POST", "/open", {"cut": True, "resume": True})

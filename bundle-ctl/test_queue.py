@@ -384,7 +384,8 @@ def check_disk(root):
     daemon.DISK_STOP, daemon.DISK_WARN = 30, 60
     daemon.read_disk_free = lambda: 20.4
     refused = (
-        "20 GB left on the disk, under 30: no new bundle until Seb frees space, his desktop says so"
+        "20 GB left on the disk, under 30: no new bundle until Seb frees space, his desktop says so."
+        " bctl free-disk asks his yes to free it"
     )
     for verb, body in (
         (daemon.create, {"base": "master", "name": "x"}),

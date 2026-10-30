@@ -606,7 +606,7 @@ def check_disk():
     if free < DISK_STOP:
         raise Refused(
             f"{free:.0f} GB left on the disk, under {DISK_STOP:.0f}: no new bundle until Seb frees"
-            " space, his desktop says so",
+            " space, his desktop says so. bctl free-disk asks his yes to free it",
         )
 
 
@@ -3158,11 +3158,13 @@ def send_task(item):
 
 def send_held(item):
     """Seb's yes to what was held: the deletion of a bundle, the task a bundle sends to a new ops
-    agent or to another bundle, or the resume of the cut sessions."""
+    agent or to another bundle, the resume of the cut sessions, or what frees the disk."""
     if "resume" in item["send"]:
         return resume_cut(item["send"]["resume"])
     if "queue" in item["send"]:
         return send_task(item)
+    if "free_disk" in item["send"]:
+        return send_free_disk(item)
     if "node_modules" in item["send"]:
         base, package = (item["send"]["node_modules"][key] for key in ("base", "package"))
         _code, answer = start_job(
@@ -3333,6 +3335,73 @@ def build_node_modules_safely():
         build_node_modules()
     except Exception:
         traceback.print_exc()
+
+
+def read_podman(*args):
+    """The lines podman prints, each split on its first space."""
+    out = subprocess.run(["podman", *args], capture_output=True, check=False, text=True).stdout
+    return [line.split(" ", 1) for line in out.splitlines() if " " in line]
+
+
+def free_disk(caller, query, body):
+    """Hold for Seb's yes the removal of what takes disk space for nothing: the stopped containers
+    of the bundles, which the next open of each makes again, as their databases and filestore are
+    folders of the host, and the podman images no tag names."""
+    if HELD is None:
+        raise Refused("no gateway-core beside useful-things: hok cannot list the request")
+    containers = read_podman(
+        "ps",
+        "--all",
+        "--filter",
+        "label=devcontainer.local_folder",
+        "--filter",
+        "status=exited",
+        "--format",
+        '{{.ID}} {{index .Labels "devcontainer.local_folder"}}',
+    )
+    images = read_podman("images", "--filter", "dangling=true", "--format", "{{.ID}} {{.Size}}")
+    free = read_disk_free()
+    if not containers and not images:
+        raise Refused(f"{free:.0f} GB left, and nothing to remove here: an ops agent frees space")
+    item = {
+        "client": caller,
+        "key": "free-disk",
+        "lines": [
+            f"{free:.0f} GB left on the disk, {DISK_STOP:.0f} needed for new bundles and agents",
+            f"{len(containers)} stopped containers of bundles, made again at the next open:",
+            *(f"  {os.path.basename(path)}" for _id, path in containers),
+            f"{len(images)} podman images that no tag names:",
+            *(f"  {image} {size}" for image, size in images),
+        ],
+        "reason": str(body.get("reason") or ""),
+        "send": {
+            "free_disk": {
+                "containers": [container for container, _path in containers],
+                "images": [image for image, _size in images],
+            },
+        },
+        "title": "free disk space on the host",
+        "yes": (
+            "removes the containers and the images below, unless one runs or is in use again: no"
+            " bundle, branch, database or filestore goes"
+        ),
+    }
+    return 200, {"held": hold(item)}
+
+
+def send_free_disk(item):
+    """Seb's yes to free the disk. podman refuses a container that runs again since the card and
+    an image a container uses, so the containers go first."""
+    before = read_disk_free()
+    listed = item["send"]["free_disk"]
+    for verb, ids in (("rm", listed["containers"]), ("rmi", listed["images"])):
+        if ids:
+            subprocess.run(["podman", verb, *ids], capture_output=True, check=False)
+    free = read_disk_free()
+    text = f"{free - before:.0f} GB freed, {free:.0f} GB left"
+    if free < DISK_STOP:
+        return f"{text}: still under {DISK_STOP:.0f}, an ops agent frees the rest"
+    return text
 
 
 def node_modules(caller, query, body):
@@ -3644,6 +3713,7 @@ VERBS = {
     ("POST", "/delete"): delete,
     ("POST", "/fetch"): fetch,
     ("POST", "/force-queue"): force_queue,
+    ("POST", "/free-disk"): free_disk,
     ("POST", "/move"): move_task,
     ("POST", "/node-modules"): node_modules,
     ("POST", "/open"): open_bundle,

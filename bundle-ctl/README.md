@@ -57,6 +57,7 @@ the pager. `python3 test_node_modules.py` and `python3 test_delete.py` have the 
 | `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle, but for `resume` or `terminal` in a bare folder or after its `bctl build` failed, whose session knows how to build it. With `terminal` from the host on a deleted bundle, the session kept at its deletion in its bare folder made again. A task from a bundle that is neither that bundle nor its parent waits for Seb's yes as `bN` (see A task for another bundle). On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window, and from a bundle a task alone, held as `bN` for Seb's yes in `hok`; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents). With `cut` and `resume` and no bundle, the resume of every cut session, held as `bN` for one yes of Seb (see Cut sessions) |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
 | `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, its text, whether it resumes the session of its bundle and the session it names, where it starts (`where`: `auto`, `local`, `worker` or `worker:NAME`), the memory left on the host, `short` when a start would add to a host that already lacks it, and the names of `BUNDLE_CTL_WORKERS` |
+| `POST /free-disk` | the removal of the stopped containers of the bundles and of the podman images no tag names, held as `bN` for Seb's yes in `hok`, whose card lists them with the space left (see Disk) |
 | `POST /force-queue` | the tasks queued now may start over the cap, those that wait for their time (`--after`) or for a manual resume (`--paused`) aside, or with `bundle` the task of that bundle, its time and its pause too; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
 | `POST /move` | the queued task of `bundle` put at `place` (from 1), where it keeps its priority when that priority fits between the tasks around it, else takes the nearest of theirs; then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
 | `POST /bring-back` | the agent of `bundle` back from its worker: its work tree written here, then its session goes on in a terminal (see Remote agents). The host or that bundle asks |
@@ -381,6 +382,16 @@ daemon reads what is left on the disk of the bundles:
   level warned is kept in `~/.local/state/bundle-ctl/disk-warned`, so a restart of the daemon
   does not warn again.
 - `python3 test_queue.py` has the cases.
+
+`bctl free-disk [--wait S]` asks Seb's yes to remove what takes space for nothing: the stopped
+containers of the bundles, which the next open of each makes again (their databases and filestore
+are folders of the host, `bundle-db`), and the podman images no tag names. Its card lists them
+with the space left, a yes removes them, containers first, and says what it freed. podman keeps a
+container that runs again since the card, and an image a container still uses. The 409 of the
+guard names it. Before, a bundle sent an ops task for this, 6 times from 10-19 to 10-30, each an
+agent and several cards (Seb, 2026-10-30: "dedicated cards for common requests"). An ops agent
+is still needed when the answer says the disk stays under the floor. `python3 test_free_disk.py`
+has the cases.
 
 A bundle of someone else's PR (no `BUNDLE_SUFFIX` in its name) goes by itself once nobody used it
 for `BUNDLE_CTL_REVIEW_CLOSED_MINUTES` since its container stopped (default 10, Seb's choice on
