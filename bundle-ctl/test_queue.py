@@ -72,6 +72,7 @@ CASES = [
             "fresh: the agent of starting to start",
         ],
     ),
+    ({"dead": {**STARTS_ANOTHER, "dead": ""}, "fresh": FRESH}, ["fresh"], [f"dead: {BUSY}"]),
     (
         {"stuck": NEVER_STARTED_ANOTHER, "fresh": FRESH},
         ["fresh"],
@@ -135,9 +136,10 @@ CASES = [
 
 def prepare(root, bundles, cap, short=False, disk=100, busy=False):
     """A daemon whose queue holds these bundles, each given as its `.agent` files, None when its
-    folder is gone: its state, and the list its launches go to. `launching`, `old` and `window`
-    are no file of an agent: the bundle was just launched and has no container yet, its files
-    are older than a launch may take, or it is open in a VS Code window. `short`: the host is
+    folder is gone: its state, and the list its launches go to. `launching`, `old`, `window` and
+    `dead` are no file of an agent: the bundle was just launched and has no container yet, its
+    files are older than a launch may take, it is open in a VS Code window, or its terminal was
+    killed. A `terminal` lives while its window is open, `held` with none. `short`: the host is
     short of memory; `busy`: its CPU is.
     """
     folders = {bundle: str(root / "master" / bundle) for bundle in bundles}
@@ -188,7 +190,14 @@ def prepare(root, bundles, cap, short=False, disk=100, busy=False):
     daemon.get_worktree_bundle_folder = folders.get
     daemon.get_worktree_container_folder = lambda: str(root)
     daemon.has_window = lambda container: "window" in bundles[container]
-    daemon.is_held = lambda agent: (agent / "held").exists()
+    daemon.is_held = lambda agent: (
+        (agent / "held").exists()
+        or (
+            (agent / "terminal").exists()
+            and not (agent / "dead").exists()
+            and str(agent.parent) in daemon.get_open_windows()
+        )
+    )
     daemon.open_terminal = lambda log, bundle, takeover=None: launched.append(bundle)
     daemon.read_disk_free = lambda: disk
     daemon.read_state = lambda: state
@@ -1897,7 +1906,12 @@ def check_remote_type(root):
     )
     stubs = {name: getattr(daemon, name) for name in names}
     daemon.REMOTE_ENTER_AFTER = 0
-    daemon.WORKERS = types.SimpleNamespace(names=[], is_leaving=lambda name: False)
+    daemon.WORKERS = types.SimpleNamespace(
+        names=[],
+        is_leaving=lambda name: False,
+        is_sending=lambda bundle: False,
+        lists_agent=lambda name, bundle, after: None,
+    )
     daemon.get_last_text = lambda transcript: records["text"]
     daemon.get_session_records = lambda container: {
         "s": {"status": statuses.get(container, "idle"), "statusUpdatedAt": records["stamp"]}
@@ -2312,8 +2326,153 @@ def check_refused_once(root):
     return ([] if found == expected else [f"refused once: {found}"]), 1
 
 
+def check_stuck(root):
+    """A task waits since the pass that gave its reason a new kind, and shows stuck in GET /queue
+    and `bctl queue` once it waited past the limit of that kind: a reason of the same kind keeps
+    its time, a pause is never stuck (2026-11-02: 8 tasks waited an hour on the agents of sebpc,
+    with no age shown)."""
+    state, launched = prepare(root, {"busy": RUNS_ANOTHER, "fresh": FRESH, "paused": FRESH}, 1)
+    state["queue"][2]["paused"] = True
+    daemon.identify = lambda connection: daemon.HOST
+    daemon.is_in_container = lambda connection: False
+    daemon.launch_queued()
+    old = time.time() - 4 * 3600 - 1
+    for item in state["queue"]:
+        item["waits_since"] = old
+    daemon.launch_queued()
+    stuck = [item["stuck"] for item in daemon.describe_queue(state)]
+    path = root / "ctl.sock"
+    server = daemon.Server(str(path), daemon.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    _code, lines = run_client(path, "queue")
+    server.shutdown()
+    server.server_close()
+    memory = daemon.describe_memory
+    daemon.MAX_AGENTS = 8
+    daemon.describe_memory = lambda open_windows: {**memory(open_windows), "short": True}
+    daemon.launch_queued()
+    after = [(item["waits_for"], item["stuck"]) for item in daemon.describe_queue(state)][1:]
+    since = f"from host, since {daemon.format_time(QUEUED)}, stuck since {daemon.format_time(old)}"
+    checks = [
+        ("past the limit but a pause", stuck == [daemon.format_time(old)] * 2 + [None]),
+        (
+            "bctl queue says so",
+            lines[2:3] == [f"queued 2: fresh (priority 0, {since}, waits for a slot)"],
+        ),
+        (
+            "a new kind starts again",
+            after == [("memory on the host", None), ("a manual resume", None)],
+        ),
+        ("nothing starts", launched == []),
+    ]
+    found = stuck, lines, after
+    return [f"stuck: {name}: {found}" for name, passed in checks if not passed], len(checks)
+
+
+def check_stale(root):
+    """What a wait names is checked each pass: an agent its worker no longer lists, in answers
+    asked after its start, ends as lost after REMOTE_GONE_AFTER, and a start no job runs is
+    dropped, each with one `stale wait` line. A listed agent, a worker with no fresh answer, a
+    start that runs or just began are left. A terminal killed before its run holds no start."""
+    agents = {
+        "alive": {"session": "s\n", "task.md": TASK},
+        "gone": {"session": "s\n", "task.md": TASK},
+        "silent": {"session": "s\n", "task.md": TASK},
+        "orphan": {"remote-starting": ""},
+        "sending": {"remote-starting": ""},
+        "new": {"remote-starting": ""},
+    }
+    state, _launched = prepare(root, agents, 8)
+    state["queue"].clear()
+    started = time.time() - 600
+    for bundle in ("alive", "gone", "silent"):
+        remote = {"worker": "vm" if bundle == "silent" else "sebpc", "job": "1", "started": started}
+        (daemon.get_agent_folder(bundle) / "remote.json").write_text(json.dumps(remote))
+    for bundle in ("orphan", "sending"):
+        os.utime(daemon.get_agent_folder(bundle) / "remote-starting", (started, started))
+    finished, enqueued = [], []
+
+    def finish(bundle, folder, end):
+        finished.append(bundle)
+        (folder / ".agent" / "remote.json").unlink()
+        return f"{bundle}: its agent on sebpc ended ({end['reason']})", True
+
+    names = ("WORKERS", "enqueue", "get_transcript", "remote_agent")
+    stubs = {name: getattr(daemon, name) for name in names}
+    module = stubs["remote_agent"]
+    daemon.WORKERS = daemon.workers.Workers(["sebpc", "vm"])
+    agent = {"bundle": "alive", "kind": "agent", "age": 600}
+    daemon.WORKERS.status = {
+        "sebpc": (time.time(), {"every": {"agents": [agent]}}),
+        "vm": (time.time() - 3600, {}),
+    }
+    daemon.WORKERS.sent = {"sebpc": {"sending": float("inf")}}
+    daemon.enqueue = lambda caller, bundle, body: enqueued.append((bundle, body))
+    daemon.get_transcript = lambda session: None
+    daemon.remote_agent = types.SimpleNamespace(
+        STARTING=module.STARTING,
+        finish=finish,
+        keep=lambda bundle, folder, workers: (None, False),
+        read_remote=module.read_remote,
+        renew_login_soon=lambda folder: None,
+    )
+    journal = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(journal):
+            daemon.keep_remote_agents()
+            first = list(finished)
+            for bundle, since in daemon.missing_agents.items():
+                daemon.missing_agents[bundle] = since - daemon.REMOTE_GONE_AFTER
+            daemon.keep_remote_agents()
+            daemon.keep_remote_agents()
+    finally:
+        vars(daemon).update(stubs)
+        daemon.missing_agents.clear()
+    starting = [
+        bundle
+        for bundle in ("orphan", "sending", "new")
+        if (daemon.get_agent_folder(bundle) / "remote-starting").exists()
+    ]
+    state, _launched = prepare(
+        root / "start", {"dead": {**STARTS_ANOTHER, "dead": ""}, "fresh": FRESH}, 8, True
+    )
+    with contextlib.redirect_stdout(journal):
+        daemon.launch_queued()
+        daemon.launch_queued()
+    waits = [f"{item['bundle']}: {item['waits_for']}" for item in state["queue"]]
+    checks = [
+        ("an agent missing once is left", first == []),
+        ("the agent gone ends as lost, once", finished == ["gone"]),
+        ("its task goes on", enqueued == [("gone", {"task": TASK})]),
+        ("a start that runs or just began stays", starting == ["sending", "new"]),
+        (
+            "one line each",
+            journal.getvalue().splitlines()
+            == [
+                "stale wait: orphan: no start of its agent runs on a worker",
+                "stale wait: gone: its agent on sebpc ended (gone from its worker)",
+                "stale wait: dead: its terminal died before its run",
+            ],
+        ),
+        ("no task waits for the dead start", "fresh: memory on the host" in waits),
+    ]
+    found = first, finished, enqueued, starting, journal.getvalue(), waits
+    return [f"stale: {name}: {found}" for name, passed in checks if not passed], len(checks)
+
+
 def main():
     failures = []
+    starts = {start for start, _limit in daemon.WAIT_LIMITS}
+    unnamed = set()
+    classify = daemon.get_wait_limit
+
+    def get_wait_limit(waits_for):
+        kind, limit = classify(waits_for)
+        if waits_for and kind not in starts:
+            unnamed.add(waits_for)
+        return kind, limit
+
+    daemon.get_wait_limit = get_wait_limit
     for bundles, launched, queue, *options in CASES:
         with tempfile.TemporaryDirectory() as root:
             try:
@@ -2325,6 +2484,8 @@ def main():
     total = len(CASES)
     for check in (
         check_clients,
+        check_stuck,
+        check_stale,
         check_moves,
         check_disk,
         check_after,
@@ -2359,6 +2520,8 @@ def main():
             failed, count = check(pathlib.Path(root))
         failures += failed
         total += count
+    failures += [f"a reason WAIT_LIMITS does not name: {reason}" for reason in sorted(unnamed)]
+    total += 1
     for line in failures:
         print(line)
     print(f"{total - len(failures)}/{total} cases as expected")

@@ -36,10 +36,10 @@ VS Code window opened on the bundle later takes the session over in a Claude tab
 window is already open runs the task in that window. A task for a bundle whose agent has not ended
 is queued behind it. The queue runs the highest priority first (-100 to 100; by default 0 from the
 host, and from an agent the priority of its own task), then in arrival order: bctl status lists it
-in that order, with what each task waits for. One agent
-starts at a time: the next task waits until the run of the last one began. --after keeps a task
-in the queue until that time of the host comes, today or tomorrow, and --paused until it is
-scheduled again: it waits for a manual resume.
+in that order, with what each task waits for, and "stuck since HH:MM" once it waited on that
+past its limit (README.md, "Stuck tasks"). One agent starts at a time: the next task waits until
+the run of the last one began. --after keeps a task in the queue until that time of the host
+comes, today or tomorrow, and --paused until it is scheduled again: it waits for a manual resume.
 
 queue is that list alone, at once, with the memory left on the host. force-queue lets the tasks
 queued now start over the cap, those that wait for their time or for a manual resume aside, or
@@ -262,6 +262,7 @@ def print_queued(queue):
         asked += f", effort {item['effort']}" if item.get("effort") else ""
         asked += ", not built yet" if not item.get("built", True) else ""
         since = f", since {item['queued']}" if item.get("queued") else ""
+        since += f", stuck since {item['stuck']}" if item.get("stuck") else ""
         since += f", waits for {item['waits_for']}" if item.get("waits_for") else ""
         print(
             f"queued {position}: {item['bundle']} (priority {item['priority']}{asked},"

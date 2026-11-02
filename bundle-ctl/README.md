@@ -56,7 +56,7 @@ the pager. `python3 test_node_modules.py` and `python3 test_delete.py` have the 
 | `POST /node-modules` | the `node_modules` of the `package.json` of the web tooling of the branch of `base`, built in the store when it has none (see `scripts/README.md`, Shared node_modules): a job for the host; from a bundle, for its own base only, held as `bN` for Seb's yes in `hok`, which shows the change from the `package.json` of the tree it links; `tree` at once when it is built already |
 | `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle, but for `resume` or `terminal` in a bare folder or after its `bctl build` failed, whose session knows how to build it. With `terminal` from the host on a deleted bundle, the session kept at its deletion in its bare folder made again. A task from a bundle that is neither that bundle nor its parent waits for Seb's yes as `bN` (see A task for another bundle). On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window, and from a bundle a task alone, held as `bN` for Seb's yes in `hok`; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents). With `cut` and `resume` and no bundle, the resume of every cut session, held as `bN` for one yes of Seb (see Cut sessions) |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
-| `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, its text, whether it resumes the session of its bundle and the session it names, where it starts (`where`: `auto`, `local`, `worker` or `worker:NAME`), the memory left on the host, `short` when a start would add to a host that already lacks it, the names of `BUNDLE_CTL_WORKERS`, and in `worker_states` the word of each one that takes no agent now (`no link`, `no answer`, `leaving`, `drained`, `full`), which deck shows beside it; this read asks no connection |
+| `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, `stuck` once it waited on that past its limit (see Stuck tasks), its text, whether it resumes the session of its bundle and the session it names, where it starts (`where`: `auto`, `local`, `worker` or `worker:NAME`), the memory left on the host, `short` when a start would add to a host that already lacks it, the names of `BUNDLE_CTL_WORKERS`, and in `worker_states` the word of each one that takes no agent now (`no link`, `no answer`, `leaving`, `drained`, `full`), which deck shows beside it; this read asks no connection |
 | `POST /free-disk` | the removal of the stopped containers of the bundles and of the podman images no tag names, held as `bN` for Seb's yes in `hok`, whose card lists them with the space left (see Disk) |
 | `POST /force-queue` | the tasks queued now may start over the cap, those that wait for their time (`--after`) or for a manual resume (`--paused`) aside, or with `bundle` the task of that bundle, its time and its pause too; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
 | `POST /move` | the queued task of `bundle` put at `place` (from 1), where it keeps its priority when that priority fits between the tasks around it, else takes the nearest of theirs; then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
@@ -103,6 +103,40 @@ from a container or from the host: `bctl whoami`, `bctl status`. The containers 
 read-only at its host path. Without the client:
 
     curl --unix-socket ~/.local/state/bundle-ctl/sock/ctl.sock http://bundle-ctl/whoami
+
+## Stuck tasks
+
+A queued task keeps since when it waits on the same kind of reason (`waits_since`, set by the pass
+that gave it a reason of another kind). Past the limit of that kind, `GET /queue` gives `stuck`,
+the time it began to wait, `bctl queue` says `stuck since HH:MM, waits for ...` and deck shows the
+row in red. No hok card: the red row is the alert (Seb, 2026-11-02: 8 tasks waited an hour on the
+agents of sebpc, and nothing showed for how long).
+
+| reason | limit | why |
+| --- | --- | --- |
+| a manual resume, its time, the task queued before it, a desktop session | none | Seb's pause, his time or his login; the task before it shows its own |
+| the GitHub connection of the host, the previous agent of the bundle to end | 4 h | the key comes at his next unlock; agent runs here, 10-28 to 11-02: 90% under 3.9 h, longest 5 h (19 runs) |
+| the end or the verdict of its agent on a worker, a place for an agent, its container here to stop | 2 h | agent runs on sebpc: 90% under 94 min, longest 105 min (19 runs) |
+| disk space, a slot, memory or the CPU of the host | 2 h | a slot frees when an agent ends |
+| its window to close, an agent to be idle | 1 h | a turn of Seb, or a dialog |
+| the main login, the agent of X to start, the link to a worker | 30 min | the login is renewed every 5 minutes; a start counts for 15 minutes |
+| the terminal of the previous agent to close, the deletion of its checkout, a build for a worker | 15 min | builds: 90% under 1.6 min, longest 2.9 min (86 jobs) |
+| any other | 1 h | `WAIT_LIMITS` in `daemon.py` names each reason, and `test_queue.py` fails on one it does not name |
+
+Each pass also checks that what the reason names still exists. When it does not, the wait goes,
+the task goes on in the same pass, and the journal gets one `stale wait:` line, as a bug to fix
+(`journalctl --user -u bundle-ctl -g 'stale wait'`):
+
+- An agent on a worker that its worker no longer lists, in answers asked after its start, for
+  `REMOTE_GONE_AFTER` (2 minutes): its end never came here. It ends as a lost job (see Remote
+  agents), and its session is queued again when it gave no verdict.
+- A `.agent/remote-starting` that no start of this daemon runs, 2 minutes after it was written: a
+  restart of the daemon kills its start, and the file held the tasks of the bundle 30 minutes.
+- A terminal killed before its run began: no task waits for its start any more.
+
+`its window to close` reads the window in `/proc` at each pass already. An agent at work here
+whose terminal died is not checked: `podman exec` keeps its claude running in the container, so
+the terminal says nothing of it, and its tasks show stuck after 4 hours.
 
 ## Runs
 
@@ -321,7 +355,13 @@ necessary. but if we have a good setup, full remote should offer the same possib
   no `.agent/terminal`: it takes no slot, and closing it leaves the agent running there. A link
   down shows since when and waits. Its title says where, `⭐ BUNDLE @sebpc (mine)`, and so do the
   agent list and `GET /status` (`where` in the agent of the bundle, whose state is the one of an
-  agent in a terminal here, never `stopped`).
+  agent in a terminal here, never `stopped`). When the daemon stops that claude, after the
+  verdict (`.agent/done` is `0`) or to move it (`remote-moving`), the window closes as a terminal
+  here does; any other end keeps it open on its code, ❌ in the agent list. Its mark comes from the
+  record the worker mirrors back, of a claude started since the run (`.agent/run.lock`), so
+  before the window: counted from the window, as here, the verdict read as a run that failed
+  before its claude started. On 2026-11-02 four agents of sebpc showed ❌ after their verdict or
+  their move. `python3 test_terminal.py` and `python3 test_window_title.py` have the cases.
 - `bctl bring-back BUNDLE`: claude stops once idle or in a tool call, its work tree comes back and
   is written in the worktrees when they are what was sent (else nothing is overwritten, and the
   commits stay in `refs/remote-runs/BUNDLE/`), the job is cancelled 11 minutes after at most,

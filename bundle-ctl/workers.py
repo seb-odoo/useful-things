@@ -237,6 +237,22 @@ class Workers:
             if bundle in self.sent.get(name, {}):
                 self.sent[name][bundle] = time.time()
 
+    def is_sending(self, bundle):
+        """Whether a start of the bundle's agent on a worker runs in this daemon."""
+        with self.lock:
+            return any(sent.get(bundle) == float("inf") for sent in self.sent.values())
+
+    def lists_agent(self, name, bundle, after):
+        """Whether the worker lists an agent of the bundle in its last answer, None when that
+        answer is older than FRESH or was asked before `after`, as a job starts after."""
+        with self.lock:
+            seen, status = self.status.get(name, (0, {}))
+        every = status.get("every")
+        agents = every.get("agents") if type(every) is dict else None
+        if time.time() - seen > FRESH or seen <= after or type(agents) is not list:
+            return None
+        return any(is_job(job) and job["bundle"] == bundle for job in agents)
+
     def get_unreachable(self, name):
         """(a word, why) the worker takes no agent until something changes, or None. A full worker
         frees a place by itself."""

@@ -239,6 +239,7 @@ RECONNECTED = (
     " meanwhile where your work depends on it (a PR: its threads, its head, its CI; its base)."
 )
 REMOTE_ENTER_AFTER = 2
+REMOTE_GONE_AFTER = 120
 REPORT_HEAD = 4096
 REQUEUE_AFTER = (15, 30, 60, 120, 240)
 RESTART_RETRY = 3600
@@ -308,6 +309,33 @@ TERMINAL_FILES = (
     "terminal",
 )
 TITLE = load_title()
+WAIT_LIMITS = (
+    ("a manual resume", None),
+    ("its time, ", None),
+    ("the task queued before it", None),
+    ("a desktop session", None),
+    ("the GitHub connection of the host", 4 * 3600),
+    ("the previous agent of the bundle to end", 4 * 3600),
+    ("the end of its agent on its worker", 2 * 3600),
+    ("the verdict of its agent on ", 2 * 3600),
+    ("a place for an agent", 2 * 3600),
+    ("its container here to stop", 2 * 3600),
+    ("disk space", 2 * 3600),
+    ("a slot", 2 * 3600),
+    ("memory on the host", 2 * 3600),
+    ("the CPU of the host", 2 * 3600),
+    ("its window to close", 3600),
+    ("the previous agent of the bundle to be idle", 3600),
+    ("its agent on ", 3600),
+    ("the main login", 1800),
+    ("the agent of ", 1800),
+    ("the link to ", 1800),
+    ("the terminal of the previous agent of the bundle to close", 900),
+    ("the deletion of its checkout", 900),
+    ("its build here, then a worker", 900),
+    ("the build of ", 900),
+)
+WAIT_LIMIT = 3600
 WATCH_EXPIRY = 8 * 86400
 WATCH_KEPT = 3600
 WINDOW_CLOSE_WAIT = 30
@@ -315,6 +343,8 @@ WINDOW_CLOSE_WAIT = 30
 bundle_locks = {}
 moving_back = set()
 building_for_worker = set()
+missing_agents = {}
+stale_starts = set()
 bundle_rows = {"read": float("-inf"), "rows": []}
 folder_by_container = {}
 FOLDER_LABELS = (
@@ -552,6 +582,7 @@ def list_bundles():
 
 
 def describe_queue(state):
+    now = time.time()
     return [
         dict(
             after=item.get("after") and format_time(item["after"]),
@@ -566,12 +597,34 @@ def describe_queue(state):
             queued=item.get("queued") and format_time(item["queued"]),
             resume=item.get("resume", False),
             session=item.get("session"),
+            stuck=get_stuck(item, now),
             task=item["task"],
             waits_for=item.get("waits_for"),
             where=get_task_where(item, get_agent_folder(item["bundle"])),
         )
         for item in state["queue"]
     ]
+
+
+def get_wait_limit(waits_for):
+    """(the kind of a wait, how long a task waits on it before it shows stuck, None for no
+    limit): the start of the reason in WAIT_LIMITS, which the queue history of 2026-10-28 to
+    11-02 sized (README.md, "Stuck tasks"). A reason it does not name is a kind of its own."""
+    if not waits_for:
+        return None, None
+    for start, limit in WAIT_LIMITS:
+        if waits_for.startswith(start):
+            return start, limit
+    return waits_for, WAIT_LIMIT
+
+
+def get_stuck(item, now):
+    """When a task began to wait on its reason, once it waits on it past its limit, else None."""
+    limit = get_wait_limit(item.get("waits_for"))[1]
+    since = item.get("waits_since")
+    if limit is None or not since or now - since < limit:
+        return None
+    return format_time(since)
 
 
 def describe_memory(open_windows):
@@ -1365,7 +1418,8 @@ def get_alive_launches(launches):
 def get_starting(launches, open_windows, now):
     """The bundle of an agent that was launched and has not begun its run, None when no such.
 
-    A terminal that begins no run counts for LAUNCH_GRACE, as a launch with no container does.
+    A terminal that begins no run counts for LAUNCH_GRACE, as a launch with no container does,
+    while it lives: one killed before its run starts no agent, and a journal line says so once.
     """
     held = sorted(os.path.basename(folder) for folder in open_windows)
     for bundle in (*launches, *held):
@@ -1377,7 +1431,11 @@ def get_starting(launches, open_windows, now):
             and not (folder / "run.lock").exists()
             and not (folder / "done").exists()
         ):
-            return bundle
+            if not (folder / "terminal").exists() or is_held(folder):
+                return bundle
+            if (bundle, launched) not in stale_starts:
+                stale_starts.add((bundle, launched))
+                print(f"stale wait: {bundle}: its terminal died before its run", flush=True)
     return None
 
 
@@ -1653,6 +1711,10 @@ def launch_queued():
                 if not is_running and get_task_where(item, folder) == "auto":
                     item["waits_for"] += f", or {get_worker_wait()}"
             queue.append(item)
+        for item in queue:
+            kind = get_wait_limit(item["waits_for"])[0]
+            if item.get("wait_kind") != kind:
+                item.update(wait_kind=kind, waits_since=now)
         state["queue"] = queue
         write_state(state)
     return paced
@@ -1861,7 +1923,9 @@ def keep_remote_agents():
     """Each remote agent: its tunnel up, its end once its job ended, and its job ended once it
     gave its verdict FREE_AFTER ago, as a terminal closes here. The main login is renewed while
     a remote agent lives or a bundle container runs: neither can renew it. While a worker leaves,
-    a bundle placed on it with no agent there runs its next tasks here.
+    a bundle placed on it with no agent there runs its next tasks here. An agent its worker no
+    longer lists ends as lost, and a start no job of this daemon runs is dropped, each with a
+    `stale wait` line: the tasks behind them waited for good (README.md, "Stuck tasks").
     """
     root = pathlib.Path(get_worktree_container_folder())
     remotes = sorted(root.glob("*/*/.agent/remote.json"))
@@ -1879,7 +1943,10 @@ def keep_remote_agents():
             remote = remote_agent.read_remote(folder)
             if line is None and remote and not done:
                 line = end_typed_turn(bundle, found.parent, session)
-            if line is None and remote and WORKERS.is_leaving(remote["worker"]):
+            if line is None and remote and is_gone(bundle, remote):
+                line, lost = remote_agent.finish(bundle, folder, {"reason": "gone from its worker"})
+                line = line and f"stale wait: {line}"
+            elif line is None and remote and WORKERS.is_leaving(remote["worker"]):
                 line = leave_worker(bundle, folder, remote["worker"], done, session)
             elif line is None and done and time.time() - done > FREE_AFTER and (
                 get_session_status(bundle, session) != "busy"
@@ -1896,6 +1963,16 @@ def keep_remote_agents():
                 enqueue(HOST, bundle, {"task": GO_ON, "resume": True})
             else:
                 enqueue(HOST, bundle, {"task": read_text(found.parent / "task.md") or GO_ON})
+    for starting in sorted(root.glob("*/*/.agent/remote-starting")):
+        bundle = starting.parent.parent.name
+        age = time.time() - (get_mtime(starting) or 0)
+        if (
+            REMOTE_GONE_AFTER < age < remote_agent.STARTING
+            and not (starting.parent / "remote.json").exists()
+            and not WORKERS.is_sending(bundle)
+        ):
+            starting.unlink(missing_ok=True)
+            print(f"stale wait: {bundle}: no start of its agent runs on a worker", flush=True)
     leaving = {f"worker:{name}": name for name in WORKERS.names if WORKERS.is_leaving(name)}
     for placed in sorted(root.glob("*/*/.agent/where")) if leaving else ():
         folder = placed.parent.parent
@@ -1903,6 +1980,19 @@ def keep_remote_agents():
         if name and not remote_agent.is_remote(folder):
             set_place(folder.name, "local")
             print(f"{folder.name}: placed here, {name} is leaving", flush=True)
+
+
+def is_gone(bundle, remote):
+    """Whether the worker of a remote agent listed no agent of its bundle for REMOTE_GONE_AFTER,
+    in answers asked after its start: its job ended there and its end never came here. Not
+    while it moves back, which ends it on its own."""
+    listed = WORKERS.lists_agent(remote["worker"], bundle, remote.get("started", 0))
+    job = (bundle, remote["job"])
+    if listed or bundle in moving_back:
+        missing_agents.pop(job, None)
+    if listed is not False or bundle in moving_back:
+        return False
+    return time.time() - missing_agents.setdefault(job, time.time()) > REMOTE_GONE_AFTER
 
 
 def leave_worker(bundle, folder, worker, done, session):

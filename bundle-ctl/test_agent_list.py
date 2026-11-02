@@ -670,6 +670,9 @@ def main():
         flagged = dict(QUEUE, queue=[dict(QUEUE["queue"][0], **{flag: True})])
         if (found := agent_list.describe_queue(flagged)[1][0][:6:5]) != [state, "a slot"]:
             failures.append(f"{flag} task: {found!r}")
+    stuck = dict(QUEUE, queue=[dict(QUEUE["queue"][0], stuck="13:40")])
+    if (found := agent_list.describe_queue(stuck)[1][0][5]) != "stuck since 13:40: a slot":
+        failures.append(f"stuck task: {found!r}")
     searched = [agent_list.describe_queue(QUEUE, search=text) for text in ("X--S", "master-y")]
     if searched != [queue, (queue[0], [])]:
         failures.append(f"queue searched {searched!r}, expected the task of master-x--seb alone")
@@ -689,7 +692,7 @@ def main():
         print(line)
     cases = len(AGENTS) + len(OPS_INFOS) + 4 + 1 + len(FACETS) + len(FILTERED) + 2 + 7 + 3 + 3
     cases += len(QUEUED_LINES) + 1 + 2 + len(SEARCHED) + 1 + len(MOVES) + len(TABS) + 2 + 9 + 3
-    cases += 1 + 1 + 1 + 2 + 6
+    cases += 1 + 1 + 1 + 2 + 6 + 1
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

@@ -548,7 +548,8 @@ def get_queued_row(item):
 def describe_queue(answer, rows=(), search=""):
     """The head and the lines of the queue, those whose bundle or name the search is in: the name
     of the row of the bundle, else of the title read with the queue, which is the title of the
-    conversation of an ops task (ops-SESSION). A task takes its kind from the same row."""
+    conversation of an ops task (ops-SESSION). A task takes its kind from the same row. One that
+    waits on its reason past the limit of bundle-ctl says since when, first."""
     if answer is None:
         return "bundle-ctl does not answer", []
     head = f"{answer['agents']}/{answer['max_agents']} agents at work in a terminal"
@@ -563,6 +564,9 @@ def describe_queue(answer, rows=(), search=""):
             continue
         forced = item.get("forced") and "over the cap"
         state = "paused" if item.get("paused") else forced or "queued"
+        waits = item.get("waits_for") or ""
+        if item.get("stuck"):
+            waits = f"stuck since {item['stuck']}: {waits}"
         lines.append(
             [
                 state,
@@ -570,7 +574,7 @@ def describe_queue(answer, rows=(), search=""):
                 item["bundle"],
                 str(item["priority"]),
                 item.get("queued") or "",
-                item.get("waits_for") or "",
+                waits,
                 item.get("message") or "",
                 item.get("answer") or "",
             ],
