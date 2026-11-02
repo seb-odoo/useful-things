@@ -42,6 +42,14 @@ CALLS = {
     "hok-background": [("hok-answer g3", "Command running in background with ID: b1")],
     "hok-then-test": [("hok-answer g3", "sent"), ("python3 test_queue.py", None)],
     "hok-after-prompt": [("hok-answer g3", "still waits"), ("go on", "prompt")],
+    "hok-said-yes": [
+        ("hok event: Seb said yes to your request 4, it runs now", "prompt"),
+        ("hctl job 4 --wait 590", None),
+    ],
+    "hok-said-yes-to-another": [
+        ("hok event: Seb said yes to your requests 40, 5 on one card", "prompt"),
+        ("hctl job 4 --wait 590", None),
+    ],
 }
 HOK_WAITS = [
     ("hok", 600),
@@ -50,6 +58,8 @@ HOK_WAITS = [
     ("hok-background", None),
     ("hok-then-test", None),
     ("hok-after-prompt", None),
+    ("hok-said-yes", None),
+    ("hok-said-yes-to-another", 600),
 ]
 API_ERRORS = [
     ("error-one", ["answer", "502"], 1),

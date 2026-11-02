@@ -22,7 +22,8 @@ the parts of the answer: finished with a Done part and neither a Decide nor a Yo
 An idle session that waits for the reset of the usage limit works, as Claude goes on with it by
 itself ("Usage limit reached · continuing automatically at 4pm"), until Esc cancels that, for 5
 hours at most. A busy session whose running call waits for Seb's answer in hok (`hok-answer`,
-`hctl job`) waits for him.
+`hctl job`) waits for him, but not an `hctl job` of a request that hok told his yes to: that one
+waits for the run.
 """
 
 import calendar
@@ -37,6 +38,8 @@ CLOSE = re.compile(r"[*_\s]*(nothing (is )?left|(waiting|waits) (for|on) you)\b"
 FINISHED = re.compile(r"(pushed:|nothing to do:)", re.IGNORECASE)
 FLAGS = {"--failed": "❌", "--starting": "🚀"}
 HOK_WAIT = re.compile(r"\b(hok-answer|hctl job)\b")
+JOB = re.compile(r"\bhctl job (\d+)")
+SAID_YES = re.compile(rb"Seb said yes to your requests? (\d+(?:, \d+)*)")
 KINDS = (
     ("🔧", "ops", lambda name, own: name.startswith(OPS)),
     ("⏩", "fw", lambda name, own: name.endswith("-fw")),
@@ -137,17 +140,27 @@ def count_api_errors(session):
     return count
 
 
-def is_hok_wait(call):
+def is_hok_wait(call, told):
     command = (call.get("input") or {}).get("command") if call.get("name") == "Bash" else None
-    return bool(HOK_WAIT.search(str(command or "")))
+    job = JOB.search(str(command or ""))
+    return bool(HOK_WAIT.search(str(command or ""))) and not (job and job[1] in told)
 
 
 def get_hok_wait(session):
     """When a session began to wait for Seb's answer in hok, as epoch seconds: the start of the
     calls of hok-answer or `hctl job` it made in a row, the last one still running. None when no
-    such call runs: answered, sent to the background, or another call runs."""
+    such call runs: answered, sent to the background, or another call runs. An `hctl job` of a
+    request that hok told his yes to waits for its run, not for him."""
+    lines = read_tail(session)
+    told = {
+        number
+        for line in lines
+        if b"said yes" in line
+        for match in SAID_YES.finditer(line)
+        for number in match[1].decode().split(", ")
+    }
     answered, start, running = set(), None, False
-    for line in reversed(read_tail(session)):
+    for line in reversed(lines):
         try:
             entry = json.loads(line)
             content = entry["message"]["content"] if entry["type"] in ("user", "assistant") else None
@@ -160,7 +173,7 @@ def get_hok_wait(session):
             answered.update(block.get("tool_use_id") for block in blocks)
             continue
         calls = [block for block in blocks if block.get("type") == "tool_use"]
-        if not all(map(is_hok_wait, calls)):
+        if not all(is_hok_wait(call, told) for call in calls):
             break
         if calls:
             start = calendar.timegm(time.strptime(entry["timestamp"][:19], "%Y-%m-%dT%H:%M:%S"))
