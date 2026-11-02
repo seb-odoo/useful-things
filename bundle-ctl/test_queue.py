@@ -1717,6 +1717,111 @@ def check_renew(root):
     return [], 1
 
 
+def check_leaving(root):
+    """The agents of a worker that answers `leaving` come back, once each, however many passes
+    while their move runs: one at work, or busy again after its verdict, goes on here in a
+    terminal and stays here; an idle one that gave its verdict stops there. One whose claude has
+    not started yet, and the agents of a worker that stays, are left. A bundle placed on the
+    worker with no agent there is placed here, once; one starting there, or placed on a worker
+    that stays, is left."""
+    on_sebpc, on_vm = {"where": "worker:sebpc\n"}, {"where": "worker:vm\n"}
+    agents = {
+        "answering": {**on_sebpc, "session": "s\n", "done": "0\n"},
+        "elsewhere": on_vm,
+        "placed": on_sebpc,
+        "staying": {**on_vm, "session": "s\n"},
+        "starting": {**on_sebpc, "remote-starting": ""},
+        "unborn": {**on_sebpc, "session": "unborn\n"},
+        "verdict": {**on_sebpc, "session": "s\n", "done": "0\n"},
+        "working": {**on_sebpc, "session": "s\n"},
+    }
+    state, launched = prepare(root, agents, 8)
+    state["queue"].clear()
+    for bundle in ("answering", "staying", "unborn", "verdict", "working"):
+        worker = "vm" if bundle == "staying" else "sebpc"
+        remote = json.dumps({"worker": worker, "job": "1"})
+        (daemon.get_agent_folder(bundle) / "remote.json").write_text(remote)
+    jobs, moved, stops = [], [], []
+
+    def move_back(log, bundle, folder, workers):
+        moved.append(bundle)
+        (folder / ".agent" / "remote.json").unlink()
+        return f"{bundle}: back"
+
+    names = ("WORKERS", "get_session_status", "get_transcript", "remote_agent", "start_job")
+    stubs = {name: getattr(daemon, name) for name in names}
+    module = stubs["remote_agent"]
+    in_standin = module.in_standin
+    module.in_standin = lambda bundle, verb, data=b"", check=True: stops.append(bundle)
+    daemon.WORKERS = daemon.workers.Workers(["sebpc", "vm"])
+    daemon.WORKERS.status = {
+        "sebpc": (time.time(), {"draining": True, "leaving": True}),
+        "vm": (time.time(), {}),
+    }
+    daemon.remote_agent = types.SimpleNamespace(
+        end=module.end,
+        is_remote=module.is_remote,
+        keep=lambda bundle, folder, workers: (None, False),
+        move_back=move_back,
+        read_remote=module.read_remote,
+        renew_login_soon=lambda folder: None,
+    )
+    daemon.get_session_status = lambda bundle, session: "busy" if bundle == "answering" else "idle"
+    daemon.get_transcript = lambda session: session != "unborn" and root / "t"
+    daemon.start_job = lambda caller, verb, work, lock=None, bundle=None: jobs.append(
+        (bundle, work)
+    )
+    journal = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(journal):
+            daemon.keep_remote_agents()
+            daemon.keep_remote_agents()
+            started = [bundle for bundle, _work in jobs]
+            for _bundle, work in jobs:
+                work(io.StringIO())
+            daemon.keep_remote_agents()
+    finally:
+        vars(daemon).update(stubs)
+        module.in_standin = in_standin
+    wheres = [
+        daemon.read_text(daemon.get_agent_folder(bundle) / "where") for bundle in (*moved, *stops)
+    ]
+    places = {
+        bundle: daemon.read_text(daemon.get_agent_folder(bundle) / "where")
+        for bundle in ("elsewhere", "placed", "staying", "starting", "unborn")
+    }
+    checks = [
+        ("one move each, while it runs", started == ["answering", "working"]),
+        ("they go on here in a terminal", moved == launched == ["answering", "working"]),
+        ("their next tasks run here", wheres == ["local", "local", "local"]),
+        ("the idle one stops there, once", stops == ["verdict"]),
+        (
+            "a bundle placed there with no agent there is placed here",
+            places
+            == {
+                "elsewhere": "worker:vm",
+                "placed": "local",
+                "staying": "worker:vm",
+                "starting": "worker:sebpc",
+                "unborn": "worker:sebpc",
+            },
+        ),
+        (
+            "the journal says why",
+            journal.getvalue().splitlines()
+            == [
+                "answering: back from sebpc, the worker is leaving",
+                "verdict: its agent stops on sebpc, the worker is leaving",
+                "working: back from sebpc, the worker is leaving",
+                "placed: placed here, sebpc is leaving",
+            ],
+        ),
+    ]
+    failed = [name for name, passed in checks if not passed]
+    found = started, moved, launched, stops, places, journal.getvalue()
+    return [f"leaving: {name}: {found}" for name in failed], len(checks)
+
+
 def check_choose_agent(root):
     """A worker takes an agent only with a place and 1 GB free for it, as it refuses one
     without (2026-10-30: six agents sent to sebpc in three minutes, each refused, then here)."""
@@ -1771,6 +1876,7 @@ def main():
         check_tell,
         check_ramp,
         check_renew,
+        check_leaving,
         check_choose_agent,
     ):
         with tempfile.TemporaryDirectory() as root:

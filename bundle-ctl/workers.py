@@ -209,6 +209,13 @@ class Workers:
                 return name
         return None
 
+    def is_leaving(self, name):
+        """Whether the worker answered lately that it leaves: it shuts down once it holds no
+        agent and no job (README.md, "Remote agents")."""
+        with self.lock:
+            seen, status = self.status.get(name, (0, {}))
+        return time.time() - seen <= FRESH and bool(status.get("leaving"))
+
     def check(self, verb, args):
         if verb not in VERBS:
             raise Refused(f"no worker verb {verb}")
