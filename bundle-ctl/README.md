@@ -305,9 +305,13 @@ necessary. but if we have a good setup, full remote should offer the same possib
   login in `~/.local/state/claude-switch/dummies/`, then `ssh ... tunnel` and the stand-in joined
   by `pair.py` in a `systemd-run --user --scope` of their own (`rr-tunnel-BUNDLE`), so that a
   restart of the daemon cuts no tunnel. Any failure before the job started starts the agent here.
-  The stand-in starts in a scope of its own too, as podman leaves the conmon of a container in
-  the cgroup of its caller: in the unit's, each stop of bundle-ctl waited 90 s for it, and the
-  socket did not answer meanwhile (3 of the 4 restarts of 2026-10-30).
+  Before the stand-in, `devcontainer/claude-config.py` makes the bundle's Claude folder, as at the
+  start of its container: a bundle built for a worker never started one, so its claude got a
+  `.claude.json` with no onboarding done. That claude checked the network at
+  `platform.claude.com`, which the stand-in refuses, and ended on 1 with no transcript (14 runs
+  on sebpc on 2026-11-02). The stand-in starts in a scope of its own too, as podman leaves the
+  conmon of a container in the cgroup of its caller: in the unit's, each stop of bundle-ctl waited
+  90 s for it, and the socket did not answer meanwhile (3 of the 4 restarts of 2026-10-30).
 - `MOUNTS` says, for each mount of a bundle (`devcontainer/base.jsonc`), how the remote agent gets
   it: sent in its config, served by the stand-in, in the runner image, made in the job, or of no
   use there. `python3 test_remote_agent.py` fails on a mount it does not name, and checks that the

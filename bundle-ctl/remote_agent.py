@@ -381,7 +381,8 @@ def standin_name(bundle):
 def start_standin(bundle, bundle_folder, worker, session):
     """The stand-in: the bundle's mounts the tunnel serves, on devnet, as the bundle. Started in
     a scope of its own, as podman leaves its conmon in the cgroup of the caller, where a stop of
-    bundle-ctl waited 90 s for it.
+    bundle-ctl waited 90 s for it. The bundle's Claude folder is made first, as at the start of
+    its container: a bundle built for a worker never started one.
     """
     values, own = get_paths(bundle_folder)
     repo_root = pathlib.Path(values["REPO_ROOT"])
@@ -400,6 +401,8 @@ def start_standin(bundle, bundle_folder, worker, session):
     ]
     admin = HERE.parent / "devcontainer" / "worktree-admin.py"
     subprocess.run([sys.executable, str(admin), str(bundle_folder)], check=True)
+    config = HERE.parent / "devcontainer" / "claude-config.py"
+    subprocess.run([sys.executable, str(config), bundle_folder.name, "--bundle"], check=True)
     for repo in REPOS:
         git_dir = repo_root / repo / ".git"
         if git_dir.is_dir():
