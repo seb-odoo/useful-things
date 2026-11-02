@@ -250,6 +250,173 @@ def check_parent(root, check):
     check("a report is read up to REPORT_HEAD, a fifo not at all",
           found == (daemon.REPORT_HEAD, ""), found)
 
+def check_watch(root, check):
+    """A session that waits on a card of another one watches it: the line of hok on that card is
+    typed in its window too once the card ended, or at once when it ended in the last hour."""
+    window = f"ops-{OPS_SESSION}"
+    agents = {name: root / "watch" / name / ".agent" for name in ("b1", "b2", "c1")}
+    agents[window] = root / "watch" / "ops" / OPS_SESSION
+    for folder in agents.values():
+        folder.mkdir(parents=True)
+    (agents["b1"] / "session").write_text(f"{BUNDLE_SESSION}\n")
+    other = "22222222-2222-3333-4444-555555555555"
+    rows = [
+        {
+            "name": "658+659",
+            "caller": "ops",
+            "session": other,
+            "action": "deploy",
+            "created": 5.0,
+            "parts": [["658", 5.0], ["659", 6.0]],
+        },
+        {
+            "name": "660",
+            "caller": "ops",
+            "session": OPS_SESSION,
+            "action": "deploy",
+            "created": 7.0,
+        },
+        {"name": "g4", "caller": "b9", "session": PUSHED_SESSION, "action": "push", "created": 8.0},
+        {"name": "p1", "caller": "c1", "session": "", "action": "1 image", "created": 9.0},
+        {"name": "f2", "caller": "b1", "session": "", "action": "tabs", "created": 10.0},
+        {"name": "b3", "caller": "b1", "session": "", "action": "delete", "created": 11.0},
+    ]
+    reads = []
+    daemon.read_hok_waiting = lambda fresh=False: reads.append(fresh) or rows
+    daemon.get_agent_folder = lambda name: agents.get(name, root / "watch" / "gone" / name)
+    daemon.get_terminals = lambda: {"b1": 1}
+    daemon.is_agent_running = {window}.__contains__
+    daemon.reads_told = lambda bundle: True
+    daemon.TOLD_DIR = root / "watch" / "told"
+    daemon.WATCH_DIR = root / "watch" / "state"
+    daemon.PARENTS_DIR = root / "watch" / "parents"
+    daemon.keep_parent("c1", window)
+    told_b1 = root / "watch" / "told" / "b1" / BUNDLE_SESSION
+
+    def watch(caller, card, session=OPS_SESSION, **body):
+        body = {"card": card, "session": session, **body}
+        if caller == daemon.HOST:
+            body.setdefault("window", window)
+        try:
+            return daemon.watch_card(caller, {}, body)
+        except (daemon.Refused, ValueError) as error:
+            return type(error).__name__, str(error)
+
+    def look(caller, *cards, session=OPS_SESSION):
+        query = {"session": [session], "window": [window], "card": list(cards)}
+        return daemon.look_watch(caller, query, {})[1]
+
+    def answered(cards, text=TEXT):
+        return daemon.tell_watchers(daemon.HOST, {}, {"cards": cards, "text": text})
+
+    found = look(daemon.HOST, "659", "660", "g4", "p1", "f2", "999")
+    expected = {
+        "659": {"waits": True, "wakes": False},
+        "660": {"waits": True, "wakes": True},
+        "g4": {"waits": True, "wakes": False},
+        "p1": {"waits": True, "wakes": True},
+        "f2": {"waits": True, "wakes": False},
+        "999": {"waits": False, "wakes": False},
+    }
+    check(
+        "an ops window is woken by its own request and a card of its bundle",
+        found == {"cards": expected},
+        found,
+    )
+    found = watch(daemon.HOST, "659")
+    check(
+        "it watches a request of another ops session",
+        found[0] == 200 and found[1]["state"] == "watched" and found[1]["action"] == "deploy",
+        found,
+    )
+    check("which wakes it now", look(daemon.HOST, "659")["cards"]["659"]["wakes"])
+    check("its own request needs no watch", watch(daemon.HOST, "660")[1]["state"] == "asked")
+    check(
+        "an unknown card is read again before a 404",
+        watch(daemon.HOST, "999")[0] == 404 and reads[-1] is True,
+        reads,
+    )
+    check(
+        "a window that is not its own is refused",
+        watch(daemon.HOST, "659", window="ops-x")[0] == "ValueError",
+    )
+    check(
+        "a bundle watches a push of another one",
+        watch("b1", "g4", BUNDLE_SESSION)[1] == {"card": "g4", "state": "watched"},
+    )
+    check(
+        "a bundle is not told whose card it is",
+        "action" not in watch("b1", "659", BUNDLE_SESSION)[1],
+    )
+    check(
+        "its own tab group is told by nothing",
+        not look("b1", "f2", session=BUNDLE_SESSION)["cards"]["f2"]["wakes"],
+    )
+    check("its own deletion is", look("b1", "b3", session=BUNDLE_SESSION)["cards"]["b3"]["wakes"])
+    check(
+        "a bundle with no terminal cannot watch", watch("b2", "g4", BUNDLE_SESSION)[0] == "Refused"
+    )
+    listed = [
+        row["name"]
+        for row in daemon.look_watch("b1", {"session": [BUNDLE_SESSION]}, {})[1]["waiting"]
+    ]
+    check("a bundle lists its own cards", listed == ["f2", "b3"], listed)
+    listed = daemon.look_watch(daemon.HOST, {"session": [OPS_SESSION], "window": [window]}, {})[1]
+    check("the ops container lists them all", len(listed["waiting"]) == len(rows), listed)
+
+    found = answered([["659", 6.0]])
+    check(
+        "the end of the card is typed in the window that watches it",
+        found == (200, {"told": [window, "b1"]}) and get_lines(agents[window]) == [TEXT],
+        found,
+    )
+    check("and in the bundle that watches it", prwatch_lines(told_b1) == [TEXT])
+    found = answered([["g4", 1.0]])
+    check(
+        "a card of the same name asked at another time tells nobody",
+        found == (200, {"told": []}),
+        found,
+    )
+    found = answered([["g4", 8.0]])
+    check(
+        "a push tells the bundle that watches it",
+        found == (200, {"told": ["b1"]}) and prwatch_lines(told_b1) == [TEXT],
+        found,
+    )
+    check("the watch goes with the answer", answered([["g4", 8.0]]) == (200, {"told": []}))
+    rows.pop(0)
+    found = watch(daemon.HOST, "659")
+    check(
+        "a watch after the end gets the line at once",
+        found == (200, {"card": "659", "state": "told"})
+        and get_lines(agents[window]) == [TEXT] * 2,
+        found,
+    )
+    (daemon.WATCH_DIR / "659.told").touch()
+    os.utime(daemon.WATCH_DIR / "659.told", (time.time() - 4000,) * 2)
+    check("but not past an hour", watch(daemon.HOST, "659")[0] == 404)
+    check("a bad card is refused", watch(daemon.HOST, "../x")[0] == "ValueError")
+    try:
+        answered([["659", "5"]])
+        refused = False
+    except ValueError:
+        refused = True
+    check("a card of /answered has its time of asking", refused)
+    check("only the host tells the end of a card", ("POST", "/answered") in daemon.HOST_ONLY)
+    check(
+        "a bundle may watch",
+        ("POST", "/watch") not in daemon.HOST_ONLY
+        and daemon.VERBS[("POST", "/watch")] is daemon.watch_card,
+    )
+
+
+def prwatch_lines(folder):
+    lines = sorted(path.read_text() for path in folder.glob("[!.]*.txt"))
+    for path in folder.glob("[!.]*.txt"):
+        path.unlink()
+    return lines
+
+
 def ask(verb, session, **body):
     try:
         return verb(daemon.HOST, {}, {"session": session, **body})
@@ -347,10 +514,11 @@ def main():
         check_parent(root, check)
         check_prompt(root, check)
         check_window(root, check)
+        check_watch(root, check)
         check("no podman ran", not (root / "podman.log").exists())
     for line in failures:
         print(line)
-    print(f"{58 - len(failures)}/58 cases as expected")
+    print(f"{82 - len(failures)}/82 cases as expected")
     sys.exit(1 if failures else 0)
 
 

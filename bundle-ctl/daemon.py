@@ -158,6 +158,7 @@ AGENT_RAMP_GIGABYTES = 1
 AGENT_TERMINAL = CONFIG.get("AGENT_TERMINAL") or "gnome-terminal --window --title {bundle} --"
 BARE_FOLDER = frozenset({".agent", ".claude", ".devcontainer", ".vscode", "odools.toml", "tasks"})
 BRANCHES_TIMEOUT = 120
+CARD_NAME = re.compile(r"[befgprt]?[0-9]{1,6}")
 CONTAINER_ID = re.compile(r"/libpod-(?:payload-)?([0-9a-f]{64})")
 CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 CPU_LOG = cpulog.CpuLog(get_worktree_container_folder())
@@ -184,6 +185,7 @@ HELD_DIR = STATE / "held"
 DECK_DIR = STATE / "deck"
 TOLD_DIR = STATE / "told"
 PARENTS_DIR = STATE / "parents"
+WATCH_DIR = STATE / "watch"
 HELD_LETTER = "b"
 HOK_KEPT = 5
 HOK_TIME = 30
@@ -192,6 +194,7 @@ HOK_WORKER = HERE / "hok-waiting.py"
 HOST = "host"
 HOST_FOLDER = CONFIG.get("BUNDLE_CTL_HOST_FOLDER")
 HOST_ONLY = {
+    ("POST", "/answered"),
     ("POST", "/close"),
     ("POST", "/force-queue"),
     ("POST", "/prompt"),
@@ -305,6 +308,8 @@ TERMINAL_FILES = (
     "terminal",
 )
 TITLE = load_title()
+WATCH_EXPIRY = 8 * 86400
+WATCH_KEPT = 3600
 WINDOW_CLOSE_WAIT = 30
 
 bundle_locks = {}
@@ -323,6 +328,7 @@ package_heads = {}
 restarted = {}
 ops_lock = threading.Lock()
 parents_lock = threading.Lock()
+watch_lock = threading.Lock()
 state_lock = threading.Lock()
 status_lock = threading.Lock()
 work_lock = threading.Lock()
@@ -3026,12 +3032,12 @@ def list_hok(caller, query, body):
     return 200, {"requests": mine}
 
 
-def read_hok_waiting():
+def read_hok_waiting(fresh=False):
     """`hok waiting` of host-ctl, read again after HOK_KEPT seconds by hok-waiting.py, a process
     that stays: started again once it ended, gave no answer within HOK_TIME, or said the code of
-    hok changed."""
+    hok changed. `fresh` reads it again at once, for a card asked a second ago."""
     with hok_lock:
-        if time.monotonic() - hok_read["at"] > HOK_KEPT:
+        if fresh or time.monotonic() - hok_read["at"] > HOK_KEPT:
             worker = hok_read.get("worker")
             if worker is None or worker.poll() is not None:
                 worker = subprocess.Popen(
@@ -3140,6 +3146,182 @@ def get_noted_bundle(session):
         if read_text(get_agent_folder(path.name) / "session") == session
     ]
     return found[0] if len(found) == 1 else None
+
+
+def get_watcher(caller, body):
+    """The agent window a watch types into, and its session: the bundle of the caller, or for the
+    host the ops window it names (`window`, the AGENT_WINDOW of hok-answer), which the ops
+    container cannot prove but runs as the host anyway, as for get_parent."""
+    session, window = body.get("session"), body.get("window")
+    if not isinstance(session, str) or not SESSION_ID.fullmatch(session):
+        raise ValueError("session: a session id")
+    if caller != HOST:
+        return caller, session
+    if window != f"{OPS}{session}":
+        raise ValueError("window: the AGENT_WINDOW of an ops window of this session, ops-SESSION")
+    return window, session
+
+
+def is_window_running(agent):
+    """Whether the agent window a line is left for runs, as tell_parent asks: an ops window keeps
+    its folder while its claude ended, a bundle needs its terminal."""
+    if agent.startswith(OPS):
+        return is_agent_running(agent) or get_agent_folder(agent).is_dir()
+    return agent in get_terminals()
+
+
+def find_card(card, fresh=False):
+    """The row of `hok waiting` that holds a card, and when the card was asked: hok names several
+    requests of one card in `parts`. (None, None) when it does not wait."""
+    for row in read_hok_waiting(fresh):
+        parts = row.get("parts") or [[name, row["created"]] for name in row["name"].split("+")]
+        for name, created in parts:
+            if name == card:
+                return row, created
+    return None, None
+
+
+def is_told_by_hok(caller, agent, session, row, card):
+    """Whether hok tells this window of a card by itself (README.md, "hok events"): it asked it,
+    or a bundle it started did. Not a tab group (fN), which hok tells nobody, nor a request a
+    gateway holds for the ops container, which names no ops window."""
+    asker = row.get("caller")
+    if card[0] == "f" or not isinstance(asker, str):
+        return False
+    if caller == HOST and asker == "ops":
+        return card[0] in "g0123456789" and row.get("session") == session
+    return asker == agent or read_parent(asker).get("parent") == agent
+
+
+def read_watch(card):
+    try:
+        kept = json.loads((WATCH_DIR / f"{card}.json").read_text())
+    except (OSError, ValueError):
+        return {}
+    return kept if isinstance(kept, dict) else {}
+
+
+def drop_old_watches():
+    """Drop the lines kept past WATCH_KEPT, and a watch on a card nobody answered past
+    WATCH_EXPIRY: a gateway drops its requests after a week, host-ctl its jobs sooner."""
+    for path in WATCH_DIR.glob("*.*"):
+        kept = WATCH_KEPT if path.suffix == ".told" else WATCH_EXPIRY
+        with contextlib.suppress(OSError):
+            if time.time() - path.stat().st_mtime > kept:
+                path.unlink()
+
+
+def watch_card(caller, query, body):
+    """`POST /watch {card, session, window}`: type the line of hok on a card in this agent window
+    too once Seb answered it, for a session that waits on a card another one asked (README.md,
+    "hok events"). A card that ended in the last WATCH_KEPT has its line typed at once."""
+    card = body.get("card")
+    if not isinstance(card, str) or not CARD_NAME.fullmatch(card):
+        raise ValueError("card: a card of hok, as 658, g4 or p1")
+    agent, session = get_watcher(caller, body)
+    if not is_window_running(agent):
+        raise Refused(
+            f"no agent window runs {agent}: a tab keeps `hok-answer NAME` in the background"
+        )
+    row, created = find_card(card, fresh=True)
+    WATCH_DIR.mkdir(parents=True, exist_ok=True)
+    drop_old_watches()
+    if row is None:
+        try:
+            told = json.loads((WATCH_DIR / f"{card}.told").read_text())
+        except (OSError, ValueError):
+            return 404, {"error": f"no card {card} waits in hok, nor ended in the last hour"}
+        leave_told(agent, session, told["text"])
+        print(f"{agent}: told {told['text'][:100]}", flush=True)
+        return 200, {"card": card, "state": "told"}
+    answer = {"card": card, "state": "watched"}
+    if caller == HOST:
+        answer.update(action=row.get("action"), caller=row.get("caller"))
+    if is_told_by_hok(caller, agent, session, row, card):
+        return 200, {**answer, "state": "asked"}
+    with watch_lock:
+        kept = read_watch(card)
+        watchers = kept.get("watchers", []) if kept.get("created") == created else []
+        if [agent, session] not in watchers:
+            watchers.append([agent, session])
+        fresh = WATCH_DIR / f".{card}.new"
+        fresh.write_text(json.dumps({"created": created, "watchers": watchers}))
+        fresh.replace(WATCH_DIR / f"{card}.json")
+    print(f"{agent}: watches {card}", flush=True)
+    return 200, answer
+
+
+def look_watch(caller, query, body):
+    """`GET /watch?session=S&window=W&card=N...`: for the Stop hook of a session, whether each
+    card waits in hok and whether its answer wakes this window (`wakes`: hok tells it, or it
+    watches it). With no card, the cards that wait, for `hok-answer --list`: all of them to the
+    host, its own to a bundle."""
+    agent, session = get_watcher(caller, {key: values[0] for key, values in query.items()})
+    cards = query.get("card", [])
+    if not cards:
+        rows = read_hok_waiting()
+        if caller != HOST:
+            rows = [row for row in rows if row.get("caller") == caller]
+        keys = ("name", "caller", "session", "action", "created")
+        return 200, {"waiting": [{key: row.get(key) for key in keys} for row in rows]}
+    found = {}
+    for card in cards[:20]:
+        if not CARD_NAME.fullmatch(card):
+            raise ValueError(f"card: {card} is not a card of hok")
+        row, created = find_card(card)
+        if row is None:
+            row, created = find_card(card, fresh=True)
+        if row is None:
+            found[card] = {"waits": False, "wakes": False}
+            continue
+        kept = read_watch(card)
+        watched = kept.get("created") == created and [agent, session] in kept.get("watchers", [])
+        wakes = watched or is_told_by_hok(caller, agent, session, row, card)
+        found[card] = {"waits": True, "wakes": wakes}
+    return 200, {"cards": found}
+
+
+def tell_watchers(caller, query, body):
+    """`POST /answered {cards, text}`: the cards of hok that ended, each [name, asked at], and the
+    line for the windows that watch them, typed in each one that runs (README.md, "hok events").
+    The line stays WATCH_KEPT for a watch that comes after. Only the host asks (HOST_ONLY)."""
+    cards, text = body.get("cards"), body.get("text")
+    if not isinstance(text, str) or not text.isprintable() or not 0 < len(text) <= MAX_TOLD:
+        raise ValueError(f"text: one line of at most {MAX_TOLD} characters")
+    if not isinstance(cards, list) or not all(
+        isinstance(card, list)
+        and len(card) == 2
+        and isinstance(card[0], str)
+        and CARD_NAME.fullmatch(card[0])
+        and isinstance(card[1], (int, float))
+        for card in cards
+    ):
+        raise ValueError("cards: a list of [name, asked at]")
+    WATCH_DIR.mkdir(parents=True, exist_ok=True)
+    watchers = []
+    with watch_lock:
+        for name, created in cards:
+            kept = read_watch(name)
+            if kept.get("created") == created:
+                watchers += [
+                    watcher for watcher in kept.get("watchers", []) if watcher not in watchers
+                ]
+                (WATCH_DIR / f"{name}.json").unlink(missing_ok=True)
+            fresh = WATCH_DIR / f".{name}.new"
+            fresh.write_text(json.dumps({"created": created, "text": text}))
+            fresh.replace(WATCH_DIR / f"{name}.told")
+    told = []
+    for agent, session in watchers:
+        if not is_window_running(agent):
+            continue
+        try:
+            leave_told(agent, session, text)
+        except OSError as error:
+            print(f"{agent}: the line on a card it watches was not left: {error}", flush=True)
+            continue
+        print(f"{agent}: told {text[:100]}", flush=True)
+        told.append(agent)
+    return 200, {"told": told}
 
 
 def tell_verdicts():
@@ -4194,6 +4376,7 @@ VERBS = {
     ("GET", "/queue"): get_queue,
     ("GET", "/runs"): list_runs,
     ("GET", "/status"): status,
+    ("GET", "/watch"): look_watch,
     ("GET", "/whoami"): whoami,
     ("GET", "/worker"): look_worker,
     ("POST", "/build"): build_bundle,
@@ -4213,7 +4396,9 @@ VERBS = {
     ("POST", "/prompt"): prompt_window,
     ("POST", "/stop"): stop_window,
     ("POST", "/tell"): tell,
+    ("POST", "/answered"): tell_watchers,
     ("POST", "/unqueue"): unqueue,
+    ("POST", "/watch"): watch_card,
 }
 
 

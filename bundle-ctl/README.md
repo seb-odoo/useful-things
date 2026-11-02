@@ -1149,9 +1149,29 @@ a prompt.
   itself. The note goes a day after a pass first finds the folder of its bundle gone, unless its
   task still waits in the queue. Nothing is left for an ops window gone, nor for a parent bundle
   with no terminal. A tab group card (`fN`), which `hok` tells nobody, reaches no parent either.
+- A session that waits on a card another one asked watches it, with `hok-answer N --watch`
+  (`~/.claude/bin`): `POST /watch {card, session, window}`. From 10-29 to 11-02 Seb typed
+  "done?" 38 times to an agent whose turn ended on a card, 12 of them a card of another session
+  (hok 306 of repo-6b, 521 of repo-24), which nothing told (Seb, 2026-11-02: "agents stay stuck
+  waiting a long time for things that never come"). The daemon looks the card up in `hok
+  waiting`, read again for it, and keeps `[window, session]` in `STATE/watch/CARD.json` with
+  when the card was asked (`parts` of `hok waiting`): hok gives a number again once its card is
+  gone, so a watch holds to that card only. A bundle watches for its own terminal, the host for
+  the ops window it names (`window`, as for a parent); a window that does not run is refused,
+  as a tab keeps its background wait. A card hok tells that window of already (it asked it, or a
+  bundle it started did) answers `asked`, and no watch is kept.
+- Once a card ended, `hok` asks `POST /answered {cards, text}` (the host only): the requests of
+  the card with when each was asked, and one line, ``hok event: Seb answered 658 in hok, a card
+  you watch: 658 ran, exit 0. ...``. The daemon types it in each window that watches one of them
+  and runs, and keeps it an hour in `STATE/watch/CARD.told`: a watch asked in that hour gets it
+  at once. A watch on a card nobody answered goes after 8 days.
+- `GET /watch?session=S&window=W&card=N...` says of each card whether it waits and whether its
+  answer wakes that window (`wakes`), for the Stop hook `guard-report-end.py`; with no card, the
+  cards that wait (`hok-answer --list`): all of them to the host, its own to a bundle, which never
+  reads whose another card is.
 
-`python3 test_tell.py` runs the verb on fake agent folders, the environment of both windows, and
-the lines of a parent.
+`python3 test_tell.py` runs the verb on fake agent folders, the environment of both windows, the
+lines of a parent, and the watch of a card.
 
 ## Prompts from deck
 
