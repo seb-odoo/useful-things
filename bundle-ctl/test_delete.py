@@ -965,18 +965,20 @@ def check_pairs(root):
 
 
 def check_close(root):
-    """`bctl close` from the host closes an idle agent window, and from a bundle gets a 403; a turn
-    that runs, a dialog, an agent that starts or one on a worker keeps the window."""
-    idle, busy, starting, remote, stuck, bare = (
-        f"master-{name}--seb" for name in ("idle", "busy", "starting", "remote", "stuck", "bare")
+    """`bctl close` from the host closes an idle agent window, or stops an idle agent on its worker,
+    and from a bundle gets a 403; a turn that runs, a dialog or an agent that starts keeps it."""
+    names = ("idle", "busy", "starting", "remote", "remote-busy", "stuck", "bare")
+    idle, busy, starting, remote, remote_busy, stuck, bare = (
+        f"master-{name}--seb" for name in names
     )
-    for bundle in (idle, busy, starting, remote, stuck, bare):
+    for bundle in (idle, busy, starting, remote, remote_busy, stuck, bare):
         (root / "master" / bundle / ".agent").mkdir(parents=True)
         (root / "master" / bundle / ".agent" / "session").write_text(f"{bundle}-session\n")
     world = {
         "caller": idle,
         "closed": [],
-        "windows": {idle, busy, starting, remote, stuck},
+        "ended": [],
+        "windows": {idle, busy, starting, stuck},
     }
 
     def close_freed(bundle):
@@ -992,8 +994,11 @@ def check_close(root):
     daemon.identify = lambda connection: world["caller"]
     daemon.is_agent_running = lambda bundle: bundle in (idle, busy, starting)
     daemon.is_in_container = lambda connection: world["caller"] != daemon.HOST
-    daemon.is_in_turn = lambda bundle: bundle in (busy, remote)
-    daemon.remote_agent.is_remote = lambda folder: folder.name == remote
+    daemon.is_in_turn = lambda bundle: bundle == busy
+    daemon.get_session_status = lambda bundle, session: "busy" if bundle == remote_busy else "idle"
+    daemon.remote_agent.is_remote = lambda folder: folder.name in (remote, remote_busy)
+    daemon.remote_agent.read_remote = lambda folder: {"worker": "sebpc"}
+    daemon.remote_agent.end = lambda bundle, folder: world["ended"].append(bundle) or "stops"
     path = root / "ctl.sock"
     server = daemon.Server(str(path), daemon.Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -1019,15 +1024,27 @@ def check_close(root):
             "its agent is starting, its claude does not run yet",
         ),
         (
-            "an agent on a worker keeps its window",
-            remote,
-            "its agent runs on a worker, this host cannot see its turn",
+            "a turn that runs on a worker goes on",
+            remote_busy,
+            "its claude is in a turn or waits for an answer",
         ),
     ):
         code, lines = run_client(path, "close", bundle)
         checks.append(
-            (name, (code, lines, world["closed"]) == (1, [f"bctl: 409 {bundle}: {error}"], [])),
+            (
+                name,
+                (code, lines, world["closed"], world["ended"])
+                == (1, [f"bctl: 409 {bundle}: {error}"], [], []),
+            ),
         )
+    code, lines = run_client(path, "close", remote)
+    checks.append(
+        (
+            "the host stops an idle agent on its worker",
+            (code, lines, world["closed"], world["ended"])
+            == (0, [f"{remote}: its agent stops on sebpc, its work tree comes back"], [], [remote]),
+        ),
+    )
     code, lines = run_client(path, "close", bare)
     checks.append(
         (

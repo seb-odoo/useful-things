@@ -931,10 +931,10 @@ def close_agent_window(caller, query, body):
     folder = get_worktree_bundle_folder(bundle)
     if not os.path.isdir(folder):
         raise ValueError(f"no bundle folder for {bundle}")
+    if remote_agent.is_remote(pathlib.Path(folder)):
+        return close_remote_agent(bundle, pathlib.Path(folder))
     if not get_window_pids(bundle):
         raise ValueError(f"{bundle} has no agent window")
-    if remote_agent.is_remote(pathlib.Path(folder)):
-        raise Refused(f"{bundle}: its agent runs on a worker, this host cannot see its turn")
     if is_in_turn(bundle):
         raise Refused(f"{bundle}: its claude is in a turn or waits for an answer")
     live = cut.get_live_sessions([pathlib.Path(CLAUDE_CONFIG_CONTAINER, bundle, "sessions")])
@@ -945,6 +945,24 @@ def close_agent_window(caller, query, body):
     if get_window_pids(bundle):
         raise Refused(f"{bundle}: its agent window is still open {WINDOW_CLOSE_WAIT} s later")
     return 200, {"bundle": bundle}
+
+
+def close_remote_agent(bundle, folder):
+    """Stop the claude of a bundle's agent on its worker as after its verdict: its work tree comes
+    back and its session stays. Refused as close_agent_window is, from the session record the
+    worker mirrors back, and while the agent moves."""
+    agent = get_agent_folder(bundle)
+    status = get_session_status(bundle, read_text(agent / "session"))
+    if status is None:
+        raise Refused(f"{bundle}: its agent is starting on its worker, its claude does not run yet")
+    if status not in ("idle", "shell"):
+        raise Refused(f"{bundle}: its claude is in a turn or waits for an answer")
+    if bundle in moving_back or (agent / "remote-moving").exists():
+        raise Refused(f"{bundle}: its agent is moving")
+    worker = remote_agent.read_remote(folder)["worker"]
+    if remote_agent.end(bundle, folder):
+        print(f"{bundle}: its agent stops on {worker}, closed by the host", flush=True)
+    return 200, {"bundle": bundle, "worker": worker}
 
 
 def stop_after_turn(bundle, session, why, drop_done=False):

@@ -67,8 +67,9 @@ verdict has its window closed here, and any other bundle keeps the place for its
 auto, the next tasks of the bundle go back to auto and nothing moves. Only the host may ask it.
 
 close closes the agent window of a bundle, with no yes of Seb: its claude and its container stop,
-its Firefox tab groups stay, and open --terminal goes on with its session. It is refused while a
-claude of the bundle is in a turn or waits for an answer, and while its agent starts. Only the host
+its Firefox tab groups stay, and open --terminal goes on with its session. An agent on a worker
+stops there as after its verdict, and its work tree comes back. It is refused while a claude of
+the bundle is in a turn or waits for an answer, and while its agent starts or moves. Only the host
 may ask it: a container gets a 403, the ops container asks it through hctl.
 
 open --resume gives the task to the last Claude session of the bundle as its next prompt, where a
@@ -326,6 +327,11 @@ def print_placed(answer):
 
 
 def print_closed(answer):
+    if "worker" in answer:
+        print(
+            f"{answer['bundle']}: its agent stops on {answer['worker']}, its work tree comes back"
+        )
+        return
     print(
         f"{answer['bundle']}: its agent window is closed, bctl open {answer['bundle']} --terminal"
         " goes on with its session",
