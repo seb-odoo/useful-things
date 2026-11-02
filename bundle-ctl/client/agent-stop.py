@@ -20,7 +20,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import prwatch
 
 AGENT = pathlib.Path("/workspace/.agent")
-VERDICT = re.compile(r"(pushed:|ready to push|needs seb:|blocked:|nothing to do:)", re.IGNORECASE)
+VERDICT = re.compile(
+    r"(pushed:|ready to push|needs seb:|stays a draft:|blocked:|nothing to do:)", re.IGNORECASE
+)
 
 
 def read(name):

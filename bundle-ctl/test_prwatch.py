@@ -215,9 +215,9 @@ def test_hooks(folder):
     (prwatch.AGENT / "terminal").write_text("1\n")
     prwatch.leave("c")
 
-    def stopped():
+    def stopped(message="Pushed: x"):
         out = io.StringIO()
-        sys.stdin = io.StringIO(json.dumps({"session_id": "s1", "last_assistant_message": "Pushed: x"}))
+        sys.stdin = io.StringIO(json.dumps({"session_id": "s1", "last_assistant_message": message}))
         with contextlib.redirect_stdout(out):
             stop.main()
         return out.getvalue(), (prwatch.AGENT / "done").exists()
@@ -228,6 +228,9 @@ def test_hooks(folder):
     check("a turn before the terminal typed its task writes no verdict", stopped(), ("", False))
     (prwatch.AGENT / "run.lock").mkdir()
     check("then the turn ends on its verdict", stopped(), ("", True))
+    (prwatch.AGENT / "done").unlink()
+    check("a draft left on Seb's word is a verdict too",
+          stopped("**Stays a draft:** Seb reads it at abc"), ("", True))
 
     started = []
     prwatch.Watch.run = lambda self: started.append(self)

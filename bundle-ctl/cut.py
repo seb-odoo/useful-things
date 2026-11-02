@@ -33,7 +33,9 @@ SHORT = 160
 STOPS = {"KillShell": "shell_id", "TaskStop": "task_id"}
 TAIL = 256 * 1024
 TITLES = {"ai-title": "aiTitle", "custom-title": "customTitle"}
-VERDICT = re.compile(r"(pushed:|ready to push|needs seb:|blocked:|nothing to do:)", re.IGNORECASE)
+VERDICT = re.compile(
+    r"(pushed:|ready to push|needs seb:|stays a draft:|blocked:|nothing to do:)", re.IGNORECASE
+)
 WINDOW = 3 * 86400
 
 
