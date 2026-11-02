@@ -176,6 +176,7 @@ FOLLOWED = [
     [f"❌ {TITLE}"],
     [f"⏳ {OPS}", "⏳ 🔧 Ops agent windows (ops)", "🔧 Ops agent windows (ops)"],
     [f"⏳ {TITLE}", f"✋ {TITLE}"],
+    [f"⏳ {TITLE}", f"✅ {TITLE}"],
 ]
 
 
@@ -368,7 +369,8 @@ def get_loaded():
 def get_followed(home):
     """The titles agent-terminator.py gives its window while the session of its claude works,
     then ends on a verdict, and when the run fails before its claude starts. A claude of the
-    bundle started before the window does not count. Then how its terminator ends on SIGUSR1,
+    bundle started before the window does not count, but on a worker one started since its run
+    does, as its window attaches to it later. Then how its terminator ends on SIGUSR1,
     which agent-terminal.py sends after a takeover. Last, an ops window opened with no task: its
     title follows the title of the conversation, and loses its mark once its claude ended. It
     closes once a tab of the ops VS Code window resumes its session."""
@@ -458,6 +460,27 @@ def get_followed(home):
     threading.Thread(target=wait_on_hok, daemon=True).start()
     terminator.follow(BUNDLE, window, time.time() * 1000 - 1000)
     titles.append((home / "log").read_text().splitlines())
+
+    def run_remote():
+        time.sleep(0.5)
+        (agent / "done").write_text("0\n")
+        write("18.json", sessionId="pushed", startedAt=started, status="idle")
+
+    for path in sessions.iterdir():
+        path.unlink()
+    (agent / "run.lock").mkdir()
+    os.utime(agent / "run.lock", (time.time() - 120, time.time() - 120))
+    (agent / "remote.json").write_text("{}")
+    started = time.time() * 1000 - 60000
+    write("18.json", sessionId="pushed", startedAt=started, status="busy")
+    window = subprocess.Popen(["sleep", "2"])
+    (home / "pid").write_text(str(window.pid))
+    (home / "log").write_text("")
+    threading.Thread(target=run_remote, daemon=True).start()
+    terminator.follow(BUNDLE, window, time.time() * 1000)
+    titles.append((home / "log").read_text().splitlines())
+    (agent / "run.lock").rmdir()
+    (agent / "remote.json").unlink()
     window = subprocess.Popen(["sleep", "30"])
     threading.Timer(0.3, os.kill, (os.getpid(), signal.SIGUSR1)).start()
     closed = terminator.follow(BUNDLE, window, time.time() * 1000)

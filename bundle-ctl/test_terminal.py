@@ -40,6 +40,7 @@ case "$1 $*" in
 \t\tIFS= read -r -t 0.1 part && { printf '%s\\n' "$line$part" >>"$STATE/typed"; line=; } || line+=$part
 \tdone ;;
 "exec "*agent-takeover.py*) touch "$AGENT/handoff" ;;
+"exec "*"standin.py attach") exit 143 ;;
 "exec "*) cat >/dev/null ;;
 "inspect "*) echo true ;;
 "ps "*) [ -e "$STATE/window" ] && echo c1 ;;
@@ -154,7 +155,7 @@ class Terminal:
 
 class Case:
     def __init__(self, folder, name, window=False, tab=None, wait=None, bundle="b1", task=True,
-                 enter=None):
+                 enter=None, files=None):
         self.name = name
         self.bundle = bundle
         self.root = pathlib.Path(folder)
@@ -162,6 +163,8 @@ class Case:
         (self.agent / "run.lock").mkdir(parents=True)
         if task:
             (self.agent / "task.md").write_text("task\n")
+        for file, text in (files or {}).items():
+            (self.agent / file).write_text(text)
         (self.agent / "session").write_text("s1\n")
         self.state = self.root / "state"
         self.state.mkdir()
@@ -671,6 +674,23 @@ def check_ops_cut(case):
     case.check("quitting claude ends it", wait(case.terminal.has_ended))
 
 
+def check_remote_stop(case):
+    """A window on the claude of a worker closes when the daemon stops that claude after its
+    verdict or to move it, as a terminal here closes after the verdict."""
+    case.check("the stop ends it", wait(case.terminal.has_ended))
+    case.check("the stop shows no failure", "Press Enter" not in case.terminal.read())
+
+
+def check_remote_move(case):
+    check_remote_stop(case)
+
+
+def check_remote_failure(case):
+    """Any other end of the claude of a worker keeps its window open on its code."""
+    case.check("a failure shows its code", wait(lambda: "code 143" in case.terminal.read()))
+    case.check("a failure keeps the window", not case.terminal.has_ended())
+
+
 def check_takeover_container():
     """A terminal takes the session over in the container the label of the bundle names: the
     bundle writes .agent/container, here with another container in it."""
@@ -728,6 +748,12 @@ def main():
     checks += (check_shutdown, check_close_window)
     checks += (check_handoff, *tabs)
     checks += (check_ops_quit, check_ops_close, check_ops_retry)
+    remote = {
+        check_remote_stop: {"remote.json": "{}", "done": "0\n"},
+        check_remote_move: {"remote.json": "{}", "remote-moving": ""},
+        check_remote_failure: {"remote.json": "{}"},
+    }
+    checks += (*remote,)
     bundles = {check_ops_quit: "ops-s2", check_ops_close: "ops-s2", check_ops_retry: "ops-s2"}
     bundles |= {check_ops_resume: "ops-s1", check_ops_cut: "ops-s1"}
     for check in checks:
@@ -738,7 +764,10 @@ def main():
             task = check is not check_ops_resume
             name = check.__name__[6:]
             enter = 1.5 if check is check_enter else None
-            case = Case(folder, name, window, tabs.get(check), wait_time, bundle, task, enter)
+            files = remote.get(check)
+            case = Case(
+                folder, name, window, tabs.get(check), wait_time, bundle, task, enter, files
+            )
             try:
                 check(case)
                 case.check("its markers are gone", wait(case.is_clean))

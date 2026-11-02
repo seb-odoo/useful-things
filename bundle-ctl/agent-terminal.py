@@ -764,14 +764,17 @@ def run_ops(name):
 
 def attach_remote(bundle):
     """The agent runs on a worker: this window shows its claude, through its stand-in, and
-    closing it leaves the agent running there (README.md, "Remote agents").
+    closing it leaves the agent running there (README.md, "Remote agents"). The daemon stops that
+    claude after its verdict or to move it, which closes the window as a terminal here closes
+    after the verdict; any other end keeps it open on its code.
     """
     code = run_tty(
         ["podman", "exec", "--interactive", "--tty", "--detach-keys=",
          "--env", f"TERM={os.environ.get('TERM', 'xterm')}", f"rrs-{bundle}",
          "python3", "-I", "/opt/remote-runs/standin/standin.py", "attach"],
     )
-    if code:
+    agent = get_agent_folder(bundle)
+    if code and read_text(agent / "done") != "0" and not (agent / "remote-moving").exists():
         keep_open(f"{bundle}: its agent on the worker ended with code {code}")
 
 

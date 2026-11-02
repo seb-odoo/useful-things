@@ -20,7 +20,9 @@ window minimizes it again.
 The title of the window says what the work is about (client/window-title.py). With wmctrl, it also
 follows the status of the agent's session, in the sessions folder of the bundle's container, until
 the window closes: it says the agent starts until its claude does, and that it failed when the
-run ends before (.agent/done written since the window opened). A busy session is read again every
+run ends before (.agent/done written since the window opened). The window of an agent on a worker
+takes the record that the worker mirrors back of a claude started since its run (.agent/run.lock),
+as that claude started before the window. A busy session is read again every
 REFRESH seconds, as a call that waits for Seb in hok changes its mark and not its status. Once its
 claude ends, the last mark stays. When a VS Code window or another terminal takes the session over, agent-terminal.py closes
 the window: SIGUSR1 to BUNDLE_CTL_WINDOW_PID, this process. The window opens minimized, so that a
@@ -189,7 +191,10 @@ def get_windows(pid):
 
 def follow(bundle, terminator, since):
     signal.signal(signal.SIGUSR1, lambda *args: terminator.terminate())
-    done = get_agent_folder(bundle) / "done"
+    agent = get_agent_folder(bundle)
+    done = agent / "done"
+    run = get_mtime(agent / "run.lock") if (agent / "remote.json").exists() else None
+    start = since if run is None else min(since, run * 1000)
     ended = False
     refreshed = time.monotonic()
     shown = titled = None
@@ -198,7 +203,7 @@ def follow(bundle, terminator, since):
             return terminator.wait(CHECK)
         except subprocess.TimeoutExpired:
             pass
-        record = get_record(bundle, since)
+        record = get_record(bundle, start)
         if record and record.get("entrypoint") == "claude-vscode":
             terminator.terminate()
             continue
