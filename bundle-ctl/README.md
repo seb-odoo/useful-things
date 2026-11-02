@@ -298,6 +298,11 @@ necessary. but if we have a good setup, full remote should offer the same possib
   only has its window closed, as its terminal would type the next task here. Any other bundle
   only takes the place. Refused while the agent starts, here or on a worker, while its session
   is queued already, and for a worker while a VS Code window holds the bundle.
+- The agents of a worker that leaves (`leaving` in its `status`, Seb's "Worker - off" on sebpc)
+  come back, once each: one at work goes on here in a terminal, same session; an idle one that
+  gave its verdict stops there. The next tasks of both run here. One whose claude has not
+  started waits for it. A bundle placed on it with no agent there is placed here (Seb,
+  2026-10-30): its next task rebuilds its DBs here, and deck's Move to puts it back there.
 - What differs from here: its DBs stay on the worker; Remote Control and the claude.ai connectors
   do not work (they use the login outside what claude-switch serves); a link down longer than a
   minute (a suspend, a move between home and office) waits for Seb's Bitwarden yes.
@@ -999,7 +1004,8 @@ what to do: ask Seb to validate, or act.
   own, `idle`, and a line typed before claude runs (agent-run.sh waits 10 s first) reaches it with
   its Enter as a paste, left in the prompt (2026-10-23). The
   terminal types nothing while a key Seb typed since his last Enter may be a draft (a mouse move,
-  a focus change or the answer of the terminal to a query of claude is none), nor after a slash
+  a focus change, the answer of the terminal to a query of claude or a key with nothing to show is
+  none), nor after a slash
   command he sent, which may leave a menu open: his
   next prompt then carries the line, by the hook.
 - The terminal looks for a line every 0.2 s (`EVENTS_EVERY`), as an event that comes after Seb
@@ -1037,6 +1043,10 @@ a prompt.
   running. It leaves the line in `pr-events/` of the ops window, a folder of the host, or for a
   bundle in `~/.local/state/bundle-ctl/told/BUNDLE/SESSION/` (see PR events), and the terminal
   types it, idle or busy. No hook takes it: in `.agent/`, the bundle could leave a false one.
+- The answer is `{bundle, asks}`: `asks` is true when that claude waits on a dialog, a question
+  or a permission. The terminal types the line only once Seb answered it there, as an Enter on
+  the dialog would pick an answer, and `hok` says so (Seb, 2026-10-30: the no to a deploy of
+  review-board waited 6 min behind a question of the agent, and he wondered whether it came).
 - A request a gateway held names its bundle, not its conversation: `POST /tell {bundle, text}`
   types the line in the session the terminal of that bundle runs now, 404 when none runs.
 - An ops window whose claude ended keeps its folder until the window closes, and the line waits

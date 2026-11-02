@@ -58,26 +58,36 @@ def check_tell(root, check):
     daemon.get_terminals = lambda: {"b1": 1}
     daemon.is_agent_running = running.__contains__
     daemon.TOLD_DIR = root / "told"
+    daemon.HOST_FOLDER = str(root / "host-ctl")
+    statuses = {}
+    daemon.get_session_status = lambda container, session: statuses.get((container, session))
     host = root / "told" / "b1" / BUNDLE_SESSION
 
     found = tell(OPS_SESSION)
-    check("an ops window is told", found == (200, {"bundle": f"ops-{OPS_SESSION}"}), found)
+    told = (200, {"bundle": f"ops-{OPS_SESSION}", "asks": False})
+    check("an ops window is told", found == told, found)
     check("its line waits in its folder", get_lines(agents[f"ops-{OPS_SESSION}"]) == [TEXT])
+    statuses[("host-ctl", OPS_SESSION)] = "waiting"
+    found = tell(OPS_SESSION)
+    check("an ops window on a dialog says so", found == (200, told[1] | {"asks": True}), found)
+    max((agents[f"ops-{OPS_SESSION}"] / "pr-events").glob("[!.]*.txt")).unlink()
     found = tell(STOPPED_SESSION)
     told = get_lines(agents["b2"])
     check("a bundle with no terminal is not", found[0] == 404 and not told, found)
 
     found = tell(BUNDLE_SESSION)
-    check("a bundle terminal is told", found == (200, {"bundle": "b1"}), found)
+    check("a bundle terminal is told", found == (200, {"bundle": "b1", "asks": False}), found)
     check("its line waits in the folder of the host, not in .agent",
           [path.read_text() for path in host.glob("[!.]*.txt")] == [TEXT]
           and not get_lines(agents["b1"]))
     prwatch = load("prwatch", HERE / "client" / "prwatch.py")
     taken = prwatch.take(host)
     check("the terminal takes it as a PR event", taken == [TEXT], taken)
+    statuses[("b1", BUNDLE_SESSION)] = "waiting"
     found = tell_bundle("b1")
-    check("a card a gateway held for b1 is told to its session", found == (200, {"bundle": "b1"})
-          and prwatch.take(host) == [TEXT], found)
+    check("a card a gateway held for b1 is told to its session, on a dialog",
+          found == (200, {"bundle": "b1", "asks": True}) and prwatch.take(host) == [TEXT], found)
+    statuses.clear()
     found = tell_bundle("b2")
     check("a bundle with no terminal is not, by name",
           found[0] == 404 and not get_lines(agents["b2"]), found)

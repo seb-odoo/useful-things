@@ -291,6 +291,7 @@ TITLE = load_title()
 WINDOW_CLOSE_WAIT = 30
 
 bundle_locks = {}
+moving_back = set()
 bundle_rows = {"read": float("-inf"), "rows": []}
 folder_by_container = {}
 FOLDER_LABELS = (
@@ -1691,7 +1692,8 @@ def start_remote(log, bundle, worker):
 def keep_remote_agents():
     """Each remote agent: its tunnel up, its end once its job ended, and its job ended once it
     gave its verdict FREE_AFTER ago, as a terminal closes here. The main login is renewed while
-    a remote agent lives or a bundle container runs: neither can renew it.
+    a remote agent lives or a bundle container runs: neither can renew it. While a worker leaves,
+    a bundle placed on it with no agent there runs its next tasks here.
     """
     root = pathlib.Path(get_worktree_container_folder())
     remotes = sorted(root.glob("*/*/.agent/remote.json"))
@@ -1706,7 +1708,10 @@ def keep_remote_agents():
             line, lost = remote_agent.keep(bundle, folder, WORKERS)
             done = get_mtime(found.parent / "done")
             session = read_text(found.parent / "session")
-            if line is None and done and time.time() - done > FREE_AFTER and (
+            remote = remote_agent.read_remote(folder)
+            if line is None and remote and WORKERS.is_leaving(remote["worker"]):
+                line = leave_worker(bundle, folder, remote["worker"], done, session)
+            elif line is None and done and time.time() - done > FREE_AFTER and (
                 get_session_status(bundle, session) != "busy"
             ):
                 line = remote_agent.end(bundle, folder)
@@ -1721,6 +1726,41 @@ def keep_remote_agents():
                 enqueue(HOST, bundle, {"task": GO_ON, "resume": True})
             else:
                 enqueue(HOST, bundle, {"task": read_text(found.parent / "task.md") or GO_ON})
+    leaving = {f"worker:{name}": name for name in WORKERS.names if WORKERS.is_leaving(name)}
+    for placed in sorted(root.glob("*/*/.agent/where")) if leaving else ():
+        folder = placed.parent.parent
+        name = leaving.get(read_text(placed))
+        if name and not remote_agent.is_remote(folder):
+            set_place(folder.name, "local")
+            print(f"{folder.name}: placed here, {name} is leaving", flush=True)
+
+
+def leave_worker(bundle, folder, worker, done, session):
+    """The agent of a bundle on a worker that leaves (README.md, "Remote agents"): one at work
+    goes on here in a terminal, same session; an idle one that gave its verdict stops there. The
+    next tasks of both run here. Once per bundle while its move runs; one whose claude has not
+    started yet waits for it. Returns a line for the journal or None."""
+    if bundle in moving_back:
+        return None
+    if done and get_session_status(bundle, session) != "busy":
+        if remote_agent.end(bundle, folder):
+            set_place(bundle, "local")
+            return f"{bundle}: its agent stops on {worker}, the worker is leaving"
+        return None
+    if not get_transcript(session):
+        return None
+    moving_back.add(bundle)
+
+    def work(log):
+        try:
+            log.write(remote_agent.move_back(log, bundle, folder, WORKERS) + "\n")
+            set_place(bundle, "local")
+            open_terminal(log, bundle, takeover=f"{bundle}: back from its worker, same session")
+        finally:
+            moving_back.discard(bundle)
+
+    start_job(HOST, "bring-back", work, lock=None, bundle=bundle)
+    return f"{bundle}: back from {worker}, the worker is leaving"
 
 
 def bring_back(caller, query, body):
@@ -2720,7 +2760,8 @@ def tell(caller, query, body):
     """`POST /tell {session, text}`: one line of hok, once Seb answered a card of a Claude session,
     for the agent window that runs that session, as a PR event (README.md, "hok events"). A card
     a gateway held names its bundle and no session: `{bundle, text}` tells the session its
-    terminal runs. Only the host asks (HOST_ONLY): the line is typed as a prompt."""
+    terminal runs. Only the host asks (HOST_ONLY): the line is typed as a prompt. `asks` says
+    that its claude waits on a dialog, which the terminal types nothing into until Seb answers."""
     session, bundle, text = body.get("session"), body.get("bundle"), body.get("text")
     if not isinstance(text, str) or not text.isprintable() or not 0 < len(text) <= MAX_TOLD:
         raise ValueError(f"text: one line of at most {MAX_TOLD} characters")
@@ -2742,7 +2783,8 @@ def tell(caller, query, body):
     except OSError as error:
         raise Refused(f"{agent}: the line was not left: {error}") from error
     print(f"{agent}: told {text[:100]}", flush=True)
-    return 200, {"bundle": agent}
+    container = os.path.basename(HOST_FOLDER or "") if agent.startswith(OPS) else agent
+    return 200, {"bundle": agent, "asks": get_session_status(container, session) == "waiting"}
 
 
 def get_deck_window(body):
