@@ -65,6 +65,8 @@ def check_config(root):
     own.mkdir(parents=True)
     (own / ".claude.json").write_text(json.dumps({
         "hasCompletedOnboarding": True, "mcpServers": {"x": {"headers": {"Authorization": "t"}}},
+        "projects": {"/workspace": {"hasClaudeMdExternalIncludesApproved": True,
+                                    "mcpServers": {"y": {}}}},
     }))
     (own / "settings.json").write_text("{}\n")
     shared = root / "worktrees" / ".claude"
@@ -112,7 +114,10 @@ def check_config(root):
     check("~/.gitconfig as the file its link names",
           contents.get("home/.gitconfig") == b"[user]\n", names)
     kept = json.loads(contents["home/.claude/.claude.json"])
-    check(".claude.json by its allow list", kept == {"hasCompletedOnboarding": True}, kept)
+    check(".claude.json by its allow list",
+          kept == {"hasCompletedOnboarding": True,
+                   "projects": {"/workspace": {"hasClaudeMdExternalIncludesApproved": True}}},
+          kept)
     check("everything under home/ or workspace/",
           all(name.split("/")[0] in ("home", "workspace") for name in names), names)
 

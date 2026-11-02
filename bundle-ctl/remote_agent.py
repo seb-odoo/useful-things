@@ -166,6 +166,8 @@ CLAUDE_JSON_KEYS = ("hasCompletedOnboarding", "projects", "theme", "lastOnboardi
 PROJECT_KEYS = (
     "allowedTools",
     "hasTrustDialogAccepted",
+    "hasClaudeMdExternalIncludesApproved",
+    "hasClaudeMdExternalIncludesWarningShown",
     "hasCompletedProjectOnboarding",
     "projectOnboardingSeenCount",
 )
