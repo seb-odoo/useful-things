@@ -923,8 +923,11 @@ def check_place(root):
     windows, stopping = {"busy", "ended", "answering", "unborn", "verdict"}, set()
     started, closed, moved = [], [], []
     remote = {"away": "sebpc", "stuck": "sebpc"}
+    unreachable = {}
     daemon.WORKERS = types.SimpleNamespace(
-        names=["sebpc", "vm"], choose_agent=lambda wanted=None: wanted or "sebpc"
+        names=["sebpc", "vm"],
+        choose_agent=lambda wanted=None: wanted or "sebpc",
+        get_unreachable=unreachable.get,
     )
 
     def move_back(log, bundle, folder, workers):
@@ -1057,6 +1060,12 @@ def check_place(root):
             code, lines = run_client(path, "place", bundle, where)
             refused = code == 1 and lines[0].startswith(f"bctl: {error}")
             checks.append((f"place {bundle} {where} from {caller} is refused", refused))
+        daemon.identify = lambda connection: daemon.HOST
+        unreachable["vm"] = "vm is drained"
+        found = run_client(path, "place", "waiting", "vm"), get_where("waiting")
+        unreachable.clear()
+        expected = (1, ["bctl: 409 vm is drained"]), "worker:sebpc\n"
+        checks.append(("a place on a worker that takes no agent is refused", found == expected))
     finally:
         server.shutdown()
         server.server_close()
@@ -1866,21 +1875,48 @@ def check_leaving(root):
 
 def check_choose_agent(root):
     """A worker takes an agent only with a place and 1 GB free for it, as it refuses one
-    without (2026-10-30: six agents sent to sebpc in three minutes, each refused, then here)."""
+    without (2026-10-30: six agents sent to sebpc in three minutes, each refused, then here), and
+    a task placed there says which is missing (Seb, 2026-11-02: "why isn't there a clear way to
+    tell why there is no place?")."""
     found = daemon.workers.Workers(["sebpc"])
     found.is_up = lambda name: True
     failures = []
-    for status, expected in (
-        ({"agents_free": 1, "gigabytes_free": 0.8}, None),
-        ({"agents_free": 0, "gigabytes_free": 5}, None),
-        ({"agents_free": 1, "gigabytes_free": 1.0}, "sebpc"),
-        ({"agents_free": 1}, None),
+    for status, expected, why in (
+        ({"agents_free": 1, "gigabytes_free": 0.8}, None, "sebpc has 0.8 GB free, 1 needed"),
+        ({"agents_free": 0, "gigabytes_free": 5}, None, "every agent place of sebpc is taken"),
+        ({"agents_free": 1, "gigabytes_free": 1.0}, "sebpc", None),
+        ({"agents_free": 1}, None, "sebpc has 0.0 GB free, 1 needed"),
+        ({"agents_free": 1, "gigabytes_free": 5, "draining": True}, None, "sebpc is drained"),
     ):
         found.status["sebpc"] = (time.time(), status)
         for wanted in (None, "sebpc"):
             if found.choose_agent(wanted) != expected:
                 failures.append(f"choose_agent {status} {wanted}: expected {expected}")
-    return failures, 8
+        if found.get_agent_wait("sebpc") != why:
+            failures.append(f"get_agent_wait {status}: {found.get_agent_wait('sebpc')}")
+    mux, workers = daemon.workers.MUX, daemon.WORKERS
+    daemon.workers.MUX, daemon.WORKERS = root, found
+    try:
+        item = {"bundle": "placed", "where": "worker:sebpc"}
+        wait = daemon.get_agent_worker(item, root, False)
+        if wait != (None, "a place for an agent: sebpc is drained"):
+            failures.append(f"the wait of a placed task: {wait}")
+        found.status["sebpc"] = (0, {})
+        stale = found.get_unreachable("sebpc")
+        found.is_up = lambda name: False
+        down = found.get_unreachable("sebpc")
+        (root / "sebpc" / "request" / "held").touch()
+        held = found.get_unreachable("sebpc")
+    finally:
+        daemon.workers.MUX, daemon.WORKERS = mux, workers
+    for name, why, expected in (
+        ("stale", stale, "no answer from sebpc yet"),
+        ("down", down, "no connection to sebpc"),
+        ("held", held, "no connection to sebpc, its key is asked at the next unlock of the screen"),
+    ):
+        if why != expected:
+            failures.append(f"get_unreachable {name}: {why}")
+    return failures, 19
 
 
 def main():

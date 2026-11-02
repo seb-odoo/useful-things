@@ -191,22 +191,46 @@ class Workers:
         return best[1] if best else None
 
     def choose_agent(self, wanted=None):
-        """The worker that starts an agent now, or None: up, answered lately, not drained, with
-        a place and the memory for an agent (README.md, "Remote agents").
-        """
-        now = time.time()
+        """The worker that starts an agent now, or None (README.md, "Remote agents")."""
         for name in self.names if wanted is None else [wanted]:
-            if name not in self.names:
-                continue
-            if not self.is_up(name):
-                self.ask(name)
-                continue
-            with self.lock:
-                seen, status = self.status.get(name, (0, {}))
-            fresh = now - seen <= FRESH and not status.get("draining")
-            room = status.get("gigabytes_free", 0) >= AGENT_GIGABYTES
-            if fresh and room and status.get("agents_free", 0) > 0:
+            if not self.get_agent_wait(name):
                 return name
+        return None
+
+    def get_agent_wait(self, name):
+        """Why the worker starts no agent now, or None: it is up, answered lately, is not drained,
+        and has a place and the memory for an agent."""
+        if name not in self.names:
+            return f"no worker {name}"
+        unreachable = self.get_unreachable(name)
+        if unreachable:
+            return unreachable
+        with self.lock:
+            _, status = self.status.get(name, (0, {}))
+        gigabytes = status.get("gigabytes_free", 0)
+        if gigabytes < AGENT_GIGABYTES:
+            return f"{name} has {gigabytes:.1f} GB free, {AGENT_GIGABYTES} needed"
+        if status.get("agents_free", 0) <= 0:
+            return f"every agent place of {name} is taken"
+        return None
+
+    def get_unreachable(self, name):
+        """Why the worker takes no agent until something changes, or None. A full worker frees a
+        place by itself."""
+        if not self.is_up(name):
+            self.ask(name)
+            if (MUX / name / "request" / "held").exists():
+                return f"no connection to {name}, its key is asked at the next unlock of the screen"
+            return f"no connection to {name}"
+        with self.lock:
+            seen, status = self.status.get(name, (0, {}))
+        if time.time() - seen > FRESH:
+            since = time.strftime("%H:%M", time.localtime(seen)) if seen else None
+            return f"no answer from {name} since {since}" if since else f"no answer from {name} yet"
+        if status.get("leaving"):
+            return f"{name} is leaving"
+        if status.get("draining"):
+            return f"{name} is drained"
         return None
 
     def is_leaving(self, name):

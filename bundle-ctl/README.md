@@ -245,7 +245,8 @@ necessary. but if we have a good setup, full remote should offer the same possib
   When a task's turn comes, `auto` goes to a worker of `BUNDLE_CTL_WORKERS` that answered lately,
   is not drained and has a place for an agent (`agents_free` of its `status`) and 1 GB for it
   (`gigabytes_free`, as the worker refuses an agent without), else here as any
-  task; `worker` waits for one. A bundle open in a window stays here, and so does a bundle not
+  task; `worker` waits for one, and its wait in `bctl queue` says what is missing (no connection,
+  its key held until the next unlock, no answer, drained, memory, places). A bundle open in a window stays here, and so does a bundle not
   built yet (see Bare start), as its build runs here. A bundle whose agent ran on
   a worker goes there again (`.agent/where` is `worker:NAME`) until it is brought back, so that it
   does not rebuild its DBs on each machine in turn. A task for a bundle whose agent is remote
@@ -301,7 +302,10 @@ necessary. but if we have a good setup, full remote should offer the same possib
   for `.agent/remote-back`, on its old worker for a lost job. An idle agent that gave its verdict
   only has its window closed, as its terminal would type the next task here. Any other bundle
   only takes the place. Refused while the agent starts, here or on a worker, while its session
-  is queued already, and for a worker while a VS Code window holds the bundle.
+  is queued already, and for a worker while a VS Code window holds the bundle, or that takes no
+  agent until something changes: no connection, no answer in the last minute, drained or leaving
+  (Seb, 2026-11-02: two agents moved to sebpc waited with no connection since a reboot). A full
+  worker is not refused: a place frees by itself.
 - The agents of a worker that leaves (`leaving` in its `status`, Seb's "Worker - off" on sebpc)
   come back, once each: one at work goes on here in a terminal, same session; an idle one that
   gave its verdict stops there. The next tasks of both run here. One whose claude has not

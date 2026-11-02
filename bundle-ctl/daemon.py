@@ -1690,7 +1690,11 @@ def get_agent_worker(item, folder, is_running):
     found = WORKERS.choose_agent(wanted)
     if found or where == "auto":
         return found, None
-    return None, f"a place for an agent on {wanted or 'a worker'}"
+    names = [wanted] if wanted else WORKERS.names
+    waits = [why for name in names if (why := WORKERS.get_agent_wait(name))]
+    return None, "a place for an agent" + (
+        f": {'; '.join(waits)}" if waits else f" on {wanted or 'a worker'}"
+    )
 
 
 def start_remote(log, bundle, worker):
@@ -1835,6 +1839,8 @@ def place_agent(caller, query, body):
         raise Refused(f"the agent of {bundle} is starting on a worker: move it once it runs")
     if bundle in state["launches"]:
         raise Refused(f"the agent of {bundle} is starting here: move it once it runs")
+    if where != "local" and (unreachable := WORKERS.get_unreachable(where)):
+        raise Refused(unreachable)
     container = get_bundle_container(bundle)
     if not remote and where != "local" and container and has_window(container):
         raise Refused(f"{bundle} is open in a window: its agent stays here until it closes")
