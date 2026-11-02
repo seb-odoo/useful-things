@@ -108,7 +108,7 @@ MODES = ("acceptEdits", "auto", "default", "plan")
 RESET = "\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m"
 NOT_TYPED = re.compile(
     rb"\x1b\[<[0-9;]*[Mm]|\x1b\[M[\s\S]{3}|\x1b\[[IO]"
-    rb"|\x1b\[[?>][0-9;]*\$?[A-Za-z]|\x1b[\]P_][^\x07\x1b]*(?:\x07|\x1b\\)"
+    rb"|\x1b\[[?>][0-9;]*\$?[A-Za-z]|\x1b\[[0-9;]*t|\x1b[\]P_][^\x07\x1b]*(?:\x07|\x1b\\)"
 )
 PASTE_END = b"\x1b[201~"
 PASTE_START = b"\x1b[200~"

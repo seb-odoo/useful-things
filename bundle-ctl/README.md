@@ -1035,7 +1035,9 @@ what to do: ask Seb to validate, or act.
   its Enter as a paste, left in the prompt (2026-10-23). The
   terminal types nothing while a key Seb typed since his last Enter may be a draft (a mouse move,
   a focus change, the answer of the terminal to a query of claude or a key with nothing to show is
-  none), nor after a slash
+  none: claude asks the size of a cell again each time its window gets the focus back, and on
+  2026-11-02 the answer, `ESC[6;17;8t`, held the yes to request 620 of an ops window 38 s, until
+  Seb typed there), nor after a slash
   command he sent, which may leave a menu open: his
   next prompt then carries the line, by the hook.
 - The terminal looks for a line every 0.2 s (`EVENTS_EVERY`), as an event that comes after Seb

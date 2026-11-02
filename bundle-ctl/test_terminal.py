@@ -295,7 +295,7 @@ def check_wake(case):
     os.write(case.terminal.fd, b"\r")
     case.check("his Enter lets it go, after his prompt",
                wait(lambda: lines()[2:] == ["ab", "\x1b[200~PR event: two\x1b[201~"]))
-    os.write(case.terminal.fd, b"\x1b[<35;10;5M\x1b[I")
+    os.write(case.terminal.fd, b"\x1b[<35;10;5M\x1b[I\x1b[6;17;8t")
     os.write(case.terminal.fd, b"\x1b]11;rgb:0000/0000/0000\x07\x1b[?65;1;9c\x1bP>|VTE(7800)\x1b\\")
     os.write(case.terminal.fd, b"\n")
     (events / "3.txt").write_text("PR event: three")
