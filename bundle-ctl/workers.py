@@ -219,6 +219,8 @@ class Workers:
         gigabytes = status.get("gigabytes_free", 0) - len(sent) * AGENT_GIGABYTES
         if gigabytes < AGENT_GIGABYTES:
             return "full", f"{name} has {gigabytes:.1f} GB free, {AGENT_GIGABYTES} needed"
+        if status.get("agent_wait"):
+            return "full", f"{name}: {status['agent_wait']}"
         if status.get("agents_free", 0) <= len(sent):
             return "full", f"every agent place of {name} is taken"
         return None

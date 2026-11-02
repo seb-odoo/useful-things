@@ -249,8 +249,11 @@ necessary. but if we have a good setup, full remote should offer the same possib
   start ended, as one pass may send several on the same status. An agent the worker refuses
   starts here that once, and the next tasks of its bundle are `auto` again.
   `worker` waits for one, and its wait in `bctl queue` says what is missing (no connection,
-  its key held until the next unlock, no answer, drained, memory, places). A bundle open in a window stays here, and so does a bundle not
-  built yet (see Bare start), as its build runs here. A bundle whose agent ran on
+  its key held until the next unlock, no answer, drained, memory, places, or the `agent_wait` of
+  the worker's `status`). A bundle open in a window stays here. A bundle not built yet (see Bare
+  start) that a worker would take is built here first, one at a time, as a worker makes no
+  bundle; its task then starts as any other (Seb, 2026-11-02). After a failed build it starts
+  here in its bare folder, as without a worker. A bundle whose agent ran on
   a worker goes there again (`.agent/where` is `worker:NAME`) until it is brought back, so that it
   does not rebuild its DBs on each machine in turn. A task for a bundle whose agent is remote
   waits for its end. `auto` stays here until `BUNDLE_CTL_REMOTE_AGENTS=auto` is in

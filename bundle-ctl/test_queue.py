@@ -1235,10 +1235,11 @@ def check_login(root):
 
 def check_disk_worker(root):
     """Under the disk floor, a task a worker takes goes there, and one not built yet waits; with
-    the disk back, that one starts here, where its build runs."""
+    the disk back, that one is built here, then its agent goes to the worker (Seb, 2026-11-02), or
+    starts here in its bare folder when its build failed."""
     stubs = {
         name: getattr(daemon, name)
-        for name in ("REMOTE_AUTO", "WORKERS", "prepare_folder", "start_remote")
+        for name in ("REMOTE_AUTO", "WORKERS", "prepare_folder", "run_script", "start_remote")
     }
     daemon.REMOTE_AUTO = True
     daemon.WORKERS = types.SimpleNamespace(
@@ -1246,25 +1247,46 @@ def check_disk_worker(root):
         choose_agent=lambda wanted=None: "sebpc",
         send_agent=lambda name, bundle: None,
     )
-    daemon.prepare_folder = lambda bundle: os.makedirs(daemon.get_worktree_bundle_folder(bundle))
-    started = []
+    daemon.prepare_folder = lambda bundle: os.makedirs(
+        daemon.get_worktree_bundle_folder(bundle), exist_ok=True
+    )
+    started, builds = [], []
     daemon.start_remote = lambda log, bundle, worker: started.append((bundle, worker))
+
+    def fail(log, script, *args):
+        raise daemon.Refused(f"{script} exited with 1")
+
+    building = "new: its build here, then a worker"
     checks = []
     try:
-        for disk, expected in [
-            (20.4, ([], ["new: disk space (20 GB left, 30 needed)"])),
-            (100, (["new"], [])),
+        for disk, run_script, expected in [
+            (20.4, None, ([], [], ["new: disk space (20 GB left, 30 needed)"])),
+            (100, lambda log, *args: None, ([("new", "sebpc")], [], [building])),
+            (99, fail, ([], ["new"], [building])),
         ]:
             started.clear()
+            builds.clear()
             state, launched = prepare(root / str(disk), {"built": FRESH, "new": GONE}, 8, disk=disk)
             state["queue"][1]["build"] = ["fetch_bundle.py", "new", "--no-open"]
-            daemon.launch_queued()
-            found = (
-                list(started),
-                launched,
-                [f"{item['bundle']}: {item['waits_for']}" for item in state["queue"]],
+            daemon.run_script = run_script
+            daemon.start_job = (
+                lambda caller, verb, work, lock=None, bundle=None, run=daemon.start_job: (
+                    builds.append(work)
+                    if verb == "build"
+                    else run(caller, verb, work, lock, bundle)
+                )
             )
-            checks.append((disk, found == ([("built", "sebpc")], *expected), found))
+            daemon.launch_queued()
+            waits = [f"{item['bundle']}: {item['waits_for']}" for item in state["queue"]]
+            started.remove(("built", "sebpc"))
+            with contextlib.redirect_stdout(io.StringIO()):
+                for work in builds:
+                    work(io.StringIO())
+            found = list(started), launched, waits
+            if builds:
+                found += ([item["bundle"] for item in state["queue"] if item["bundle"] == "new"],)
+                expected += ([],)
+            checks.append((disk, found == expected, found))
     finally:
         vars(daemon).update(stubs)
     failed = [f"disk worker: {disk:.0f} GB left: {found}" for disk, ok, found in checks if not ok]
@@ -1915,6 +1937,11 @@ def check_choose_agent(root):
         ),
         ({"agents_free": 0, "gigabytes_free": 5}, None, taken),
         ({"agents_free": 1, "gigabytes_free": 1.0}, "sebpc", None),
+        (
+            {"agents_free": 0, "gigabytes_free": 5, "agent_wait": "the disk is short"},
+            None,
+            ("full", "sebpc: the disk is short"),
+        ),
         ({"agents_free": 1}, None, ("full", "sebpc has 0.0 GB free, 1 needed")),
         (
             {"agents_free": 1, "gigabytes_free": 5, "draining": True},
@@ -1971,7 +1998,7 @@ def check_choose_agent(root):
     ):
         if why != expected:
             failures.append(f"get_unreachable {name}: {why}")
-    return failures, 21
+    return failures, 24
 
 
 def check_fallback(root):

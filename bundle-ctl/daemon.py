@@ -299,6 +299,7 @@ WINDOW_CLOSE_WAIT = 30
 
 bundle_locks = {}
 moving_back = set()
+building_for_worker = set()
 bundle_rows = {"read": float("-inf"), "rows": []}
 folder_by_container = {}
 FOLDER_LABELS = (
@@ -1524,6 +1525,24 @@ def launch_queued():
                 remote_agent.renew_login_soon(folder.parent)
             elif remote_agent.is_remote(folder.parent):
                 item["waits_for"] = "the end of its agent on its worker"
+            elif bundle in building_for_worker:
+                item["waits_for"] = "its build here, then a worker"
+            elif item.get("build") and get_agent_worker({**item, "build": None}, folder, False)[0]:
+                if building_for_worker:
+                    item["waits_for"] = f"the build of {min(building_for_worker)} here"
+                else:
+                    building_for_worker.add(bundle)
+                    state.setdefault("building", []).append(bundle)
+                    start_job(
+                        item["parent"],
+                        "build",
+                        lambda log, bundle=bundle, build=item["build"]: build_for_worker(
+                            log, bundle, build
+                        ),
+                        lock=None,
+                        bundle=bundle,
+                    )
+                    item["waits_for"] = "its build here, then a worker"
             elif (worker := get_agent_worker(item, folder, is_running))[0]:
                 item["task"] = get_resumed(item)
                 write_task(item)
@@ -1669,11 +1688,10 @@ def launch_safely():
 
 
 def get_task_where(item, folder):
-    """Where a task starts: `local`, `auto`, `worker` or `worker:NAME`. A task to build starts
-    here, and so does the session of an ops agent window, any with no worker, or `auto` until
-    REMOTE_AUTO."""
+    """Where a task starts: `local`, `auto`, `worker` or `worker:NAME`. The session of an ops
+    agent window starts here, and so does any with no worker, or `auto` until REMOTE_AUTO."""
     where = item.get("where") or read_text(folder / "where") or "auto"
-    if item.get("build") or item["bundle"].startswith(OPS) or not WORKERS.names:
+    if item["bundle"].startswith(OPS) or not WORKERS.names:
         return "local"
     if where == "auto" and not REMOTE_AUTO:
         return "local"
@@ -1684,10 +1702,11 @@ def get_agent_worker(item, folder, is_running):
     """(the worker that starts the agent of this task, why it waits): a task goes `auto` by
     default, to a worker with an agent place, else here; one placed on a worker waits for it
     (README.md, "Remote agents"). A bundle open in a window stays here, and so does one not built
-    yet, as its build runs here. One placed on a worker waits for its container to stop here.
+    yet until build_for_worker built it. One placed on a worker waits for its container to stop
+    here.
     """
     where = get_task_where(item, folder)
-    if where == "local":
+    if where == "local" or item.get("build"):
         return None, None
     if is_running:
         return None, None if where == "auto" else "its container here to stop"
@@ -1700,6 +1719,36 @@ def get_agent_worker(item, folder, is_running):
     return None, "a place for an agent" + (
         f": {'; '.join(waits)}" if waits else f" on {wanted or 'a worker'}"
     )
+
+
+def build_for_worker(log, bundle, build):
+    """Make here the bundle of a task a worker would take, as a worker makes no bundle (Seb,
+    2026-11-02). Its task then starts as any other, on a worker with a place, else here. After a
+    failed build the task keeps it and starts here, in its bare folder, as before."""
+    built = False
+    try:
+        prepare_folder(bundle)
+        run_script(log, *build)
+        built = True
+    except Exception as error:
+        log.write(traceback.format_exc())
+        print(f"{bundle}: its build for a worker failed, it starts here: {error}", flush=True)
+    try:
+        with state_lock:
+            state = read_state()
+            item = next(
+                (item for item in state["queue"] if item["bundle"] == bundle and item.get("build")),
+                None,
+            )
+            if item and built:
+                item.pop("build")
+            elif item:
+                item.update(where="local", once=True)
+            write_state(state)
+    finally:
+        building_for_worker.discard(bundle)
+        set_building(bundle, False)
+    launch_queued()
 
 
 def start_remote(log, bundle, worker):
