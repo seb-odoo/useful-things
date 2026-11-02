@@ -250,7 +250,9 @@ necessary. but if we have a good setup, full remote should offer the same possib
   starts here that once, and the next tasks of its bundle are `auto` again.
   `worker` waits for one, and its wait in `bctl queue` says what is missing (no connection,
   its key held until the next unlock, no answer, drained, memory, places, or the `agent_wait` of
-  the worker's `status`). A bundle open in a window stays here. A bundle not built yet (see Bare
+  the worker's `status`). An `auto` task that waits for room here adds why no worker takes it
+  (`the CPU of the host, or a place for an agent: sebpc: the disk is short`). A bundle open in a
+  window stays here. A bundle not built yet (see Bare
   start) that a worker would take is built here first, one at a time, as a worker makes no
   bundle; its task then starts as any other (Seb, 2026-11-02). After a failed build it starts
   here in its bare folder, as without a worker. A bundle whose agent ran on

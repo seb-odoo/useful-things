@@ -1294,6 +1294,29 @@ def check_disk_worker(root):
     return failed, len(checks)
 
 
+def check_full_worker(root):
+    """A task a worker would take, with no room here nor there, says why for both."""
+    stubs = {name: getattr(daemon, name) for name in ("REMOTE_AUTO", "WORKERS")}
+    daemon.REMOTE_AUTO = True
+    daemon.WORKERS = types.SimpleNamespace(
+        names=["sebpc"],
+        choose_agent=lambda wanted=None: None,
+        get_agent_wait=lambda name: ("full", "sebpc: the disk is short"),
+    )
+    try:
+        state = prepare(root, {"fresh": FRESH, "here": FRESH}, 8, busy=True)[0]
+        state["queue"][1]["where"] = "local"
+        daemon.launch_queued()
+    finally:
+        vars(daemon).update(stubs)
+    waits = [f"{item['bundle']}: {item['waits_for']}" for item in state["queue"]]
+    expected = [
+        "fresh: the CPU of the host, or a place for an agent: sebpc: the disk is short",
+        "here: the CPU of the host",
+    ]
+    return ([] if waits == expected else [f"full worker: {waits}"]), 1
+
+
 def check_build(root):
     """A task queued with its build starts in the bare folder, told so, and only its own bundle
     builds it; under the disk floor such a task is still queued."""
@@ -2094,6 +2117,7 @@ def main():
         check_build,
         check_gate_push,
         check_disk_worker,
+        check_full_worker,
         check_build_cut,
         check_build_disk,
         check_parked,

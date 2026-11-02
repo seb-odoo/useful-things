@@ -1637,6 +1637,8 @@ def launch_queued():
                 continue
             else:
                 item["waits_for"] = get_room_wait(has_display, fits, memory)
+                if not is_running and get_task_where(item, folder) == "auto":
+                    item["waits_for"] += f", or {get_worker_wait()}"
             queue.append(item)
         state["queue"] = queue
         write_state(state)
@@ -1770,9 +1772,13 @@ def get_agent_worker(item, folder, is_running):
     found = WORKERS.choose_agent(wanted)
     if found or where == "auto":
         return found, None
+    return None, get_worker_wait(wanted)
+
+
+def get_worker_wait(wanted=None):
     names = [wanted] if wanted else WORKERS.names
     waits = [wait[1] for name in names if (wait := WORKERS.get_agent_wait(name))]
-    return None, "a place for an agent" + (
+    return "a place for an agent" + (
         f": {'; '.join(waits)}" if waits else f" on {wanted or 'a worker'}"
     )
 
