@@ -193,17 +193,21 @@ class Workers:
         return best[1] if best else None
 
     def choose_agent(self, wanted=None):
-        """The worker that starts an agent now, or None (README.md, "Remote agents")."""
+        """The worker that starts an agent now, or None, the connection asked of each worker with
+        none (README.md, "Remote agents")."""
         for name in self.names if wanted is None else [wanted]:
-            if not self.get_agent_wait(name):
+            wait = self.get_agent_wait(name)
+            if not wait:
                 return name
+            if wait[0] == "no link":
+                self.ask(name)
         return None
 
     def get_agent_wait(self, name):
-        """Why the worker starts no agent now, or None: it is up, answered lately, is not drained,
-        and has a place and the memory for an agent."""
+        """(a word, why) the worker starts no agent now, or None: it is up, answered lately, is not
+        drained, and has a place and the memory for an agent. Deck shows the word beside it."""
         if name not in self.names:
-            return f"no worker {name}"
+            return "no worker", f"no worker {name}"
         unreachable = self.get_unreachable(name)
         if unreachable:
             return unreachable
@@ -214,9 +218,9 @@ class Workers:
                 del sent[bundle]
         gigabytes = status.get("gigabytes_free", 0) - len(sent) * AGENT_GIGABYTES
         if gigabytes < AGENT_GIGABYTES:
-            return f"{name} has {gigabytes:.1f} GB free, {AGENT_GIGABYTES} needed"
+            return "full", f"{name} has {gigabytes:.1f} GB free, {AGENT_GIGABYTES} needed"
         if status.get("agents_free", 0) <= len(sent):
-            return f"every agent place of {name} is taken"
+            return "full", f"every agent place of {name} is taken"
         return None
 
     def send_agent(self, name, bundle):
@@ -232,22 +236,23 @@ class Workers:
                 self.sent[name][bundle] = time.time()
 
     def get_unreachable(self, name):
-        """Why the worker takes no agent until something changes, or None. A full worker frees a
-        place by itself."""
+        """(a word, why) the worker takes no agent until something changes, or None. A full worker
+        frees a place by itself."""
         if not self.is_up(name):
-            self.ask(name)
+            why = f"no connection to {name}"
             if (MUX / name / "request" / "held").exists():
-                return f"no connection to {name}, its key is asked at the next unlock of the screen"
-            return f"no connection to {name}"
+                why += ", its key is asked at the next unlock of the screen"
+            return "no link", why
         with self.lock:
             seen, status = self.status.get(name, (0, {}))
         if time.time() - seen > FRESH:
             since = time.strftime("%H:%M", time.localtime(seen)) if seen else None
-            return f"no answer from {name} since {since}" if since else f"no answer from {name} yet"
+            why = f"no answer from {name} since {since}" if since else f"no answer from {name} yet"
+            return "no answer", why
         if status.get("leaving"):
-            return f"{name} is leaving"
+            return "leaving", f"{name} is leaving"
         if status.get("draining"):
-            return f"{name} is drained"
+            return "drained", f"{name} is drained"
         return None
 
     def is_leaving(self, name):

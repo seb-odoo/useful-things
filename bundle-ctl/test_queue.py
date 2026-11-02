@@ -923,10 +923,12 @@ def check_place(root):
     windows, stopping = {"busy", "ended", "answering", "unborn", "verdict"}, set()
     started, closed, moved = [], [], []
     remote = {"away": "sebpc", "stuck": "sebpc"}
-    unreachable = {}
+    unreachable, asked = {}, []
     daemon.WORKERS = types.SimpleNamespace(
         names=["sebpc", "vm"],
+        ask=asked.append,
         choose_agent=lambda wanted=None: wanted or "sebpc",
+        get_agent_wait=unreachable.get,
         get_unreachable=unreachable.get,
         send_agent=lambda name, bundle: None,
     )
@@ -1075,11 +1077,18 @@ def check_place(root):
             refused = code == 1 and lines[0].startswith(f"bctl: {error}")
             checks.append((f"place {bundle} {where} from {caller} is refused", refused))
         daemon.identify = lambda connection: daemon.HOST
-        unreachable["vm"] = "vm is drained"
-        found = run_client(path, "place", "waiting", "vm"), get_where("waiting")
-        unreachable.clear()
-        expected = (1, ["bctl: 409 vm is drained"]), "worker:sebpc\n"
+        unreachable["vm"] = ("drained", "vm is drained")
+        found = run_client(path, "place", "waiting", "vm"), get_where("waiting"), list(asked)
+        expected = (1, ["bctl: 409 vm is drained"]), "worker:sebpc\n", []
         checks.append(("a place on a worker that takes no agent is refused", found == expected))
+        found = daemon.get_queue(daemon.HOST, {}, {})[1]["worker_states"], asked
+        expected = {"vm": "drained"}, []
+        checks.append(("the queue says why a worker takes no agent", found == expected))
+        unreachable["vm"] = ("no link", "no connection to vm")
+        found = run_client(path, "place", "waiting", "vm"), asked
+        unreachable.clear()
+        expected = (1, ["bctl: 409 no connection to vm"]), ["vm"]
+        checks.append(("a place on a worker with no connection asks it", found == expected))
     finally:
         server.shutdown()
         server.server_close()
@@ -1897,12 +1906,21 @@ def check_choose_agent(root):
     found = daemon.workers.Workers(["sebpc"])
     found.is_up = lambda name: True
     failures = []
+    taken = "full", "every agent place of sebpc is taken"
     for status, expected, why in (
-        ({"agents_free": 1, "gigabytes_free": 0.8}, None, "sebpc has 0.8 GB free, 1 needed"),
-        ({"agents_free": 0, "gigabytes_free": 5}, None, "every agent place of sebpc is taken"),
+        (
+            {"agents_free": 1, "gigabytes_free": 0.8},
+            None,
+            ("full", "sebpc has 0.8 GB free, 1 needed"),
+        ),
+        ({"agents_free": 0, "gigabytes_free": 5}, None, taken),
         ({"agents_free": 1, "gigabytes_free": 1.0}, "sebpc", None),
-        ({"agents_free": 1}, None, "sebpc has 0.0 GB free, 1 needed"),
-        ({"agents_free": 1, "gigabytes_free": 5, "draining": True}, None, "sebpc is drained"),
+        ({"agents_free": 1}, None, ("full", "sebpc has 0.0 GB free, 1 needed")),
+        (
+            {"agents_free": 1, "gigabytes_free": 5, "draining": True},
+            None,
+            ("drained", "sebpc is drained"),
+        ),
     ):
         found.status["sebpc"] = (time.time(), status)
         for wanted in (None, "sebpc"):
@@ -1925,8 +1943,7 @@ def check_choose_agent(root):
     waits.append(sending.get_agent_wait("sebpc"))
     sending.send_agent("sebpc", "third")
     waits.append(sending.get_agent_wait("sebpc"))
-    taken = "every agent place of sebpc is taken"
-    if waits != [None, taken, taken, None, "sebpc has 0.5 GB free, 1 needed"]:
+    if waits != [None, taken, taken, None, ("full", "sebpc has 0.5 GB free, 1 needed")]:
         failures.append(f"agents sent before the next status: {waits}")
     mux, workers = daemon.workers.MUX, daemon.WORKERS
     daemon.workers.MUX, daemon.WORKERS = root, found
@@ -1938,19 +1955,23 @@ def check_choose_agent(root):
         found.status["sebpc"] = (0, {})
         stale = found.get_unreachable("sebpc")
         found.is_up = lambda name: False
-        down = found.get_unreachable("sebpc")
+        down = found.get_unreachable("sebpc"), found.get_agent_wait("sebpc")
+        if (root / "sebpc" / "request").exists():
+            failures.append("a read of a worker with no connection asks it")
+        found.choose_agent()
         (root / "sebpc" / "request" / "held").touch()
         held = found.get_unreachable("sebpc")
     finally:
         daemon.workers.MUX, daemon.WORKERS = mux, workers
+    held_why = "no connection to sebpc, its key is asked at the next unlock of the screen"
     for name, why, expected in (
-        ("stale", stale, "no answer from sebpc yet"),
-        ("down", down, "no connection to sebpc"),
-        ("held", held, "no connection to sebpc, its key is asked at the next unlock of the screen"),
+        ("stale", stale, ("no answer", "no answer from sebpc yet")),
+        ("down", down, (("no link", "no connection to sebpc"),) * 2),
+        ("held", held, ("no link", held_why)),
     ):
         if why != expected:
             failures.append(f"get_unreachable {name}: {why}")
-    return failures, 20
+    return failures, 21
 
 
 def check_fallback(root):

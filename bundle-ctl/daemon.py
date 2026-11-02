@@ -672,6 +672,9 @@ def get_queue(caller, query, body):
         "queue": describe_queue(state),
         "remote": get_remote_agents(),
         "workers": WORKERS.names,
+        "worker_states": {
+            name: wait[0] for name in WORKERS.names if (wait := WORKERS.get_agent_wait(name))
+        },
     }
 
 
@@ -1693,7 +1696,7 @@ def get_agent_worker(item, folder, is_running):
     if found or where == "auto":
         return found, None
     names = [wanted] if wanted else WORKERS.names
-    waits = [why for name in names if (why := WORKERS.get_agent_wait(name))]
+    waits = [wait[1] for name in names if (wait := WORKERS.get_agent_wait(name))]
     return None, "a place for an agent" + (
         f": {'; '.join(waits)}" if waits else f" on {wanted or 'a worker'}"
     )
@@ -1850,7 +1853,9 @@ def place_agent(caller, query, body):
     if bundle in state["launches"]:
         raise Refused(f"the agent of {bundle} is starting here: move it once it runs")
     if where != "local" and (unreachable := WORKERS.get_unreachable(where)):
-        raise Refused(unreachable)
+        if unreachable[0] == "no link":
+            WORKERS.ask(where)
+        raise Refused(unreachable[1])
     container = get_bundle_container(bundle)
     if not remote and where != "local" and container and has_window(container):
         raise Refused(f"{bundle} is open in a window: its agent stays here until it closes")
