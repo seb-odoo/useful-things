@@ -517,7 +517,7 @@ def start(log, bundle, bundle_folder, worker, workers, base, session, resume):
             "name": bundle,
             "repos": repos,
             "in": sorted(files),
-            "env": get_env(),
+            "env": get_env(bundle),
         }
         DUMMIES.mkdir(parents=True, exist_ok=True)
         named.write_text(f"{bundle}\n")
@@ -560,15 +560,19 @@ def start(log, bundle, bundle_folder, worker, workers, base, session, resume):
     log.write(f"the agent of {bundle} runs on {worker}, job {answer['job']}\n")
 
 
-def get_env():
-    """The environment of a bundle the job takes: the containerEnv of the generated config."""
+def get_env(bundle):
+    """The environment of a bundle the job takes: the containerEnv of the generated config, but
+    what the worker sets, and the bundle in ODOO_PROXY_HOST, as firefox-tabs and serve-for-seb
+    read it.
+    """
+    # ODOO_PROXY_HOST is ${localWorkspaceFolderBasename} in the config, for Dev Containers to fill.
+    kept = {"ODOO_PROXY_HOST": bundle}
     try:
         root = pathlib.Path(get_values()["WORKTREE_ROOT"])
         lines = (root / ".devcontainer" / "devcontainer.json").read_text().splitlines()
         config = json.loads("\n".join(line for line in lines if line[:2] != "//"))
     except (OSError, ValueError, KeyError):
-        return {}
-    kept = {}
+        return kept
     for name, value in (config.get("containerEnv") or {}).items():
         fixed = (
             "PROXY",

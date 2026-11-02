@@ -132,12 +132,15 @@ def check_env(root):
         "GIT_SSH_COMMAND": "/opt/git-gate/git-gate-ssh", "GH_TOKEN": "read-only-via-proxy",
         "REQUESTS_CA_BUNDLE": "/etc/ssl/certs/ca-certificates.crt",
         "BUNDLE_CTL_CLIENT": "/home/seb/repo/useful-things/bundle-ctl/client",
+        "ODOO_PROXY_HOST": "${localWorkspaceFolderBasename}",
     }}))
-    env = remote_agent.get_env()
+    env = remote_agent.get_env("master-x")
     check("the bundle's helpers go", env.get("BASH_ENV") == "/x/devcontainer.bashrc", env)
     check("and what the gateways read", env.get("GH_TOKEN") == "read-only-via-proxy", env)
     check("bctl as the job has it",
           env.get("BUNDLE_CTL_CLIENT") == "/job/home/bundle-ctl/client", env)
+    check("the bundle as firefox-tabs and the hooks read it",
+          env.get("ODOO_PROXY_HOST") == "master-x", env)
     left = {"HTTPS_PROXY", "https_proxy", "CLAUDE_CONFIG_DIR", "PGHOST", "GIT_SSH_COMMAND",
             "REQUESTS_CA_BUNDLE"}
     check("not what the worker sets", not left & set(env), env)
