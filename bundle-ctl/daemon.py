@@ -195,6 +195,12 @@ HOST_ONLY = {
     ("POST", "/tell"),
 }
 JOB_WAIT = 50
+LOGIN_BACK = (
+    f"{GO_ON}\n\nThe main login is renewed: this session waited for it in the queue since"
+    " {time}, as claude-switch held its requests meanwhile. Go on with what it stopped, and first"
+    " check what changed meanwhile where your work depends on it (a PR: its threads, its head,"
+    " its CI; its base)."
+)
 MAX_AGENTS = int(
     os.environ.get("BUNDLE_CTL_MAX_AGENTS") or CONFIG.get("BUNDLE_CTL_MAX_AGENTS") or 8,
 )
@@ -221,6 +227,7 @@ RECONNECTED = (
     " queue since {time}. Go on with what its outage stopped, and first check what changed"
     " meanwhile where your work depends on it (a PR: its threads, its head, its CI; its base)."
 )
+REQUEUE_AFTER = (15, 30, 60, 120, 240)
 RESTART_RETRY = 3600
 RESUMED = (
     f"{GO_ON}\n\nSeb closed your window and queued this session again at {{time}}: what you left"
@@ -695,6 +702,7 @@ def force_queue(caller, query, body):
                 and (item.get("after") or 0) <= now
                 and not item.get("paused")
                 and not item.get("github")
+                and not item.get("login")
             )
         ]
         if bundle is not None and not items:
@@ -703,6 +711,7 @@ def force_queue(caller, query, body):
             item["forced"] = True
             item.pop("after", None)
             item.pop("github", None)
+            item.pop("login", None)
             item.pop("paused", None)
         write_state(state)
     forced = [item["bundle"] for item in items]
@@ -764,8 +773,8 @@ def move_task(caller, query, body):
 def schedule_task(caller, query, body):
     """Set when the queued task of a bundle may leave the queue: `spot`, once a slot and the
     memory let it, `manual`, once it is scheduled again, or `HH:MM`, once that time of the host
-    came. It no longer goes over the cap nor waits for GitHub. The host, that bundle or the one
-    that queued the task asks."""
+    came. It no longer goes over the cap nor waits for GitHub or the main login. The host, that
+    bundle or the one that queued the task asks."""
     bundle, when = body.get("bundle") or "", body.get("when")
     if when not in ("manual", "spot") and not (isinstance(when, str) and AFTER.fullmatch(when)):
         raise ValueError("when: spot, manual or a time of the day, HH:MM")
@@ -776,17 +785,19 @@ def schedule_task(caller, query, body):
         item["paused"] = when == "manual"
         item.pop("forced", None)
         item.pop("github", None)
+        item.pop("login", None)
         write_state(state)
     launch_queued()
     return get_queue(caller, query, body)
 
 
-def requeue_agent(caller, query, body):
+def requeue_agent(caller, query, body, after=None, login=False):
     """Queue the session of a bundle's agent, or of an ops agent window (ops-SESSION), again,
     last, paused with `paused`, and close its window once its turn ended, PAUSE_WAIT seconds at
     most. Meanwhile the Bash calls of a bundle's agent are refused on a reason that tells it to
     end its turn (client/run-hook.py). The host asks, or with `github` the agent of a bundle
-    itself: its session then waits for the GitHub connection of the host."""
+    itself: its session then waits for the GitHub connection of the host. The daemon alone
+    passes `after`, the HH:MM it waits for, or `login`: it waits for the main login."""
     bundle = body.get("bundle") or ""
     if caller != HOST and not (caller == bundle and body.get("github") is True):
         raise Refused(
@@ -810,6 +821,10 @@ def requeue_agent(caller, query, body):
     with state_lock:
         priority = min((item.get("priority", 0) for item in read_state()["queue"]), default=0)
     task = {"github": github, "paused": paused, "priority": priority, "resume": True, "task": GO_ON}
+    if after:
+        task["after"] = after
+    if login:
+        task["login"] = True
     if bundle.startswith(OPS):
         with state_lock:
             if any(item["bundle"] == bundle for item in read_state()["queue"]):
@@ -823,6 +838,10 @@ def requeue_agent(caller, query, body):
         why = "when Seb paused it"
     elif github:
         why = "when it went back to the queue to wait for the GitHub connection of the host"
+    elif login:
+        why = "when it went back to the queue to wait for the main login"
+    elif after:
+        why = f"when it went back to the queue until {after}, its turns ending on API errors"
     threading.Thread(target=stop_after_turn, args=(bundle, session, why), daemon=True).start()
     return 202, {**answer, "wait": PAUSE_WAIT}
 
@@ -1229,6 +1248,7 @@ def enqueue(caller, bundle, body, build=None, session=None, first=False):
                 "task": body["task"],
                 **({"where": body["where"]} if body.get("where") else {}),
                 **({"github": True} if body.get("github") else {}),
+                **({"login": True} if body.get("login") else {}),
                 **({"session": session} if session else {}),
             },
         )
@@ -1295,9 +1315,15 @@ def get_resumed(item):
     """The prompt of a task: a session queued again with no prompt of its own learns that its
     window closed meanwhile, with what it ran in the background."""
     if item.get("resume") and item["task"] == GO_ON:
-        text = RECONNECTED if item.get("github") else RESUMED
+        text = RECONNECTED if item.get("github") else LOGIN_BACK if item.get("login") else RESUMED
         return text.format(time=format_time(item["queued"]))
     return item["task"]
+
+
+def has_login():
+    """Whether the main login lives longer than the time before renew_login renews it."""
+    left = remote_agent.get_login_left()
+    return left is not None and left > remote_agent.RENEW_BEFORE
 
 
 def ask_github():
@@ -1489,6 +1515,9 @@ def launch_queued():
             elif item.get("github") and not (GITHUB_MUX / "sock" / "github").is_socket():
                 item["waits_for"] = "the GitHub connection of the host"
                 ask_github()
+            elif item.get("login") and not has_login():
+                item["waits_for"] = "the main login, which a laptop session or bundle-ctl renews"
+                remote_agent.renew_login_soon(folder.parent)
             elif remote_agent.is_remote(folder.parent):
                 item["waits_for"] = "the end of its agent on its worker"
             elif (worker := get_agent_worker(item, folder, is_running))[0]:
@@ -2327,8 +2356,10 @@ def free_done_terminals():
 def requeue_failed_terminals():
     """Put back in the queue the agent of each bundle whose session ended more turns in a row on an
     API error than its terminal tries again (TITLE.RETRIES), so that it frees its slot: the queue
-    starts it again with GO_ON. Not after its verdict, as it holds no slot then, and only while its
-    window is minimized, as for free_done_terminals."""
+    starts it again with GO_ON after REQUEUE_AFTER minutes, longer at each turn that ends so again.
+    One whose last turn ended on the wait for the main login goes at once, and waits for that login
+    in the queue. Not after its verdict, as it holds no slot then, and only while its window is
+    minimized, as for free_done_terminals."""
     with state_lock:
         state = read_state()
     queued = {item["bundle"] for item in state["queue"]} | set(state.get("deletions", []))
@@ -2344,18 +2375,27 @@ def requeue_failed_terminals():
             or is_deleting(bundle)
             or not session
             or get_session_status(bundle, session) != "idle"
-            or TITLE.count_api_errors(session) <= TITLE.RETRIES
         ):
+            continue
+        login = TITLE.is_login_wait(session)
+        errors = TITLE.count_api_errors(session, TITLE.RETRIES + len(REQUEUE_AFTER))
+        if not login and errors <= TITLE.RETRIES:
             continue
         env = env or session_env()
         if not is_terminal_minimized(agent, env):
             continue
+        if login:
+            print(f"{bundle}: its claude waits for the main login, back to the queue", flush=True)
+            requeue_agent(HOST, {}, {"bundle": bundle}, login=True)
+            continue
+        minutes = REQUEUE_AFTER[errors - TITLE.RETRIES - 1]
+        after = time.strftime("%H:%M", time.localtime(time.time() + minutes * 60))
         print(
-            f"{bundle}: {TITLE.RETRIES + 1} turns in a row ended on an API error,"
-            " back to the queue",
+            f"{bundle}: {errors} turns in a row ended on an API error,"
+            f" back to the queue until {after}",
             flush=True,
         )
-        requeue_agent(HOST, {}, {"bundle": bundle})
+        requeue_agent(HOST, {}, {"bundle": bundle}, after=after)
 
 
 def close_freed(bundle):

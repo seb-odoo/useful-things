@@ -796,12 +796,8 @@ def renew_login(bundle_folder):
     session may renew it. A one-shot claude in a container that shares the login, as the ops
     container does, renews it with their lock.
     """
-    try:
-        login = json.loads((HOME / ".claude" / ".credentials.json").read_text())["claudeAiOauth"]
-        left = login["expiresAt"] / 1000 - time.time()
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
-    if left > RENEW_BEFORE or time.time() - renewed[0] < RENEW_EVERY:
+    left = get_login_left()
+    if left is None or left > RENEW_BEFORE or time.time() - renewed[0] < RENEW_EVERY:
         return None
     renewed[0] = time.time()
     command = [
@@ -829,10 +825,22 @@ def renew_login(bundle_folder):
         "haiku",
         "Answer ok.",
     ]
-    done = subprocess.run(command, capture_output=True, check=False, timeout=180)
+    try:
+        done = subprocess.run(command, capture_output=True, check=False, timeout=180)
+    except subprocess.TimeoutExpired:
+        return f"the main login expires in {left:.0f} s, its renewal ran 180 s and was stopped"
     return (
         f"the main login expired in {left:.0f} s, renewed for the remote agents ({done.returncode})"
     )
+
+
+def get_login_left():
+    """The seconds the main login lives yet, None when it cannot be read."""
+    try:
+        login = json.loads((HOME / ".claude" / ".credentials.json").read_text())["claudeAiOauth"]
+        return login["expiresAt"] / 1000 - time.time()
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def read(path):

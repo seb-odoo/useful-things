@@ -333,7 +333,8 @@ class Waker:
     started: before it, the line would go to agent-run.sh, and claude would take it with its Enter
     as a paste, left in its prompt (Seb, 2026-10-23: "composer was pre-filled"). With neither,
     GO_ON once the session has been idle RETRY_AFTER on an API error that a new request may pass,
-    at most TITLE.RETRIES times in a row: the daemon then puts it back in the queue."""
+    at most TITLE.RETRIES times in a row: the daemon then puts it back in the queue. None on the
+    wait for the main login, which the daemon queues at once."""
 
     def __init__(self, agent, bundle, session, name=None):
         self.agent = agent
@@ -510,6 +511,7 @@ class Waker:
         if stamp != self.checked:
             self.checked = stamp
             self.due = 0 < TITLE.count_api_errors(self.session) <= TITLE.RETRIES
+            self.due = self.due and not TITLE.is_login_wait(self.session)
         return self.due
 
     def take_task(self):

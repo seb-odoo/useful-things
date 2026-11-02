@@ -51,6 +51,7 @@ KINDS = (
 )
 LEFT = re.compile(r"[*_\s]*nothing (is )?left\b", re.IGNORECASE)
 LINK = re.compile(r"\[([^\]]+)\]\([^)\s]+\)")
+LOGIN_WAIT = "claude-switch: the main login expires"
 NEW = "new session"
 OPS = "ops-"
 PARTS = re.compile(r"^[#*_ ]*(Done|Decide|Your action)\b", re.MULTILINE)
@@ -122,22 +123,52 @@ def is_resuming(session):
     return False
 
 
-def count_api_errors(session):
+def read_answers(session):
+    """The answers of the main thread of a session, the last one first, read TAIL bytes at a time
+    up its transcript: a turn that ends on an API error writes the blobs of its request first,
+    77 KB a turn in a bundle on 2026-10-30, so that TAIL held 3 such turns, never the 6 of the
+    requeue, and its terminal typed GO_ON 423 times."""
+    try:
+        with get_transcript(session).open("rb") as file:
+            end, rest = file.seek(0, os.SEEK_END), b""
+            while end:
+                start = max(0, end - TAIL)
+                file.seek(start)
+                lines = (file.read(end - start) + rest).split(b"\n")
+                rest = lines.pop(0) if start else b""
+                for line in reversed(lines):
+                    try:
+                        entry = json.loads(line)
+                        if entry["type"] == "assistant" and not entry.get("isSidechain"):
+                            yield entry
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                end = start
+    except (AttributeError, OSError):
+        return
+
+
+def count_api_errors(session, most=RETRIES + 1):
     """How many turns in a row of a session ended on an API error that a new request may pass: a
-    5xx, the API out of reach, an answer cut. 0 when its last message is anything else. A usage
-    limit is not one: Claude goes on with it at the reset."""
+    5xx, the API out of reach, an answer cut; `most` at most. 0 when its last message is anything
+    else. A usage limit is not one: Claude goes on with it at the reset."""
     count = 0
-    for line in reversed(read_tail(session)):
-        try:
-            entry = json.loads(line)
-            if entry["type"] != "assistant" or entry.get("isSidechain"):
-                continue
-        except (KeyError, TypeError, ValueError):
-            continue
-        if not entry.get("isApiErrorMessage") or entry.get("error") != "server_error":
+    for entry in read_answers(session):
+        if count == most or not entry.get("isApiErrorMessage"):
+            return count
+        if entry.get("error") != "server_error":
             return count
         count += 1
     return count
+
+
+def is_login_wait(session):
+    """Whether the last turn of a session ended on the 529 claude-switch gives a dummy login while
+    the main login expires: a new request passes once a laptop session or bundle-ctl renewed it,
+    not before."""
+    for entry in read_answers(session):
+        return bool(entry.get("isApiErrorMessage")) and LOGIN_WAIT in str(entry.get("message"))
+    return False
 
 
 def is_hok_wait(call, told):

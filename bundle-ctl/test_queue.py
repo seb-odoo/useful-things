@@ -1159,6 +1159,48 @@ def check_github(root):
     return [f"github: {name}: {state['queue']}" for name in failed], len(checks)
 
 
+def check_login(root):
+    """A session the daemon queued again on the wait for the main login waits for a login that
+    lives past RENEW_BEFORE, has bundle-ctl renew it meanwhile, and starts once it does, told so;
+    a force of the queue leaves it, a force or a schedule of its bundle lets it go."""
+    checks = []
+    state, launched = prepare(root, {"expired": {"session": "s\n"}}, 8)
+    stubs = {name: vars(daemon)[name] for name in ("get_window_pids", "stop_after_turn")}
+    remote = {name: vars(daemon.remote_agent)[name] for name in ("get_login_left", "renew_login_soon")}
+    left, renewed = [None], []
+    vars(daemon).update(get_window_pids=lambda bundle: [1], stop_after_turn=lambda *args: None)
+    vars(daemon.remote_agent).update(get_login_left=lambda: left[0], renew_login_soon=renewed.append)
+    try:
+        state["queue"].clear()
+        daemon.requeue_agent(daemon.HOST, {}, {"bundle": "expired"}, login=True)
+        daemon.force_queue(daemon.HOST, {}, {})
+        found = launched, state["queue"][0].get("waits_for"), renewed[-1:]
+        waits = ([], "the main login, which a laptop session or bundle-ctl renews")
+        checks.append(("it waits, renewing it", found == (*waits, [root / "master" / "expired"])))
+        left[0] = daemon.remote_agent.RENEW_BEFORE - 1
+        daemon.launch_queued()
+        checks.append(("a login renew_login renews is not enough", launched == []))
+        left[0] = 3600
+        daemon.launch_queued()
+        task = (daemon.get_agent_folder("expired") / "task.md").read_text()
+        back = task.startswith(daemon.GO_ON) and "The main login is renewed" in task
+        checks.append(("it starts once renewed, told so", (launched, back) == (["expired"], True)))
+        left[0] = None
+        for name, action, body in (
+            ("a force of its bundle", daemon.force_queue, {"bundle": "later"}),
+            ("a schedule", daemon.schedule_task, {"bundle": "later", "when": "spot"}),
+        ):
+            state, launched = prepare(root / name.replace(" ", "-"), {"later": FRESH}, 8)
+            state["queue"][0]["login"] = True
+            action(daemon.HOST, {}, body)
+            checks.append((f"{name} lets it go", launched == ["later"]))
+    finally:
+        vars(daemon).update(stubs)
+        vars(daemon.remote_agent).update(remote)
+    failed = [name for name, passed in checks if not passed]
+    return [f"login: {name}: {state['queue']}" for name in failed], len(checks)
+
+
 def check_disk_worker(root):
     """Under the disk floor, a task a worker takes goes there, and one not built yet waits; with
     the disk back, that one starts here, where its build runs."""
@@ -1862,6 +1904,7 @@ def main():
         check_ops_requeue,
         check_place,
         check_github,
+        check_login,
         check_build,
         check_gate_push,
         check_disk_worker,

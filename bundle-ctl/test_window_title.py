@@ -68,6 +68,13 @@ API_ERRORS = [
     ("error-then-answer", ["502", "prompt", "answer"], 0),
     ("error-limit", ["answer", "429"], 0),
     ("error-of-subagent", ["answer", "subagent"], 0),
+    ("error-loop", ["answer", *["blob", "502", "prompt"] * 8], 6),
+    ("error-login", ["answer", "blob", "502", "prompt", "blob", "529"], 2),
+]
+LOGIN_WAITS = [
+    ("login-wait", ["answer", "502", "prompt", "blob", "529"], True),
+    ("login-then-502", ["529", "prompt", "502"], False),
+    ("login-then-answer", ["529", "prompt", "answer"], False),
 ]
 CLOSE_LINES = [
     ("left", "Nothing left: the list shows it."),
@@ -221,31 +228,44 @@ def get_hok_waits():
 
 def get_api_errors(home):
     """The turns in a row that ended on a 5xx, the API out of reach or an answer cut, with the
-    prompts that tried again between them; not a usage limit, nor an error of a subagent."""
+    prompts that tried again between them, however far the request blobs of each turn put them
+    apart; not a usage limit, nor an error of a subagent. Then whether the last one is the wait
+    for the main login."""
     spec = importlib.util.spec_from_file_location("title", HERE / "client" / "window-title.py")
     title = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(title)
     text = {"content": [{"type": "text", "text": "API Error"}]}
     error = {"type": "assistant", "isApiErrorMessage": True, "error": "server_error"}
+    login = "API Error: 529 claude-switch: the main login expires: a laptop session renews it"
     messages = {
         "answer": {"type": "assistant", "message": {"content": [{"type": "text", "text": "ok"}]}},
         "call": {"type": "assistant", "message": {"content": [{"type": "tool_use"}]}},
         "result": {"type": "user", "message": {"content": [{"type": "tool_result"}]}},
         "prompt": {"type": "user", "message": {"content": "Continue from where you left off."}},
+        "blob": {
+            "type": "api-request-blob",
+            "message": {"role": "assistant", "content": "x" * 10**5},
+        },
         "502": error,
+        "529": {**error, "message": {"content": [{"type": "text", "text": login}]}},
         "429": {**error, "error": "rate_limit"},
         "subagent": {**error, "isSidechain": True},
     }
     failures = []
-    for session, kinds, expected in API_ERRORS:
+    for session, kinds, expected in API_ERRORS + LOGIN_WAITS:
         entries = []
         for kind in kinds:
             entries.append({"message": text, **messages[kind]})
             entries.append({"type": "system", "subtype": "turn_duration"})
         lines = "".join(f"{json.dumps(entry)}\n" for entry in entries)
         (home / ".claude" / "projects" / "-workspace" / f"{session}.jsonl").write_text(lines)
-        if (found := title.count_api_errors(session)) != expected:
+        if type(expected) is bool:
+            if (found := title.is_login_wait(session)) != expected:
+                failures.append(f"login wait of {session}: {found}, expected {expected}")
+        elif (found := title.count_api_errors(session)) != expected:
             failures.append(f"API errors of {session}: {found}, expected {expected}")
+    if (found := title.count_api_errors("error-loop", 99)) != 8:
+        failures.append(f"API errors of error-loop, 99 at most: {found}, expected 8")
     return failures
 
 
@@ -503,7 +523,7 @@ def main():
     for line in failures:
         print(line)
     cases = len(MARKS) + len(OPS_MARKS) + len(HOK_WAITS) + len(CLOSE_LINES) + len(CONFIGS)
-    cases += len(API_ERRORS)
+    cases += len(API_ERRORS) + len(LOGIN_WAITS) + 1
     cases += len(FOLLOWED) + 6
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)

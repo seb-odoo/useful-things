@@ -275,10 +275,14 @@ necessary. but if we have a good setup, full remote should offer the same possib
   login and the tunnel. A job lost on the worker (a reboot) is queued again on its session, and
   goes on from its tree there. A work tree that cannot come back (the worktree changed here
   meanwhile) stays in `.agent/remote-back` with the reason in `.agent/remote-conflict`, and the
-  bundle's next task runs here. While a remote agent lives or a bundle container runs, and the
-  main login expires within 4 minutes, a one-shot claude in a container that shares it renews
-  it: at night no claude here may, and a bundle has a dummy login (`python3 test_queue.py`). The journal says `BUNDLE: its agent started on NAME` and `BUNDLE: its agent on NAME
-  ended (WHY)`.
+  bundle's next task runs here. While a remote agent lives, a bundle container runs or a task
+  waits for the main login (see Agents in a terminal), and the main login expires within 4
+  minutes, a one-shot claude in a container that shares it renews it: at night no claude here
+  may, and a bundle has a dummy login (`python3 test_queue.py`). It goes through claude-switch
+  as any claude, so it cannot when the switch does not reach the API: from 2026-10-30 to 11-02
+  it ran 180 s and was stopped 716 times, `the main login expires in N s, its renewal ran 180 s
+  and was stopped` in the journal. The journal says `BUNDLE: its agent started on NAME` and
+  `BUNDLE: its agent on NAME ended (WHY)`.
 - `agent-terminal.py` of a remote bundle attaches to its claude (`standin.py attach`) and writes
   no `.agent/terminal`: it takes no slot, and closing it leaves the agent running there. A link
   down shows since when and waits. Its title says where, `⭐ BUNDLE @sebpc (mine)`, and so do the
@@ -591,9 +595,24 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   (`RETRY_AFTER`), as it types a PR event, for 5 such turns in a row at most (`RETRIES` of
   `client/window-title.py`). On the sixth, the daemon puts the agent back in the queue as Back to
   queue does, while its window is minimized and before its verdict: its slot goes to the next
-  task, and the queue starts the same session again later. The journal says `BUNDLE: 6 turns in a row ended on an API error,
-  back to the queue`. A usage limit is not such an error: claude goes on at its reset.
-  `python3 test_terminal.py` and `python3 test_restart.py` run each case.
+  task, and the queue starts the same session again 15 minutes later, then 30, 60, 120 and 240
+  after each turn that ends so again (`REQUEUE_AFTER`). The journal says `BUNDLE: 6 turns in a
+  row ended on an API error, back to the queue until HH:MM`. A usage limit is not such an error:
+  claude goes on at its reset. The errors are counted up the whole transcript, not in its last
+  256 KB: each such turn writes the blobs of its request first (`api-request-blob`, 77 KB a turn
+  in a bundle), and from 2026-10-30 to 11-02 the tail held 3 errors, never the 6 of the
+  requeue, so two terminals typed `Continue from where you left off.` 423 times each, and their
+  transcripts reached 53 MB.
+- A turn that ends on the 529 claude-switch gives a dummy login while the main login expires
+  (`the main login expires: a laptop session renews it`, gateway-core README) gets no
+  `Continue from where you left off.`: a request passes once the login is renewed, not before.
+  The daemon puts the agent back in the queue at once, minimized as above, and its task waits
+  for `the main login, which a laptop session or bundle-ctl renews`: a login that lives longer
+  than the 4 minutes before bundle-ctl renews it (see Remote agents), which meanwhile it tries
+  every 5 minutes. Then the queue starts the session again, told that it waited for the login.
+  The journal says `BUNDLE: its claude waits for the main login, back to the queue`.
+  `python3 test_terminal.py`, `python3 test_restart.py`, `python3 test_window_title.py` and
+  `python3 test_queue.py` run each case.
 - Quitting claude or closing the terminal stops the container. Before the verdict nothing else
   does: Seb may type in that session at any time. Without a verdict the agent then reads `stopped`. So does a
   terminal that dies without closing (killed, or lost with the X server): `podman exec` does not see that hangup, so the wrapper ends on the hangup and stops

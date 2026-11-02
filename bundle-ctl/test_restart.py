@@ -3,6 +3,7 @@
 and how it finds them, without a terminal: python3 test_restart.py
 """
 
+import math
 import os
 import pathlib
 import subprocess
@@ -68,7 +69,11 @@ FREE_CASES = [
 
 REQUEUE_BASE = {**FREE_BASE, "done": False, "errors": 6, "answer": "API Error: 502"}
 REQUEUE_CASES = [
-    ({}, True),
+    ({}, {"after": 15}),
+    ({"errors": 7}, {"after": 30}),
+    ({"errors": 10}, {"after": 240}),
+    ({"errors": 1, "login": True}, {"login": True}),
+    ({"errors": 1, "login": True, "minimized": False}, False),
     ({"done": True}, False),
     ({"errors": 5}, False),
     ({"errors": 0}, False),
@@ -160,8 +165,13 @@ def free(root, bundle, case):
     daemon.is_minimized = lambda pid, env: case["minimized"]
     daemon.session_env = dict
     daemon.close_freed = closed.append
-    daemon.TITLE.count_api_errors = lambda session: case.get("errors", 0)
-    daemon.requeue_agent = lambda caller, query, body: closed.append((caller, body["bundle"]))
+    daemon.TITLE.count_api_errors = lambda session, most: min(case.get("errors", 0), most)
+    daemon.TITLE.is_login_wait = lambda session: case.get("login", False)
+
+    def requeue_agent(caller, query, body, **kwargs):
+        closed.append((caller, body["bundle"], kwargs))
+
+    daemon.requeue_agent = requeue_agent
     daemon.print = lambda *args, **kwargs: None
     daemon.free_done_terminals()
     daemon.requeue_failed_terminals()
@@ -181,8 +191,12 @@ def check_free(root):
             failures.append(f"free {changes}: closed {found}, expected {expected}")
     for at, (changes, expected) in enumerate(REQUEUE_CASES):
         bundle = f"r{at}"
+        start = time.time()
         found = free(root, bundle, {**REQUEUE_BASE, **changes})
-        if found != ([("host", bundle)] if expected else []):
+        if found and "after" in found[0][2]:
+            ahead = daemon.get_next_time(found[0][2]["after"]) - start
+            found[0][2]["after"] = math.ceil(ahead / 60 - 0.02)
+        if found != ([("host", bundle, expected)] if expected else []):
             failures.append(f"requeue {changes}: {found}, expected {expected}")
     daemon.close_freed = close_freed
     pause = root / "g1" / ".agent" / "pause"
