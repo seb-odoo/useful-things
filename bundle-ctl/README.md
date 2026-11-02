@@ -1162,7 +1162,10 @@ answer as `bctl delete` does, and the same task sent again takes back the reques
   refuses its commands meanwhile: the ops container has no `.agent/pause`. Opening the session by
   hand, in a window or a tab, takes its task out of the queue.
 - The title shows the title of the conversation in place of a name, with 🔧 and `(ops)`:
-  `⏳ 🔧 Ops list layout (ops)`. The marks are those of a bundle, the close line first (Seb,
+  `⏳ 🔧 Ops list layout (ops)`. Claude gives no title to a first prompt of a word or two: the
+  window then shows the first line of its first typed prompt, 50 characters at most, and `new
+  session` only before that prompt (Seb, 2026-11-02: a window on `triage` read `new session` after
+  an hour of work). The marks are those of a bundle, the close line first (Seb,
   2026-10-16), but for an idle session whose last answer has none: ✅ when that answer has a Done
   part and neither a Decide nor a Your action part, the parts of Seb's reports, ✋ otherwise (Seb,
   2026-10-14). The ops container has a sessions folder of its own, as

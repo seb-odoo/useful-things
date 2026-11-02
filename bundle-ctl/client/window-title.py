@@ -17,8 +17,9 @@ suffix is BUNDLE_SUFFIX, which the containers have, else `--$USER`, the default 
 An idle session is finished when the close line of its last answer, the line that ends Seb's
 reports, starts with "Nothing left", and waits for him when it starts with "Waiting for you". With
 no close line, a bundle guesses it from the verdict on the first line of that answer. An ops agent
-window (ops-SESSION) shows the title of its conversation in place of a name, and guesses it from
-the parts of the answer: finished with a Done part and neither a Decide nor a Your action part.
+window (ops-SESSION) shows the title of its conversation in place of a name, else the first line of
+its first prompt, and guesses it from the parts of the answer: finished with a Done part and
+neither a Decide nor a Your action part.
 An idle session that waits for the reset of the usage limit works, as Claude goes on with it by
 itself ("Usage limit reached · continuing automatically at 4pm"), until Esc cancels that, for 5
 hours at most. A busy session whose running call waits for Seb's answer in hok (`hok-answer`,
@@ -55,6 +56,7 @@ LOGIN_WAIT = "claude-switch: the main login expires"
 NEW = "new session"
 OPS = "ops-"
 PARTS = re.compile(r"^[#*_ ]*(Done|Decide|Your action)\b", re.MULTILINE)
+PROMPT = 50
 PROJECTS = (
     pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or pathlib.Path.home() / ".claude")
     / "projects"
@@ -81,8 +83,42 @@ def read_tail(session):
         return []
 
 
+def get_first_prompt(session):
+    """The first line of the first prompt typed in a session, PROMPT characters at most."""
+    try:
+        with get_transcript(session).open("rb") as file:
+            lines = file.read(TAIL).splitlines()
+    except (AttributeError, OSError):
+        return None
+    for line in lines:
+        try:
+            entry = json.loads(line)
+            content = entry["message"]["content"] if entry["type"] == "user" else None
+        except (KeyError, TypeError, ValueError):
+            continue
+        origin = entry.get("origin") if isinstance(entry.get("origin"), dict) else {}
+        if (
+            origin.get("kind", "human") != "human"
+            or entry.get("isMeta")
+            or entry.get("isSidechain")
+        ):
+            continue
+        if isinstance(content, list):
+            content = "\n".join(
+                str(block.get("text") or "")
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+        text = str(content or "").strip()
+        if text and not text.startswith("<"):
+            first = " ".join(text.splitlines()[0].split())
+            return first if len(first) <= PROMPT else f"{first[: PROMPT - 3].rstrip()}..."
+    return None
+
+
 def get_topic(session):
-    """The title Claude gave the conversation, or the one it was given by name."""
+    """The title Claude gave the conversation, or the one it was given by name, else its first
+    prompt: Claude gives no title to a prompt of a word or two ("triage", on 2026-11-02)."""
     titles = {}
     for line in read_tail(session):
         try:
@@ -91,7 +127,7 @@ def get_topic(session):
             titles[key] = " ".join(str(entry[key]).split())
         except (KeyError, TypeError, ValueError):
             continue
-    return titles.get("customTitle") or titles.get("aiTitle") or NEW
+    return titles.get("customTitle") or titles.get("aiTitle") or get_first_prompt(session) or NEW
 
 
 def get_last_answer(session):

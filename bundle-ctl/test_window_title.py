@@ -129,14 +129,26 @@ OPS_MARKS = [
     ("ops-report", ["--starting"], f"🚀 {OPS}"),
     ("ops-report", ["report=busy"], f"⏳ {OPS}"),
     ("ops-report", ["report=idle"], f"✅ {OPS}"),
-    ("ops-decide", ["decide=idle"], "✋ 🔧 new session (ops)"),
-    ("ops-chat", ["chat=idle"], "✋ 🔧 new session (ops)"),
+    ("ops-decide", ["decide=idle"], "✋ 🔧 go (ops)"),
+    ("ops-chat", ["chat=idle"], "✋ 🔧 go (ops)"),
     ("ops-seb", ["seb=idle"], "✋ 🔧 Pick a base (ops)"),
-    ("ops-left", ["left=idle"], "✅ 🔧 new session (ops)"),
-    ("ops-separately", ["separately=idle"], "✅ 🔧 new session (ops)"),
-    ("ops-wait", ["wait=idle"], "✋ 🔧 new session (ops)"),
-    ("ops-wait-bold", ["wait-bold=idle"], "✋ 🔧 new session (ops)"),
-    ("ops-hok", ["hok=busy"], "✋ 🔧 new session (ops)"),
+    ("ops-left", ["left=idle"], "✅ 🔧 go (ops)"),
+    ("ops-separately", ["separately=idle"], "✅ 🔧 go (ops)"),
+    ("ops-wait", ["wait=idle"], "✋ 🔧 go (ops)"),
+    ("ops-wait-bold", ["wait-bold=idle"], "✋ 🔧 go (ops)"),
+    ("ops-hok", ["hok=busy"], "✋ 🔧 go (ops)"),
+]
+PROMPTS = [
+    ("prompt-word", ["mode", "triage"], "triage"),
+    (
+        "prompt-after-others",
+        ["mode", "subagent", "peer", "skill", "command", "result", "triage"],
+        "triage",
+    ),
+    ("prompt-long", ["long"], "Fix the Stop hook ~/.claude/hooks/guard-ops-you..."),
+    ("prompt-blocks", ["blocks"], "why is this slow?"),
+    ("prompt-titled", ["triage", "title"], "Triage of the open PRs"),
+    ("prompt-none", ["mode", "result"], "new session"),
 ]
 TOPICS = {
     "report": [
@@ -266,6 +278,40 @@ def get_api_errors(home):
             failures.append(f"API errors of {session}: {found}, expected {expected}")
     if (found := title.count_api_errors("error-loop", 99)) != 8:
         failures.append(f"API errors of error-loop, 99 at most: {found}, expected 8")
+    return failures
+
+
+def get_first_prompts(home):
+    """The title of an ops window whose conversation Claude gave no title: the first line of its
+    first prompt typed, past what a subagent, a peer, a skill, a command or a tool wrote."""
+    spec = importlib.util.spec_from_file_location("title", HERE / "client" / "window-title.py")
+    title = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(title)
+    human = {"type": "user", "origin": {"kind": "human"}, "promptSource": "typed"}
+    long = "Fix the Stop hook ~/.claude/hooks/guard-ops-your-action.py: in the ops container"
+    entries = {
+        "mode": {"type": "mode", "mode": "normal"},
+        "triage": {**human, "message": {"content": "triage"}},
+        "subagent": {"type": "user", "isSidechain": True, "message": {"content": "Find it"}},
+        "peer": {"type": "user", "origin": {"kind": "peer"}, "message": {"content": "repo-4d"}},
+        "skill": {"type": "user", "isMeta": True, "message": {"content": "Base directory"}},
+        "command": {"type": "user", "message": {"content": "<command-name>/model</command-name>"}},
+        "result": {"type": "user", "message": {"content": [{"type": "tool_result"}]}},
+        "long": {**human, "message": {"content": f"{long}\nthen the rest"}},
+        "blocks": {
+            **human,
+            "message": {
+                "content": [{"type": "image"}, {"type": "text", "text": "why is\tthis slow?"}]
+            },
+        },
+        "title": {"type": "ai-title", "aiTitle": "Triage of the open PRs"},
+    }
+    failures = []
+    for session, kinds, expected in PROMPTS:
+        lines = "".join(f"{json.dumps(entries[kind])}\n" for kind in kinds)
+        (home / ".claude" / "projects" / "-workspace" / f"{session}.jsonl").write_text(lines)
+        if (found := title.get_topic(session)) != expected:
+            failures.append(f"title of {session}: {found!r}, expected {expected!r}")
     return failures
 
 
@@ -507,6 +553,7 @@ def main():
         failures += get_marks()
         failures += get_hok_waits()
         failures += get_api_errors(home)
+        failures += get_first_prompts(home)
         failures += get_close_lines()
         failures += get_loaded()
         failures += get_configs(home)
@@ -523,7 +570,7 @@ def main():
     for line in failures:
         print(line)
     cases = len(MARKS) + len(OPS_MARKS) + len(HOK_WAITS) + len(CLOSE_LINES) + len(CONFIGS)
-    cases += len(API_ERRORS) + len(LOGIN_WAITS) + 1
+    cases += len(API_ERRORS) + len(LOGIN_WAITS) + len(PROMPTS) + 1
     cases += len(FOLLOWED) + 6
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
