@@ -1074,8 +1074,9 @@ a prompt.
   or a permission. The terminal types the line only once Seb answered it there, as an Enter on
   the dialog would pick an answer, and `hok` says so (Seb, 2026-10-30: the no to a deploy of
   review-board waited 6 min behind a question of the agent, and he wondered whether it came).
-- A request a gateway held names its bundle, not its conversation: `POST /tell {bundle, text}`
-  types the line in the session the terminal of that bundle runs now, 404 when none runs.
+- A request a gateway or this daemon held (`bN`, such as `bctl delete`) names its bundle, not
+  its conversation: `POST /tell {bundle, text}` types the line in the session the terminal of
+  that bundle runs now, 404 when none runs.
 - An ops window whose claude ended keeps its folder until the window closes, and the line waits
   there for the window that goes on with the session. All of them end when the ops container goes
   down: on 2026-10-29 the line of request 542 was lost, as every ops window was down from 13:42 to
