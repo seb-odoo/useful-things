@@ -59,6 +59,7 @@ from agents import (  # noqa: E402
     get_last_text,
     get_mtime,
     get_resume,
+    get_session_records,
     get_session_status,
     get_transcript,
     get_window_pids,
@@ -226,12 +227,15 @@ NOT_BUILT = (
 OPS_OPEN = "ops-window-open"
 OPS_TASK = "The agent of the bundle {bundle} sends this task, and Seb said yes to it in hok:\n\n"
 PARENT_KEPT = 86400
+PASTE_END = "\x1b[201~"
+PASTE_START = "\x1b[200~"
 PAUSE_WAIT = 120
 RECONNECTED = (
     f"{GO_ON}\n\nThe GitHub connection of the host is back: this session waited for it in the"
     " queue since {time}. Go on with what its outage stopped, and first check what changed"
     " meanwhile where your work depends on it (a PR: its threads, its head, its CI; its base)."
 )
+REMOTE_ENTER_AFTER = 2
 REPORT_HEAD = 4096
 REQUEUE_AFTER = (15, 30, 60, 120, 240)
 RESTART_RETRY = 3600
@@ -505,7 +509,8 @@ def list_bundles():
         folder = get_worktree_bundle_folder(bundle)
         is_open = folder in open_folders
         opening = now - state["launches"].get(bundle, 0) < LAUNCH_GRACE
-        agent = get_agent(bundle, dates[bundle], is_open or opening)
+        remote = remote_agent.is_remote(pathlib.Path(folder))
+        agent = get_agent(bundle, dates[bundle], is_open or opening or remote)
         if agent and agent["state"] == "stopped":
             agent["task"] = read_text(get_agent_folder(bundle) / "task.md")
         if agent and (remote := remote_agent.read_remote(pathlib.Path(folder))):
@@ -1579,7 +1584,9 @@ def launch_queued():
                 item["waits_for"] = "the main login, which a laptop session or bundle-ctl renews"
                 remote_agent.renew_login_soon(folder.parent)
             elif remote_agent.is_remote(folder.parent):
-                item["waits_for"] = "the end of its agent on its worker"
+                if not (waits_for := type_remote(item)):
+                    continue
+                item["waits_for"] = waits_for
             elif bundle in building_for_worker:
                 item["waits_for"] = "its build here, then a worker"
             elif item.get("build") and get_agent_worker({**item, "build": None}, folder, False)[0]:
@@ -1860,6 +1867,8 @@ def keep_remote_agents():
             done = get_mtime(found.parent / "done")
             session = read_text(found.parent / "session")
             remote = remote_agent.read_remote(folder)
+            if line is None and remote and not done:
+                line = end_typed_turn(bundle, found.parent, session)
             if line is None and remote and WORKERS.is_leaving(remote["worker"]):
                 line = leave_worker(bundle, folder, remote["worker"], done, session)
             elif line is None and done and time.time() - done > FREE_AFTER and (
@@ -2620,7 +2629,7 @@ def tell_terminal(item):
     end. False when the line could not be left: the task then waits as before."""
     agent = get_agent_folder(item["bundle"])
     session = read_text(agent / "session")
-    text = "".join(char if char.isprintable() or char == "\n" else " " for char in item["task"])
+    text = as_typed(item["task"])
     try:
         if not session:
             raise OSError("no session in .agent/session")
@@ -2633,6 +2642,112 @@ def tell_terminal(item):
     write_task(item, keep=(*TERMINAL_FILES, "run.lock"))
     print(f"{item['bundle']}: the task from {item['parent']} is left in its terminal", flush=True)
     return True
+
+
+def as_typed(text):
+    """A text as a terminal types it: a control character but a new line goes as a space, as an
+    escape would act as a key."""
+    return "".join(char if char.isprintable() or char == "\n" else " " for char in text)
+
+
+def type_remote(item):
+    """Type a task in the session of the agent of its bundle on its worker, as its terminal here
+    would (Seb, 2026-11-02): a `--resume` task with a text of its own at once, idle or busy, any
+    other once that agent gave its verdict and is idle. Not on a dialog, where its Enter would
+    pick the first answer, nor while its job ends. What the task waits for, None once typed."""
+    bundle = item["bundle"]
+    agent = get_agent_folder(bundle)
+    session = read_text(agent / "session")
+    remote = remote_agent.read_remote(agent.parent)
+    if (
+        not remote
+        or not session
+        or item.get("build")
+        or item.get("where") == "local"
+        or item.get("session") not in (None, session)
+        or (agent / "remote-ending").exists()
+        or (agent / "remote-moving").exists()
+    ):
+        return "the end of its agent on its worker"
+    worker = remote["worker"]
+    told = item.get("resume") and item["task"] != GO_ON and not item.get("session")
+    if not told and not (agent / "done").exists():
+        return f"the verdict of its agent on {worker}"
+    statuses = ("idle", "busy", "shell") if told else ("idle",)
+    if (
+        (agent / "pause").exists()
+        or get_session_status(bundle, session) not in statuses
+        or TITLE.is_resuming(session)
+    ):
+        return f"its agent on {worker} to be idle"
+    if (agent / "remote-down").exists():
+        return f"the link to {worker}"
+    text = as_typed(item["task"])
+    if told:
+        text = f"Task from {item['parent']}: {text}"
+    since = get_status_since(bundle, session)
+    if error := remote_agent.type_keys(bundle, f"{PASTE_START}{text}{PASTE_END}"):
+        return f"the link to {worker} ({error})"
+    model, effort = (read_text(agent / name) for name in ("model", "effort"))
+    kept = [path.name for path in agent.iterdir() if path.name.startswith("remote")]
+    item = {**item, "resume": True, "model": model, "effort": effort}
+    write_task(item, keep=(*TERMINAL_FILES, "run.lock", *kept))
+    with contextlib.suppress(FileExistsError):
+        (agent / "run.lock").mkdir()
+    write_text(agent / "remote-typed", f"{since}\n")
+    print(f"{bundle}: the task from {item['parent']} is typed on {worker}", flush=True)
+    start_job(
+        item["parent"],
+        "type",
+        lambda log: press_remote_enter(bundle, session),
+        lock=None,
+        bundle=bundle,
+    )
+    return None
+
+
+def press_remote_enter(bundle, session):
+    """The Enter of a task typed on a worker, REMOTE_ENTER_AFTER after its text, as claude takes
+    both sent together as a paste, where Enter is a new line. Not on a dialog that opened since."""
+    time.sleep(REMOTE_ENTER_AFTER)
+    if get_session_status(bundle, session) == "waiting":
+        print(f"{bundle}: no Enter on its worker, a dialog opened after the text", flush=True)
+    elif error := remote_agent.type_keys(bundle, "\r"):
+        print(f"{bundle}: the Enter of its task did not reach its worker: {error}", flush=True)
+
+
+def get_status_since(bundle, session):
+    """When the claude of a bundle's session took its status, in ms of the clock of its machine, 0
+    when its newest record does not say."""
+    record = get_session_records(bundle).get(session) or {}
+    stamp = record.get("statusUpdatedAt") or record.get("updatedAt")
+    return stamp if type(stamp) is int else 0
+
+
+def end_typed_turn(bundle, agent, session):
+    """The end of the turn of a task typed on a worker, written here as client/agent-stop.py writes
+    it: in the job it writes the first verdict alone, as its own `.agent/done` stays. Once the
+    session is idle again since the task was typed. A line for the journal on a verdict."""
+    since = read_text(agent / "remote-typed") or ""
+    transcript = session and get_transcript(session)
+    if (
+        not re.fullmatch(r"[0-9]{1,16}", since)
+        or not transcript
+        or get_session_status(bundle, session) not in ("idle", "shell")
+        or get_status_since(bundle, session) <= int(since)
+    ):
+        return None
+    message = (get_last_text(transcript) or "").strip()
+    if not message or read_text(agent / "result.md") == message:
+        return None
+    write_text(agent / "result.md", message)
+    if not cut.VERDICT.match(message.splitlines()[0].strip().lstrip("#*_` ")):
+        write_text(agent / "waiting", "")
+        return None
+    write_text(agent / "done", "0\n")
+    (agent / "waiting").unlink(missing_ok=True)
+    (agent / "remote-typed").unlink(missing_ok=True)
+    return f"{bundle}: its agent on its worker gave its verdict on the task typed there"
 
 
 def clean(text):

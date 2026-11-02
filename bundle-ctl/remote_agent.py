@@ -451,6 +451,17 @@ def in_standin(bundle, verb, data=b"", check=True):
     return subprocess.run(command, input=data, capture_output=True, check=check)
 
 
+def type_keys(bundle, keys):
+    """Keys typed in the claude of the bundle's job, as those of an attached window: why the
+    stand-in did not take them, None once it did."""
+    order = json.dumps({"op": "type", "text": keys}).encode() + b"\n"
+    done = in_standin(bundle, "order", order, check=False)
+    if done.returncode == 0:
+        return None
+    lines = done.stderr.decode(errors="replace").strip().splitlines()
+    return (lines or [f"exit {done.returncode}"])[-1][:200]
+
+
 def start(log, bundle, bundle_folder, worker, workers, base, session, resume):
     """Start the agent of the bundle on WORKER, its task in `.agent/task.md`. Raise on a failure
     before the job started: the queue then starts it here. After a job that was lost, the agent
@@ -724,6 +735,7 @@ def finish(bundle, bundle_folder, end):
             "remote-sent.json",
             "remote-down",
             "remote-ending",
+            "remote-typed",
         ):
             (agent / name).unlink(missing_ok=True)
         for path in run_folder(bundle).glob("*"):

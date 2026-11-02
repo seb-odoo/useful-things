@@ -12,6 +12,7 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -185,6 +186,39 @@ def check_standin(root):
     check("its conmon out of the cgroup of bundle-ctl", runs[-1][:7] == scope, runs[-1])
 
 
+def check_type(root):
+    """Keys typed on a worker go to the stand-in as one order line, a refusal says why, and the
+    mark of a typed task goes with the other files of the job once it ended."""
+    runs = []
+
+    def run(argv, input=b"", **kwargs):
+        runs.append((argv, input))
+        refused = argv[-1] == "order" and b"refused" in input
+        error = b"Traceback\nConnectionRefusedError: [Errno 111] Connection refused\n"
+        return subprocess.CompletedProcess(argv, int(refused), b"", error if refused else b"")
+
+    remote_agent.subprocess.run = run
+    keys = "\x1b[200~fix\nit\x1b[201~"
+    found = remote_agent.type_keys("b", keys)
+    argv, data = runs[-1]
+    order = argv[-2:] == ["/opt/remote-runs/standin/standin.py", "order"]
+    check("typed keys are one order of the stand-in", order and data.count(b"\n") == 1, runs[-1])
+    sent = json.loads(data) == {"op": "type", "text": keys}
+    check("as the worker reads it", sent and found is None, data)
+    found = remote_agent.type_keys("b", "refused")
+    refusal = "ConnectionRefusedError: [Errno 111] Connection refused"
+    check("a stand-in that does not take them says why", found == refusal, found)
+    agent = root / "typed" / ".agent"
+    agent.mkdir(parents=True)
+    (agent / "remote.json").write_text(json.dumps({"worker": "sebpc", "job": "1"}))
+    (agent / "remote-ended").write_text("{}\n")
+    (agent / "remote-typed").write_text("1000\n")
+    remote_agent.DUMMIES = remote_agent.STATE = root
+    remote_agent.finish("typed", root / "typed", {"reason": "verdict"})
+    left = sorted(path.name for path in agent.iterdir())
+    check("the mark of a typed task goes with the job", left == [], left)
+
+
 def main():
     check_mounts()
     with tempfile.TemporaryDirectory() as folder:
@@ -193,6 +227,7 @@ def main():
         check_env(root)
         check_remote(root)
         check_standin(root)
+        check_type(root)
     for line in failures:
         print(line)
     print(f"{total - len(failures)}/{total} cases as expected")

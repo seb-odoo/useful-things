@@ -44,7 +44,7 @@ the pager. `python3 test_node_modules.py` and `python3 test_delete.py` have the 
 | --- | --- |
 | `GET /whoami` | the caller's bundle, base and parent |
 | `GET /branches` | `gbs --json` run on the host, which deletes the bundles left with merged PRs only; `?format=table&width=N`: its colored table |
-| `GET /status` | every local bundle branch, as read in the last 30 seconds (agents and the helper of firefox-gateway poll it; each git call of the host starts a host-box, so a read runs git again only on a branch whose commit or base commit moved): base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open, and its agent: state (`running`, `waiting`, `done`, or `stopped` when its terminal or its window closed before the verdict: nothing runs it any more, and a new task may replace it; a stopped agent carries its `task` text, to queue it again as it was), when it was queued, when its run started (none for a task no window took), when it ended, `stale` when a branch of the bundle got a commit, or its dev remote ref an update (the mtime of its reflog), after that end, retry, and the last write to a session titled with the bundle, its own or an earlier agent's tab Seb went on in (`active N min ago`, or `idle since HH:MM` after 15 minutes; a tab opened by hand has no title and does not count); the queue, each task with its priority, the bundle that queued it, when, and what it waits for |
+| `GET /status` | every local bundle branch, as read in the last 30 seconds (agents and the helper of firefox-gateway poll it; each git call of the host starts a host-box, so a read runs git again only on a branch whose commit or base commit moved): base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open, and its agent: state (`running`, `waiting`, `done`, or `stopped` when its terminal or its window closed before the verdict and it runs on no worker: nothing runs it any more, and a new task may replace it; a stopped agent carries its `task` text, to queue it again as it was), when it was queued, when its run started (none for a task no window took), when it ended, `stale` when a branch of the bundle got a commit, or its dev remote ref an update (the mtime of its reflog), after that end, retry, and the last write to a session titled with the bundle, its own or an earlier agent's tab Seb went on in (`active N min ago`, or `idle since HH:MM` after 15 minutes; a tab opened by hand has no title and does not count); the queue, each task with its priority, the bundle that queued it, when, and what it waits for |
 | `POST /add-repo` | `add_repo.py`: the worktree of a repo the bundle was made without (`design-themes`, `documentation`); a container asks for its own only |
 | `POST /build` | the `gnb` or `pfb` a task was queued with, for the bundle whose agent started bare (see Bare start); the bundle itself or the host asks; when the disk is short, the session of the agent that asks it in its terminal goes back to the queue with that build (see Disk), and anyone else is refused; refused too when a branch of the bundle has a commit no remote has, which the script would reset |
 | `POST /create` | `gnb` with `--no-push`, then a window; with a task, only its queue entry, the bundle being made when its agent asks (see Bare start); refused when the bundle exists, a branch has unpushed commits or, with no task, the disk is short (see Disk) |
@@ -258,7 +258,7 @@ necessary. but if we have a good setup, full remote should offer the same possib
   here in its bare folder, as without a worker. A bundle whose agent ran on
   a worker goes there again (`.agent/where` is `worker:NAME`) until it is brought back, so that it
   does not rebuild its DBs on each machine in turn. A task for a bundle whose agent is remote
-  waits for its end. `auto` stays here until `BUNDLE_CTL_REMOTE_AGENTS=auto` is in
+  is typed in its session there (see below). `auto` stays here until `BUNDLE_CTL_REMOTE_AGENTS=auto` is in
   `~/.config/odoo-dev/config.env`, set once a first agent ran whole on the worker.
 - `remote_agent.py` starts it: the stand-in `rrs-BUNDLE` (the runner image, `standin.py` of
   remote-runs, on `devnet`, `--cap-drop=ALL`, 256 MB, labels `remote-runs.folder` and
@@ -292,10 +292,33 @@ necessary. but if we have a good setup, full remote should offer the same possib
   it ran 180 s and was stopped 716 times, `the main login expires in N s, its renewal ran 180 s
   and was stopped` in the journal. The journal says `BUNDLE: its agent started on NAME` and
   `BUNDLE: its agent on NAME ended (WHY)`.
+- A task queued for a bundle whose agent is remote is typed in its session there, as its terminal
+  here would type it (Seb, 2026-11-02, as 8 tasks waited an hour for the end of agents on sebpc:
+  "can't the task waiting be forwarded to the existing agent instead immediately?"). The daemon
+  sends it to the stand-in
+  (`standin.py order`, `{"op": "type"}`, which the job writes in the pty of its claude), as a
+  paste, then the Enter `REMOTE_ENTER_AFTER` (2 s) apart: sent together, claude takes the Enter
+  as a new line of the paste. A `--resume` with a text of its own goes at once, opened by `Task
+  from PARENT:`, idle or busy; any other task once the agent gave its verdict and its session is
+  idle, which the mirrored session record says. Neither goes on a dialog (`waiting`), and the
+  Enter is not sent when one opened after the text, as it would pick its first answer; nor while
+  the job ends (`.agent/remote-ending`, `remote-moving`), for another session, for a task with
+  `--where local`, or one to build: these wait for `the end of its agent on its worker` and
+  start after it as before. A link down (`.agent/remote-down`) or a stand-in that does not take
+  the text keeps the task waiting for `the link to NAME`. The files go to `.agent/history/` as for
+  a terminal, `run.lock` and the `remote*` files stay, and `.agent/remote-typed` keeps when the
+  session took its status (`statusUpdatedAt` of its record, on the clock of the worker). In the
+  job, `client/agent-stop.py` writes the first verdict alone, as its own `.agent/done` stays, so
+  the daemon writes the end of a typed turn here once the session is idle again since then: its
+  last text in `result.md`, then `done` on a verdict line, else `waiting`. The 5 minutes after
+  the verdict then count from it. One gap with a terminal here: the daemon does not see what Seb
+  types in an attached window, and a task typed then lands in his draft. The journal says
+  `BUNDLE: the task from PARENT is typed on NAME`. `python3 test_queue.py` has the cases.
 - `agent-terminal.py` of a remote bundle attaches to its claude (`standin.py attach`) and writes
   no `.agent/terminal`: it takes no slot, and closing it leaves the agent running there. A link
   down shows since when and waits. Its title says where, `⭐ BUNDLE @sebpc (mine)`, and so do the
-  agent list and `GET /status` (`where` in the agent of the bundle).
+  agent list and `GET /status` (`where` in the agent of the bundle, whose state is the one of an
+  agent in a terminal here, never `stopped`).
 - `bctl bring-back BUNDLE`: claude stops once idle or in a tool call, its work tree comes back and
   is written in the worktrees when they are what was sent (else nothing is overwritten, and the
   commits stay in `refs/remote-runs/BUNDLE/`), the job is cancelled 11 minutes after at most,
@@ -1459,9 +1482,10 @@ new line goes as a space: an escape would act as a key. The files of the last ru
 `waiting` at its end, and `bctl status` says `running` until then. The model and the effort stay
 the ones of the session. These still go through the queue as above: a resume with no task (go
 on), one whose time has not come, a session the daemon queued again or closes (Back to queue,
-Pause, a build under the disk floor), a task the terminal has not typed yet (no `run.lock`), an
-agent on a worker, and a bundle with no `.agent/session`. The journal says `BUNDLE: the
-task from PARENT is left in its terminal`. `python3 test_queue.py` has the cases.
+Pause, a build under the disk floor), a task the terminal has not typed yet (no `run.lock`), and
+a bundle with no `.agent/session`. An agent on a worker gets it from the daemon, typed there at
+once (see Remote agents). The journal says `BUNDLE: the task from PARENT is left in its
+terminal`. `python3 test_queue.py` has the cases.
 
 The agent runs of all the containers start at least 10 seconds apart (a lock in the shared
 `~/.claude`), as claude processes started together fail each other's OAuth token refresh. A

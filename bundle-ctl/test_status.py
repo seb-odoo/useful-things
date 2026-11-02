@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Which branches GET /status reads again with git, on a throwaway repo:
+"""Which branches GET /status reads again with git, on a throwaway repo, and the agent it gives
+a bundle whose agent runs on a worker:
 python3 test_status.py
 """
 
@@ -86,9 +87,52 @@ def check(root):
     return [name for name, passed in checks if not passed], len(checks)
 
 
+def check_remote(root):
+    agent = root / "bundles" / "master-a--seb" / ".agent"
+    agent.mkdir(parents=True)
+    alive = {}
+
+    def get_agent(bundle, head_date, is_alive):
+        alive[bundle] = is_alive
+        return {"state": "running" if is_alive else "stopped"}
+
+    stubs = {
+        name: getattr(daemon, name)
+        for name in (
+            "get_agent",
+            "get_open_bundle_folders",
+            "get_repo_folder",
+            "get_repos",
+            "get_worktree_bundle_folder",
+            "read_state",
+        )
+    }
+    daemon.get_agent = get_agent
+    daemon.get_open_bundle_folders = set
+    daemon.get_repo_folder = lambda name: str(root / name)
+    daemon.get_repos = lambda: ["odoo"]
+    daemon.get_worktree_bundle_folder = lambda bundle: str(root / "bundles" / bundle)
+    daemon.read_state = lambda: {"launches": {}, "queue": []}
+
+    def read():
+        rows = {row["bundle"]: row["agent"] for row in daemon.list_bundles()}
+        return alive["master-a--seb"], rows["master-a--seb"].get("where")
+
+    checks = []
+    try:
+        checks.append(("an agent with no window and no worker is stopped", read() == (False, None)))
+        (agent / "remote.json").write_text('{"worker": "sebpc", "job": "1"}')
+        checks.append(("an agent on a worker is alive, with its worker", read() == (True, "sebpc")))
+    finally:
+        vars(daemon).update(stubs)
+    return [name for name, passed in checks if not passed], len(checks)
+
+
 def main():
     with tempfile.TemporaryDirectory() as root:
         failures, total = check(pathlib.Path(root))
+        more, count = check_remote(pathlib.Path(root))
+        failures, total = failures + more, total + count
     for line in failures:
         print(line)
     print(f"{total - len(failures)}/{total} cases as expected")

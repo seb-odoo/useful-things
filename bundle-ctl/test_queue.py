@@ -1115,7 +1115,7 @@ def check_place(root):
             ["away"],
             [("away", "vm")],
             "worker:vm\n",
-            [("away", "new", "the end of its agent on its worker")],
+            [("away", "new", "the verdict of its agent on vm")],
         )
         checks.append(("a remote agent goes on on the other worker, first", found == expected))
         state["queue"].clear()
@@ -1835,6 +1835,174 @@ def check_tell(root):
     return [f"tell: {name}" for name, passed in checks if not passed], len(checks)
 
 
+def check_remote_type(root):
+    """A task for a bundle whose agent runs on a worker is typed in its session there, as its
+    terminal here would: one asked with --resume and a text of its own at once, idle or busy, any
+    other once that agent gave its verdict and is idle, then its Enter apart. Its verdict and its
+    old task go to the history; its run.lock and the files of the remote agent stay. A dialog, a
+    turn, a job that ends, a task for another session or for here, a link down and a stand-in that
+    does not take the text keep it waiting, and a dialog opened after the text gets no Enter. The
+    end of the turn it starts is written here, as the job writes its first verdict alone."""
+    on_worker = {
+        "model": "sonnet\n",
+        "remote.json": "{}",
+        "result.md": "pushed: x",
+        "run.lock": "",
+        "session": "s\n",
+        "task.md": "old",
+    }
+    verdict = {**on_worker, "done": "0\n"}
+    bundles = {
+        "told": on_worker,
+        "ended": verdict,
+        "late": verdict,
+        "working": on_worker,
+        "answering": verdict,
+        "dialog": verdict,
+        "ending": {**verdict, "remote-ending": ""},
+        "other": verdict,
+        "here": verdict,
+        "down": {**verdict, "remote-down": "10:00\n"},
+        "refused": verdict,
+    }
+    state, launched = prepare(root, bundles, 8)
+    task = "fix it\nthen push\x1b[201~ it"
+    for item in state["queue"]:
+        item["task"] = task
+        item["resume"] = item["bundle"] in ("told", "dialog")
+        if item["bundle"] == "other":
+            item["session"] = "x"
+        if item["bundle"] == "here":
+            item["where"] = "local"
+    statuses = {"told": "busy", "working": "busy", "answering": "busy", "dialog": "waiting"}
+    records = {"stamp": 1000, "text": "Looking at it."}
+    typed = []
+
+    def type_keys(bundle, keys):
+        if bundle == "refused":
+            return "Connection refused"
+        if bundle == "late":
+            statuses["late"] = "waiting"
+        typed.append((bundle, keys))
+        return None
+
+    names = (
+        "REMOTE_ENTER_AFTER",
+        "WORKERS",
+        "get_last_text",
+        "get_session_records",
+        "get_session_status",
+        "get_transcript",
+        "remote_agent",
+    )
+    stubs = {name: getattr(daemon, name) for name in names}
+    daemon.REMOTE_ENTER_AFTER = 0
+    daemon.WORKERS = types.SimpleNamespace(names=[], is_leaving=lambda name: False)
+    daemon.get_last_text = lambda transcript: records["text"]
+    daemon.get_session_records = lambda container: {
+        "s": {"status": statuses.get(container, "idle"), "statusUpdatedAt": records["stamp"]}
+    }
+    daemon.get_session_status = lambda bundle, session: statuses.get(bundle, "idle")
+    daemon.get_transcript = lambda session: root / "t"
+    daemon.remote_agent = types.SimpleNamespace(
+        is_remote=lambda folder: True,
+        keep=lambda bundle, folder, workers: (None, False),
+        read_remote=lambda folder: {"worker": "sebpc", "job": "1"},
+        renew_login_soon=lambda folder: None,
+        type_keys=type_keys,
+    )
+    agent = daemon.get_agent_folder("ended")
+    journal = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(journal):
+            daemon.launch_queued()
+            kept = sorted(path.name for path in agent.iterdir())
+            history = sorted(path.name for path in next((agent / "history").iterdir()).iterdir())
+            since = daemon.read_text(agent / "remote-typed")
+            waits = [f"{item['bundle']}: {item['waits_for']}" for item in state["queue"]]
+            ends, marks = [], ("done", "waiting", "remote-typed")
+            for status, stamp, text in (
+                ("busy", 2000, "Looking at it."),
+                ("idle", 1000, "Looking at it."),
+                ("idle", 2000, "Looking at it."),
+                ("idle", 2000, "pushed: it is fixed"),
+            ):
+                statuses["ended"] = status
+                records.update(stamp=stamp, text=text)
+                daemon.keep_remote_agents()
+                ends.append([name for name in marks if (agent / name).exists()])
+    finally:
+        vars(daemon).update(stubs)
+    paste = f"{daemon.PASTE_START}fix it\nthen push [201~ it{daemon.PASTE_END}"
+    told = f"{daemon.PASTE_START}Task from host: fix it\nthen push [201~ it{daemon.PASTE_END}"
+    checks = [
+        ("no window opens", launched == []),
+        (
+            "the resume is told at once, a task after the verdict typed, each with its Enter",
+            typed
+            == [("told", told), ("told", "\r"), ("ended", paste), ("ended", "\r"), ("late", paste)],
+        ),
+        (
+            "its verdict and its old task go to the history",
+            {"done", "result.md", "task.md"} <= set(history),
+        ),
+        (
+            "its session, its run and the remote files stay",
+            kept
+            == [
+                "history",
+                "model",
+                "parent",
+                "priority",
+                "queued",
+                "remote-typed",
+                "remote.json",
+                "run.lock",
+                "session",
+                "task.md",
+            ],
+        ),
+        ("task.md holds the task", daemon.read_text(agent / "task.md") == task.strip()),
+        ("the status it was typed on is kept", since == "1000"),
+        (
+            "the others wait",
+            waits
+            == [
+                "working: the verdict of its agent on sebpc",
+                "answering: its agent on sebpc to be idle",
+                "dialog: its agent on sebpc to be idle",
+                "ending: the end of its agent on its worker",
+                "other: the end of its agent on its worker",
+                "here: the end of its agent on its worker",
+                "down: the link to sebpc",
+                "refused: the link to sebpc (Connection refused)",
+            ],
+        ),
+        (
+            "one that does not take the text keeps its verdict",
+            (daemon.get_agent_folder("refused") / "done").exists(),
+        ),
+        (
+            "a turn, a status of before, a text with no verdict, then the verdict",
+            ends == [["remote-typed"], ["remote-typed"], ["waiting", "remote-typed"], ["done"]],
+        ),
+        ("its verdict is the last text", daemon.read_text(agent / "result.md") == records["text"]),
+        (
+            "the journal says so",
+            [
+                "told: the task from host is typed on sebpc",
+                "ended: the task from host is typed on sebpc",
+                "late: the task from host is typed on sebpc",
+                "late: no Enter on its worker, a dialog opened after the text",
+                "ended: its agent on its worker gave its verdict on the task typed there",
+            ]
+            == journal.getvalue().splitlines(),
+        ),
+    ]
+    found = typed, waits, kept, ends, journal.getvalue()
+    return [f"remote type: {name}: {found}" for name, passed in checks if not passed], len(checks)
+
+
 def check_ramp(root):
     """Only an agent that began its run in the last AGENT_RAMP seconds and gave no verdict counts
     for the memory it takes soon.
@@ -2127,6 +2295,7 @@ def main():
         check_second_task,
         check_hand_over,
         check_tell,
+        check_remote_type,
         check_ramp,
         check_renew,
         check_leaving,
