@@ -76,6 +76,9 @@ TASK_CASES = [
     ("other", None, {"task": "do"}, "held b3"),
     ("other", "parent", {"task": daemon.GO_ON, "resume": True}, "held b4"),
     ("parent", "parent", {"task": daemon.GO_ON, "resume": True}, "queued by parent"),
+    (daemon.HOST, None, {"task": "do", "window": NEW}, f"queued by {NEW}"),
+    (daemon.HOST, None, {"task": "do", "window": "ops-../x"}, "queued by host"),
+    ("bundle", None, {"task": "do", "window": NEW}, "queued by bundle"),
 ]
 
 
@@ -256,6 +259,7 @@ def main():
     start_job = daemon.start_job
     with tempfile.TemporaryDirectory() as root:
         daemon.HELD_DIR = pathlib.Path(root) / "held"
+        daemon.PARENTS_DIR = pathlib.Path(root) / "parents"
         agent = pathlib.Path(root) / "bundle" / ".agent"
         agent.mkdir(parents=True)
         daemon.get_agent_folder = lambda bundle: agent

@@ -167,6 +167,7 @@ def prepare(root, bundles, cap, short=False, disk=100, busy=False):
     daemon.DISK_STOP = 30
     daemon.HELD_DIR = root / "held"
     daemon.MAX_AGENTS = cap
+    daemon.PARENTS_DIR = root / "parents"
     daemon.describe_memory = lambda _open_windows: {
         "available": 9.0,
         "busy": busy,
@@ -1380,6 +1381,34 @@ def check_build(root):
             "under the floor a task is queued with its build",
             (code, queued["build"][0], queued["waits_for"])
             == (202, "create_bundle.py", "disk space (20 GB left, 30 needed)"),
+        ),
+    )
+    window = "ops-11111111-2222-3333-4444-555555555555"
+    path = root / "create.sock"
+    server = daemon.Server(str(path), daemon.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    daemon.identify = lambda connection: daemon.HOST
+    check_fetch, daemon.outside.check_fetch = daemon.outside.check_fetch, lambda *args: None
+    (root / "task.md").write_text(TASK)
+    os.environ["AGENT_WINDOW"] = window
+    try:
+        sent = run_client(path, "create", "master", "y", "--task-file", str(root / "task.md"))
+        daemon.fetch(daemon.HOST, {}, {"name": "master-z--seb", "task": TASK, "window": window})
+    finally:
+        del os.environ["AGENT_WINDOW"]
+        daemon.outside.check_fetch = check_fetch
+        server.shutdown()
+        server.server_close()
+    parents = {
+        bundle: (item["parent"], daemon.read_parent(bundle).get("parent"))
+        for item in state["queue"]
+        if (bundle := item["bundle"]) in ("master-y--seb", "master-z--seb")
+    }
+    checks.append(
+        (
+            "a task bctl creates or fetches from an ops window has that window as parent",
+            sent[0] == 0
+            and parents == dict.fromkeys(("master-y--seb", "master-z--seb"), (window, window)),
         ),
     )
     bare = root / "bare"

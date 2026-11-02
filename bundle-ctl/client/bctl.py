@@ -916,6 +916,8 @@ def main():
             task = task or GO_ON
         if task is not None:
             body["task"] = task
+        if task is not None and os.environ.get("AGENT_WINDOW", "").startswith("ops-"):
+            body["window"] = os.environ["AGENT_WINDOW"]
         if args.after is not None:
             body["after"] = args.after
         if args.paused:

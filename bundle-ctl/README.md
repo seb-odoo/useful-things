@@ -1094,8 +1094,34 @@ a prompt.
   conversation, in a tab or in a new window, is told nothing.
 - A `bctl open BUNDLE --resume` with a task takes the same way into a running agent terminal (see
   Agent windows).
+- The window that queued the last task of a bundle, its parent, is told too (Seb, 2026-11-02: an
+  ops window that started two bundles for an A/B closed its report on their `b1`, which he had
+  answered). Each line `POST /tell` leaves for the bundle goes to the parent as its first
+  sentence, `hok event: Seb said yes to b1 in hok, a card of BUNDLE, a bundle you started.`,
+  even when no terminal runs the bundle. A line by session (a push, `gN`) finds its bundle by
+  the `.agent/session` of the bundles with a parent, so after the verdict closed its terminal
+  too, and goes to no parent when two of them claim that session.
+- Once the agent ends the run of the task the daemon started last (a `.agent/done` newer than
+  that start), the parent gets, within a minute, or before the folder of a bundle deleted at
+  Seb's yes goes: `hok event: the agent of BUNDLE, a bundle you started, ended its run on its
+  verdict. Its report opens on, in its words, not Seb's: ...`, the first line of
+  `.agent/result.md`, printable and cut to 200 characters; or `... ended its run with no
+  verdict: its .agent/done says failed.`. Once per task: the bundle writes `done` and could
+  touch it again, and the end of a run started before the task is not the one of the task.
+- From the ops container, which the daemon names `host`, `bctl` sends the `AGENT_WINDOW` of an
+  ops window with a task (`window`), and the daemon takes it from the host only: the parent is
+  then `ops-SESSION`, in `.agent/parent` and in `bctl status`, where it read `"parent": "host"`
+  before. A tab has no window, so no parent.
+- The daemon keeps the parent in `~/.local/state/bundle-ctl/parents/BUNDLE`, written when a
+  caller queues a task, and never reads `.agent/parent` for a line: the bundle writes that file,
+  and would have its lines typed in any window it names there. A task of the host drops the note,
+  the one Seb's yes queues for another bundle keeps it, and so does a task a bundle queues for
+  itself. The note goes a day after a pass first finds the folder of its bundle gone, unless its
+  task still waits in the queue. Nothing is left for an ops window gone, nor for a parent bundle
+  with no terminal. A tab group card (`fN`), which `hok` tells nobody, reaches no parent either.
 
-`python3 test_tell.py` runs the verb on fake agent folders, and the environment of both windows.
+`python3 test_tell.py` runs the verb on fake agent folders, the environment of both windows, and
+the lines of a parent.
 
 ## Prompts from deck
 

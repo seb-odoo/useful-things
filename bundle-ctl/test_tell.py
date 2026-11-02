@@ -9,6 +9,7 @@ import pathlib
 import shutil
 import sys
 import tempfile
+import time
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -18,6 +19,7 @@ import daemon  # noqa: E402
 OPS_SESSION = "11111111-2222-3333-4444-555555555555"
 BUNDLE_SESSION = "66666666-7777-8888-9999-000000000000"
 STOPPED_SESSION = "33333333-7777-8888-9999-000000000000"
+PUSHED_SESSION = "44444444-7777-8888-9999-000000000000"
 TEXT = "hok event: Seb answered request 959 (ran)."
 
 
@@ -128,6 +130,126 @@ def check_tell(root, check):
     check("the verb is served", daemon.VERBS.get(("POST", "/tell")) is daemon.tell)
 
 
+def check_parent(root, check):
+    """The window that queued the task of a bundle hears of the cards of that bundle and of its
+    verdict, from the note the host keeps, never from what .agent/parent says."""
+    window = f"ops-{OPS_SESSION}"
+    ops = root / "parent" / "ops" / OPS_SESSION
+    agents = {name: root / "parent" / name / ".agent" for name in ("c1", "c2", "p1")}
+    agents[window] = ops
+    for folder in agents.values():
+        folder.mkdir(parents=True)
+    (agents["c1"] / "session").write_text(f"{STOPPED_SESSION}\n")
+    (agents["p1"] / "session").write_text(f"{BUNDLE_SESSION}\n")
+    running = {window}
+    daemon.get_agent_folder = lambda name: agents.get(name, root / "parent" / "gone" / name)
+    daemon.get_terminals = lambda: {"c1": 1, "p1": 2}
+    daemon.is_agent_running = running.__contains__
+    daemon.reads_told = lambda bundle: True
+    daemon.TOLD_DIR = root / "parent" / "told"
+    daemon.PARENTS_DIR = root / "parent" / "parents"
+    told_p1 = root / "parent" / "told" / "p1" / BUNDLE_SESSION
+
+    def in_p1():
+        return sorted(path.read_text() for path in told_p1.glob("[!.]*.txt"))
+
+    cases = [
+        (daemon.HOST, {"window": window}, window),
+        (daemon.HOST, {}, daemon.HOST),
+        (daemon.HOST, {"window": "ops-../x"}, daemon.HOST),
+        (daemon.HOST, {"window": "p1"}, daemon.HOST),
+        ("c1", {"window": window}, "c1"),
+    ]
+    found = [daemon.get_parent(caller, body) for caller, body, _parent in cases]
+    check("the parent is the caller, or the ops window the host names",
+          found == [parent for *_rest, parent in cases], found)
+
+    daemon.keep_parent("c1", window)
+    daemon.keep_parent("c2", "p1")
+    (agents["c2"] / "parent").write_text(f"{window}\n")
+    (agents["c2"] / "session").write_text(f"{PUSHED_SESSION}\n")
+    said = "hok event: Seb said yes to b1 in hok. `hok-answer b1` says what came of it. Read it."
+    found = tell(STOPPED_SESSION, said)
+    told = "hok event: Seb said yes to b1 in hok, a card of c1, a bundle you started."
+    check("a card told to a bundle by its session is told to its ops window",
+          found[0] == 200 and get_lines(ops) == [told], get_lines(ops))
+    found = tell_bundle("c2", said)
+    check("a card of a bundle with no terminal is told to its parent bundle",
+          found[0] == 404 and in_p1() == [told.replace("c1", "c2")], (found, in_p1()))
+    found = tell(PUSHED_SESSION, said)
+    check("a push by the session of a bundle whose terminal closed is told to its parent",
+          found[0] == 404 and len(in_p1()) == 2, (found, in_p1()))
+    check("not to the window its .agent/parent names", len(get_lines(ops)) == 1)
+    (agents["c1"] / "session").write_text(f"{PUSHED_SESSION}\n")
+    tell(PUSHED_SESSION, said)
+    check("a session two bundles claim is told to no parent",
+          len(in_p1()) == 2 and len(get_lines(ops)) == 1, in_p1())
+    (agents["c1"] / "session").write_text(f"{STOPPED_SESSION}\n")
+    daemon.keep_parent("c2", daemon.HOST)
+    tell_bundle("c2", said)
+    check("a task of the host drops the note",
+          not (daemon.PARENTS_DIR / "c2").exists() and len(in_p1()) == 2)
+
+    shutil.rmtree(ops)
+    running.clear()
+    tell(STOPPED_SESSION, said)
+    check("a closed ops window is told nothing", not ops.exists())
+    ops.mkdir(parents=True)
+    daemon.keep_parent("c1", window)
+    enqueue = daemon.enqueue
+    daemon.enqueue = lambda parent, bundle, body, build=None: {"parent": parent}
+    try:
+        found = daemon.queue_task("c1", "c1", {"task": "do"})
+    finally:
+        daemon.enqueue = enqueue
+    check("a bundle that queues its own task keeps the note",
+          found == {"parent": "c1"} and daemon.read_parent("c1")["parent"] == window, found)
+
+    done = agents["c1"] / "done"
+    report = f"\n## **Pushed: 1a2b3c** \x1b[2J now\tlive {'x' * 300}\n\nDone\n"
+    (agents["c1"] / "result.md").write_text(report)
+    done.write_text("0\n")
+    daemon.read_state = lambda: {"queue": [{"bundle": "queued1"}]}
+    daemon.tell_verdicts()
+    check("a run that ended before its task started is not told", get_lines(ops) == [])
+    daemon.note_task_start("c1")
+    later = daemon.read_parent("c1")["since"] + 5
+    os.utime(done, (later, later))
+    daemon.tell_verdicts()
+    daemon.tell_verdicts()
+    lines = get_lines(ops)
+    opens = "hok event: the agent of c1, a bundle you started, ended its run on its verdict."
+    first = "not Seb's: Pushed: 1a2b3c** [2J now live "
+    check("its verdict is told once, its first line printable and cut",
+          len(lines) == 1 and lines[0].startswith(opens) and first in lines[0]
+          and lines[0].endswith("x...") and lines[0].isprintable(), lines)
+    os.utime(done, (later + 5, later + 5))
+    daemon.tell_verdicts()
+    check("a done touched again is not told again", len(get_lines(ops)) == 1)
+    daemon.note_task_start("c1")
+    done.write_text("failed\n")
+    os.utime(done, (later + 60, later + 60))
+    daemon.tell_verdict("c1")
+    lines = get_lines(ops)
+    check("the next task that ends with no verdict says so",
+          len(lines) == 2 and lines[1].endswith("with no verdict: its .agent/done says failed."),
+          lines)
+
+    for name in ("gone1", "gone2", "queued1"):
+        daemon.keep_parent(name, window)
+    daemon.write_parent("gone1", {"parent": window, "gone": time.time() - daemon.PARENT_KEPT - 1})
+    daemon.tell_verdicts()
+    kept = sorted(path.name for path in daemon.PARENTS_DIR.iterdir())
+    check("the note of a bundle gone a day goes, of a queued one stays",
+          kept == ["c1", "gone2", "queued1"] and "gone" in daemon.read_parent("gone2"), kept)
+    big = root / "parent" / "big.md"
+    big.write_text("x" * (daemon.REPORT_HEAD * 3))
+    fifo = root / "parent" / "fifo.md"
+    os.mkfifo(fifo)
+    found = (len(daemon.read_head(big)), daemon.read_head(fifo))
+    check("a report is read up to REPORT_HEAD, a fifo not at all",
+          found == (daemon.REPORT_HEAD, ""), found)
+
 def ask(verb, session, **body):
     try:
         return verb(daemon.HOST, {}, {"session": session, **body})
@@ -220,13 +342,15 @@ def main():
         fake.write_text(f'#!/bin/sh\necho "$*" >>{root}/podman.log\nexit 1\n')
         fake.chmod(0o755)
         os.environ["PATH"] = f"{root / 'bin'}{os.pathsep}{os.environ['PATH']}"
+        daemon.PARENTS_DIR = root / "parents"
         check_tell(root, check)
+        check_parent(root, check)
         check_prompt(root, check)
         check_window(root, check)
         check("no podman ran", not (root / "podman.log").exists())
     for line in failures:
         print(line)
-    print(f"{40 - len(failures)}/40 cases as expected")
+    print(f"{58 - len(failures)}/58 cases as expected")
     sys.exit(1 if failures else 0)
 
 

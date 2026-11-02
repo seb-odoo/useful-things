@@ -64,6 +64,7 @@ from agents import (  # noqa: E402
     get_window_pids,
     has_window,
     is_agent_running,
+    open_unlinked,
     read_stat,
     read_state,
     read_text,
@@ -169,6 +170,7 @@ DISK_WARN = float(
     os.environ.get("BUNDLE_CTL_DISK_WARN_GB") or CONFIG.get("BUNDLE_CTL_DISK_WARN_GB") or 60,
 )
 DISK_WARNED = STATE / "disk-warned"
+DONE_WORD = re.compile(r"[a-z0-9-]{1,20}")
 FETCH_TIMEOUT = 60
 FOLDERS_KEPT = 60
 FREE_AFTER = 5 * 60
@@ -180,6 +182,7 @@ HELD = load_held()
 HELD_DIR = STATE / "held"
 DECK_DIR = STATE / "deck"
 TOLD_DIR = STATE / "told"
+PARENTS_DIR = STATE / "parents"
 HELD_LETTER = "b"
 HOK_KEPT = 5
 HOK_TIME = 30
@@ -207,6 +210,7 @@ MAX_AGENTS = int(
 MAX_BODY = 64 * 1024
 MAX_PRIORITY = 100
 MAX_RELAUNCHES = 3
+MAX_REPORT_LINE = 200
 MAX_TASK = 32 * 1024
 MAX_TOLD = 2000
 MAX_WIDTH = 400
@@ -221,12 +225,14 @@ NOT_BUILT = (
 )
 OPS_OPEN = "ops-window-open"
 OPS_TASK = "The agent of the bundle {bundle} sends this task, and Seb said yes to it in hok:\n\n"
+PARENT_KEPT = 86400
 PAUSE_WAIT = 120
 RECONNECTED = (
     f"{GO_ON}\n\nThe GitHub connection of the host is back: this session waited for it in the"
     " queue since {time}. Go on with what its outage stopped, and first check what changed"
     " meanwhile where your work depends on it (a PR: its threads, its head, its CI; its base)."
 )
+REPORT_HEAD = 4096
 REQUEUE_AFTER = (15, 30, 60, 120, 240)
 RESTART_RETRY = 3600
 RESUMED = (
@@ -312,6 +318,7 @@ kept_reviews = {}
 package_heads = {}
 restarted = {}
 ops_lock = threading.Lock()
+parents_lock = threading.Lock()
 state_lock = threading.Lock()
 status_lock = threading.Lock()
 work_lock = threading.Lock()
@@ -1217,6 +1224,53 @@ def get_next_time(text):
     return (start if start > now else start + datetime.timedelta(days=1)).timestamp()
 
 
+def queue_task(caller, bundle, body, build=None):
+    """Queue the task a caller sends, from the parent get_parent names, noted on the host. A
+    bundle that queues its own keeps the note: it would be told of its own verdict."""
+    parent = get_parent(caller, body)
+    if parent != bundle:
+        keep_parent(bundle, parent)
+    return enqueue(parent, bundle, body, build)
+
+
+def get_parent(caller, body):
+    """The parent of the bundle a caller queues a task for: the caller, or for the host the ops
+    agent window that asks (`window`, the AGENT_WINDOW bctl sends), which the ops container
+    cannot prove but runs as the host anyway. A bundle is its own caller."""
+    window = body.get("window")
+    if caller == HOST and isinstance(window, str) and window.startswith(OPS):
+        if SESSION_ID.fullmatch(window.removeprefix(OPS)):
+            return window
+    return caller
+
+
+def keep_parent(bundle, parent):
+    """Note on the host the window that queued the task of a bundle, told of its cards and of its
+    verdict (tell_parent): the bundle writes its .agent/parent, and could name any window there.
+    A task of the host drops the note."""
+    with parents_lock:
+        if parent == HOST:
+            (PARENTS_DIR / bundle).unlink(missing_ok=True)
+            return
+        PARENTS_DIR.mkdir(parents=True, exist_ok=True)
+        write_parent(bundle, {"parent": parent, "since": None})
+
+
+def note_task_start(bundle):
+    """Count the verdict of the agent of a bundle from now on: the one of the task that starts,
+    never the end of an earlier run (tell_verdict)."""
+    with parents_lock:
+        kept = read_parent(bundle)
+        if kept:
+            write_parent(bundle, {**kept, "since": time.time()})
+
+
+def write_parent(bundle, kept):
+    fresh = PARENTS_DIR / f".{bundle}.new"
+    fresh.write_text(json.dumps(kept))
+    fresh.replace(PARENTS_DIR / bundle)
+
+
 def enqueue(caller, bundle, body, build=None, session=None, first=False):
     """Queue the task of a bundle. `build` is the script that makes a bundle not made yet: the
     agent starts in its bare folder and runs it with `bctl build` once it needs the code. With no
@@ -1359,6 +1413,7 @@ def write_task(item, keep=()):
         move_to_history(folder, kept)
     folder.mkdir(exist_ok=True)
     write_text(folder / "parent", f"{item['parent']}\n")
+    note_task_start(item["bundle"])
     if "queued" in item:
         write_text(folder / "queued", f"{item['queued']}\n")
     write_text(folder / "priority", f"{item.get('priority', 0)}\n")
@@ -1661,6 +1716,7 @@ def keep_launching():
             delete_safely()
             restart_safely()
             free_safely()
+            tell_safely()
             try:
                 keep_remote_agents()
                 outside.collect_all()
@@ -1988,6 +2044,13 @@ def free_safely():
     try:
         free_done_terminals()
         requeue_failed_terminals()
+    except Exception:
+        traceback.print_exc()
+
+
+def tell_safely():
+    try:
+        tell_verdicts()
     except Exception:
         traceback.print_exc()
 
@@ -2881,6 +2944,7 @@ def tell(caller, query, body):
     if bundle is not None:
         if session is not None or not isinstance(bundle, str) or not BUNDLE_NAME.fullmatch(bundle):
             raise ValueError("bundle: a bundle name, and no session")
+        tell_parent(bundle, get_parent_line(bundle, text))
         session = read_text(get_agent_folder(bundle) / "session")
         if bundle not in get_terminals() or not SESSION_ID.fullmatch(session or ""):
             return 404, {"error": f"no agent window runs {bundle}"}
@@ -2889,6 +2953,9 @@ def tell(caller, query, body):
         raise ValueError("session: a session id")
     else:
         agent = get_session_agent(session)
+        child = not (agent or "").startswith(OPS) and get_noted_bundle(session)
+        if child:
+            tell_parent(child, get_parent_line(child, text))
     if agent is None:
         return 404, {"error": f"no agent window runs {session}"}
     try:
@@ -2898,6 +2965,112 @@ def tell(caller, query, body):
     print(f"{agent}: told {text[:100]}", flush=True)
     container = os.path.basename(HOST_FOLDER or "") if agent.startswith(OPS) else agent
     return 200, {"bundle": agent, "asks": get_session_status(container, session) == "waiting"}
+
+
+def get_parent_line(bundle, text):
+    """The line of hok for a bundle, said to its parent: its first sentence, which names the card
+    and what Seb said. The rest tells the bundle how to read what came of it."""
+    said = text.removeprefix("hok event: ").split(". ", 1)[0].rstrip(".")
+    return f"hok event: {said}, a card of {bundle}, a bundle you started."
+
+
+def read_parent(bundle):
+    try:
+        kept = json.loads((PARENTS_DIR / bundle).read_text())
+    except (OSError, ValueError):
+        return {}
+    return kept if isinstance(kept, dict) else {}
+
+
+def tell_parent(bundle, text):
+    """Leave a line for the window that queued the task of a bundle (keep_parent): an ops agent
+    window, even while its claude ended, or the terminal of a bundle. Nothing for the host or a
+    window gone: a tab has nothing to type in."""
+    parent = read_parent(bundle).get("parent")
+    if not isinstance(parent, str):
+        return
+    if parent.startswith(OPS):
+        session = parent.removeprefix(OPS)
+        if not is_agent_running(parent) and not get_agent_folder(parent).is_dir():
+            return
+    else:
+        session = read_text(get_agent_folder(parent) / "session")
+        if parent not in get_terminals() or not SESSION_ID.fullmatch(session or ""):
+            return
+    try:
+        leave_told(parent, session, text)
+    except OSError as error:
+        print(f"{parent}: the line on {bundle} was not left: {error}", flush=True)
+        return
+    print(f"{parent}: told {text[:100]}", flush=True)
+
+
+def get_noted_bundle(session):
+    """The bundle with a parent note whose .agent/session is this session, once its terminal
+    closed too (a push Seb answered after the verdict). None when two claim it: a bundle writes
+    its .agent/session, and could take the line of another."""
+    found = [
+        path.name
+        for path in PARENTS_DIR.glob("[!.]*")
+        if read_text(get_agent_folder(path.name) / "session") == session
+    ]
+    return found[0] if len(found) == 1 else None
+
+
+def tell_verdicts():
+    """Each pass, tell_verdict for each bundle with a parent note. The note of a bundle whose
+    folder is gone goes PARENT_KEPT after a pass first saw it gone, as hok tells a deletion once
+    it ran; a task still queued keeps it, its folder made when it starts."""
+    with state_lock:
+        queued = {item["bundle"] for item in read_state()["queue"]}
+    for path in PARENTS_DIR.glob("[!.]*"):
+        if get_agent_folder(path.name).is_dir() or path.name in queued:
+            tell_verdict(path.name)
+            continue
+        with parents_lock:
+            kept = read_parent(path.name)
+            if "gone" not in kept:
+                write_parent(path.name, {**kept, "gone": time.time()})
+            elif time.time() - kept["gone"] > PARENT_KEPT:
+                path.unlink(missing_ok=True)
+
+
+def tell_verdict(bundle):
+    """Tell the parent of a bundle that its agent ended the run of the task that started last
+    (note_task_start), once: the bundle writes its .agent/ folder, and could touch `done` again.
+    On a verdict, the first line of its report goes too, printable and cut, as the words of the
+    agent (Seb, 2026-11-02)."""
+    with parents_lock:
+        kept = read_parent(bundle)
+        agent = get_agent_folder(bundle)
+        done = get_mtime(agent / "done")
+        if not isinstance(kept.get("since"), (int, float)) or not done or done <= kept["since"]:
+            return
+        write_parent(bundle, {**kept, "since": None})
+    said = f"hok event: the agent of {bundle}, a bundle you started, ended its run"
+    word = read_head(agent / "done").strip()
+    if word != "0":
+        word = word if DONE_WORD.fullmatch(word) else "something else"
+        tell_parent(bundle, f"{said} with no verdict: its .agent/done says {word}.")
+        return
+    report = read_head(agent / "result.md").splitlines()
+    first = next((line for line in report if line.strip()), "").strip().lstrip("#*_` ")
+    first = "".join(char for char in " ".join(first.split()) if char.isprintable())
+    if len(first) > MAX_REPORT_LINE:
+        first = f"{first[: MAX_REPORT_LINE - 3]}..."
+    opens = "Its report opens on, in its words, not Seb's:"
+    tell_parent(bundle, f"{said} on its verdict. {opens} {first}")
+
+
+def read_head(path):
+    """The start of a file of an .agent/ folder, REPORT_HEAD characters at most: the bundle
+    writes it, and could make it as large as its disk."""
+    try:
+        fd = open_unlinked(path, os.O_RDONLY)
+    except OSError:
+        return ""
+    with open(fd, errors="replace") as file:
+        return file.read(REPORT_HEAD) if stat.S_ISREG(os.fstat(fd).st_mode) else ""
 
 
 def get_deck_window(body):
@@ -3040,6 +3213,7 @@ def delete_stopped():
 
         def work(log, bundle=bundle, drop=drops[bundle]):
             _branches, force = check_deletion(bundle, drop)
+            tell_verdict(bundle)
             keep_last_answer(bundle)
             run_script(log, "delete_bundle.py", *(["--force"] if force else []), bundle)
             with state_lock:
@@ -3404,7 +3578,7 @@ def create(caller, query, body):
     if "task" in body and get_agent_folder(bundle).is_dir() and not may_queue(caller, bundle):
         return hold_task(caller, bundle, body, ["create_bundle.py", *args])
     if "task" in body:
-        return 202, enqueue(caller, bundle, body, ["create_bundle.py", *args])
+        return 202, queue_task(caller, bundle, body, ["create_bundle.py", *args])
 
     def work(log):
         return build(log, caller, bundle, body, "create_bundle.py", *args)
@@ -3435,7 +3609,7 @@ def fetch(caller, query, body):
     if "task" in body and get_agent_folder(bundle).is_dir() and not may_queue(caller, bundle):
         return hold_task(caller, bundle, body, ["fetch_bundle.py", name, "--no-open"])
     if "task" in body:
-        return 202, enqueue(caller, bundle, body, ["fetch_bundle.py", name, "--no-open"])
+        return 202, queue_task(caller, bundle, body, ["fetch_bundle.py", name, "--no-open"])
 
     def work(log):
         return build(log, caller, bundle, body, "fetch_bundle.py", name, "--no-open")
@@ -3844,7 +4018,7 @@ def open_bundle(caller, query, body):
     if "task" in body and not may_queue(caller, bundle):
         return hold_task(caller, bundle, body)
     if "task" in body:
-        return 202, enqueue(caller, bundle, body)
+        return 202, queue_task(caller, bundle, body)
     return start_job(
         caller,
         "open",
@@ -3875,7 +4049,7 @@ def build(log, caller, bundle, body, script, *args):
 
 def open_or_enqueue(log, caller, bundle, body):
     if "task" in body:
-        return enqueue(caller, bundle, body)
+        return queue_task(caller, bundle, body)
     if body.get("open", True):
         open_window(log, bundle)
         with state_lock:

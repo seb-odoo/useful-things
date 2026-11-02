@@ -156,6 +156,7 @@ def prepare(root):
         "running": {str(root / "master" / CLEAN)},
         "stopped": [],
         "tabs": [],
+        "verdicts": [],
         "vscode": {CLEAN},
         "windows": {REPORTED, TYPED},
         "state": {"queue": [{"bundle": REPORTED, "parent": CLEAN}]},
@@ -192,6 +193,7 @@ def prepare(root):
     daemon.is_in_container = lambda connection: world["caller"] != daemon.HOST
     daemon.read_state = lambda: world["state"]
     daemon.run_script = lambda log, script, *args: world["calls"].append((script, *args))
+    daemon.tell_verdict = lambda bundle: world["verdicts"].append((bundle, len(world["calls"])))
     daemon.write_state = lambda state: None
     daemon.tab_groups.ask = lambda request: world["tabs"].append(request) or {
         "groups": [{"bundle": REPORTED, "title": f"🚀 {REPORTED}"}],
@@ -351,6 +353,12 @@ def check(root):
             "the stop of the container deletes it, and its build that never ran",
             (world["calls"], world["state"]["deletions"], world["state"]["builds"])
             == ([("delete_bundle.py", CLEAN)], [], {}),
+        ),
+    )
+    checks.append(
+        (
+            "its parent is told its verdict before its folder goes",
+            world["verdicts"] == [(CLEAN, 0)],
         ),
     )
     answer_later(REFUSED, "no it still runs")
