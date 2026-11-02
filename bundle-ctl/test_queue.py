@@ -2260,6 +2260,58 @@ def check_fallback(root):
     return ([] if found == expected else [f"fallback: {found}"]), 1
 
 
+def check_refused_once(root):
+    """A task its worker refuses starts here once, with its priority and effort, and never goes
+    to the worker again, whatever pass comes before its job takes the lock of the bundle or
+    before its requeue takes the queue (2026-11-02: four such tasks started on sebpc ten minutes
+    later, and their copy waited to run them a second time here)."""
+    stubs = {name: getattr(daemon, name) for name in ("REMOTE_AUTO", "WORKERS", "enqueue")}
+    start = daemon.remote_agent.start
+    state, launched = prepare(root, {"refused": FRESH}, 8)
+    state["queue"][0].update(priority=-15, effort="high")
+    sent = []
+
+    def refuse(log, bundle, folder, *args):
+        (folder / ".agent" / "remote-starting").unlink()
+        raise RuntimeError("the disk is short")
+
+    def enqueue(*args, **kwargs):
+        # Simulate the pass of a container event that takes the queue first.
+        daemon.launch_queued()
+        return stubs["enqueue"](*args, **kwargs)
+
+    daemon.REMOTE_AUTO = True
+    daemon.WORKERS = types.SimpleNamespace(
+        names=["sebpc"],
+        choose_agent=lambda wanted=None: "sebpc",
+        send_agent=lambda name, bundle: None,
+        end_send=lambda name, bundle: None,
+    )
+    daemon.enqueue = enqueue
+    daemon.remote_agent.start = refuse
+    daemon.start_job = lambda caller, verb, work, lock=None, bundle=None: (
+        sent.append(work) if verb == "remote-agent" else work(None)
+    )
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            daemon.launch_queued()
+            daemon.launch_queued()
+            sent[0](io.StringIO())
+    finally:
+        vars(daemon).update(stubs)
+        daemon.remote_agent.start = start
+    agent = daemon.get_agent_folder("refused")
+    found = (
+        len(sent),
+        launched,
+        [item["bundle"] for item in state["queue"]],
+        daemon.read_text(agent / "priority"),
+        daemon.read_text(agent / "effort"),
+    )
+    expected = (1, ["refused"], [], "-15", "high")
+    return ([] if found == expected else [f"refused once: {found}"]), 1
+
+
 def main():
     failures = []
     for bundles, launched, queue, *options in CASES:
@@ -2301,6 +2353,7 @@ def main():
         check_leaving,
         check_choose_agent,
         check_fallback,
+        check_refused_once,
     ):
         with tempfile.TemporaryDirectory() as root:
             failed, count = check(pathlib.Path(root))

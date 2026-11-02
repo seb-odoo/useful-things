@@ -1835,11 +1835,15 @@ def start_remote(log, bundle, worker):
     except Exception as error:
         log.write(traceback.format_exc())
         print(f"{bundle}: its agent starts here, not on {worker}: {error}", flush=True)
-        task = {"task": read_text(agent / "task.md") or GO_ON, "where": "local", "once": True}
-        if transcript.exists():
-            task["resume"] = True
-        else:
-            (agent / "session").unlink(missing_ok=True)
+        task = {
+            "task": read_text(agent / "task.md") or GO_ON,
+            "where": "local",
+            "once": True,
+            "priority": get_task_priority(bundle),
+            "effort": read_text(agent / "effort") or None,
+            "model": read_text(agent / "model") or None,
+            "resume": transcript.exists(),
+        }
         enqueue(read_text(agent / "parent") or HOST, bundle, task)
         return
     finally:

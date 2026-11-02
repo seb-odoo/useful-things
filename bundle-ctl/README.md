@@ -247,7 +247,10 @@ necessary. but if we have a good setup, full remote should offer the same possib
   (`gigabytes_free`, as the worker refuses an agent without), else here as any
   task. An agent sent to a worker takes its place and its GB there until a status asked after its
   start ended, as one pass may send several on the same status. An agent the worker refuses
-  starts here that once, and the next tasks of its bundle are `auto` again.
+  starts here that once, at the priority and effort of its task, and the next tasks of its bundle
+  are `auto` again. Its session file stays until then: without it, a pass took the task as
+  stranded and sent it to the worker again (2026-11-02: four tasks ran on sebpc, and their copy
+  waited to run here).
   `worker` waits for one, and its wait in `bctl queue` says what is missing (no connection,
   its key held until the next unlock, no answer, drained, memory, places, or the `agent_wait` of
   the worker's `status`). An `auto` task that waits for room here adds why no worker takes it
