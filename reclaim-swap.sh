@@ -1,10 +1,10 @@
 #!/bin/bash
 set -eu
 
-# sudo needs a terminal for the password, and hctl runs this without one.
+# sudo needs a terminal for the password, and hctl runs this without one, nor a display.
 if [ ! -t 0 ]; then
     log=$(mktemp)
-    gnome-terminal --wait --title "reclaim swap: sudo" -- bash -c 'bash "$0" 2>&1 | tee "$1"; echo "${PIPESTATUS[0]}" > "$1.status"; read -rsn1 -t 60 -p "press a key to close"' "$(realpath "$0")" "$log" || true
+    DISPLAY=${DISPLAY:-:0} XAUTHORITY=${XAUTHORITY:-/run/user/$(id -u)/gdm/Xauthority} gnome-terminal --wait --title "reclaim swap: sudo" -- bash -c 'bash "$0" 2>&1 | tee "$1"; echo "${PIPESTATUS[0]}" > "$1.status"; read -rsn1 -t 60 -p "press a key to close"' "$(realpath "$0")" "$log" || true
     cat "$log"
     status=$(cat "$log.status" 2>/dev/null || echo 1)
     rm -f "$log" "$log.status"
