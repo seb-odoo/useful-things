@@ -11,6 +11,7 @@ The dev environment I work on Odoo with, and the odds and ends that come with it
 | [`proxy/`](proxy/) | rootless nginx, so parallel containers are reachable by bundle name |
 | [`claude-autoopen/`](claude-autoopen/) | a small VS Code extension that opens a Claude tab and a terminal per repo |
 | `.bashrc`, `install.sh`, `terminator-config` | the host side of all of it |
+| `wifi-watchdog.sh` | installs with sudo a root timer that reloads the wifi driver when the wifi is on and the laptop had no default route at 3 checks 5 minutes apart, then every 30 minutes while it lasts: the mt7921e of my laptop once saw no network for 63 hours, until a reboot. It logs in `journalctl -u wifi-watchdog`. The install copies `wifi-watchdog-check.sh` to `/usr/local/sbin`: run it again after a change. Run with no terminal, it opens one for the password |
 | `reclaim-swap.sh` | moves the swap back to RAM when it fits, with sudo: the alias `reclaim-swap`. Run with no terminal, it opens one for the password |
 | `odoo_*.py`, `populate.sql`, `discuss_populate/`, `compare_logs.py` | helper scripts for odoo work, no setup needed |
 

@@ -3,6 +3,10 @@
     "reclaim-swap": {
       "run": ["bash", "reclaim-swap.sh"],
       "title": "move the swap back to memory when it fits, with sudo in a terminal"
+    },
+    "wifi-watchdog": {
+      "run": ["bash", "wifi-watchdog.sh"],
+      "title": "install the timer that reloads the wifi driver when the wifi stays without network, with sudo in a terminal"
     }
   }
 }
