@@ -7,7 +7,7 @@
     bctl force-queue [BUNDLE]
     bctl move BUNDLE PLACE
     bctl requeue BUNDLE [--paused | --github]
-    bctl place BUNDLE local|WORKER
+    bctl place BUNDLE auto|local|WORKER
     bctl close BUNDLE
     bctl schedule BUNDLE spot|manual|HH:MM
     bctl unqueue BUNDLE
@@ -63,8 +63,8 @@ session waits until the GitHub connection of the host is up, and goes on told so
 place puts the agent of a bundle here (local) or on a worker of BUNDLE_CTL_WORKERS. An agent at
 work goes on there with its session: after its turn here, as for requeue, or once its work tree
 came back from its worker, before the other tasks of the bundle. An idle one that gave its
-verdict has its window closed here, and any other bundle keeps the place for its next task. Only
-the host may ask it.
+verdict has its window closed here, and any other bundle keeps the place for its next task. With
+auto, the next tasks of the bundle go back to auto and nothing moves. Only the host may ask it.
 
 close closes the agent window of a bundle, with no yes of Seb: its claude and its container stop,
 its Firefox tab groups stay, and open --terminal goes on with its session. It is refused while a
@@ -318,6 +318,8 @@ def print_placed(answer):
             f"queued {answer['queued']} to go on on {answer['where']}, waits for"
             f" {answer['waits_for']}",
         )
+    elif answer.get("where") == "auto":
+        print(f"{answer['bundle']}: its next task starts on a worker with a place, else here")
     elif "where" in answer:
         print(f"{answer['bundle']}: its next task starts on {answer['where']}")
 
@@ -750,7 +752,7 @@ def main():
         "place", help="the agent of a bundle here or on a worker, its session going on there"
     )
     place.add_argument("bundle")
-    place.add_argument("where", help="local, or a worker of BUNDLE_CTL_WORKERS")
+    place.add_argument("where", help="auto, local, or a worker of BUNDLE_CTL_WORKERS")
     requeue = commands.add_parser(
         "requeue",
         help="queue the session of a bundle's agent again, and close its window after its turn",

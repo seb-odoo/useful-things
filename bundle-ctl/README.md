@@ -245,7 +245,10 @@ necessary. but if we have a good setup, full remote should offer the same possib
   When a task's turn comes, `auto` goes to a worker of `BUNDLE_CTL_WORKERS` that answered lately,
   is not drained and has a place for an agent (`agents_free` of its `status`) and 1 GB for it
   (`gigabytes_free`, as the worker refuses an agent without), else here as any
-  task; `worker` waits for one, and its wait in `bctl queue` says what is missing (no connection,
+  task. An agent sent to a worker takes its place and its GB there until a status asked after its
+  start ended, as one pass may send several on the same status. An agent the worker refuses
+  starts here that once, and the next tasks of its bundle are `auto` again.
+  `worker` waits for one, and its wait in `bctl queue` says what is missing (no connection,
   its key held until the next unlock, no answer, drained, memory, places). A bundle open in a window stays here, and so does a bundle not
   built yet (see Bare start), as its build runs here. A bundle whose agent ran on
   a worker goes there again (`.agent/where` is `worker:NAME`) until it is brought back, so that it
@@ -293,6 +296,7 @@ necessary. but if we have a good setup, full remote should offer the same possib
   commits stay in `refs/remote-runs/BUNDLE/`), the job is cancelled 11 minutes after at most,
   then the session goes on in a terminal here. A VS Code window on a remote bundle is refused
   until then, as its tab would start a second claude on the session.
+- `bctl place BUNDLE auto` gives the next tasks of a bundle back to `auto` and moves nothing.
 - `bctl place BUNDLE local|WORKER` (deck's Move to) moves an agent whatever it does, and
   `.agent/where` keeps the place for the next tasks of the bundle. An agent at work, or busy
   again after its verdict, goes on with its session there, before the other tasks of its bundle:

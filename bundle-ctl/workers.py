@@ -74,6 +74,7 @@ class Workers:
         self.popen = popen
         self.status = {}
         self.asked = {}
+        self.sent = {}
         self.lock = threading.Lock()
 
     def socket(self, name):
@@ -102,6 +103,7 @@ class Workers:
         for name in self.names:
             if not self.is_up(name):
                 continue
+            asked = time.time()
             try:
                 result = self.run(self.ssh(name, "status", "host"), capture_output=True,
                                   timeout=20, check=False)
@@ -110,7 +112,7 @@ class Workers:
                 continue
             if type(status) is dict and "error" not in status:
                 with self.lock:
-                    self.status[name] = (time.time(), status)
+                    self.status[name] = (asked, status)
 
     def list_jobs(self):
         """For `bctl runs`: the jobs and agents of the workers that answered lately (worker,
@@ -206,13 +208,28 @@ class Workers:
         if unreachable:
             return unreachable
         with self.lock:
-            _, status = self.status.get(name, (0, {}))
-        gigabytes = status.get("gigabytes_free", 0)
+            seen, status = self.status.get(name, (0, {}))
+            sent = self.sent.get(name, {})
+            for bundle in [bundle for bundle, end in sent.items() if end < seen]:
+                del sent[bundle]
+        gigabytes = status.get("gigabytes_free", 0) - len(sent) * AGENT_GIGABYTES
         if gigabytes < AGENT_GIGABYTES:
             return f"{name} has {gigabytes:.1f} GB free, {AGENT_GIGABYTES} needed"
-        if status.get("agents_free", 0) <= 0:
+        if status.get("agents_free", 0) <= len(sent):
             return f"every agent place of {name} is taken"
         return None
+
+    def send_agent(self, name, bundle):
+        """The agent of a bundle on its way to the worker takes a place and its memory there until
+        a status asked after its start ended (2026-10-30: 8 agents sent to sebpc in one minute on
+        one status, each refused)."""
+        with self.lock:
+            self.sent.setdefault(name, {})[bundle] = float("inf")
+
+    def end_send(self, name, bundle):
+        with self.lock:
+            if bundle in self.sent.get(name, {}):
+                self.sent[name][bundle] = time.time()
 
     def get_unreachable(self, name):
         """Why the worker takes no agent until something changes, or None. A full worker frees a

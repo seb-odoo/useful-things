@@ -928,6 +928,7 @@ def check_place(root):
         names=["sebpc", "vm"],
         choose_agent=lambda wanted=None: wanted or "sebpc",
         get_unreachable=unreachable.get,
+        send_agent=lambda name, bundle: None,
     )
 
     def move_back(log, bundle, folder, workers):
@@ -973,6 +974,9 @@ def check_place(root):
     def get_where(bundle):
         return (daemon.get_agent_folder(bundle) / "where").read_text()
 
+    def get_agent_folder_where(bundle):
+        return daemon.read_text(daemon.get_agent_folder(bundle) / "where")
+
     def close(bundle):
         windows.discard(bundle)
         del agents[bundle]["terminal"]
@@ -987,6 +991,11 @@ def check_place(root):
         said = (0, ["waiting: its next task starts on sebpc"])
         expected = (said, [("waiting", "sebpc")], "worker:sebpc\n")
         checks.append(("a queued task placed here starts on the worker", found == expected))
+        (daemon.get_agent_folder("stuck") / "where").write_text("local\n")
+        found = run_client(path, "place", "stuck", "auto"), get_agent_folder_where("stuck")
+        said = (0, ["stuck: its next task starts on a worker with a place, else here"])
+        checks.append(("auto takes the place back, nothing moves", found == (said, None)))
+        (daemon.get_agent_folder("stuck") / "where").unlink(missing_ok=True)
         code, lines = run_client(path, "place", "busy", "sebpc")
         item = state["queue"][-1]
         found = code, item["bundle"], item["resume"], item["task"], closed
@@ -1052,7 +1061,12 @@ def check_place(root):
             ("away", "sebpc", daemon.HOST, "409 the agent of away runs on sebpc already"),
             ("starting", "local", daemon.HOST, "409 the agent of starting is starting on a worker"),
             ("launching", "vm", daemon.HOST, "409 the agent of launching is starting here"),
-            ("waiting", "mars", daemon.HOST, "400 place: a bundle, and where: local, sebpc, vm"),
+            (
+                "waiting",
+                "mars",
+                daemon.HOST,
+                "400 place: a bundle, and where: auto, local, sebpc, vm",
+            ),
             ("waiting", "vm", "waiting", "409 place: only the host and the ops container"),
         )
         for bundle, where, caller, error in refusals:
@@ -1219,7 +1233,9 @@ def check_disk_worker(root):
     }
     daemon.REMOTE_AUTO = True
     daemon.WORKERS = types.SimpleNamespace(
-        names=["sebpc"], choose_agent=lambda wanted=None: "sebpc"
+        names=["sebpc"],
+        choose_agent=lambda wanted=None: "sebpc",
+        send_agent=lambda name, bundle: None,
     )
     daemon.prepare_folder = lambda bundle: os.makedirs(daemon.get_worktree_bundle_folder(bundle))
     started = []
@@ -1894,6 +1910,24 @@ def check_choose_agent(root):
                 failures.append(f"choose_agent {status} {wanted}: expected {expected}")
         if found.get_agent_wait("sebpc") != why:
             failures.append(f"get_agent_wait {status}: {found.get_agent_wait('sebpc')}")
+    sending = daemon.workers.Workers(["sebpc"])
+    sending.is_up = lambda name: True
+    seen = time.time()
+    sending.status["sebpc"] = (seen, {"agents_free": 2, "gigabytes_free": 5})
+    sending.send_agent("sebpc", "first")
+    waits = [sending.get_agent_wait("sebpc")]
+    sending.send_agent("sebpc", "second")
+    waits.append(sending.get_agent_wait("sebpc"))
+    sending.end_send("sebpc", "first")
+    sending.end_send("sebpc", "second")
+    waits.append(sending.get_agent_wait("sebpc"))
+    sending.status["sebpc"] = (seen + 60, {"agents_free": 2, "gigabytes_free": 1.5})
+    waits.append(sending.get_agent_wait("sebpc"))
+    sending.send_agent("sebpc", "third")
+    waits.append(sending.get_agent_wait("sebpc"))
+    taken = "every agent place of sebpc is taken"
+    if waits != [None, taken, taken, None, "sebpc has 0.5 GB free, 1 needed"]:
+        failures.append(f"agents sent before the next status: {waits}")
     mux, workers = daemon.workers.MUX, daemon.WORKERS
     daemon.workers.MUX, daemon.WORKERS = root, found
     try:
@@ -1916,7 +1950,46 @@ def check_choose_agent(root):
     ):
         if why != expected:
             failures.append(f"get_unreachable {name}: {why}")
-    return failures, 19
+    return failures, 20
+
+
+def check_fallback(root):
+    """An agent its worker refuses starts here this once, and the next tasks of its bundle are
+    `auto` again (2026-10-30: one refusal each kept 9 bundles here for good)."""
+    stubs = {
+        name: getattr(daemon, name)
+        for name in ("REMOTE_AUTO", "WORKERS", "launch_queued", "remote_agent")
+    }
+    state, _launched = prepare(root, {"refused": {"parent": "host\n"}}, 8)
+    daemon.launch_queued = lambda: None
+    state["queue"].clear()
+    ended = []
+
+    def start(*args):
+        raise RuntimeError("no memory left for an agent")
+
+    daemon.REMOTE_AUTO = True
+    daemon.WORKERS = types.SimpleNamespace(
+        names=["sebpc"], end_send=lambda name, bundle: ended.append((name, bundle))
+    )
+    daemon.remote_agent = types.SimpleNamespace(start=start)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            daemon.start_remote(io.StringIO(), "refused", "sebpc")
+        item = state["queue"][0]
+        folder = daemon.get_agent_folder("refused")
+        here = daemon.get_task_where(item, folder)
+        daemon.write_task(item)
+        found = (
+            here,
+            (folder / "where").exists(),
+            daemon.get_task_where({"bundle": "refused", "task": TASK}, folder),
+            ended,
+        )
+    finally:
+        vars(daemon).update(stubs)
+    expected = ("local", False, "auto", [("sebpc", "refused")])
+    return ([] if found == expected else [f"fallback: {found}"]), 1
 
 
 def main():
@@ -1957,6 +2030,7 @@ def main():
         check_renew,
         check_leaving,
         check_choose_agent,
+        check_fallback,
     ):
         with tempfile.TemporaryDirectory() as root:
             failed, count = check(pathlib.Path(root))

@@ -1249,6 +1249,7 @@ def enqueue(caller, bundle, body, build=None, session=None, first=False):
                 **({"where": body["where"]} if body.get("where") else {}),
                 **({"github": True} if body.get("github") else {}),
                 **({"login": True} if body.get("login") else {}),
+                **({"once": True} if body.get("once") else {}),
                 **({"session": session} if session else {}),
             },
         )
@@ -1365,7 +1366,7 @@ def write_task(item, keep=()):
             write_text(folder / name, f"{item[name]}\n")
         else:
             (folder / name).unlink(missing_ok=True)
-    if item.get("where") in ("local", "worker"):
+    if item.get("where") in ("local", "worker") and not item.get("once"):
         write_text(folder / "where", f"{item['where']}\n")
 
 
@@ -1525,6 +1526,7 @@ def launch_queued():
                 write_task(item)
                 # The job waits for the lock of the bundle: meanwhile no pass starts another task.
                 (folder / "remote-starting").touch()
+                WORKERS.send_agent(worker[0], bundle)
                 start_job(
                     item["parent"],
                     "remote-agent",
@@ -1712,13 +1714,15 @@ def start_remote(log, bundle, worker):
     except Exception as error:
         log.write(traceback.format_exc())
         print(f"{bundle}: its agent starts here, not on {worker}: {error}", flush=True)
-        task = {"task": read_text(agent / "task.md") or GO_ON, "where": "local"}
+        task = {"task": read_text(agent / "task.md") or GO_ON, "where": "local", "once": True}
         if transcript.exists():
             task["resume"] = True
         else:
             (agent / "session").unlink(missing_ok=True)
         enqueue(read_text(agent / "parent") or HOST, bundle, task)
         return
+    finally:
+        WORKERS.end_send(worker, bundle)
     print(f"{bundle}: its agent started on {worker}", flush=True)
 
 
@@ -1824,10 +1828,16 @@ def place_agent(caller, query, body):
     bundle, where = body.get("bundle") or "", body.get("where")
     if caller != HOST:
         raise Refused("place: only the host and the ops container move an agent")
-    if set(body) != {"bundle", "where"} or where not in ("local", *WORKERS.names):
-        raise ValueError(f"place: a bundle, and where: {', '.join(('local', *WORKERS.names))}")
+    if set(body) != {"bundle", "where"} or where not in ("auto", "local", *WORKERS.names):
+        raise ValueError(
+            f"place: a bundle, and where: {', '.join(('auto', 'local', *WORKERS.names))}"
+        )
     if not BUNDLE_NAME.fullmatch(bundle) or not os.path.isdir(get_worktree_bundle_folder(bundle)):
         raise ValueError(f"no bundle folder for {bundle}")
+    if where == "auto":
+        set_place(bundle, where)
+        launch_queued()
+        return 200, {"bundle": bundle, "where": where}
     folder = pathlib.Path(get_worktree_bundle_folder(bundle))
     agent = get_agent_folder(bundle)
     remote = remote_agent.read_remote(folder)
@@ -1893,7 +1903,10 @@ def set_place(bundle, where):
     tasks."""
     agent = get_agent_folder(bundle)
     agent.mkdir(exist_ok=True)
-    write_text(agent / "where", "local\n" if where == "local" else f"worker:{where}\n")
+    if where == "auto":
+        (agent / "where").unlink(missing_ok=True)
+    else:
+        write_text(agent / "where", "local\n" if where == "local" else f"worker:{where}\n")
     with state_lock:
         state = read_state()
         for item in state["queue"]:
