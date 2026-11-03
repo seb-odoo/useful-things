@@ -593,6 +593,16 @@ def start(log, bundle, bundle_folder, worker, workers, base, session, resume):
     log.write(f"the agent of {bundle} runs on {worker}, job {answer['job']}\n")
 
 
+def drop_start(bundle):
+    """What a start that died before it wrote remote.json left: its stand-in, and its dummy
+    login, which only that start knew (2026-11-02 and 11-03: restarts of the daemon left
+    stand-ins for 25 hours)."""
+    subprocess.run(["podman", "rm", "-f", standin_name(bundle)], capture_output=True, check=False)
+    for named in DUMMIES.glob("*"):
+        if read(named) == bundle:
+            named.unlink(missing_ok=True)
+
+
 def get_env(bundle):
     """The environment of a bundle the job takes: the containerEnv of the generated config, but
     what the worker sets, and the bundle in ODOO_PROXY_HOST, as firefox-tabs and serve-for-seb

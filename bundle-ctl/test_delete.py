@@ -758,22 +758,27 @@ def check_parked(root):
     """A review bundle whose session waits paused in the queue loses its checkout once its
     container stopped, and its task gets the script that fetches it again; a bare one stays, as
     does a bare one whose session waits for disk space to build it, and a refused deletion leaves
-    the task as it was."""
+    the task as it was. A bare one whose agent starts on a worker stays too, out of the queue
+    (2026-11-03: two such bundles went as unused, with the task their start held)."""
     closed = time.time() - 20 * 60
     calls, queue, world_closed = [], [], {}
     bundles = ("master-bare-aku", "master-disk-aku", "master-parked-aku", "master-refused-aku")
-    for bundle in bundles:
+    for bundle in (*bundles, "master-starting-aku"):
         folder = root / "master" / bundle
         (folder / ".agent").mkdir(parents=True)
         (folder / ".agent" / "session").write_text(f"{bundle}-session\n")
         paths = [folder / ".agent" / "session"]
-        if bundle not in ("master-bare-aku", "master-disk-aku"):
+        if bundle == "master-starting-aku":
+            paths.append(folder / ".agent" / "remote-starting")
+            paths[-1].touch()
+        elif bundle not in ("master-bare-aku", "master-disk-aku"):
             paths.append(folder / daemon.MADE)
             paths[-1].touch()
         for path in paths:
             os.utime(path, (closed - 60, closed - 60))
         world_closed[str(folder)] = closed
-        queue.append({"bundle": bundle, "paused": True, "resume": True, "task": daemon.GO_ON})
+        if bundle in bundles:
+            queue.append({"bundle": bundle, "paused": True, "resume": True, "task": daemon.GO_ON})
     build = ["fetch_bundle.py", "master-disk-aku", "--no-open"]
     queue[1].update(build=build, paused=False, session="master-disk-aku-session")
 
@@ -806,6 +811,10 @@ def check_parked(root):
         ),
         ("a refused deletion leaves the task to its bundle", "build" not in items["master-refused-aku"]),
         ("the bare one keeps its folder", (root / "master" / "master-bare-aku" / ".agent").is_dir()),
+        (
+            "so does the bare one whose agent starts on a worker",
+            (root / "master" / "master-starting-aku" / ".agent").is_dir(),
+        ),
         (
             "the bare one that waits for disk space keeps its folder and its build",
             (

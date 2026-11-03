@@ -1629,6 +1629,7 @@ def launch_queued():
             ):
                 continue
             is_running = get_worktree_bundle_folder(bundle) in open_windows
+            bare = bundle in state.get("builds", {})
             container = is_running and get_bundle_container(bundle)
             can_start = has_display and (is_running or has_room)
             in_terminal = (folder / "terminal").exists() and (container or is_held(folder))
@@ -1647,7 +1648,7 @@ def launch_queued():
             elif is_busy(bundle, is_running or bundle in state["launches"]):
                 item["waits_for"] = get_previous_end(folder)
             elif free < DISK_STOP and (
-                in_terminal or not get_agent_worker(item, folder, is_running)[0]
+                in_terminal or not get_agent_worker(item, folder, is_running, bare)[0]
             ):
                 item["waits_for"] = f"disk space ({free:.0f} GB left, {DISK_STOP:.0f} needed)"
             elif in_terminal and not (waits_for := get_terminal_wait(item, now)):
@@ -1690,7 +1691,7 @@ def launch_queued():
                         bundle=bundle,
                     )
                     item["waits_for"] = "its build here, then a worker"
-            elif (worker := get_agent_worker(item, folder, is_running))[0]:
+            elif (worker := get_agent_worker(item, folder, is_running, bare))[0]:
                 item["task"] = get_resumed(item)
                 write_task(item)
                 # The job waits for the lock of the bundle: meanwhile no pass starts another task.
@@ -1729,7 +1730,7 @@ def launch_queued():
                 continue
             else:
                 item["waits_for"] = get_room_wait(has_display, fits, memory)
-                if not is_running and get_task_where(item, folder) == "auto":
+                if not is_running and not bare and get_task_where(item, folder) == "auto":
                     item["waits_for"] += f", or {get_worker_wait()}"
             queue.append(item)
         for item in queue:
@@ -1864,15 +1865,15 @@ def get_task_where(item, folder):
     return where
 
 
-def get_agent_worker(item, folder, is_running):
+def get_agent_worker(item, folder, is_running, bare=False):
     """(the worker that starts the agent of this task, why it waits): a task goes `auto` by
     default, to a worker with an agent place, else here; one placed on a worker waits for it
     (README.md, "Remote agents"). A bundle open in a window stays here, and so does one not built
-    yet until build_for_worker built it. One placed on a worker waits for its container to stop
-    here.
+    yet until build_for_worker built it, or one whose agent started `bare` here and built nothing
+    since. One placed on a worker waits for its container to stop here.
     """
     where = get_task_where(item, folder)
-    if where == "local" or item.get("build"):
+    if where == "local" or item.get("build") or bare:
         return None, None
     if is_running:
         return None, None if where == "auto" else "its container here to stop"
@@ -1936,20 +1937,28 @@ def start_remote(log, bundle, worker):
     except Exception as error:
         log.write(traceback.format_exc())
         print(f"{bundle}: its agent starts here, not on {worker}: {error}", flush=True)
-        task = {
-            "task": read_text(agent / "task.md") or GO_ON,
-            "where": "local",
-            "once": True,
-            "priority": get_task_priority(bundle),
-            "effort": read_text(agent / "effort") or None,
-            "model": read_text(agent / "model") or None,
-            "resume": transcript.exists(),
-        }
-        enqueue(read_text(agent / "parent") or HOST, bundle, task)
+        queue_here(bundle)
         return
     finally:
         WORKERS.end_send(worker, bundle)
     print(f"{bundle}: its agent started on {worker}", flush=True)
+
+
+def queue_here(bundle):
+    """Queue again, to start here that once, the task of a bundle whose agent started on no
+    worker: its queue entry went when its start began."""
+    agent = get_agent_folder(bundle)
+    transcript = PROJECTS / "-workspace" / f"{read_text(agent / 'session')}.jsonl"
+    task = {
+        "task": read_text(agent / "task.md") or GO_ON,
+        "where": "local",
+        "once": True,
+        "priority": get_task_priority(bundle),
+        "effort": read_text(agent / "effort") or None,
+        "model": read_text(agent / "model") or None,
+        "resume": transcript.exists(),
+    }
+    enqueue(read_text(agent / "parent") or HOST, bundle, task)
 
 
 def keep_remote_agents():
@@ -1957,8 +1966,9 @@ def keep_remote_agents():
     gave its verdict FREE_AFTER ago, as a terminal closes here. The main login is renewed while
     a remote agent lives or a bundle container runs: neither can renew it. While a worker leaves,
     a bundle placed on it with no agent there runs its next tasks here. An agent its worker no
-    longer lists ends as lost, and a start no job of this daemon runs is dropped, each with a
-    `stale wait` line: the tasks behind them waited for good (README.md, "Stuck tasks").
+    longer lists ends as lost, and a start no job of this daemon runs is dropped with its
+    stand-in, its task queued here, each with a `stale wait` line: the tasks behind them waited
+    for good (README.md, "Stuck tasks").
     """
     root = pathlib.Path(get_worktree_container_folder())
     remotes = sorted(root.glob("*/*/.agent/remote.json"))
@@ -2003,12 +2013,17 @@ def keep_remote_agents():
         bundle = starting.parent.parent.name
         age = time.time() - (get_mtime(starting) or 0)
         if (
-            REMOTE_GONE_AFTER < age < remote_agent.STARTING
+            age > REMOTE_GONE_AFTER
             and not (starting.parent / "remote.json").exists()
             and not WORKERS.is_sending(bundle)
         ):
             starting.unlink(missing_ok=True)
-            print(f"stale wait: {bundle}: no start of its agent runs on a worker", flush=True)
+            remote_agent.drop_start(bundle)
+            line = f"stale wait: {bundle}: no start of its agent runs on a worker"
+            if (starting.parent / "task.md").exists() and not (starting.parent / "done").exists():
+                queue_here(bundle)
+                line += ", its task is queued here"
+            print(line, flush=True)
     leaving = {f"worker:{name}": name for name in WORKERS.names if WORKERS.is_leaving(name)}
     for placed in sorted(root.glob("*/*/.agent/where")) if leaving else ():
         folder = placed.parent.parent
@@ -3912,6 +3927,7 @@ def drop_idle_reviews():
             bundle in STICKY_BUNDLES
             or bundle in busy
             or (bare and bundle in parked)
+            or remote_agent.is_remote(folder)
             or not BUNDLE_NAME.fullmatch(bundle)
             or not (bare or is_made(folder))
             or str(folder) in open_windows

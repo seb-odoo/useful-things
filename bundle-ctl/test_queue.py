@@ -1303,6 +1303,31 @@ def check_disk_worker(root):
     return failed, len(checks)
 
 
+def check_bare_worker(root):
+    """A session queued again from a bare folder, its build still to do, starts here, as a worker
+    gets no repo from it, and a built bundle beside it goes to the worker (2026-11-03: six
+    sessions that `bctl requeue --github` sent back went to sebpc, each refused with `agent:
+    repos: an object of 1 to 8 repos`)."""
+    stubs = {name: getattr(daemon, name) for name in ("REMOTE_AUTO", "WORKERS", "start_remote")}
+    daemon.REMOTE_AUTO = True
+    daemon.WORKERS = types.SimpleNamespace(
+        names=["sebpc"],
+        choose_agent=lambda wanted=None: "sebpc",
+        send_agent=lambda name, bundle: None,
+    )
+    started = []
+    daemon.start_remote = lambda log, bundle, worker: started.append(bundle)
+    try:
+        state, launched = prepare(root, {"built": FRESH, "bare": FRESH}, 8)
+        state["builds"] = {"bare": ["fetch_bundle.py", "bare", "--no-open"]}
+        state["queue"][1].update(resume=True, task=daemon.GO_ON)
+        daemon.launch_queued()
+    finally:
+        vars(daemon).update(stubs)
+    found = started, launched, state["queue"]
+    return ([] if found == (["built"], ["bare"], []) else [f"bare worker: {found}"]), 1
+
+
 def check_full_worker(root):
     """A task a worker would take, with no room here nor there, says why for both."""
     stubs = {name: getattr(daemon, name) for name in ("REMOTE_AUTO", "WORKERS")}
@@ -2500,13 +2525,17 @@ def check_stuck(root):
 def check_stale(root):
     """What a wait names is checked each pass: an agent its worker no longer lists, in answers
     asked after its start, ends as lost after REMOTE_GONE_AFTER, and a start no job runs is
-    dropped, each with one `stale wait` line. A listed agent, a worker with no fresh answer, a
-    start that runs or just began are left. A terminal killed before its run holds no start."""
+    dropped with its stand-in, its task queued here when it gave no verdict, each with one `stale
+    wait` line (2026-11-03: two such tasks of a restart vanished, then their bundle as unused). A
+    listed agent, a worker with no fresh answer, a start that runs or just began are left. A
+    terminal killed before its run holds no start."""
     agents = {
         "alive": {"session": "s\n", "task.md": TASK},
         "gone": {"session": "s\n", "task.md": TASK},
         "silent": {"session": "s\n", "task.md": TASK},
-        "orphan": {"remote-starting": ""},
+        "ended": {"remote-starting": "", "task.md": TASK, "done": "0\n"},
+        "late": {"remote-starting": "", "task.md": TASK},
+        "orphan": {"remote-starting": "", "task.md": TASK, "effort": "high\n"},
         "sending": {"remote-starting": ""},
         "new": {"remote-starting": ""},
     }
@@ -2516,9 +2545,10 @@ def check_stale(root):
     for bundle in ("alive", "gone", "silent"):
         remote = {"worker": "vm" if bundle == "silent" else "sebpc", "job": "1", "started": started}
         (daemon.get_agent_folder(bundle) / "remote.json").write_text(json.dumps(remote))
-    for bundle in ("orphan", "sending"):
-        os.utime(daemon.get_agent_folder(bundle) / "remote-starting", (started, started))
-    finished, enqueued = [], []
+    for bundle in ("ended", "late", "orphan", "sending"):
+        when = started - daemon.remote_agent.STARTING if bundle == "late" else started
+        os.utime(daemon.get_agent_folder(bundle) / "remote-starting", (when, when))
+    finished, enqueued, dropped = [], [], []
 
     def finish(bundle, folder, end):
         finished.append(bundle)
@@ -2539,6 +2569,7 @@ def check_stale(root):
     daemon.get_transcript = lambda session: None
     daemon.remote_agent = types.SimpleNamespace(
         STARTING=module.STARTING,
+        drop_start=dropped.append,
         finish=finish,
         keep=lambda bundle, folder, workers: (None, False),
         read_remote=module.read_remote,
@@ -2558,9 +2589,11 @@ def check_stale(root):
         daemon.missing_agents.clear()
     starting = [
         bundle
-        for bundle in ("orphan", "sending", "new")
+        for bundle in ("ended", "late", "orphan", "sending", "new")
         if (daemon.get_agent_folder(bundle) / "remote-starting").exists()
     ]
+    here = ("task", "where", "once", "effort", "resume")
+    requeued = [(bundle, [body.get(key) for key in here]) for bundle, body in enqueued[:-1]]
     state, _launched = prepare(
         root / "start", {"dead": {**STARTS_ANOTHER, "dead": ""}, "fresh": FRESH}, 8, True
     )
@@ -2571,20 +2604,34 @@ def check_stale(root):
     checks = [
         ("an agent missing once is left", first == []),
         ("the agent gone ends as lost, once", finished == ["gone"]),
-        ("its task goes on", enqueued == [("gone", {"task": TASK})]),
+        ("its task goes on", enqueued[-1:] == [("gone", {"task": TASK})]),
         ("a start that runs or just began stays", starting == ["sending", "new"]),
+        (
+            "a dead start drops its stand-in, past 30 minutes too",
+            dropped == ["ended", "late", "orphan"],
+        ),
+        (
+            "its task is queued here once, with its effort, not after a verdict",
+            requeued
+            == [
+                ("late", [TASK, "local", True, None, False]),
+                ("orphan", [TASK, "local", True, "high", False]),
+            ],
+        ),
         (
             "one line each",
             journal.getvalue().splitlines()
             == [
-                "stale wait: orphan: no start of its agent runs on a worker",
+                "stale wait: ended: no start of its agent runs on a worker",
+                "stale wait: late: no start of its agent runs on a worker, its task is queued here",
+                "stale wait: orphan: no start of its agent runs on a worker, its task is queued here",
                 "stale wait: gone: its agent on sebpc ended (gone from its worker)",
                 "stale wait: dead: its terminal died before its run",
             ],
         ),
         ("no task waits for the dead start", "fresh: memory on the host" in waits),
     ]
-    found = first, finished, enqueued, starting, journal.getvalue(), waits
+    found = first, finished, enqueued, dropped, starting, journal.getvalue(), waits
     return [f"stale: {name}: {found}" for name, passed in checks if not passed], len(checks)
 
 
@@ -2626,6 +2673,7 @@ def main():
         check_build,
         check_gate_push,
         check_disk_worker,
+        check_bare_worker,
         check_full_worker,
         check_build_cut,
         check_build_disk,

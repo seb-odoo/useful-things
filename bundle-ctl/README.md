@@ -132,6 +132,11 @@ the task goes on in the same pass, and the journal gets one `stale wait:` line, 
   agents), and its session is queued again when it gave no verdict.
 - A `.agent/remote-starting` that no start of this daemon runs, 2 minutes after it was written: a
   restart of the daemon kills its start, and the file held the tasks of the bundle 30 minutes.
+  Its task, which left the queue at the start, is queued again to start here that once, as for a
+  start the worker refused, unless it gave its verdict; its stand-in and its dummy login go
+  (`remote_agent.drop_start`). Until 2026-11-03 the task vanished: two fw hops queued by
+  autotriage, whose start a restart of bundle-ctl killed at 10:26, were never run, and their
+  stand-ins ran until the next start of the bundle.
 - A terminal killed before its run began: no task waits for its start any more.
 
 `its window to close` reads the window in `/proc` at each pass already. An agent at work here
@@ -292,7 +297,11 @@ necessary. but if we have a good setup, full remote should offer the same possib
   window stays here. A bundle not built yet (see Bare
   start) that a worker would take is built here first, one at a time, as a worker makes no
   bundle; its task then starts as any other (Seb, 2026-11-02). After a failed build it starts
-  here in its bare folder, as without a worker. A bundle whose agent ran on
+  here in its bare folder, as without a worker. So does a task for a bundle whose agent started
+  bare and never built it (`builds` in `state.json` keeps its build), wherever it is placed: the
+  worker gets no repo from that folder. On 2026-11-03 six sessions that `bctl requeue --github`
+  sent back after their `bctl build` failed went to sebpc, which refused each with `agent: repos:
+  an object of 1 to 8 repos`. A bundle whose agent ran on
   a worker goes there again (`.agent/where` is `worker:NAME`) until it is brought back, so that it
   does not rebuild its DBs on each machine in turn. A task for a bundle whose agent is remote
   is typed in its session there (see below). `auto` stays here until `BUNDLE_CTL_REMOTE_AGENTS=auto` is in
@@ -529,7 +538,9 @@ A bundle of someone else's PR (no `BUNDLE_SUFFIX` in its name) goes by itself on
 for `BUNDLE_CTL_REVIEW_CLOSED_MINUTES` since its container stopped (default 10, Seb's choice on
 2026-10-14: out of the way once its window or terminal closed), or for
 `BUNDLE_CTL_REVIEW_IDLE_DAYS` when no container ever ran for it (default 2, Seb's choice on
-2026-10-13): no window open, no task queued or being built, and no file newer than that among its
+2026-10-13): no window open, no task queued or being built, no agent on a worker or starting
+there (its task left the queue at the start: on 2026-11-03 two bare fw bundles went with the task
+their dead start held), and no file newer than that among its
 `.made`, its `.agent/` files, its Claude config (written at each window open and Claude start) and
 the reflog of its worktrees. Nor while a hok request of it waits or a Firefox tab group of it is
 open (`tab_groups.py`): the Agent and VS Code buttons of that group need the bundle (Seb,
