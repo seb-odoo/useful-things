@@ -160,7 +160,7 @@ MOUNTS = {
     "@REPO_ROOT@/runbot-fix-agents": ("send", "the skills of the runbot fixes"),
     "/usr/local/bin/gh": ("send", "gh, to the GitHub gateway"),
     "/home/vscode/.gitconfig.local": ("send", "the git identity"),
-    "/home/vscode/.vscode-server/extensions": ("drop", "claude goes as its own part"),
+    "/home/vscode/.vscode-server/extensions": ("drop", "claude and ruff go as parts of their own"),
     "@USEFUL_THINGS@/container-rw": ("image", "the shell helpers, in the runner image"),
     "/home/vscode/.claude-autoopen": ("drop", "VS Code"),
     "/home/vscode/.install-claude-autoopen.sh": ("drop", "VS Code"),
@@ -356,22 +356,23 @@ def keep_regular(info, sent):
     return None
 
 
-def find_claude(bundle_folder):
-    """The claude of the bundle's extension store, the newest version."""
+def find_binary(bundle_folder, pattern):
+    """The newest PATTERN of the bundle's extension store, else of any store, else None."""
     values, _own = get_paths(bundle_folder)
     store = pathlib.Path(values["CACHE_ROOT"]) / "devcontainer" / "vscode-extensions"
-    found = sorted(
-        store.glob(f"{bundle_folder.name}/anthropic.claude-code-*/resources/native-binary/claude"),
-        key=lambda path: path.stat().st_mtime,
-    )
-    if not found:
-        found = sorted(
-            store.glob("*/anthropic.claude-code-*/resources/native-binary/claude"),
-            key=lambda path: path.stat().st_mtime,
-        )
-    if not found:
+    for where in (bundle_folder.name, "*"):
+        found = sorted(store.glob(f"{where}/{pattern}"), key=lambda path: path.stat().st_mtime)
+        if found:
+            return found[-1]
+    return None
+
+
+def find_claude(bundle_folder):
+    """The claude of the bundle's extension store, the newest version."""
+    found = find_binary(bundle_folder, "anthropic.claude-code-*/resources/native-binary/claude")
+    if found is None:
         raise RuntimeError("no claude in the extension stores")
-    return found[-1]
+    return found
 
 
 def ssh(workers, worker, verb, bundle, *args, data=b"", timeout=600):
@@ -531,6 +532,9 @@ def start(log, bundle, bundle_folder, worker, workers, base, session, resume):
             "claude": find_claude(bundle_folder),
             "ca": HOME / ".config" / "gateway-ca" / "ca-certificates.crt",
         }
+        ruff = find_binary(bundle_folder, "charliermarsh.ruff-*/bundled/libs/bin/ruff")
+        if ruff:
+            parts["ruff"] = ruff
         shas = {}
         for name, value in parts.items():
             data = value if isinstance(value, bytes) else pathlib.Path(value).read_bytes()
@@ -552,6 +556,8 @@ def start(log, bundle, bundle_folder, worker, workers, base, session, resume):
             "in": sorted(files),
             "env": get_env(bundle),
         }
+        if ruff:
+            spec["ruff"] = shas["ruff"][0]
         DUMMIES.mkdir(parents=True, exist_ok=True)
         named.write_text(f"{bundle}\n")
         answer = ssh(workers, worker, "agent", bundle, data=json.dumps(spec).encode())

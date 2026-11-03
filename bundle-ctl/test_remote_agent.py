@@ -239,6 +239,27 @@ def check_start(root):
     check("a job starts with no record of its session", left == ["8.json", "9.json"], left)
 
 
+def check_binary(root):
+    """A binary of the extension stores: the bundle's own, else the newest of any, else none."""
+    remote_agent.get_values = lambda: {"CACHE_ROOT": str(root / "cache")}
+    store = root / "cache" / "devcontainer" / "vscode-extensions"
+    pattern = "charliermarsh.ruff-*/bundled/libs/bin/ruff"
+    found = remote_agent.find_binary(root / "b1", pattern)
+    check("no ruff in the stores, none goes", found is None, found)
+    paths = {}
+    for bundle, mtime in (("b2", 100), ("b3", 200), ("b1", 50)):
+        path = store / bundle / "charliermarsh.ruff-2026.92.0-linux-x64/bundled/libs/bin/ruff"
+        path.parent.mkdir(parents=True)
+        path.write_text("ruff\n")
+        os.utime(path, (mtime, mtime))
+        paths[bundle] = path
+        if bundle == "b3":
+            found = remote_agent.find_binary(root / "b1", pattern)
+            check("no ruff in its store, the newest of another", found == path, found)
+    found = remote_agent.find_binary(root / "b1", pattern)
+    check("the ruff of its own store first", found == paths["b1"], found)
+
+
 def check_type(root):
     """Keys typed on a worker go to the stand-in as one order line, a refusal says why, and the
     mark of a typed task goes with the other files of the job once it ended."""
@@ -281,6 +302,7 @@ def main():
         check_remote(root)
         check_standin(root)
         check_start(root)
+        check_binary(root)
         check_type(root)
     for line in failures:
         print(line)

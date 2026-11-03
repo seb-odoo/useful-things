@@ -310,7 +310,8 @@ necessary. but if we have a good setup, full remote should offer the same possib
   remote-runs, on `devnet`, `--cap-drop=ALL`, 256 MB, labels `remote-runs.folder` and
   `remote-runs.worker`), the files of its start (`standin.py pack`: the branch and base past what
   the worker's store has, the changes, the untracked files, the session's transcript when it goes
-  on), the parts (claude of the bundle's extension store, the config of `MOUNTS`, the CA), a dummy
+  on), the parts (claude and ruff of the bundle's extension store, else of the newest other store,
+  the config of `MOUNTS`, the CA; a store with no ruff sends none), a dummy
   login in `~/.local/state/claude-switch/dummies/`, then `ssh ... tunnel` and the stand-in joined
   by `pair.py` in a `systemd-run --user --scope` of their own (`rr-tunnel-BUNDLE`), so that a
   restart of the daemon cuts no tunnel. Any failure before the job started starts the agent here.
