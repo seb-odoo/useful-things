@@ -85,6 +85,14 @@ def main():
         branch_status.GIT_CACHE.write_text("[1, 2")
         read()
         found["a broken cache: git again"] = len(computed)
+        git(folder, "branch", "master-c--me", "master-b--me")
+        git(folder, "push", "odoo-dev", "master-c--me")
+        git(folder, "fetch", "odoo-dev")
+        heads = {("odoo", "master-c--me"): git(folder, "rev-parse", "master-c--me")}
+        git(folder, "branch", "-D", "master-c--me")
+        with ThreadPoolExecutor() as executor:
+            gone = branch_status.read_git_facts(executor, heads, True)[("odoo", "master-c--me")]
+        found["a branch deleted after the heads were read"] = (gone["status"], gone["push"])
         stubs = {
             "get_repos": lambda: ["odoo"],
             "get_prs": lambda pairs: ({}, []),
@@ -106,6 +114,7 @@ def main():
         "the base moved: both, now behind": (6, [1, 1]),
         "a push: that branch only": ["master-b--me"],
         "a broken cache: git again": 6,
+        "a branch deleted after the heads were read": (None, None),
         "gbs lists both branches with their git facts": [("master-a--me", 1), ("master-b--me", 1)],
     }
     failures = [

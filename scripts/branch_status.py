@@ -288,6 +288,8 @@ def get_push(repo, branch):
     if git(repo, "rev-parse", "--verify", "--quiet", remote_ref) is None:
         return None
     counts = git(repo, "rev-list", "--left-right", "--count", f"{branch}...{remote_ref}")
+    if counts is None:
+        return None
     ahead, behind = counts.split()
     return {"ahead": int(ahead), "behind": int(behind)}
 
@@ -323,10 +325,10 @@ def get_status(repo, branch, write_tree):
     base_ref = get_base_ref(repo, branch)
     if git(repo, "rev-parse", "--verify", "--quiet", base_ref) is None:
         return None
-    ahead, behind = map(
-        int,
-        git(repo, "rev-list", "--left-right", "--count", f"{branch}...{base_ref}").split(),
-    )
+    counts = git(repo, "rev-list", "--left-right", "--count", f"{branch}...{base_ref}")
+    if counts is None:
+        return None
+    ahead, behind = map(int, counts.split())
     return {
         "ahead": ahead,
         "behind": behind,
