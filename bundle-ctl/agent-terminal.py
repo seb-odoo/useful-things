@@ -123,6 +123,8 @@ STOP_TIME = 5
 TAKEOVER_WAIT = 30
 TOLD = STATE / "told"
 TRANSCRIPTS = pathlib.Path.home() / ".claude" / "projects" / "-workspace"
+# Without VTE_VERSION, claude writes each link of the agentbar band as its text and its URL.
+VTE = ["--env", f"VTE_VERSION={os.environ['VTE_VERSION']}"] if "VTE_VERSION" in os.environ else []
 USER = "vscode"
 WAKE_EVERY = 2
 WINDOW_WAIT = 120
@@ -740,7 +742,7 @@ def run_ops(name):
         space_start()
         code = run_tty(
             ["podman", "exec", "--interactive", "--tty", "--detach-keys=", "--user", USER]
-            + ["--workdir", REPO_ROOT, "--env", f"TERM={os.environ.get('TERM', 'xterm')}"]
+            + ["--workdir", REPO_ROOT, "--env", f"TERM={os.environ.get('TERM', 'xterm')}", *VTE]
             + ["--env", "SHELL=/bin/bash", "--env", f"AGENT_WINDOW={name}", container, *claude],
             Waker(agent, os.path.basename(HOST_FOLDER), session, name),
         )
@@ -832,7 +834,7 @@ def main():
         write_text(agent / "container", f"{container}\n")
         code = run_tty(
             ["podman", "exec", "--interactive", "--tty", "--detach-keys=", "--user", USER]
-            + ["--workdir", "/workspace", "--env", f"TERM={os.environ.get('TERM', 'xterm')}"]
+            + ["--workdir", "/workspace", "--env", f"TERM={os.environ.get('TERM', 'xterm')}", *VTE]
             + ["--env", f"AGENT_WINDOW={bundle}"]
             + [container, "bash", str(HERE / "client" / "agent-run.sh"), "--terminal", session]
             + ([GO_ON] if cut else []),
