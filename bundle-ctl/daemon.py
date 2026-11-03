@@ -1028,13 +1028,15 @@ def list_runs(caller, query, body):
 
 
 def look_worker(caller, query, body):
-    """`GET /worker?worker=NAME&what=WHAT&lines=N`: a read of a worker, for any caller."""
+    """`GET /worker?worker=NAME&what=WHAT&lines=N[&since=@EPOCH][&until=@EPOCH]`: a read of a
+    worker, for any caller."""
     lines = (query.get("lines") or ["100"])[0]
     if not lines.isdigit():
         raise ValueError("lines: a number")
     name, what = (query.get("worker") or [""])[0], (query.get("what") or [""])[0]
+    window = {key: query[key][0] for key in workers.LOG_WINDOW if key in query}
     try:
-        return 200, WORKERS.look(name, what, int(lines))
+        return 200, WORKERS.look(name, what, int(lines), window)
     except workers.Refused as error:
         return 409, {"error": str(error)}
 

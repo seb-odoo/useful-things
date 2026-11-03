@@ -44,19 +44,24 @@ VALUE_FORMS = {
 title_by_session = {}
 
 
-def read_text(path):
-    """The text of a regular file, None when it cannot be read. The bundle writes its `.agent/`
-    folder: a link there is not followed, and a file of VALUE_FORMS gives None unless its value
-    has its form, as the host puts them in paths, commands and the queue."""
+def read_text(path, limit=None):
+    """The text of a regular file, None when it cannot be read or holds more than `limit` bytes.
+    The bundle writes its `.agent/` folder: a link there is not followed, a FIFO does not block,
+    and a file of VALUE_FORMS gives None unless its value has its form, as the host puts them in
+    paths, commands and the queue."""
     form = VALUE_FORMS.get(path.name)
     try:
         fd = open_unlinked(path, os.O_RDONLY)
     except OSError:
         return None
     with open(fd, errors="replace") as file:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or limit is not None and info.st_size > limit:
             return None
-        text = file.read(MAX_VALUE if form else -1).strip()
+        text = file.read(MAX_VALUE if form else -1 if limit is None else limit + 1)
+    if limit is not None and len(text) > limit:
+        return None
+    text = text.strip()
     return text if form is None or form.fullmatch(text) else None
 
 

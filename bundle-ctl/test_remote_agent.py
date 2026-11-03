@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -293,6 +294,52 @@ def check_type(root):
     check("the mark of a typed task goes with the job", left == [], left)
 
 
+def check_ended(root):
+    """An exec in the stand-in writes its run folder: the daemon reads there no link, no FIFO,
+    nothing over MAX_ENDED, and its end removes only the regular files."""
+    remote_agent.STATE = root / "state"
+    run = remote_agent.run_folder("e")
+    run.mkdir(parents=True)
+    host_file = root / "host.json"
+    host_file.write_text('{"reason": "read from a host file"}')
+    (run / "ended").symlink_to(host_file)
+    found = remote_agent.read_ended("e")
+    check("an ended that links to a host file is not read", found is None, found)
+    finished = []
+    kept = {name: getattr(remote_agent, name) for name in ("read_remote", "finish", "is_tunnel_up")}
+    remote_agent.read_remote = lambda folder: {"worker": "w", "job": "1"}
+    remote_agent.finish = lambda *args: finished.append(args) or ("ended", False)
+    remote_agent.is_tunnel_up = lambda bundle: True
+    remote_agent.keep("e", root / "e", None)
+    check("and the agent does not end on it", finished == [], finished)
+    (run / "ended").unlink()
+    os.mkfifo(run / "ended")
+    started = time.monotonic()
+    found = remote_agent.read_ended("e")
+    spent = time.monotonic() - started
+    check("an ended that is a FIFO gives None at once", found is None and spent < 1, (found, spent))
+    (run / "ended").unlink()
+    (run / "ended").write_text(json.dumps({"reason": "x" * remote_agent.MAX_ENDED}))
+    found = remote_agent.read_ended("e")
+    check("an ended over 64 KB is not read", found is None, found)
+    (run / "ended").write_text('{"reason": "verdict", "exit": 0}\n')
+    found = remote_agent.read_ended("e")
+    check("a plain ended is read", found == {"reason": "verdict", "exit": 0}, found)
+    remote_agent.keep("e", root / "e", None)
+    check("and the agent ends on it", finished == [("e", root / "e", found)], finished)
+    vars(remote_agent).update(kept)
+    os.mkfifo(run / "fifo")
+    (run / "link").symlink_to(host_file)
+    (run / "attach.sock").write_text("")
+    agent = root / "e" / ".agent"
+    agent.mkdir(parents=True)
+    (agent / "remote.json").write_text(json.dumps({"worker": "sebpc", "job": "1"}))
+    remote_agent.finish("e", root / "e", found)
+    left = sorted(path.name for path in run.iterdir())
+    check("its end removes only the regular files", left == ["attach.sock", "fifo", "link"], left)
+    check("and no file a link names", host_file.exists())
+
+
 def main():
     check_mounts()
     with tempfile.TemporaryDirectory() as folder:
@@ -304,6 +351,7 @@ def main():
         check_start(root)
         check_binary(root)
         check_type(root)
+        check_ended(root)
     for line in failures:
         print(line)
     print(f"{total - len(failures)}/{total} cases as expected")

@@ -22,7 +22,7 @@
     bctl free-disk [--reason TEXT] [--wait SECONDS]
     bctl run [--kind KIND] [--workers N] [-- COMMAND...]
     bctl runs [--json]
-    bctl worker WORKER state|log|memory|disk [--lines N] [--json]
+    bctl worker WORKER state|log|memory|disk [--lines N] [--since TIME] [--until TIME] [--json]
 
 TASK is --task TEXT or --task-file FILE, with an optional --priority N, --after HH:MM and
 --paused.
@@ -137,14 +137,18 @@ the daemon does not answer, the command runs without the queue. runs lists what 
 
 worker reads a worker of BUNDLE_CTL_WORKERS, with no yes of Seb: the state of its daemon (every
 job and agent), the units and the last N lines (100) of its daemon's log, its memory and the
-slice of its jobs, or its disk and what its state folder holds. Any bundle may ask it.
+slice of its jobs, or its disk and what its state folder holds. Any bundle may ask it. --since
+and --until keep the lines of the log in that window: a TIME is `@EPOCH` or `2026-10-30 16:45`,
+in the time zone where bctl runs (UTC in a container) unless an offset or ` UTC` ends it.
 """
 
 import argparse
+import datetime
 import http.client
 import json
 import os
 import pathlib
+import re
 import shutil
 import socket
 import sys
@@ -159,6 +163,7 @@ SOCKETS = (
     / "bundle-ctl/sock/ctl.sock",
 )
 GO_ON = "Continue from where you left off."
+EPOCH = re.compile(r"@[0-9]{9,11}")
 
 
 class UnixConnection(http.client.HTTPConnection):
@@ -424,6 +429,20 @@ def format_field(key, value):
     if type(value) is list:
         return ", ".join(format_field(key, item) for item in value) or "none"
     return str(value)
+
+
+def to_epoch(text):
+    """A time of `bctl worker --since/--until` as the `@EPOCH` the worker takes."""
+    epoch = text
+    if not EPOCH.fullmatch(text):
+        try:
+            moment = datetime.datetime.fromisoformat(text.replace(" UTC", "+00:00"))
+            epoch = f"@{int(moment.timestamp())}"
+        except (ValueError, OverflowError, OSError):
+            pass
+    if not EPOCH.fullmatch(epoch):
+        raise argparse.ArgumentTypeError(f"{text!r}: a time as 2026-10-30 16:45 or @EPOCH")
+    return epoch
 
 
 def print_worker(answer, indent=""):
@@ -792,6 +811,8 @@ def main():
     worker.add_argument("worker", help="a worker of BUNDLE_CTL_WORKERS")
     worker.add_argument("what", choices=("state", "log", "memory", "disk"))
     worker.add_argument("--lines", type=int, default=100, help="the lines of the log, 2000 at most")
+    for key in ("since", "until"):
+        worker.add_argument(f"--{key}", type=to_epoch, help="2026-10-30 16:45 or @EPOCH")
     unqueue = commands.add_parser("unqueue", help="drop the queued task of a bundle")
     unqueue.add_argument("bundle")
     args = parser.parse_args()
@@ -807,8 +828,9 @@ def main():
         answer = request("GET", "/runs")
         printer = print_runs
     elif args.command == "worker":
+        window = {key: getattr(args, key) for key in ("since", "until") if getattr(args, key)}
         query = urllib.parse.urlencode(
-            {"worker": args.worker, "what": args.what, "lines": args.lines}
+            {"worker": args.worker, "what": args.what, "lines": args.lines, **window}
         )
         answer = request("GET", f"/worker?{query}")
         printer = print_worker

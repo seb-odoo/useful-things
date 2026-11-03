@@ -265,10 +265,15 @@ repo, which has its own README (the sandbox, the load, the sync). Agents change 
   as `running BUNDLE odoo @sebpc 2 min`, and a worker that did not as `@sebpc: no answer since
   HH:MM`. The worker's `status`, which the daemon asks every 15 seconds as `host`, names every
   bundle to the daemon alone; `bctl runs` then shows them to any bundle, as the laptop's runs.
-- `bctl worker WORKER state|log|memory|disk [--lines N]`: a read of a worker, for any caller, with
-  no card. The daemon asks it as `host` with fixed words, but the line count of the log: `status`
-  for the state, `look` for the rest (remote-runs README, "Verbs"). bctl prints only printable
-  characters, as a worker runs the jobs of every bundle.
+- `bctl worker WORKER state|log|memory|disk [--lines N] [--since TIME] [--until TIME]`: a read of
+  a worker, for any caller, with no card. The daemon asks it as `host` with fixed words, but the
+  line count of the log and its window: `status` for the state, `look` for the rest (remote-runs
+  README, "Verbs"). The window keeps the last N lines of the log between two times, so the
+  journal of workerd needs no admin login (two cards from 10-29 to 11-03): bctl turns a TIME
+  typed as `2026-10-30 16:45` (in the time zone where it runs, UTC in a container, unless an
+  offset or ` UTC` ends it) into `@EPOCH`, the one form `workers.py` sends and the worker takes
+  again, as one word each. bctl prints only printable characters, as a worker runs the jobs of
+  every bundle.
 
 `python3 test_runs.py` has the cases of the wrap; the relay and the client are tested from
 `remote-runs` (`test_relay`).
@@ -339,7 +344,10 @@ necessary. but if we have a good setup, full remote should offer the same possib
   verdict 5 minutes ago and is not busy, as a terminal closes here; and once a job ended
   (`~/.local/state/bundle-ctl/standin/BUNDLE/ended`, which the worker answers the next tunnel
   however long the laptop was away), writes its work tree here and drops the stand-in, the dummy
-  login and the tunnel. The stop after the verdict waits, as a terminal here does, until no line
+  login and the tunnel. An exec in the stand-in writes that folder too: the daemon takes `ended`
+  only as a regular file of 64 KB at most, with no link followed and no wait on a FIFO
+  (`agents.read_text`), and the end removes only the regular files there (`python3
+  test_remote_agent.py`). The stop after the verdict waits, as a terminal here does, until no line
   of the host waits for that claude (see below), its transcript did not change for 5 minutes, and
   its last answer opens on a verdict: a turn after it may wait for a card of hok. A job lost on
   the worker (a reboot) is queued again on its session, and goes on from its tree there. A work tree that cannot come back (the worktree changed here

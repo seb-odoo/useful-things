@@ -36,6 +36,8 @@ LOOKS = {
     "disk": ("look", "host", "disk"),
 }
 MAX_LINES = 2000
+LOG_WINDOW = ("since", "until")
+EPOCH = re.compile(r"@[0-9]{9,11}")
 LOOK_TIMEOUT = 60
 VERBS = {
     "status": ((), 0),
@@ -136,19 +138,27 @@ class Workers:
                 ]
         return jobs, silent
 
-    def look(self, name, what, lines):
+    def look(self, name, what, lines, window=None):
         """For `bctl worker`: a read of a worker, asked as `host` with fixed words, but the line
-        count of the log (README.md, "Remote runs")."""
+        count of the log and its window, `since` and `until` as `@EPOCH` (README.md, "Remote
+        runs")."""
+        window = window or {}
         if name not in self.names:
             raise Refused(f"no worker {name}")
         if what not in LOOKS:
             raise Refused(f"worker: one of {', '.join(LOOKS)}")
         if not 1 <= lines <= MAX_LINES:
             raise Refused(f"worker: 1 to {MAX_LINES} lines")
+        if window and what != "log":
+            raise Refused("worker: --since and --until go with log only")
+        for key in LOG_WINDOW:
+            if key in window and not (type(window[key]) is str and EPOCH.fullmatch(window[key])):
+                raise Refused(f"worker: --{key} @EPOCH")
         if not self.is_up(name):
             self.ask(name)
             raise Refused(f"no connection to {name}")
         words = [*LOOKS[what], *([str(lines)] if what == "log" else [])]
+        words += [word for key in LOG_WINDOW if key in window for word in (key, window[key])]
         try:
             result = self.run(
                 self.ssh(name, *words), capture_output=True, timeout=LOOK_TIMEOUT, check=False

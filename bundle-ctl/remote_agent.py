@@ -17,6 +17,7 @@ import pathlib
 import re
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -29,6 +30,9 @@ spec = importlib.util.spec_from_file_location(
 )
 devconfig = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(devconfig)
+sys.path.insert(0, str(HERE.parent / "scripts"))
+
+from agents import read_text
 
 HOME = pathlib.Path.home()
 STATE = pathlib.Path("~/.local/state/bundle-ctl").expanduser()
@@ -47,6 +51,7 @@ PAIR_RETRY = 30
 STOP_WAIT = 660
 STARTING = 1800
 STOP_AGAIN = 300
+MAX_ENDED = 64 * 1024
 MAX_LOSSES = 3
 RENEW_BEFORE = 240
 RENEW_EVERY = 300
@@ -698,10 +703,14 @@ def is_tunnel_up(bundle):
 
 
 def read_ended(bundle):
+    """How the job ended, as the stand-in wrote it. An exec in the stand-in writes that folder
+    too: a link, a FIFO or a file over MAX_ENDED gives None."""
+    text = read_text(run_folder(bundle) / "ended", MAX_ENDED)
     try:
-        return json.loads((run_folder(bundle) / "ended").read_text())
-    except (OSError, ValueError):
+        ended = json.loads(text) if text is not None else None
+    except ValueError:
         return None
+    return ended if type(ended) is dict else None
 
 
 def is_standin_up(bundle):
@@ -794,7 +803,11 @@ def finish(bundle, bundle_folder, end):
         ):
             (agent / name).unlink(missing_ok=True)
         for path in run_folder(bundle).glob("*"):
-            if path.is_file() and not path.name.endswith((".sock", ".log")):
+            try:
+                regular = stat.S_ISREG(path.lstat().st_mode)
+            except OSError:
+                continue
+            if regular and not path.name.endswith((".sock", ".log")):
                 path.unlink(missing_ok=True)
         if moved and sent_end:
             write(agent / "where", "local\n")
