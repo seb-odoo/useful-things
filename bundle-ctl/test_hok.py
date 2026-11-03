@@ -64,6 +64,40 @@ def read_again():
     return daemon.read_hok_waiting()
 
 
+def get_proposal(caller, name):
+    try:
+        return daemon.get_proposal(caller, {"name": [name]}, {})[1]
+    except (ValueError, daemon.Refused) as error:
+        return type(error).__name__
+
+
+def check_proposals(root, failures):
+    """What GET /proposal says of a proposal in the handoff inbox."""
+    daemon.HANDOFF = inbox = pathlib.Path(root, "handoff")
+    (inbox / "master-x--seb").mkdir(parents=True)
+    (inbox / "master-x--seb" / "WHY").write_text("better\n")
+    (inbox / "master-y--seb").mkdir()
+    (inbox / "master-y--seb.refused").write_text("too big\n")
+    (inbox / "master-z--seb.written").write_text("\n")
+    (inbox / "master-w--seb@memory").symlink_to(inbox / "master-x--seb")
+    cases = [
+        ("a card waits", get_proposal("master-x--seb", "master-x--seb"), "waits"),
+        ("a no and its reason", get_proposal("master-y--seb", "master-y--seb"), "refused"),
+        ("a whole yes", get_proposal("master-z--seb", "master-z--seb"), "written"),
+        ("nothing reached hok", get_proposal("master-v--seb", "master-v--seb"), "none"),
+        ("a link is no card", get_proposal("master-w--seb", "master-w--seb@memory"), "none"),
+        ("not its own", get_proposal("master-x--seb", "master-y--seb"), "Refused"),
+        ("no bundle name", get_proposal(daemon.HOST, "../x"), "ValueError"),
+        ("the host asks any", get_proposal(daemon.HOST, "master-y--seb"), "refused"),
+    ]
+    for name, found, expected in cases:
+        if (found.get("state") if isinstance(found, dict) else found) != expected:
+            failures.append(f"proposal, {name}: {found!r}, expected {expected!r}")
+    said = get_proposal("master-y--seb", "master-y--seb")
+    if said.get("text") != "too big" or not said.get("at"):
+        failures.append(f"proposal, a no gives its reason and when: {said!r}")
+
+
 def main():
     failures = []
     with tempfile.TemporaryDirectory() as root:
@@ -119,9 +153,10 @@ def main():
         except daemon.Refused:
             pass
         daemon.hok_read.pop("worker").kill()
+        check_proposals(root, failures)
     for line in failures:
         print(line)
-    print(f"{11 - len(failures)}/11 cases as expected")
+    print(f"{20 - len(failures)}/20 cases as expected")
     sys.exit(1 if failures else 0)
 
 

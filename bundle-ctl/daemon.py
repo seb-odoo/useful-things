@@ -188,6 +188,7 @@ TOLD_DIR = STATE / "told"
 PARENTS_DIR = STATE / "parents"
 WATCH_DIR = STATE / "watch"
 HELD_LETTER = "b"
+HANDOFF = pathlib.Path.home() / ".claude" / "handoff"
 HOK_KEPT = 5
 HOK_TIME = 30
 HOK_WAITING = pathlib.Path(CONFIG["REPO_ROOT"]) / "host-ctl" / "approve.py"
@@ -3346,6 +3347,26 @@ def get_held(caller, query, body):
         time.sleep(1)
 
 
+def get_proposal(caller, query, body):
+    """`GET /proposal?name=NAME`: what hok holds of a proposal (host-ctl README, "Handoff"), NAME
+    the caller's own or its `@memory` one: it waits on a card, the note of Seb's answer with its
+    time, or none of them. The host may ask any."""
+    name = query.get("name", [""])[0]
+    if not BUNDLE_NAME.fullmatch(name.removesuffix("@memory")):
+        raise ValueError(f"name: {name!r} is no bundle")
+    if caller != HOST and name not in (caller, f"{caller}@memory"):
+        raise Refused(f"the proposal of {name} is not yours")
+    folder = HANDOFF / name
+    if folder.is_dir() and not folder.is_symlink() and os.path.lexists(folder / "WHY"):
+        return 200, {"state": "waits"}
+    for state in ("refused", "not-written", "written"):
+        note = HANDOFF / f"{name}.{state}"
+        with contextlib.suppress(FileNotFoundError):
+            text = note.read_text().strip()
+            return 200, {"state": state, "text": text, "at": note.stat().st_mtime}
+    return 200, {"state": "none"}
+
+
 def list_hok(caller, query, body):
     """The requests of hok that wait for the caller: a bundle its own, the host those of the ops
     session `?session=`. `hok waiting` of host-ctl lists them all, read again after HOK_KEPT
@@ -4715,6 +4736,7 @@ VERBS = {
     ("GET", "/held"): get_held,
     ("GET", "/hok"): list_hok,
     ("GET", "/job"): get_job,
+    ("GET", "/proposal"): get_proposal,
     ("GET", "/queue"): get_queue,
     ("GET", "/runs"): list_runs,
     ("GET", "/status"): status,
