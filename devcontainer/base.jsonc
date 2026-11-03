@@ -209,7 +209,9 @@
     // bundle-ctl: the folder of the host daemon's socket, and its client at the host path so `bctl`
     // works on both sides. Read-only, so a container replaces neither the socket nor the client.
     "source=@STATE_ROOT@/bundle-ctl/sock,target=/run/bundle-ctl,type=bind,readonly,z",
-    "source=@USEFUL_THINGS@/bundle-ctl/client,target=@USEFUL_THINGS@/bundle-ctl/client,type=bind,readonly,z"
+    "source=@USEFUL_THINGS@/bundle-ctl/client,target=@USEFUL_THINGS@/bundle-ctl/client,type=bind,readonly,z",
+    // The band of the agent terminal, next to the client, where agent-run.sh looks for it.
+    "source=@USEFUL_THINGS@/bundle-ctl/agentbar,target=@USEFUL_THINGS@/bundle-ctl/agentbar,type=bind,readonly,z"
   ],
   // Runs on the host before each start: a missing mount source stops the container from starting.
   // An array, so that no shell reads the folder name. claude-autoopen closes the "Press any key"

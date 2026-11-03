@@ -28,7 +28,10 @@ one of the host outside the ops container, has no band. Before bundle-ctl has `G
 holds the links alone.
 
 `client/agent-run.sh --terminal` and the ops agent windows of `agent-terminal.py` start claude with
-`--plugin-dir` on this folder: a window opened before has no band until its claude starts again.
+`--plugin-dir` on this folder: a window opened before has no band until its claude starts again. A
+bundle mounts it read-only next to the client (`devcontainer/base.jsonc`): a container made before
+that mount (2026-11-03) has no band until it is made again. An agent on a worker gets it in its
+config part (`remote_agent.py`), and `agent.sh` of remote-runs hands it to its claude.
 
 ```bash
 claude plugin test bundle-ctl/agentbar      # the band of a bundle, of an ops agent, none on the host

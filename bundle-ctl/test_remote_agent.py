@@ -104,6 +104,11 @@ def check_config(root):
     check("the project rules, from the shared folder the link names",
           contents.get("workspace/.claude/CLAUDE.md") == b"project\n", names)
     check("and its own files", "workspace/.claude/settings.local.json" in names, names)
+    check(
+        "the band of the agent terminal goes",
+        "home/bundle-ctl/agentbar/.claude-plugin/plugin.json" in names,
+        names,
+    )
     check("never the login", not any("credentials" in name for name in names), names)
     check("nor a link out of the tree", "home/.claude/skills/a/out" not in names, names)
     check("a link into runbot-fix-agents names its copy",

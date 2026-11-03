@@ -166,6 +166,7 @@ MOUNTS = {
     "/home/vscode/.install-claude-autoopen.sh": ("drop", "VS Code"),
     "/run/bundle-ctl": ("standin", "bctl, through the tunnel"),
     "@USEFUL_THINGS@/bundle-ctl/client": ("send", "bctl and the run hook"),
+    "@USEFUL_THINGS@/bundle-ctl/agentbar": ("send", "the band of the agent terminal"),
 }
 CLAUDE_JSON_KEYS = ("hasCompletedOnboarding", "projects", "theme", "lastOnboardingVersion")
 PROJECT_KEYS = (
@@ -317,6 +318,7 @@ def build_config(bundle_folder):
         add(repo_root / "git-gate" / "client" / "git-gate-ssh", "home/.git-gate/git-gate-ssh")
         add(repo_root / "runbot-fix-agents", "home/runbot-fix-agents")
         add(HERE / "client", "home/bundle-ctl/client")
+        add(HERE / "agentbar", "home/bundle-ctl/agentbar")
         try:
             whole = json.loads((own / ".claude.json").read_text())
         except (OSError, ValueError):
