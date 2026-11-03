@@ -5,9 +5,10 @@
 
 The helper of firefox-gateway runs it (`tell` of its config.ini) once GitHub took a review or a
 comment Seb sent from a tab of the Firefox group of the bundle, or of a PR whose branch is the
-bundle. LINE names what he posted and where. While the agent terminal of the bundle runs, it goes
-in TOLD/BUNDLE/SESSION, where the terminal types it as it is; else in .agent/pr-events/, where the
-hook of client/prwatch.py gives it to a session of a VS Code tab.
+bundle. LINE names what he posted and where. While the agent terminal of the bundle runs, or its
+agent runs on a worker, it goes in TOLD/BUNDLE/SESSION, where the terminal, or the daemon in that
+session on the worker, types it as it is; else in .agent/pr-events/, where the hook of
+client/prwatch.py gives it to a session of a VS Code tab.
 """
 
 import importlib.util
@@ -53,7 +54,8 @@ def main():
         sys.exit(f"{bundle} has no agent folder")
     session = read_text(agent / "session")
     folder = agent / "pr-events"
-    if session and is_agent_running(bundle) and reads_told(bundle):
+    runs = is_agent_running(bundle) or (agent / "remote.json").exists()
+    if session and runs and reads_told(bundle):
         folder = TOLD / bundle / session
         folder.parent.mkdir(parents=True, exist_ok=True)
     load_prwatch().leave(line, folder, ADVICE)

@@ -141,9 +141,9 @@ def load_held():
     return module
 
 
-def load_title():
-    """client/window-title.py, whose file name is no module name."""
-    spec = importlib.util.spec_from_file_location("title", HERE / "client" / "window-title.py")
+def load_client(name, file):
+    """A script of client/, whose file name may be no module name."""
+    spec = importlib.util.spec_from_file_location(name, HERE / "client" / file)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -240,6 +240,8 @@ RECONNECTED = (
 )
 REMOTE_ENTER_AFTER = 2
 REMOTE_GONE_AFTER = 120
+REMOTE_LIST_EVERY = 10
+REMOTE_TOLD_EVERY = 1
 REPORT_HEAD = 4096
 REQUEUE_AFTER = (15, 30, 60, 120, 240)
 RESTART_RETRY = 3600
@@ -308,7 +310,8 @@ TERMINAL_FILES = (
     "prwatch.log",
     "terminal",
 )
-TITLE = load_title()
+PRWATCH = load_client("prwatch", "prwatch.py")
+TITLE = load_client("title", "window-title.py")
 WAIT_LIMITS = (
     ("a manual resume", None),
     ("its time, ", None),
@@ -1825,8 +1828,20 @@ def keep_launching():
                 build_node_modules_safely()
             time.sleep(START_CHECK if launch_safely() else 60)
 
+    def on_told():
+        remotes, listed = [], float("-inf")
+        while True:
+            try:
+                if time.monotonic() - listed > REMOTE_LIST_EVERY:
+                    remotes, listed = list(get_remote_agents()), time.monotonic()
+                tell_remote_agents(remotes)
+            except Exception:
+                traceback.print_exc()
+            time.sleep(REMOTE_TOLD_EVERY)
+
     threading.Thread(target=on_events, daemon=True).start()
     threading.Thread(target=on_timer, daemon=True).start()
+    threading.Thread(target=on_told, daemon=True).start()
 
 
 def launch_safely():
@@ -1966,8 +1981,11 @@ def keep_remote_agents():
                 line = line and f"stale wait: {line}"
             elif line is None and remote and WORKERS.is_leaving(remote["worker"]):
                 line = leave_worker(bundle, folder, remote["worker"], done, session)
-            elif line is None and done and time.time() - done > FREE_AFTER and (
-                get_session_status(bundle, session) != "busy"
+            elif (
+                line is None
+                and done
+                and time.time() - done > FREE_AFTER
+                and is_remote_free(bundle, session)
             ):
                 line = remote_agent.end(bundle, folder)
         except Exception:
@@ -2510,6 +2528,13 @@ def close_dead_window(bundle):
         time.sleep(0.5)
 
 
+def is_told_bundle(bundle):
+    """Whether a line of the host reaches the agent of a bundle: its terminal here types it, or
+    tell_remote_agents in its session on its worker."""
+    folder = get_agent_folder(bundle).parent
+    return bundle in get_terminals() or remote_agent.read_remote(folder) is not None
+
+
 def get_terminals():
     """The agent-terminal.py process of each bundle, ops windows aside."""
     terminals = {}
@@ -2832,6 +2857,86 @@ def press_remote_enter(bundle, session):
         print(f"{bundle}: no Enter on its worker, a dialog opened after the text", flush=True)
     elif error := remote_agent.type_keys(bundle, "\r"):
         print(f"{bundle}: the Enter of its task did not reach its worker: {error}", flush=True)
+
+
+def get_told_folders(bundle, session):
+    """Where the host leaves the lines of a session of a bundle, then those of its earlier
+    sessions, which go to the one that runs it now, as agent-terminal.py takes them."""
+    told = TOLD_DIR / bundle
+    try:
+        earlier = sorted(path for path in told.iterdir() if path.name != session)
+    except OSError:
+        earlier = []
+    return [told / session, *earlier]
+
+
+def is_remote_free(bundle, session):
+    """Whether the claude of a remote agent that gave its verdict may stop, as its terminal here
+    would close (free_done_terminals): not busy, no line of the host waiting for it, its transcript
+    unchanged for FREE_AFTER, and its last answer opening on a verdict, as a turn after it may
+    wait for a card of hok."""
+    if get_session_status(bundle, session) == "busy" or (
+        session and any(map(PRWATCH.has_lines, get_told_folders(bundle, session)))
+    ):
+        return False
+    transcript = session and get_transcript(session)
+    if not transcript:
+        return True
+    lines = (get_last_text(transcript) or "").strip().splitlines()
+    return time.time() - (get_mtime(transcript) or 0) > FREE_AFTER and bool(
+        lines and cut.VERDICT.match(lines[0].strip().lstrip("#*_` "))
+    )
+
+
+def tell_remote_agents(bundles):
+    """Type in the session of the agent of each bundle, while it runs on a worker, the lines the
+    host left for it (a hok answer, what Seb posted from Firefox, the end of a bundle it started),
+    as its terminal here would: the window of a remote agent only shows its claude (README.md,
+    "Remote agents"). Idle, busy or on a background command, not on a dialog, where the Enter
+    would pick the first answer, nor while its job ends or its link is down: the lines wait."""
+    for bundle in bundles:
+        agent = get_agent_folder(bundle)
+        session = read_text(agent / "session")
+        if not SESSION_ID.fullmatch(session or ""):
+            continue
+        folders = get_told_folders(bundle, session)
+        if (
+            not any(map(PRWATCH.has_lines, folders))
+            or not remote_agent.read_remote(agent.parent)
+            or any(
+                (agent / name).exists()
+                for name in ("remote-down", "remote-ending", "remote-moving")
+            )
+            or get_session_status(bundle, session) not in ("idle", "busy", "shell")
+            or TITLE.is_resuming(session)
+        ):
+            continue
+
+        def note(said, bundle=bundle):
+            print(f"{bundle}: {said}", flush=True)
+
+        lines = []
+        for line in [line for folder in folders for line in PRWATCH.take(folder, note)]:
+            if line[:1].isalpha() and not CONTROL.search(line) and "\t" not in line:
+                lines.append(line)
+            else:
+                print(f"{bundle}: dropped a line that would type keys: {line[:100]!r}", flush=True)
+        if not lines:
+            continue
+        if error := remote_agent.type_keys(bundle, f"{PASTE_START}{' '.join(lines)}{PASTE_END}"):
+            print(f"{bundle}: the lines of the host wait for the link: {error}", flush=True)
+            for line in lines:
+                leave_event(TOLD_DIR / bundle, line, session)
+            continue
+        count = f"{len(lines)} line{'s' * (len(lines) != 1)}"
+        print(f"{bundle}: {count} of the host typed on its worker", flush=True)
+        start_job(
+            HOST,
+            "type",
+            lambda log, bundle=bundle, session=session: press_remote_enter(bundle, session),
+            lock=None,
+            bundle=bundle,
+        )
 
 
 def get_status_since(bundle, session):
@@ -3185,7 +3290,7 @@ def tell(caller, query, body):
             raise ValueError("bundle: a bundle name, and no session")
         tell_parent(bundle, get_parent_line(bundle, text))
         session = read_text(get_agent_folder(bundle) / "session")
-        if bundle not in get_terminals() or not SESSION_ID.fullmatch(session or ""):
+        if not is_told_bundle(bundle) or not SESSION_ID.fullmatch(session or ""):
             return 404, {"error": f"no agent window runs {bundle}"}
         agent = bundle
     elif not isinstance(session, str) or not SESSION_ID.fullmatch(session):
@@ -3234,7 +3339,7 @@ def tell_parent(bundle, text):
             return
     else:
         session = read_text(get_agent_folder(parent) / "session")
-        if parent not in get_terminals() or not SESSION_ID.fullmatch(session or ""):
+        if not is_told_bundle(parent) or not SESSION_ID.fullmatch(session or ""):
             return
     try:
         leave_told(parent, session, text)
@@ -3272,10 +3377,10 @@ def get_watcher(caller, body):
 
 def is_window_running(agent):
     """Whether the agent window a line is left for runs, as tell_parent asks: an ops window keeps
-    its folder while its claude ended, a bundle needs its terminal."""
+    its folder while its claude ended, a bundle needs its terminal or its agent on a worker."""
     if agent.startswith(OPS):
         return is_agent_running(agent) or get_agent_folder(agent).is_dir()
-    return agent in get_terminals()
+    return is_told_bundle(agent)
 
 
 def find_card(card, fresh=False):
@@ -3552,13 +3657,14 @@ def stop_window(caller, query, body):
 
 def get_session_agent(session):
     """The agent window that runs a session: ops-SESSION, or the bundle whose .agent/session it
-    is. None when no agent-terminal.py runs it: a tab has nothing to type in. An ops window whose
-    claude ended keeps its folder until it closes, and the window that goes on with its session
-    takes the line: a `podman rm` of the ops container ends them all (2026-10-29)."""
+    is. None when no agent-terminal.py runs it and it runs on no worker: a tab has nothing to type
+    in. An ops window whose claude ended keeps its folder until it closes, and the window that goes
+    on with its session takes the line: a `podman rm` of the ops container ends them all
+    (2026-10-29)."""
     ops = f"{OPS}{session}"
     if is_agent_running(ops) or get_agent_folder(ops).is_dir():
         return ops
-    for bundle in get_terminals():
+    for bundle in (*get_terminals(), *get_remote_agents()):
         if read_text(get_agent_folder(bundle) / "session") == session:
             return bundle
     return None

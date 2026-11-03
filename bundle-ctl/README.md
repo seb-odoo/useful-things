@@ -322,8 +322,10 @@ necessary. but if we have a good setup, full remote should offer the same possib
   verdict 5 minutes ago and is not busy, as a terminal closes here; and once a job ended
   (`~/.local/state/bundle-ctl/standin/BUNDLE/ended`, which the worker answers the next tunnel
   however long the laptop was away), writes its work tree here and drops the stand-in, the dummy
-  login and the tunnel. A job lost on the worker (a reboot) is queued again on its session, and
-  goes on from its tree there. A work tree that cannot come back (the worktree changed here
+  login and the tunnel. The stop after the verdict waits, as a terminal here does, until no line
+  of the host waits for that claude (see below), its transcript did not change for 5 minutes, and
+  its last answer opens on a verdict: a turn after it may wait for a card of hok. A job lost on
+  the worker (a reboot) is queued again on its session, and goes on from its tree there. A work tree that cannot come back (the worktree changed here
   meanwhile) stays in `.agent/remote-back` with the reason in `.agent/remote-conflict`, and the
   bundle's next task runs here. While a remote agent lives, a bundle container runs or a task
   waits for the main login (see Agents in a terminal), and the main login expires within 4
@@ -355,6 +357,15 @@ necessary. but if we have a good setup, full remote should offer the same possib
   the verdict then count from it. One gap with a terminal here: the daemon does not see what Seb
   types in an attached window, and a task typed then lands in his draft. The journal says
   `BUNDLE: the task from PARENT is typed on NAME`. `python3 test_queue.py` has the cases.
+- The lines the host leaves for its session in `told/` (a hok answer, what Seb posted from
+  Firefox, the end of a bundle it started: see PR events and hok events) are typed there the same
+  way, within a second (`REMOTE_TOLD_EVERY`), 10 s for an agent that just started there
+  (`REMOTE_LIST_EVERY`), with those of its earlier sessions: one paste, then the Enter. Idle, busy or on a background command; not on a dialog, while the link is down or
+  the job ends, where they wait. Its window only attaches, and the hooks of the job read its own
+  `.agent/`, so until then no such line reached a remote agent (Seb, 2026-11-02: "agent on sebpc
+  don't receive firefox github events?", as his review of enterprise#138246 and two hok answers
+  waited in `told/` until the claude of their bundle stopped). The journal says `BUNDLE: N lines
+  of the host typed on its worker`, or that they wait for the link. `python3 test_queue.py`.
 - `agent-terminal.py` of a remote bundle attaches to its claude (`standin.py attach`) and writes
   no `.agent/terminal`: it takes no slot, and closing it leaves the agent running there. A link
   down shows since when and waits. Its title says where, `⭐ BUNDLE @sebpc (mine)`, and so do the
@@ -392,7 +403,8 @@ necessary. but if we have a good setup, full remote should offer the same possib
   2026-10-30): its next task rebuilds its DBs here, and deck's Move to puts it back there.
 - What differs from here: its DBs stay on the worker; Remote Control and the claude.ai connectors
   do not work (they use the login outside what claude-switch serves); a link down longer than a
-  minute (a suspend, a move between home and office) waits for Seb's Bitwarden yes.
+  minute (a suspend, a move between home and office) waits for Seb's Bitwarden yes; no
+  `client/prwatch.py` runs for it, here or in the job, so the PR events of others do not reach it.
 
 ## Memory
 
@@ -1123,7 +1135,8 @@ what to do: ask Seb to validate, or act.
   comes the same way (Seb, 2026-10-22: "currently I have to tell it manually"): the helper of
   firefox-gateway runs `pr-posted.py BUNDLE` with one line on stdin that names it, and the script
   leaves it with an advice of its own (go on from it, no confirmation asked of him): in the
-  folder of the host above while the agent terminal of the bundle runs, else in
+  folder of the host above while the agent terminal of the bundle runs or its agent runs on a
+  worker (see Remote agents), else in
   `.agent/pr-events/`, where the hook gives it to a session of a VS Code tab, which nothing types
   in (Seb, 2026-10-30).
 - Not a Claude Code channel, though it would wake an idle session too: a seat of a Claude Team
@@ -1144,16 +1157,17 @@ a prompt.
 
 - The daemon looks for the agent window that runs the conversation: `ops-SESSION` while its
   `agent-terminal.py` runs, else the bundle whose `.agent/session` it is, with its terminal
-  running. It leaves the line in `pr-events/` of the ops window, a folder of the host, or for a
-  bundle in `~/.local/state/bundle-ctl/told/BUNDLE/SESSION/` (see PR events), and the terminal
-  types it, idle or busy. No hook takes it: in `.agent/`, the bundle could leave a false one.
+  running or its agent on a worker (see Remote agents). It leaves the line in `pr-events/` of the
+  ops window, a folder of the host, or for a bundle in
+  `~/.local/state/bundle-ctl/told/BUNDLE/SESSION/` (see PR events), and the terminal types it,
+  idle or busy. No hook takes it: in `.agent/`, the bundle could leave a false one.
 - The answer is `{bundle, asks}`: `asks` is true when that claude waits on a dialog, a question
   or a permission. The terminal types the line only once Seb answered it there, as an Enter on
   the dialog would pick an answer, and `hok` says so (Seb, 2026-10-30: the no to a deploy of
   review-board waited 6 min behind a question of the agent, and he wondered whether it came).
 - A request a gateway or this daemon held (`bN`, such as `bctl delete`) names its bundle, not
   its conversation: `POST /tell {bundle, text}` types the line in the session the terminal of
-  that bundle runs now, 404 when none runs.
+  that bundle runs now, or its agent on a worker, 404 when neither runs.
 - An ops window whose claude ended keeps its folder until the window closes, and the line waits
   there for the window that goes on with the session. All of them end when the ops container goes
   down: on 2026-10-29 the line of request 542 was lost, as every ops window was down from 13:42 to

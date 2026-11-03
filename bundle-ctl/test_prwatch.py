@@ -270,6 +270,13 @@ def test_posted(folder):
     told = folder / "told" / BUNDLE / "s1"
     check("in the folder of the host for its agent terminal", (run(BUNDLE, line), prwatch.take(),
           prwatch.take(told)), (None, [], [f"PR event: {line} {posted.ADVICE}"]))
+    running.clear()
+    (prwatch.AGENT / "remote.json").write_text("{}")
+    check("in the folder of the host for its agent on a worker, its window closed",
+          (run(BUNDLE, line), prwatch.take(), prwatch.take(told)),
+          (None, [], [f"PR event: {line} {posted.ADVICE}"]))
+    (prwatch.AGENT / "remote.json").unlink()
+    running.add(BUNDLE)
     posted.reads_told = lambda bundle: False
     check("in .agent for a terminal of before told/", (run(BUNDLE, line), prwatch.take(told),
           prwatch.take()), (None, [], [f"PR event: {line} {posted.ADVICE}"]))

@@ -2017,6 +2017,115 @@ def check_remote_type(root):
     return [f"remote type: {name}: {found}" for name, passed in checks if not passed], len(checks)
 
 
+def check_remote_told(root):
+    """The lines the host leaves for a remote agent are typed in its session on its worker as one
+    paste, then its Enter: from the folder of its session, then those of its earlier ones, idle,
+    busy or on a background command. On a dialog, while its link is down or its job ends, they
+    wait; a line that would type keys is dropped; the lines the stand-in does not take are left
+    again. After its verdict, its claude stops only once no line waits, its transcript rested
+    FREE_AFTER and its last answer opens on a verdict."""
+    session = "11111111-2222-3333-4444-555555555555"
+    on_worker = {"remote.json": '{"worker": "sebpc", "job": "1"}', "session": f"{session}\n"}
+    bundles = {
+        "idle": on_worker,
+        "busy": on_worker,
+        "dialog": on_worker,
+        "down": {**on_worker, "remote-down": "10:00\n"},
+        "ending": {**on_worker, "remote-ending": ""},
+        "refused": on_worker,
+        "here": {"session": f"{session}\n"},
+    }
+    prepare(root, bundles, 8)
+    daemon.TOLD_DIR = root / "told"
+    for bundle in bundles:
+        (daemon.TOLD_DIR / bundle).mkdir(parents=True)
+        daemon.leave_event(daemon.TOLD_DIR / bundle, f"hok event: g1 of {bundle}", session)
+    daemon.leave_event(daemon.TOLD_DIR / "idle", "PR event: odoo/odoo#1 from Firefox", "earlier")
+    daemon.leave_event(daemon.TOLD_DIR / "busy", "\x1b[Z1", session)
+    statuses = {"busy": "busy", "dialog": "waiting"}
+    texts = {"last": "Waiting for you: hok g12"}
+    transcript = root / "t"
+    transcript.write_text("")
+    typed = []
+
+    def type_keys(bundle, keys):
+        if bundle == "refused":
+            return "Connection refused"
+        typed.append((bundle, keys))
+        return None
+
+    names = (
+        "REMOTE_ENTER_AFTER",
+        "TITLE",
+        "get_last_text",
+        "get_session_status",
+        "get_transcript",
+        "remote_agent",
+    )
+    stubs = {name: getattr(daemon, name) for name in names}
+    daemon.REMOTE_ENTER_AFTER = 0
+    daemon.TITLE = types.SimpleNamespace(is_resuming=lambda session: False)
+    daemon.get_last_text = lambda path: texts["last"]
+    daemon.get_session_status = lambda bundle, session: statuses.get(bundle, "idle")
+    daemon.get_transcript = lambda session: texts.get("transcript", transcript)
+    daemon.remote_agent = types.SimpleNamespace(
+        read_remote=stubs["remote_agent"].read_remote,
+        type_keys=type_keys,
+    )
+    journal = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(journal):
+            daemon.tell_remote_agents(daemon.get_remote_agents())
+            daemon.tell_remote_agents(daemon.get_remote_agents())
+        waiting = sorted(
+            path.parent.parent.name for path in daemon.TOLD_DIR.glob(f"*/{session}/[!.]*.txt")
+        )
+        free = [daemon.is_remote_free(bundle, session) for bundle in ("busy", "dialog", "idle")]
+        old = time.time() - daemon.FREE_AFTER - 1
+        os.utime(transcript, (old, old))
+        free.append(daemon.is_remote_free("idle", session))
+        texts["last"] = "Pushed: it is fixed"
+        free.append(daemon.is_remote_free("idle", session))
+        texts["transcript"] = None
+        free.append(daemon.is_remote_free("idle", session))
+    finally:
+        vars(daemon).update(stubs)
+    paste = daemon.PASTE_START + "{}" + daemon.PASTE_END
+    lines = journal.getvalue().splitlines()
+    checks = [
+        (
+            "the idle and the busy one get their lines as one paste, then Enter, once",
+            typed
+            == [
+                ("busy", paste.format("hok event: g1 of busy")),
+                ("busy", "\r"),
+                ("idle", paste.format("hok event: g1 of idle PR event: odoo/odoo#1 from Firefox")),
+                ("idle", "\r"),
+            ],
+        ),
+        (
+            "the others keep their line, a bundle here too",
+            waiting == ["dialog", "down", "ending", "here", "refused"],
+        ),
+        ("a line that would type keys is dropped", any("dropped" in line for line in lines)),
+        (
+            "the journal says what was typed and what waits for the link",
+            {
+                "idle: 2 lines of the host typed on its worker",
+                "busy: 1 line of the host typed on its worker",
+                "refused: the lines of the host wait for the link: Connection refused",
+            }
+            <= set(lines),
+        ),
+        (
+            "busy, a line waiting, a fresh transcript, no verdict: it stays; then it stops",
+            free == [False, False, False, False, True, True],
+        ),
+    ]
+    found = typed, waiting, free, lines
+    return [f"remote told: {name}: {found}" for name, passed in checks if not passed], len(checks)
+
+
 def check_ramp(root):
     """Only an agent that began its run in the last AGENT_RAMP seconds and gave no verdict counts
     for the memory it takes soon.
@@ -2509,6 +2618,7 @@ def main():
         check_hand_over,
         check_tell,
         check_remote_type,
+        check_remote_told,
         check_ramp,
         check_renew,
         check_leaving,

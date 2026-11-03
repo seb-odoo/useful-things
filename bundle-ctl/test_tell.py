@@ -93,6 +93,15 @@ def check_tell(root, check):
     found = tell_bundle("b2")
     check("a bundle with no terminal is not, by name",
           found[0] == 404 and not get_lines(agents["b2"]), found)
+    (agents["b2"] / "remote.json").write_text('{"worker": "sebpc", "job": "1"}')
+    daemon.get_remote_agents = lambda: {"b2": "sebpc"}
+    remote = root / "told" / "b2" / STOPPED_SESSION
+    found = tell_bundle("b2"), tell(STOPPED_SESSION)
+    check("a bundle whose agent runs on a worker is, by name and by session, in the host folder",
+          [answer[0] for answer in found] == [200, 200] and not get_lines(agents["b2"])
+          and prwatch.take(remote) == [TEXT, TEXT], found)
+    (agents["b2"] / "remote.json").unlink()
+    daemon.get_remote_agents = dict
     check("a bad bundle name is refused", tell_bundle("../b1")[0] == "ValueError")
     found = tell(BUNDLE_SESSION, bundle="b1")
     check("a bundle with a session is refused", found[0] == "ValueError", found)
@@ -510,6 +519,7 @@ def main():
         fake.chmod(0o755)
         os.environ["PATH"] = f"{root / 'bin'}{os.pathsep}{os.environ['PATH']}"
         daemon.PARENTS_DIR = root / "parents"
+        daemon.get_remote_agents = dict
         check_tell(root, check)
         check_parent(root, check)
         check_prompt(root, check)
@@ -518,7 +528,7 @@ def main():
         check("no podman ran", not (root / "podman.log").exists())
     for line in failures:
         print(line)
-    print(f"{82 - len(failures)}/82 cases as expected")
+    print(f"{83 - len(failures)}/83 cases as expected")
     sys.exit(1 if failures else 0)
 
 
