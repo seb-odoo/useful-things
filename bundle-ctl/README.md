@@ -1197,7 +1197,9 @@ what to do: ask Seb to validate, or act.
 - The terminal looks for a line every 0.2 s (`EVENTS_EVERY`), as an event that comes after Seb
   starts to type is too late (2026-10-27: "the PR events often arrive after/just as I type
   something in the terminal to notify myself"). It waits 2 s after his last key, so that the hook
-  of his prompt takes a line that waited behind his draft. `.agent/prwatch.log` notes each line
+  of his prompt takes a line that waited behind his draft. `.agent/prwatch.log` notes, in UTC
+  (2026-11-03: the terminal wrote the local time of the host, the watch the UTC of the
+  container, in the same file), each line
   taken, by whom and how many seconds after it was left, and why the terminal holds one: a draft
   of Seb (how many printable keys, escapes and backspaces, never the text), a key of his in the
   last 2 s, a slash command, or a session that is not idle.

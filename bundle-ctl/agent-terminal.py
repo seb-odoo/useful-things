@@ -502,7 +502,7 @@ class Waker:
             contextlib.suppress(OSError),
             open(open_unlinked(self.agent / "prwatch.log", log), "a") as file,
         ):
-            file.write(f"{time.strftime('%H:%M:%S')} {text}\n")
+            file.write(f"{time.strftime('%H:%M:%S', time.gmtime())} {text}\n")
 
     def is_retry_due(self):
         """The transcript is read once it has not changed for RETRY_AFTER, and once per change: a

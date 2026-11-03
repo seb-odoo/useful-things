@@ -66,7 +66,7 @@ TOLD_LINE = re.compile(
 
 
 def log(text):
-    print(f"{time.strftime('%H:%M:%S')} {text}", file=sys.stderr, flush=True)
+    print(f"{time.strftime('%H:%M:%S', time.gmtime())} {text}", file=sys.stderr, flush=True)
 
 
 def get(url, timeout=30):
@@ -203,7 +203,7 @@ def take(folder=None, note=None, only=None):
                 contextlib.suppress(OSError),
                 open(open_file("../prwatch.log", log, events), "a") as file,
             ):
-                file.write(f"{time.strftime('%H:%M:%S')} {said}\n")
+                file.write(f"{time.strftime('%H:%M:%S', time.gmtime())} {said}\n")
     finally:
         os.close(events)
     return taken
