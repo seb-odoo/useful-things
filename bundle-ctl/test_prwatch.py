@@ -78,6 +78,17 @@ class GitHub:
         return self.pages[path.split("?")[0]]
 
 
+def push_from_worker(hub, bundle, message):
+    """A commit the remote agent of `bundle` pushed: in refs/remote-runs/BUNDLE/ of the shared
+    clone, not in the worktree."""
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", message)
+    git("update-ref", f"refs/remote-runs/{bundle}/odoo/{BUNDLE}", "HEAD")
+    hub.pages["repos/odoo/odoo/pulls/1"] = {"head": {"sha": git("rev-parse", "HEAD")},
+                                            "state": "open"}
+    git("reset", "-q", "--hard", "HEAD~1")
+    return "odoo#1"
+
+
 def item(login, created, **more):
     return {"user": {"login": login}, "created_at": created, **more}
 
@@ -125,6 +136,10 @@ def test_look(folder):
     hub.pages["repos/odoo/odoo/pulls/1"] = {"head": {"sha": git("rev-parse", "HEAD")},
                                             "state": "open"}
     check("a push of the bundle's own commit is not told", watch.told("odoo#1"), "")
+    check("nor one its agent on a worker sent back, which its worktree has once it is back",
+          watch.told(push_from_worker(hub, BUNDLE, "three")), "")
+    check("but one another bundle's agent sent back is",
+          "its head is now" in watch.told(push_from_worker(hub, "other", "four")), True)
     hub.pages["repos/odoo/odoo/pulls/1"] = {"head": {"sha": "f" * 40}, "state": "closed"}
     closed = watch.told("odoo#1")
     check("a head the bundle does not have, and a close", closed.split(": ", 1)[1],
@@ -312,6 +327,20 @@ def test_link(folder):
         prwatch.leave("b")
     check("and the folder it names stays as it was",
           {path.name: path.read_text() for path in host.iterdir()}, {"push-deny.txt": "held"})
+    (prwatch.AGENT / "prwatch.tmp").symlink_to(host / "push-deny.txt")
+    prwatch.write_state({"odoo#1": {}})
+    prwatch.STATE.unlink()
+    prwatch.STATE.symlink_to(host / "push-deny.txt")
+    prwatch.write_state({"odoo#2": {}})
+    (prwatch.AGENT / "prwatch.lock").unlink()
+    (prwatch.AGENT / "prwatch.lock").symlink_to(host / "push-deny.txt")
+    sys.argv = ["prwatch.py"]
+    with contextlib.suppress(OSError):
+        prwatch.main()
+    check("nor the state or the lock of the watch, which the stand-in of a remote agent runs",
+          ({path.name: path.read_text() for path in host.iterdir()},
+           prwatch.STATE.is_symlink(), json.loads(prwatch.STATE.read_text())),
+          ({"push-deny.txt": "held"}, False, {"odoo#2": {}}))
 
 
 def main():

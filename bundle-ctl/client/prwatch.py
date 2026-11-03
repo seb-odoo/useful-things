@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Tell the agent of a bundle when someone else acts on one of its PRs.
 
-client/agent-run.sh --terminal starts it beside claude, once per container. It waits on the mail
-gateway, where mail-watch names the PRs of each new GitHub mail (`GET /_gateway/touched`), and for
-a PR of the bundle reads on GitHub what came since its last look: reviews and comments of others,
-a head the bundle does not have, a close. It leaves one line per PR in .agent/pr-events/, which
-names them and never carries their text: the agent reads that with gh.
+client/agent-run.sh --terminal starts it beside claude, once per container, and the stand-in of an
+agent on a worker in its place (remote_agent.py). It waits on the mail gateway, where mail-watch
+names the PRs of each new GitHub mail (`GET /_gateway/touched`), and for a PR of the bundle reads
+on GitHub what came since its last look: reviews and comments of others, a head the bundle does
+not have, a close. It leaves one line per PR in .agent/pr-events/, which names them and never
+carries their text: the agent reads that with gh.
 
 One of three hands each line to the agent, once: this script as a PostToolUse or UserPromptSubmit
 hook (`--hook`), client/agent-stop.py before the turn ends, or agent-terminal.py, which types it
-as the next prompt of an idle session.
+as the next prompt of an idle session; for an agent on a worker, the daemon types it.
 
     prwatch.py            the watch
     prwatch.py --hook     the lines that wait, as context of a hook
@@ -90,9 +91,20 @@ def read_json(path):
 
 
 def write_state(state):
+    """Never through a link: the stand-in of a remote agent runs the watch on the .agent/ of the
+    bundle, with mounts the bundle does not have."""
+    temporary = STATE.with_suffix(".tmp").name
     try:
-        STATE.with_suffix(".tmp").write_text(json.dumps(state, indent=1))
-        STATE.with_suffix(".tmp").replace(STATE)
+        folder = open_folder(STATE.parent)
+        try:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(temporary, dir_fd=folder)
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            with open(open_file(temporary, flags, folder), "w") as file:
+                file.write(json.dumps(state, indent=1))
+            os.replace(temporary, STATE.name, src_dir_fd=folder, dst_dir_fd=folder)
+        finally:
+            os.close(folder)
     except OSError as error:
         log(f"state not kept: {error}")
 
@@ -154,11 +166,11 @@ def is_told(line):
     return bool(TOLD_LINE.fullmatch(line))
 
 
-def take(folder=None, note=None):
+def take(folder=None, note=None, only=None):
     """The lines that wait, oldest first, each taken by one caller only: the hooks in the container
     and agent-terminal.py on the host take from the same folder. Each one taken is noted in
     prwatch.log beside the folder, or by `note`, with who took it and how long after it was
-    left."""
+    left. A line `only` refuses stays."""
     try:
         events = open_folder(folder or EVENTS)
     except OSError:
@@ -170,7 +182,11 @@ def take(folder=None, note=None):
             try:
                 os.rename(name, mine, src_dir_fd=events, dst_dir_fd=events)
                 with open(open_file(mine, os.O_RDONLY, events)) as file:
-                    taken.append(file.read().strip())
+                    line = file.read().strip()
+                if only and not only(line):
+                    os.rename(mine, name, src_dir_fd=events, dst_dir_fd=events)
+                    continue
+                taken.append(line)
                 os.unlink(mine, dir_fd=events)
             except OSError:
                 continue
@@ -221,8 +237,13 @@ def list_prs():
 
 
 def is_here(repo, sha):
-    """Whether the bundle has this commit in its branch: it pushed it, or fetched and kept it."""
-    return git(repo, "merge-base", "--is-ancestor", sha, "HEAD").returncode == 0
+    """Whether the bundle has this commit in its branch: it pushed it, or fetched and kept it. The
+    commits of its agent on a worker are in refs/remote-runs/BUNDLE/ before git-gate lets their
+    push go, and in its worktree only once that agent comes back."""
+    if git(repo, "merge-base", "--is-ancestor", sha, "HEAD").returncode == 0:
+        return True
+    refs = f"refs/remote-runs/{os.environ.get('ODOO_PROXY_HOST', '')}/{repo}/"
+    return bool(git(repo, "for-each-ref", "--contains", sha, "--format=x", refs).stdout.strip())
 
 
 def by_whom(items, me, since, at="created_at"):
@@ -338,7 +359,9 @@ def main():
     if sys.argv[1:] == ["--hook"]:
         hook()
         return
-    lock = (AGENT / "prwatch.lock").open("w")
+    folder = open_folder(AGENT)
+    lock = open_file("prwatch.lock", os.O_WRONLY | os.O_CREAT, folder)
+    os.close(folder)
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:

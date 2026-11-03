@@ -2891,9 +2891,11 @@ def is_remote_free(bundle, session):
 def tell_remote_agents(bundles):
     """Type in the session of the agent of each bundle, while it runs on a worker, the lines the
     host left for it (a hok answer, what Seb posted from Firefox, the end of a bundle it started),
-    as its terminal here would: the window of a remote agent only shows its claude (README.md,
-    "Remote agents"). Idle, busy or on a background command, not on a dialog, where the Enter
-    would pick the first answer, nor while its job ends or its link is down: the lines wait."""
+    then the PR events its stand-in leaves in its .agent/pr-events, as its terminal here would:
+    the window of a remote agent only shows its claude (README.md, "Remote agents"). Idle, busy or
+    on a background command, not on a dialog, where the Enter would pick the first answer, nor
+    while its job ends or its link is down: the lines wait. A line there that prwatch.py did not
+    write stays for the hook of a session here: the bundle writes that folder."""
     for bundle in bundles:
         agent = get_agent_folder(bundle)
         session = read_text(agent / "session")
@@ -2901,7 +2903,7 @@ def tell_remote_agents(bundles):
             continue
         folders = get_told_folders(bundle, session)
         if (
-            not any(map(PRWATCH.has_lines, folders))
+            not any(map(PRWATCH.has_lines, [*folders, agent / "pr-events"]))
             or not remote_agent.read_remote(agent.parent)
             or any(
                 (agent / name).exists()
@@ -2921,6 +2923,7 @@ def tell_remote_agents(bundles):
                 lines.append(line)
             else:
                 print(f"{bundle}: dropped a line that would type keys: {line[:100]!r}", flush=True)
+        lines += PRWATCH.take(agent / "pr-events", note, PRWATCH.is_told)
         if not lines:
             continue
         if error := remote_agent.type_keys(bundle, f"{PASTE_START}{' '.join(lines)}{PASTE_END}"):

@@ -2019,11 +2019,13 @@ def check_remote_type(root):
 
 def check_remote_told(root):
     """The lines the host leaves for a remote agent are typed in its session on its worker as one
-    paste, then its Enter: from the folder of its session, then those of its earlier ones, idle,
-    busy or on a background command. On a dialog, while its link is down or its job ends, they
-    wait; a line that would type keys is dropped; the lines the stand-in does not take are left
-    again. After its verdict, its claude stops only once no line waits, its transcript rested
-    FREE_AFTER and its last answer opens on a verdict."""
+    paste, then its Enter: from the folder of its session, then those of its earlier ones, then
+    the PR events its stand-in left in its .agent/pr-events, idle, busy or on a background
+    command. On a dialog, while its link is down or its job ends, they wait; a line that would
+    type keys is dropped; a line in pr-events/ that prwatch.py does not write stays there for the
+    hook of a session here; the lines the stand-in does not take are left again. After its
+    verdict, its claude stops only once no line waits, its transcript rested FREE_AFTER and its
+    last answer opens on a verdict."""
     session = "11111111-2222-3333-4444-555555555555"
     on_worker = {"remote.json": '{"worker": "sebpc", "job": "1"}', "session": f"{session}\n"}
     bundles = {
@@ -2042,6 +2044,14 @@ def check_remote_told(root):
         daemon.leave_event(daemon.TOLD_DIR / bundle, f"hok event: g1 of {bundle}", session)
     daemon.leave_event(daemon.TOLD_DIR / "idle", "PR event: odoo/odoo#1 from Firefox", "earlier")
     daemon.leave_event(daemon.TOLD_DIR / "busy", "\x1b[Z1", session)
+    event = (
+        "odoo#2 (https://github.com/odoo/odoo/pull/2), since 2026-11-02T10:00:00Z: 1 approval by"
+        " aku-odoo; its head is now 0123456789ab, which this bundle does not have."
+    )
+    for bundle in ("idle", "dialog"):
+        daemon.PRWATCH.leave(event, daemon.get_agent_folder(bundle) / "pr-events")
+    daemon.PRWATCH.leave("Seb says go on.", daemon.get_agent_folder("idle") / "pr-events", "")
+    told = f"PR event: {event} {daemon.PRWATCH.ADVICE}"
     statuses = {"busy": "busy", "dialog": "waiting"}
     texts = {"last": "Waiting for you: hok g12"}
     transcript = root / "t"
@@ -2080,6 +2090,8 @@ def check_remote_told(root):
         waiting = sorted(
             path.parent.parent.name for path in daemon.TOLD_DIR.glob(f"*/{session}/[!.]*.txt")
         )
+        events = [daemon.PRWATCH.take(daemon.get_agent_folder(bundle) / "pr-events")
+                  for bundle in ("idle", "dialog")]
         free = [daemon.is_remote_free(bundle, session) for bundle in ("busy", "dialog", "idle")]
         old = time.time() - daemon.FREE_AFTER - 1
         os.utime(transcript, (old, old))
@@ -2099,7 +2111,10 @@ def check_remote_told(root):
             == [
                 ("busy", paste.format("hok event: g1 of busy")),
                 ("busy", "\r"),
-                ("idle", paste.format("hok event: g1 of idle PR event: odoo/odoo#1 from Firefox")),
+                (
+                    "idle",
+                    paste.format(f"hok event: g1 of idle PR event: odoo/odoo#1 from Firefox {told}"),
+                ),
                 ("idle", "\r"),
             ],
         ),
@@ -2107,11 +2122,15 @@ def check_remote_told(root):
             "the others keep their line, a bundle here too",
             waiting == ["dialog", "down", "ending", "here", "refused"],
         ),
-        ("a line that would type keys is dropped", any("dropped" in line for line in lines)),
+        ("a line that would type keys is dropped", any("would type keys" in line for line in lines)),
+        (
+            "a line in pr-events/ that prwatch.py does not write stays, a PR event on a dialog too",
+            events == [["PR event: Seb says go on."], [told]],
+        ),
         (
             "the journal says what was typed and what waits for the link",
             {
-                "idle: 2 lines of the host typed on its worker",
+                "idle: 3 lines of the host typed on its worker",
                 "busy: 1 line of the host typed on its worker",
                 "refused: the lines of the host wait for the link: Connection refused",
             }

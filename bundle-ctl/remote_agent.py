@@ -35,6 +35,11 @@ STATE = pathlib.Path("~/.local/state/bundle-ctl").expanduser()
 REMOTE_RUNS = pathlib.Path(os.environ.get("REMOTE_RUNS") or HOME / "repo" / "remote-runs")
 STANDIN_IMAGE = os.environ.get("BUNDLE_CTL_STANDIN_IMAGE", "localhost/remote-runs-runner:current")
 DUMMIES = pathlib.Path("~/.local/state/claude-switch/dummies").expanduser()
+# The log goes to the run folder: the bundle writes its .agent/, and could leave a link there.
+WATCH = (
+    "while :; do python3 -I /opt/bundle-ctl/prwatch.py >>/run/standin/prwatch.log 2>&1;"
+    " sleep 60; done"
+)
 # Where the job unpacks home/bundle-ctl/client of the config part: remote-runs sets HOME=/job/home.
 JOB_CLIENT = "/job/home/bundle-ctl/client"
 REPOS = ("odoo", "enterprise", "design-themes", "upgrade", "upgrade-util")
@@ -382,7 +387,9 @@ def start_standin(bundle, bundle_folder, worker, session):
     """The stand-in: the bundle's mounts the tunnel serves, on devnet, as the bundle. Started in
     a scope of its own, as podman leaves its conmon in the cgroup of the caller, where a stop of
     bundle-ctl waited 90 s for it. The bundle's Claude folder is made first, as at the start of
-    its container: a bundle built for a worker never started one.
+    its container: a bundle built for a worker never started one. It runs client/prwatch.py for
+    the PRs of the bundle, started again a minute after it ends, as no container of the bundle
+    runs it.
     """
     values, own = get_paths(bundle_folder)
     repo_root = pathlib.Path(values["REPO_ROOT"])
@@ -398,6 +405,7 @@ def start_standin(bundle, bundle_folder, worker, session):
         (state_root / "git-gate" / "sock", "/run/git-gate", "ro"),
         (REMOTE_RUNS, "/opt/remote-runs", "ro"),
         (run_folder(bundle), "/run/standin", "rw"),
+        (HERE / "client", "/opt/bundle-ctl", "ro"),
     ]
     admin = HERE.parent / "devcontainer" / "worktree-admin.py"
     subprocess.run([sys.executable, str(admin), str(bundle_folder)], check=True)
@@ -430,6 +438,14 @@ def start_standin(bundle, bundle_folder, worker, session):
         f"STANDIN_BUNDLE={bundle}",
         "-e",
         f"STANDIN_SESSION={session}",
+        "-e",
+        f"ODOO_PROXY_HOST={bundle}",
+        "-e",
+        "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt",
+        "--add-host=gmail.googleapis.com:10.89.255.13",
+        "--add-host=api.github.com:10.89.255.10",
+        "-v",
+        f"{HOME / '.config' / 'gateway-ca' / 'ca-certificates.crt'}:/etc/ssl/certs/ca-certificates.crt:ro",
     ]
     for source, target, mode in mounts:
         if not pathlib.Path(source).exists():
@@ -438,7 +454,7 @@ def start_standin(bundle, bundle_folder, worker, session):
     subprocess.run(["podman", "rm", "-f", standin_name(bundle)], capture_output=True, check=False)
     scope = ["systemd-run", "--user", "--scope", "--collect", "--quiet"]
     subprocess.run(
-        [*scope, *argv, STANDIN_IMAGE, "sleep", "infinity"], capture_output=True, check=True
+        [*scope, *argv, STANDIN_IMAGE, "sh", "-c", WATCH], capture_output=True, check=True
     )
 
 
@@ -748,7 +764,7 @@ def finish(bundle, bundle_folder, end):
         ):
             (agent / name).unlink(missing_ok=True)
         for path in run_folder(bundle).glob("*"):
-            if path.is_file() and not path.name.endswith(".sock"):
+            if path.is_file() and not path.name.endswith((".sock", ".log")):
                 path.unlink(missing_ok=True)
         if moved and sent_end:
             write(agent / "where", "local\n")

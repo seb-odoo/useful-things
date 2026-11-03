@@ -366,6 +366,20 @@ necessary. but if we have a good setup, full remote should offer the same possib
   don't receive firefox github events?", as his review of enterprise#138246 and two hok answers
   waited in `told/` until the claude of their bundle stopped). The journal says `BUNDLE: N lines
   of the host typed on its worker`, or that they wait for the link. `python3 test_queue.py`.
+- Its PR events (see PR events) come after them, the same way. Its stand-in runs
+  `client/prwatch.py`, started again a minute after it ends, as the bundle (`devnet`, the names of
+  the gateways and their CA, `ODOO_PROXY_HOST`), on the `.agent/` of the bundle here. The daemon
+  types the lines of its `pr-events/` that have the shape prwatch.py writes, and leaves the others
+  there (what pr-posted.py left while no agent ran) for the hook of a session here: the bundle
+  writes that folder, and no hook of the job reads it. In the stand-in rather than the job: a line
+  that waits stays here for the next agent of the bundle, here or on a worker, and the worker needs
+  no new code. A head the bundle does not have counts the commits its agent sent back
+  (`refs/remote-runs/BUNDLE/`, fetched before git-gate lets their push go), as its worktree here
+  gets them only once the agent is back: else its own push is told as someone else's. The bundle
+  writes its `.agent/`, and the stand-in has mounts the bundle has not: the log of the watch is
+  `~/.local/state/bundle-ctl/standin/BUNDLE/prwatch.log`, and prwatch.py writes its state and its
+  lock through no link. Until then no prwatch.py ran for a remote agent, here or in the job (Seb,
+  2026-11-02, as above). `python3 test_queue.py`, `test_prwatch.py`, `test_remote_agent.py`.
 - `agent-terminal.py` of a remote bundle attaches to its claude (`standin.py attach`) and writes
   no `.agent/terminal`: it takes no slot, and closing it leaves the agent running there. A link
   down shows since when and waits. Its title says where, `⭐ BUNDLE @sebpc (mine)`, and so do the
@@ -403,8 +417,7 @@ necessary. but if we have a good setup, full remote should offer the same possib
   2026-10-30): its next task rebuilds its DBs here, and deck's Move to puts it back there.
 - What differs from here: its DBs stay on the worker; Remote Control and the claude.ai connectors
   do not work (they use the login outside what claude-switch serves); a link down longer than a
-  minute (a suspend, a move between home and office) waits for Seb's Bitwarden yes; no
-  `client/prwatch.py` runs for it, here or in the job, so the PR events of others do not reach it.
+  minute (a suspend, a move between home and office) waits for Seb's Bitwarden yes.
 
 ## Memory
 
@@ -1069,7 +1082,8 @@ what to do: ask Seb to validate, or act.
   after it lands. `client/prwatch.py` waits there (`GET /_gateway/touched?after=N`, answered at
   the next mail or after 50 s) for the PRs of the bundle: those whose head is the branch of the
   bundle, in any repo of `/workspace` on that branch, found when it starts. `agent-run.sh
-  --terminal` starts it beside claude, in a session of its own, once per container (a lock).
+  --terminal` starts it beside claude, in a session of its own, once per container (a lock), and
+  the stand-in of an agent on a worker in its place (see Remote agents).
 - For one of them it reads on GitHub what came since its last look: reviews, review comments and
   comments of anyone but Seb, a head the bundle does not have in its branch, a close. It leaves one
   line in `.agent/pr-events/` that names them, with no text a stranger wrote (the agent reads them

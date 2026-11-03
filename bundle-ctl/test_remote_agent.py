@@ -195,6 +195,16 @@ def check_standin(root):
     check("the config stays a file", (git_dir / "config").is_file())
     scope = ["systemd-run", "--user", "--scope", "--collect", "--quiet", "podman", "run"]
     check("its conmon out of the cgroup of bundle-ctl", runs[-1][:7] == scope, runs[-1])
+    client = f"{remote_agent.HERE / 'client'}:/opt/bundle-ctl:ro"
+    named = {
+        "ODOO_PROXY_HOST=b",
+        "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt",
+        "--add-host=gmail.googleapis.com:10.89.255.13",
+        "--add-host=api.github.com:10.89.255.10",
+        client,
+    }
+    watch = runs[-1][-3:] == ["sh", "-c", remote_agent.WATCH] and "prwatch.py" in runs[-1][-1]
+    check("it watches the PRs of the bundle, as the bundle", watch and named <= volumes, runs[-1])
 
 
 def check_type(root):
