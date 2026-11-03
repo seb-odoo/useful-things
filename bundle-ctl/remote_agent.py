@@ -200,6 +200,17 @@ def get_agent(bundle_folder):
     return bundle_folder / ".agent"
 
 
+def forget_records(bundle_folder, session):
+    """Drop the records of the session that its earlier jobs mirrored back: until its claude runs
+    on the worker, they would say it is idle, and the daemon would type in a pty nobody reads."""
+    for path in (get_paths(bundle_folder)[1] / "sessions").glob("*.json"):
+        try:
+            if json.loads(path.read_text()).get("sessionId") == session:
+                path.unlink()
+        except (OSError, ValueError, AttributeError):
+            continue
+
+
 def read_remote(bundle_folder):
     """The worker and the job of the bundle's agent while it is remote, else None. The bundle can
     write this file: the daemon names files, units and ssh words after it, so each value must
@@ -494,6 +505,7 @@ def start(log, bundle, bundle_folder, worker, workers, base, session, resume):
     dummy = f"sk-ant-oat01-rr-{secrets.token_urlsafe(36)}"
     named = DUMMIES / hashlib.sha256(dummy.encode()).hexdigest()
     answer = {}
+    forget_records(bundle_folder, session)
     try:
         start_standin(bundle, bundle_folder, worker, session)
         haves = {

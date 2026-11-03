@@ -207,6 +207,33 @@ def check_standin(root):
     check("it watches the PRs of the bundle, as the bundle", watch and named <= volumes, runs[-1])
 
 
+def check_start(root):
+    """A job starts with no record of its session left by an earlier job, as the daemon would read
+    it as the status of the claude that does not run yet."""
+    remote_agent.get_values = lambda: {"CACHE_ROOT": str(root / "cache")}
+    sessions = root / "cache" / "devcontainer" / "claude-config" / "started" / "sessions"
+    sessions.mkdir(parents=True)
+    for name, session in (("7", "s1"), ("8", "s2")):
+        (sessions / f"{name}.json").write_text(json.dumps({"sessionId": session, "status": "idle"}))
+    (sessions / "9.json").write_text("[]")
+    (root / "started" / ".agent").mkdir(parents=True)
+
+    def refuse(*args):
+        raise RuntimeError("no stand-in")
+
+    remote_agent.start_standin = refuse
+    remote_agent.DUMMIES = root
+    remote_agent.subprocess.run = lambda argv, **kwargs: None
+    try:
+        remote_agent.start(
+            io.StringIO(), "started", root / "started", "w", None, "18.0", "s1", True
+        )
+    except RuntimeError:
+        pass
+    left = sorted(path.name for path in sessions.iterdir())
+    check("a job starts with no record of its session", left == ["8.json", "9.json"], left)
+
+
 def check_type(root):
     """Keys typed on a worker go to the stand-in as one order line, a refusal says why, and the
     mark of a typed task goes with the other files of the job once it ended."""
@@ -248,6 +275,7 @@ def main():
         check_env(root)
         check_remote(root)
         check_standin(root)
+        check_start(root)
         check_type(root)
     for line in failures:
         print(line)

@@ -312,6 +312,10 @@ necessary. but if we have a good setup, full remote should offer the same possib
   on sebpc on 2026-11-02). The stand-in starts in a scope of its own too, as podman leaves the
   conmon of a container in the cgroup of its caller: in the unit's, each stop of bundle-ctl waited
   90 s for it, and the socket did not answer meanwhile (3 of the 4 restarts of 2026-10-30).
+  Before all that, it drops the records of the session that its earlier jobs mirrored back
+  (`sessions/*.json` of the bundle's Claude folder): until the new claude runs, the daemon read
+  them as its status, and on 2026-11-03 typed the lines of the host 20 s before that claude
+  started, where nothing read them.
 - `MOUNTS` says, for each mount of a bundle (`devcontainer/base.jsonc`), how the remote agent gets
   it: sent in its config, served by the stand-in, in the runner image, made in the job, or of no
   use there. `python3 test_remote_agent.py` fails on a mount it does not name, and checks that the
