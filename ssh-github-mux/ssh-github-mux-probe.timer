@@ -1,0 +1,10 @@
+# Started by ssh-github-mux.service, stopped with it, see README.md.
+
+[Unit]
+Description=Check the shared SSH connection to github.com every 2 minutes
+BindsTo=ssh-github-mux.service
+After=ssh-github-mux.service
+
+[Timer]
+OnActiveSec=2min
+OnUnitActiveSec=2min

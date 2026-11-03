@@ -10,6 +10,7 @@ hold() {
     exit 1
 }
 
+[ -e "$dir/sock/probe" ] && rm -f "$dir/sock/probe" && exit 0
 case $(dbus-send --session --print-reply=literal --dest=org.cinnamon.ScreenSaver \
     /org/cinnamon/ScreenSaver org.cinnamon.ScreenSaver.GetActive 2>/dev/null) in
 *true*) hold ;;

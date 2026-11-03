@@ -1,0 +1,21 @@
+#!/bin/sh
+# ssh-github-mux-probe.service: a new session through the connection, else a restart, see README.md.
+dir=~/.local/state/ssh-github-mux
+[ -S "$dir/sock/github" ] || exit 0
+out=$(timeout 20 ssh -v -F none -T -o BatchMode=yes -o ControlMaster=no \
+    -o ControlPath="$dir/sock/github" -o IdentityAgent=none -o ProxyCommand=false \
+    git@github.com 2>&1)
+case $out in
+*"successfully authenticated"*)
+    rm -f "$dir/sock/probe-failed"
+    exit 0
+    ;;
+esac
+echo "no new session in 20 s through the connection, it is restarted. What ssh said:"
+echo "${out:-nothing}"
+if [ -e "$dir/sock/probe-failed" ]; then
+    notify-send --app-name=ssh-github-mux "GitHub over SSH is stuck" \
+        "A new connection did not help: journalctl --user -u ssh-github-mux-probe" || true
+fi
+touch "$dir/sock/probe-failed" "$dir/sock/probe"
+systemctl --user restart --no-block ssh-github-mux.service

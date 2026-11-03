@@ -1,0 +1,14 @@
+#!/bin/sh
+# Run by the install of README.md, and by a deploy of this folder (after-deploy of host-ops.json).
+set -e
+here=$(cd "$(dirname "$0")" && pwd)
+units=~/.config/systemd/user
+mkdir -p "$units"
+for unit in ssh-github-mux.service ssh-github-mux.path ssh-github-mux-unlock.service \
+    ssh-github-mux-probe.service ssh-github-mux-probe.timer; do
+    ln -sfn "$here/$unit" "$units/$unit"
+done
+systemctl --user daemon-reload
+if systemctl --user is-active -q ssh-github-mux.service; then
+    systemctl --user start ssh-github-mux-probe.timer
+fi

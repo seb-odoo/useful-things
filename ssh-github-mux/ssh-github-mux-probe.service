@@ -1,0 +1,6 @@
+[Unit]
+Description=Check that the shared SSH connection to github.com opens a new session
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/share/ssh-github-mux/probe

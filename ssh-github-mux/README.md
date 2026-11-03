@@ -30,6 +30,14 @@ each push of a container.
   holds no key, no agent). The service is started once the socket is there (`ExecStartPost`): an
   exit before is a failed start, and the unit shows as failed. An exit after, the normal end of
   the connection, leaves it inactive (`SuccessExitStatus=255`), as `systemctl stop` does.
+- A connection can stay up and open no new session: on 2026-11-03 it kept its keepalives from
+  10:51 to 12:11 while every git command through it hung, and nothing logged a line. So while it
+  is up, `ssh-github-mux-probe.timer` runs `probe` every 2 minutes: a session through the socket
+  must get GitHub's greeting within 20 seconds, else the unit restarts, and the sessions that
+  still run through it end. The journal of `ssh-github-mux-probe` keeps what `ssh -v` said, which
+  shows whether the master got its session from GitHub. That restart passes a locked screen
+  (`sock/probe`, read by `here`): the keys are loaded, a reconnect asks no card. When the next
+  probe finds the new connection stuck too, a desktop notification says so.
 
 Other hosts (pi5, test.upgrade, the `github-private` alias) are not concerned: one approval per
 command.
@@ -43,9 +51,13 @@ the agent of its environment into every container it attaches to.
 
 ```sh
 ln -sfn ~/repo/useful-things/ssh-github-mux ~/.local/share/ssh-github-mux
-ln -sfn ~/repo/useful-things/ssh-github-mux/ssh-github-mux{.service,.path,-unlock.service} ~/.config/systemd/user/
 sed -i '1i Include ~/.local/share/ssh-github-mux/github-mux.conf\n' ~/.ssh/config
-systemctl --user daemon-reload && systemctl --user enable --now ssh-github-mux.path ssh-github-mux-unlock.service
+sh ~/repo/useful-things/ssh-github-mux/install
+systemctl --user enable --now ssh-github-mux.path ssh-github-mux-unlock.service
 ```
+
+`install` links the units in `~/.config/systemd/user` and reloads them. A deploy of this folder
+runs it too (`after-deploy` of `host-ops.json`). Tests: `python3 test_request.py`,
+`python3 test_probe.py`.
 
 Stop the connection: `systemctl --user stop ssh-github-mux`.

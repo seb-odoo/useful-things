@@ -4,6 +4,7 @@
 [Unit]
 Description=Shared SSH connection to github.com
 StartLimitIntervalSec=0
+Wants=ssh-github-mux-probe.timer
 
 [Service]
 ExecCondition=%h/.local/share/ssh-github-mux/here
