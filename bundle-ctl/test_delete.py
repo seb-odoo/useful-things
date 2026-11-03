@@ -1107,6 +1107,20 @@ def check_close(root):
             == (0, [f"{remote}: its agent stops on sebpc, its work tree comes back"], [], [remote]),
         ),
     )
+    answer = daemon.close_agent_window(daemon.HOST, {}, {"bundle": remote_busy, "force": True})
+    checks.append(
+        (
+            "deck's Close stops a turn on a worker",
+            (answer, world["ended"])
+            == ((200, {"bundle": remote_busy, "worker": "sebpc"}), [remote, remote_busy]),
+        ),
+    )
+    try:
+        daemon.close_agent_window(daemon.HOST, {}, {"bundle": busy, "force": "yes"})
+        refused = ""
+    except ValueError as error:
+        refused = str(error)
+    checks.append(("force is true or false", refused == "close: force is true or false"))
     code, lines = run_client(path, "close", bare)
     checks.append(
         (

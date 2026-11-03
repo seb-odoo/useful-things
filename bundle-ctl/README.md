@@ -63,7 +63,7 @@ the pager. `python3 test_node_modules.py` and `python3 test_delete.py` have the 
 | `POST /bring-back` | the agent of `bundle` back from its worker: its work tree written here, then its session goes on in a terminal (see Remote agents). The host or that bundle asks |
 | `POST /place` | the agent of `bundle` put `where`: `local`, or a worker of `BUNDLE_CTL_WORKERS` (see Remote agents). The host or the ops container asks |
 | `POST /requeue` | the session of the agent of `bundle`, or of an ops agent window with `ops-SESSION` (see Ops agents), queued again, last, paused with `paused`, and its agent window closed once its turn ended, 2 minutes at most: meanwhile `client/run-hook.py` refuses the Bash calls of a bundle, on a reason that tells it to end its turn, and a turn still running at the end goes on told it was cut (see Cut sessions). With `github`, it waits for the GitHub connection of the host. The host or the ops container asks, or with `github` the bundle itself |
-| `POST /close` | the agent window of `bundle` closed with no yes, as after its verdict: its claude and its container stop, its session stays; refused while a claude of the bundle is in a turn or waits for an answer, or while its agent starts (see Agents in a terminal). An agent on a worker stops there as after its verdict and its work tree comes back: its turn is read in the session record the worker mirrors back, and it is refused while it moves (see Remote agents). Refused to a container |
+| `POST /close` | the agent window of `bundle` closed with no yes, as after its verdict: its claude and its container stop, its session stays; refused while a claude of the bundle is in a turn or waits for an answer, or while its agent starts (see Agents in a terminal). An agent on a worker stops there as after its verdict and its work tree comes back: its turn is read in the session record the worker mirrors back, and it is refused while it moves (see Remote agents); with `force` (deck's Close), a turn there does not refuse it: its claude stops at its next tool call or at the end of the turn, a dialog at once. Refused to a container |
 | `POST /prompt` | a prompt Seb sent from deck, typed as his own in the window of `agent` (a bundle, or `ops-SESSION`) while it runs `session`; 404 otherwise (see Prompts from deck). Refused to a container |
 | `POST /stop` | Escape in the window of `agent` while it runs `session`, in a turn or a dialog (see Prompts from deck). Refused to a container |
 | `POST /schedule` | when the queued task of `bundle` may start: `when` is `spot` (once a slot, the memory and the CPU let it), `manual` (it waits for a manual resume, until it is scheduled again) or `HH:MM` (that time of the host, today or tomorrow); it no longer goes over the cap. Then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
@@ -395,16 +395,27 @@ necessary. but if we have a good setup, full remote should offer the same possib
   lock through no link. Until then no prwatch.py ran for a remote agent, here or in the job (Seb,
   2026-11-02, as above). `python3 test_queue.py`, `test_prwatch.py`, `test_remote_agent.py`.
 - `agent-terminal.py` of a remote bundle attaches to its claude (`standin.py attach`) and writes
-  no `.agent/terminal`: it takes no slot, and closing it leaves the agent running there. A link
+  no `.agent/terminal`: it takes no slot. Closing it stops an agent that gave its verdict and is
+  idle (`bctl close`), and leaves one at work running there (Seb's pick, 2026-11-03, over always
+  and never: a logout of the laptop closes every terminal, and deck's Terminal opens one to look
+  at an agent). `python3 test_terminal.py` has both. A link
   down shows since when and waits. Its title says where, `⭐ BUNDLE @sebpc (mine)`, and so do the
   agent list and `GET /status` (`where` in the agent of the bundle, whose state is the one of an
   agent in a terminal here, never `stopped`). When the daemon stops that claude, after the
-  verdict (`.agent/done` is `0`) or to move it (`remote-moving`), the window closes as a terminal
-  here does; any other end keeps it open on its code, ❌ in the agent list. Its mark comes from the
+  verdict (`.agent/done` is `0`), on a Close (`remote-ending`) or to move it (`remote-moving`),
+  the window closes as a terminal here does; any other end keeps it open on its code, ❌ in the
+  agent list. Its mark comes from the
   record the worker mirrors back, of a claude started since the run (`.agent/run.lock`), so
   before the window: counted from the window, as here, the verdict read as a run that failed
   before its claude started. On 2026-11-02 four agents of sebpc showed ❌ after their verdict or
   their move. `python3 test_terminal.py` and `python3 test_window_title.py` have the cases.
+- From the stop the daemon asks until its end comes back, the agent list and deck add `stopping
+  for N s` to its state (`moving` for a move): the end took 19 s to 90 s on 2026-11-02 and 03.
+  The Close of the agent list and of deck asks `POST /close` with `force` for such an agent,
+  whether its window is open here or not (Seb, 2026-11-03: "when I actually click close in deck,
+  it seems it doesn't always close", as the Close of an agent whose window was open here closed
+  that window alone, and the agent went on there; 3 Closes in a turn were refused at 13:35).
+  `python3 test_agent_list.py` and `test_delete.py`.
 - `bctl bring-back BUNDLE`: claude stops once idle or in a tool call, its work tree comes back and
   is written in the worktrees when they are what was sent (else nothing is overwritten, and the
   commits stay in `refs/remote-runs/BUNDLE/`), the job is cancelled 11 minutes after at most,

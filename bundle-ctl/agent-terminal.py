@@ -91,6 +91,7 @@ def load_client(name, file):
 PRWATCH = load_client("prwatch", "prwatch.py")
 TITLE = load_client("title", "window-title.py")
 
+BCTL = [sys.executable, str(HERE / "client" / "bctl.py")]
 CLAUDE = "/home/vscode/.claude/bin/claude"
 CLI = "ms-vscode-remote.remote-containers-*/dist/spec-node/devContainersSpecCLI.js"
 CLIPBOARD = re.compile(rb"\x1b\]52;([a-z0-9]*);([A-Za-z0-9+/=]*|\?)(?:\x07|\x1b\\)")
@@ -763,18 +764,27 @@ def run_ops(name):
 
 
 def attach_remote(bundle):
-    """The agent runs on a worker: this window shows its claude, through its stand-in, and
-    closing it leaves the agent running there (README.md, "Remote agents"). The daemon stops that
-    claude after its verdict or to move it, which closes the window as a terminal here closes
-    after the verdict; any other end keeps it open on its code.
+    """The agent runs on a worker: this window shows its claude, through its stand-in. Closing it
+    stops an agent that gave its verdict and is idle (bctl close), and leaves one at work running
+    there (README.md, "Remote agents"). The daemon stops that claude after its verdict, to move it
+    or on a Close, which closes the window as a terminal here closes after the verdict; any other
+    end keeps it open on its code.
     """
-    code = run_tty(
-        ["podman", "exec", "--interactive", "--tty", "--detach-keys=",
-         "--env", f"TERM={os.environ.get('TERM', 'xterm')}", f"rrs-{bundle}",
-         "python3", "-I", "/opt/remote-runs/standin/standin.py", "attach"],
-    )
     agent = get_agent_folder(bundle)
-    if code and read_text(agent / "done") != "0" and not (agent / "remote-moving").exists():
+    signal.signal(signal.SIGHUP, stop)
+    signal.signal(signal.SIGTERM, stop)
+    try:
+        code = run_tty(
+            ["podman", "exec", "--interactive", "--tty", "--detach-keys=",
+             "--env", f"TERM={os.environ.get('TERM', 'xterm')}", f"rrs-{bundle}",
+             "python3", "-I", "/opt/remote-runs/standin/standin.py", "attach"],
+        )
+    except HangUp:
+        if read_text(agent / "done") == "0":
+            subprocess.run([*BCTL, "close", bundle], capture_output=True, check=False, timeout=30)
+        raise
+    asked = any((agent / name).exists() for name in ("remote-moving", "remote-ending"))
+    if code and read_text(agent / "done") != "0" and not asked:
         keep_open(f"{bundle}: its agent on the worker ended with code {code}")
 
 

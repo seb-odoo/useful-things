@@ -927,15 +927,19 @@ def requeue_agent(caller, query, body, after=None, login=False):
 def close_agent_window(caller, query, body):
     """Close the agent window of a bundle as close_freed does, once its claude is idle: refused
     while a claude of the bundle is in a turn or waits for an answer, as for a deletion, and while
-    its agent starts, before its claude runs. Only the host asks (HOST_ONLY)."""
+    its agent starts, before its claude runs. With force, an agent on a worker stops in a turn too,
+    as deck's Close stops an agent here. Only the host asks (HOST_ONLY)."""
     bundle = body.get("bundle") or ""
-    if set(body) != {"bundle"} or not BUNDLE_NAME.fullmatch(bundle):
-        raise ValueError("close: a bundle name alone")
+    force = body.get("force", False)
+    if set(body) - {"force"} != {"bundle"} or not BUNDLE_NAME.fullmatch(bundle):
+        raise ValueError("close: a bundle name alone, and force")
+    if not isinstance(force, bool):
+        raise ValueError("close: force is true or false")
     folder = get_worktree_bundle_folder(bundle)
     if not os.path.isdir(folder):
         raise ValueError(f"no bundle folder for {bundle}")
     if remote_agent.is_remote(pathlib.Path(folder)):
-        return close_remote_agent(bundle, pathlib.Path(folder))
+        return close_remote_agent(bundle, pathlib.Path(folder), force)
     if not get_window_pids(bundle):
         raise ValueError(f"{bundle} has no agent window")
     if is_in_turn(bundle):
@@ -950,15 +954,16 @@ def close_agent_window(caller, query, body):
     return 200, {"bundle": bundle}
 
 
-def close_remote_agent(bundle, folder):
+def close_remote_agent(bundle, folder, force=False):
     """Stop the claude of a bundle's agent on its worker as after its verdict: its work tree comes
     back and its session stays. Refused as close_agent_window is, from the session record the
-    worker mirrors back, and while the agent moves."""
+    worker mirrors back, and while the agent moves; with force, a turn waits for its next tool call
+    or for its end, and a dialog is closed."""
     agent = get_agent_folder(bundle)
     status = get_session_status(bundle, read_text(agent / "session"))
     if status is None:
         raise Refused(f"{bundle}: its agent is starting on its worker, its claude does not run yet")
-    if status not in ("idle", "shell"):
+    if status not in ("idle", "shell") and not force:
         raise Refused(f"{bundle}: its claude is in a turn or waits for an answer")
     if bundle in moving_back or (agent / "remote-moving").exists():
         raise Refused(f"{bundle}: its agent is moving")

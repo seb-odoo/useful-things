@@ -40,7 +40,9 @@ case "$1 $*" in
 \t\tIFS= read -r -t 0.1 part && { printf '%s\\n' "$line$part" >>"$STATE/typed"; line=; } || line+=$part
 \tdone ;;
 "exec "*agent-takeover.py*) touch "$AGENT/handoff" ;;
-"exec "*"standin.py attach") exit 143 ;;
+"exec "*"standin.py attach")
+\twhile [ -e "$AGENT/hold" ]; do sleep 0.1; done
+\texit 143 ;;
 "exec "*) cat >/dev/null ;;
 "inspect "*) echo true ;;
 "ps "*) [ -e "$STATE/window" ] && echo c1 ;;
@@ -108,6 +110,7 @@ def run_wrapper(root, bundle):
     module.has_window = lambda container: bool(os.environ.get("WINDOW")) or (
         pathlib.Path(os.environ["STATE"]) / "window"
     ).exists()
+    module.BCTL = ["bash", "-c", 'echo "bctl $*" >>"$LOG"', "bctl"]
     module.TRANSCRIPTS = root
     module.DECK = root / "deck"
     module.TOLD = root / "told"
@@ -685,6 +688,27 @@ def check_remote_move(case):
     check_remote_stop(case)
 
 
+def check_remote_close(case):
+    check_remote_stop(case)
+
+
+def check_remote_closed_done(case):
+    """Seb closes the window of an agent on a worker that gave its verdict: bctl close stops it
+    there; closing the window of one at work leaves it running."""
+    case.check("it attaches", wait(lambda: any("standin.py attach" in line for line in case.log())))
+    os.close(case.terminal.fd)
+    case.check("closing it ends the window", wait(case.terminal.has_ended))
+    case.check("closing it after the verdict stops it", wait(lambda: "bctl close b1" in case.log()))
+
+
+def check_remote_closed_at_work(case):
+    case.check("it attaches", wait(lambda: any("standin.py attach" in line for line in case.log())))
+    os.close(case.terminal.fd)
+    case.check("closing it ends the window", wait(case.terminal.has_ended))
+    time.sleep(0.5)
+    case.check("closing it at work leaves it running", "bctl close b1" not in case.log())
+
+
 def check_remote_failure(case):
     """Any other end of the claude of a worker keeps its window open on its code."""
     case.check("a failure shows its code", wait(lambda: "code 143" in case.terminal.read()))
@@ -751,6 +775,9 @@ def main():
     remote = {
         check_remote_stop: {"remote.json": "{}", "done": "0\n"},
         check_remote_move: {"remote.json": "{}", "remote-moving": ""},
+        check_remote_close: {"remote.json": "{}", "remote-ending": ""},
+        check_remote_closed_done: {"remote.json": "{}", "done": "0\n", "hold": ""},
+        check_remote_closed_at_work: {"remote.json": "{}", "hold": ""},
         check_remote_failure: {"remote.json": "{}"},
     }
     checks += (*remote,)

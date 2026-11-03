@@ -608,6 +608,8 @@ def check_pause(agent_list):
         ("master-n--seb", "", None, "running for 5 min"),
         ("0x0b", "pause", busy, "running for 5 min, pausing"),
         ("0x0b", "", busy, "running for 5 min"),
+        ("master-r--seb", "remote-ending", None, "running for 5 min, stopping for 40 s"),
+        ("master-m--seb", "remote-moving", None, "running for 5 min, moving"),
     ]
     with tempfile.TemporaryDirectory() as root:
         agent_list.get_agent_folder = lambda name: pathlib.Path(root, name, ".agent")
@@ -618,7 +620,8 @@ def check_pause(agent_list):
             os.utime(folder / "run.lock", (AGO,) * 2)
             (folder / "pause").unlink(missing_ok=True)
             if pause:
-                (folder / "pause").write_text(f"{time.time() + 120}\n")
+                (folder / pause).write_text(f"{time.time() + 120}\n")
+                os.utime(folder / pause, (time.time() - 40,) * 2)
             row = agent_list.picker.Row(None, 3, key, key, "0x0b" if record else "0x01", True)
             if (found := agent_list.get_info(row, "", record)[0]) != expected:
                 failures.append(f"row {key} with pause {pause!r}: {found!r}, expected {expected!r}")

@@ -179,8 +179,14 @@ def get_ops_state(row, record, now):
 def get_pause(bundle):
     """Why the daemon closes the agent window of a bundle, or of an ops agent (ops-SESSION), once
     its turn ended (its `pause` file): pausing for Pause, back to queue for Back to queue or a
-    wait for GitHub, closing when no task goes on with its session; "" when it closes nothing."""
-    if not (get_agent_folder(bundle) / "pause").exists():
+    wait for GitHub, closing when no task goes on with its session; "" when it closes nothing. An
+    agent on a worker that the daemon stops: since when, until its end comes back."""
+    folder = get_agent_folder(bundle)
+    if (folder / "remote-moving").exists():
+        return "moving"
+    if (since := get_mtime(folder / "remote-ending")) is not None:
+        return f"stopping for {bctl.format_span(time.time() - since)}"
+    if not (folder / "pause").exists():
         return ""
     queue = read_state()["queue"]
     item = next((item for item in queue if item["bundle"] == bundle and item.get("resume")), None)
@@ -1176,8 +1182,12 @@ class Agents:
     def close(self, *_args):
         rows = self.get_selected()
         text = "Close the window of these agents? Their claude stops."
-        if rows and self.confirm(text, rows, "Close"):
-            close_windows([row[WINDOW] for row in rows])
+        if not rows or not self.confirm(text, rows, "Close"):
+            return
+        away = [row for row in rows if (get_agent_folder(row[KEY]) / "remote.json").exists()]
+        close_windows([row[WINDOW] for row in rows if row not in away])
+        for row in away:
+            self.send("/close", {"bundle": row[KEY], "force": True})
 
     def queue_again(self, *_args, paused=False):
         """Queue the session of each selected bundle again, last: the daemon closes its window
