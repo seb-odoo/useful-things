@@ -1681,7 +1681,10 @@ def launch_queued():
             elif bundle in building_for_worker:
                 item["waits_for"] = "its build here, then a worker"
             elif item.get("build") and get_agent_worker({**item, "build": None}, folder, False)[0]:
-                if building_for_worker:
+                if not (GITHUB_MUX / "sock" / "github").is_socket():
+                    item["waits_for"] = "the GitHub connection of the host"
+                    ask_github()
+                elif building_for_worker:
                     item["waits_for"] = f"the build of {min(building_for_worker)} here"
                 else:
                     building_for_worker.add(bundle)

@@ -296,7 +296,10 @@ necessary. but if we have a good setup, full remote should offer the same possib
   (`the CPU of the host, or a place for an agent: sebpc: the disk is short`). A bundle open in a
   window stays here. A bundle not built yet (see Bare
   start) that a worker would take is built here first, one at a time, as a worker makes no
-  bundle; its task then starts as any other (Seb, 2026-11-02). After a failed build it starts
+  bundle; its task then starts as any other (Seb, 2026-11-02). That build waits for the GitHub
+  connection of the host, without which `fetch_bundle.py` fails at once (Seb, 2026-11-03: from
+  11-02 19:46 to 11-03 07:21, 21 builds failed so, and each agent started bare here only to
+  requeue itself for that connection). After a failed build it starts
   here in its bare folder, as without a worker. So does a task for a bundle whose agent started
   bare and never built it (`builds` in `state.json` keeps its build), wherever it is placed: the
   worker gets no repo from that folder. On 2026-11-03 six sessions that `bctl requeue --github`

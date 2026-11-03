@@ -1246,11 +1246,23 @@ def check_login(root):
 def check_disk_worker(root):
     """Under the disk floor, a task a worker takes goes there, and one not built yet waits; with
     the disk back, that one is built here, then its agent goes to the worker (Seb, 2026-11-02), or
-    starts here in its bare folder when its build failed."""
+    starts here in its bare folder when its build failed. With no GitHub connection, it waits for
+    it rather than build (Seb, 2026-11-03: 21 builds failed so in a night, each agent started
+    bare here for nothing)."""
     stubs = {
         name: getattr(daemon, name)
-        for name in ("REMOTE_AUTO", "WORKERS", "prepare_folder", "run_script", "start_remote")
+        for name in (
+            "GITHUB_MUX",
+            "REMOTE_AUTO",
+            "WORKERS",
+            "prepare_folder",
+            "run_script",
+            "start_remote",
+        )
     }
+    (root / "mux" / "sock").mkdir(parents=True)
+    listener = socket.socket(socket.AF_UNIX)
+    listener.bind(str(root / "mux" / "sock" / "github"))
     daemon.REMOTE_AUTO = True
     daemon.WORKERS = types.SimpleNamespace(
         names=["sebpc"],
@@ -1269,15 +1281,17 @@ def check_disk_worker(root):
     building = "new: its build here, then a worker"
     checks = []
     try:
-        for disk, run_script, expected in [
-            (20.4, None, ([], [], ["new: disk space (20 GB left, 30 needed)"])),
-            (100, lambda log, *args: None, ([("new", "sebpc")], [], [building])),
-            (99, fail, ([], ["new"], [building])),
+        for disk, run_script, mux, expected in [
+            (20.4, None, "mux", ([], [], ["new: disk space (20 GB left, 30 needed)"])),
+            (100, lambda log, *args: None, "mux", ([("new", "sebpc")], [], [building])),
+            (99, fail, "mux", ([], ["new"], [building])),
+            (98, fail, "down", ([], [], ["new: the GitHub connection of the host"])),
         ]:
             started.clear()
             builds.clear()
             state, launched = prepare(root / str(disk), {"built": FRESH, "new": GONE}, 8, disk=disk)
             state["queue"][1]["build"] = ["fetch_bundle.py", "new", "--no-open"]
+            daemon.GITHUB_MUX = root / mux
             daemon.run_script = run_script
             daemon.start_job = (
                 lambda caller, verb, work, lock=None, bundle=None, run=daemon.start_job: (
@@ -1297,9 +1311,12 @@ def check_disk_worker(root):
                 found += ([item["bundle"] for item in state["queue"] if item["bundle"] == "new"],)
                 expected += ([],)
             checks.append((disk, found == expected, found))
+        asked = (root / "down" / "request" / "start").exists()
+        checks.append(("the GitHub connection is asked", asked, asked))
     finally:
         vars(daemon).update(stubs)
-    failed = [f"disk worker: {disk:.0f} GB left: {found}" for disk, ok, found in checks if not ok]
+        listener.close()
+    failed = [f"disk worker: {disk}: {found}" for disk, ok, found in checks if not ok]
     return failed, len(checks)
 
 
