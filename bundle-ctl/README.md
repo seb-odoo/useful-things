@@ -650,6 +650,12 @@ branches again with the same commits, so a commit made after the request still k
   starts `delete_bundle.py` while the folder is still there, which the shutdown monitor of VS
   Code needs. When the session of its agent window already ended on the report of its verdict,
   the request shows that report.
+- An agent on a worker (see Remote agents) has no window nor container here: the yes stops its
+  claude there once its session is idle, as `bctl close` does, and `delete_bundle.py` runs once
+  its work tree came back (`.agent/remote.json` gone). The request and its answer say so. Until
+  2026-11-03 the deletion ran at once: on 2026-11-02, saas-19.2-website-snippets-leak-runbot-955924--seb
+  was deleted 90 s after its agent started on sebpc, and its job ran there for a day with no
+  bundle here. `delete_bundle.py` also leaves such a bundle (scripts/README.md).
 - The last answer of the agent (the last text of its session, else its `result.md`) is copied
   to `deleted/BUNDLE.md` beside `state.json` before `delete_bundle.py` runs, and the answer of
   the yes names that file. Its session goes to `deleted/BUNDLE.session`, as for a bundle deleted

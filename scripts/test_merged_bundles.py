@@ -117,6 +117,14 @@ def main():
         )
         head = make("master-window-open", "odoo")
         bundles.append(bundle("master-window-open", {"odoo": row(head)}, is_open=True))
+        head = make("master-agent-remote", "odoo")
+        agent = os.path.join(commands.get_worktree_bundle_folder("master-agent-remote"), ".agent")
+        os.makedirs(agent)
+        with open(f"{agent}/remote.json", "w") as file:
+            file.write('{"worker": "sebpc", "job": "1"}\n')
+        bundles.append(
+            bundle("master-agent-remote", {"odoo": row(head)}, agent={"state": "stopped"}),
+        )
         head = make("master-unknown-pr-head", "odoo")
         bundles.append(
             bundle("master-unknown-pr-head", {"odoo": row(head, pr_head="1" * 40)}),

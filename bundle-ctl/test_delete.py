@@ -33,6 +33,7 @@ PUSHED = "master-pushed--seb"
 QUEUED = "master-queued--seb"
 REBASED = "master-rebased-aku"
 REFUSED = "master-refused--seb"
+REMOTE = "master-remote--seb"
 REPORT = "blocked: needs opus\n\n- measured"
 REPORTED = "master-reported--seb"
 STOPPED = "master-stopped--seb"
@@ -973,6 +974,58 @@ def check_pairs(root):
     return [name for name, passed in checks if not passed], len(checks)
 
 
+def check_remote(root):
+    """A yes to delete a bundle whose agent runs on a worker stops its claude there once idle, and
+    delete_bundle runs once its work tree came back, not before (2026-11-02: the deletion ran 90 s
+    after the start of saas-19.2-website-snippets-leak-runbot-955924--seb on sebpc, and its job
+    ran on there for a day with no bundle here)."""
+    world = prepare(root)
+    world.update(caller=daemon.HOST, ended=[], status="busy")
+    git(root / "odoo", "branch", REMOTE, "master")
+    agent = root / "master" / REMOTE / ".agent"
+    agent.mkdir(parents=True)
+    (agent / "remote.json").write_text('{"worker": "sebpc", "job": "1793634308"}\n')
+    daemon.get_session_status = lambda bundle, session: world["status"]
+    daemon.remote_agent.end = lambda bundle, folder: world["ended"].append(bundle) or "stops"
+    path = root / "ctl.sock"
+    server = daemon.Server(str(path), daemon.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    _code, lines = run_client(path, "delete", REMOTE, "--reason", "moved to 18.0")
+    number = int(lines[0].partition("hok b")[2].partition(".")[0])
+    item = daemon.HELD.read_json(daemon.HELD_DIR / f"{number}.json")
+    result = answer_yes(number)
+    stop = "it stops on sebpc and its work tree comes back"
+    checks = [
+        (
+            "hok says that the yes stops the agent on its worker",
+            item["yes"] == f"once its agent ended its turn, {stop}, then delete_bundle deletes it",
+        ),
+        (
+            "a turn on the worker goes on, and nothing is deleted",
+            (result["text"], world["ended"], world["calls"])
+            == (f"{REMOTE} is deleted once its agent ended its turn: {stop} then", [], []),
+        ),
+    ]
+    world["status"] = "idle"
+    daemon.delete_safely()
+    wait_jobs()
+    checks.append(
+        (
+            "its idle claude stops on the worker, and the bundle stays until its tree is back",
+            (world["ended"], world["calls"]) == ([REMOTE], []),
+        ),
+    )
+    (agent / "remote.json").unlink()
+    daemon.delete_safely()
+    wait_jobs()
+    checks.append(
+        ("its tree back, delete_bundle runs", world["calls"] == [("delete_bundle.py", REMOTE)]),
+    )
+    server.shutdown()
+    server.server_close()
+    return [name for name, passed in checks if not passed], len(checks)
+
+
 def check_close(root):
     """`bctl close` from the host closes an idle agent window, or stops an idle agent on its worker,
     and from a bundle gets a 403; a turn that runs, a dialog or an agent that starts keeps it."""
@@ -1136,6 +1189,9 @@ def main():
         failures, total = failures + more, total + count
     with tempfile.TemporaryDirectory() as root:
         more, count = check_pairs(pathlib.Path(root))
+        failures, total = failures + more, total + count
+    with tempfile.TemporaryDirectory() as root:
+        more, count = check_remote(pathlib.Path(root))
         failures, total = failures + more, total + count
     with tempfile.TemporaryDirectory() as root:
         more, count = check_close(pathlib.Path(root))

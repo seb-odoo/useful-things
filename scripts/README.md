@@ -309,6 +309,10 @@ Removes a bundle from the local system (worktrees, branches, filestore, database
   deleted. The files of the web tooling are none (Shared node_modules)
 - Leaves a bundle whose dev container still runs, with a yellow line: delete it again once its
   window is closed
+- Leaves a bundle whose agent runs on a worker (`.agent/remote.json`, or `remote-starting` while
+  it starts), with a yellow line, `--force` too: its work tree is on the worker, and bundle-ctl
+  finds the job by that file only. On 2026-11-02 a job ran on sebpc for a day after its bundle
+  was deleted (`test_merged_bundles.py`, for gbs)
 - `--force`: delete such a bundle anyway, unsaved work included
 - `--also-remote`: also deletes the remote dev branch. ⚠️ Do not use on branches of others!
 

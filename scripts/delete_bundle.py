@@ -190,8 +190,18 @@ def delete_bundle(
     Returns that work by repo and by kind, empty once the bundle is deleted. Nothing is touched
     when there is some: the bundle folder goes as a whole below, and the branch with it.
     Nothing is touched either while the dev container of the bundle runs: VS Code stops it when
-    its window closes, but only while the bundle folder is still there.
+    its window closes, but only while the bundle folder is still there. Nor while its agent runs
+    on a worker: bundle-ctl finds it by its `.agent/remote.json`, which goes with the folder.
     """
+    agent = os.path.join(get_worktree_bundle_folder(bundle_name), ".agent")
+    if any(
+        os.path.exists(os.path.join(agent, name)) for name in ("remote.json", "remote-starting")
+    ):
+        print(
+            f"[yellow]{bundle_name}: not deleted, its agent runs on a worker, bring it back with "
+            "bctl bring-back or wait for its end, and delete the bundle again[/yellow]",
+        )
+        return {}
     if not force and (unsaved := get_unsaved_work(runner, bundle_name)):
         return unsaved
     containers = runner.run(

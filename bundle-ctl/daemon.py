@@ -2501,12 +2501,17 @@ def delete(caller, query, body):
         "reason": str(body.get("reason") or ""),
         "send": {"bundle": bundle, **({"drop": drop} if drop else {})},
         "title": f"delete the bundle {bundle}",
-        "yes": (
-            "once its agent ended its turn, its window closes and its container stops, then"
-            " delete_bundle deletes it"
-        ),
+        "yes": f"once its agent ended its turn, {get_stop(bundle)}, then delete_bundle deletes it",
     }
     return 200, {"bundle": bundle, "held": hold(item)}
+
+
+def get_stop(bundle):
+    """What ends the agent of a bundle Seb said yes to delete, before delete_bundle runs."""
+    remote = remote_agent.read_remote(pathlib.Path(get_worktree_bundle_folder(bundle)))
+    if remote:
+        return f"it stops on {remote['worker']} and its work tree comes back"
+    return "its window closes and its container stops"
 
 
 def get_report(bundle):
@@ -3743,6 +3748,7 @@ def delete_stopped():
             bundle
             for bundle in state["deletions"]
             if get_worktree_bundle_folder(bundle) not in running
+            and not remote_agent.is_remote(pathlib.Path(get_worktree_bundle_folder(bundle)))
         ]
         state["deletions"] = [bundle for bundle in state["deletions"] if bundle not in stopped]
         drops = {bundle: state.get("drops", {}).pop(bundle, []) for bundle in stopped}
@@ -3768,10 +3774,18 @@ def delete_stopped():
 def close_deleted():
     """Close the agent window of each bundle Seb said yes to delete, once no turn of its sessions
     runs, as he would: its container stops, which starts the deletion. A VS Code window is asked to
-    close, and a container no window holds any more is stopped."""
+    close, and a container no window holds any more is stopped. An agent on a worker stops there
+    once idle, and its work tree comes back."""
     with state_lock:
         bundles = list(read_state().get("deletions", []))
     for bundle in bundles:
+        folder = pathlib.Path(get_worktree_bundle_folder(bundle))
+        if remote_agent.read_remote(folder):
+            try:
+                close_remote_agent(bundle, folder)
+            except Refused:
+                pass
+            continue
         if is_in_turn(bundle):
             continue
         if get_window_pids(bundle):
@@ -4027,15 +4041,13 @@ def send_deletion(item):
         state["queue"] = [queued for queued in state["queue"] if queued["bundle"] != bundle]
         write_state(state)
     tab_groups.ask({"op": "close", "bundle": bundle})
+    stop = get_stop(bundle)
     close_deleted()
     has_agent = (get_agent_folder(bundle) / "session").exists()
     kept = f", its last answer is kept in {get_kept(bundle)}" if has_agent else ""
     job = delete_stopped().get(bundle)
     if job is None:
-        return (
-            f"{bundle} is deleted once its agent ended its turn: its window closes and its"
-            f" container stops then{kept}"
-        )
+        return f"{bundle} is deleted once its agent ended its turn: {stop} then{kept}"
     wait_job(job)
     if job["state"] == "done":
         return f"{bundle} deleted{kept}"
