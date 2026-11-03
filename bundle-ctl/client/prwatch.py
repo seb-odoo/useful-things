@@ -79,7 +79,8 @@ def github(path):
 
 
 def now():
-    return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # The stand-in runs this on the python3 of its image, 3.10, which has no datetime.UTC.
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def read_json(path):
