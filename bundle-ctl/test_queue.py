@@ -2324,6 +2324,107 @@ def check_leaving(root):
     return [f"leaving: {name}: {found}" for name in failed], len(checks)
 
 
+def check_orphans(root):
+    """An agent a worker lists past REMOTE_GONE_AFTER that no bundle here has gets one card: its
+    folder is gone, or it names no agent on that worker. One known, starting or on another
+    worker gets none, nor one whose job nothing here names, which the journal says. The yes
+    cancels its job there and drops what it left here (2026-11-02: an agent ran a day on sebpc
+    after the deletion of its bundle)."""
+    on = {name: json.dumps({"worker": name, "job": "1"}) for name in ("sebpc", "vm")}
+    bundles = {
+        "elsewhere": {"remote.json": on["vm"]},
+        "gone": None,
+        "known": {"remote.json": on["sebpc"]},
+        "recreated": {"session": "s\n"},
+        "starting": {"remote-starting": ""},
+    }
+    prepare(root, bundles, 8)
+    records = {
+        "elsewhere": {"worker": "vm", "job": "3"},
+        "gone": {"worker": "sebpc", "job": "7", "dummy": "a" * 64},
+        "recreated": {"worker": "sebpc", "job": "8"},
+    }
+    module = daemon.remote_agent
+    stubs = {name: getattr(module, name) for name in ("STATE", "drop_orphan", "ssh")}
+    module.STATE = root / "state"
+    for bundle, record in records.items():
+        module.keep_record(bundle, record)
+    (root / "projects" / "-workspace").mkdir(parents=True)
+    (root / "projects" / "-workspace" / "s1.jsonl").write_text('{"customTitle": "gone"}\n')
+    calls, drops = [], []
+    module.ssh = lambda workers, worker, verb, bundle, *args, **kwargs: (
+        calls.append((worker, verb, bundle, *args)) or {"cancelled": args[0]}
+    )
+    module.drop_orphan = lambda bundle, record: drops.append((bundle, record))
+    projects, daemon.PROJECTS = daemon.PROJECTS, root / "projects"
+    workers_stub, daemon.WORKERS = daemon.WORKERS, daemon.workers.Workers(["sebpc", "vm"])
+    listed = {
+        "sebpc": ["known", "starting", "gone", "recreated", "elsewhere"],
+        "vm": ["elsewhere"],
+    }
+    daemon.WORKERS.status = {
+        name: (
+            time.time(),
+            {"every": {"agents": [{"bundle": b, "kind": "agent", "age": 600} for b in agents]}},
+        )
+        for name, agents in listed.items()
+    }
+    journal = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(journal):
+            daemon.ask_orphans()
+            first = journal.getvalue()
+            for key in daemon.orphans:
+                daemon.orphans[key] -= daemon.REMOTE_GONE_AFTER + 1
+            daemon.ask_orphans()
+            daemon.ask_orphans()
+            path = daemon.HELD_DIR / "1.json"
+            item = daemon.HELD.read_json(path)
+            other = daemon.HELD.read_json(daemon.HELD_DIR / "2.json")
+            path.with_suffix(".answer").write_text(f"yes {item['digest']}\n")
+            daemon.HELD.take(path.with_suffix(".answer"), daemon.send_held)
+            result = daemon.HELD.read_json(path.with_suffix(".result"))
+    finally:
+        vars(module).update(stubs)
+        daemon.PROJECTS, daemon.WORKERS = projects, workers_stub
+        daemon.orphans.clear()
+    checks = [
+        ("nothing before REMOTE_GONE_AFTER", first == ""),
+        (
+            "one card each for the gone and the recreated bundle, a line for the one with no job",
+            [line for line in journal.getvalue().splitlines() if not line.startswith("{")]
+            == [
+                "gone: its agent runs on sebpc with no bundle here: hok b1",
+                "recreated: its agent runs on sebpc with no bundle here: hok b2",
+                "stale wait: elsewhere: its agent runs on sebpc, and nothing here names its job",
+                "gone: its agent on sebpc is cancelled, no bundle here had it",
+            ],
+        ),
+        (
+            "the card names the job, why, and the newest session",
+            (item["title"], item["lines"][1], item["lines"][2].split(",")[0], other["lines"][1:3])
+            == (
+                "cancel the agent of gone on sebpc",
+                "its bundle has no folder here",
+                "its newest session here: s1",
+                ["the bundle here has no agent on sebpc", "no session of it here"],
+            ),
+        ),
+        (
+            "the yes cancels its job and drops what it left here",
+            (result["text"], calls, drops)
+            == (
+                "the agent of gone on sebpc is cancelled (job 7), its tree stays there",
+                [("sebpc", "cancel", "gone", "7")],
+                [("gone", records["gone"])],
+            ),
+        ),
+    ]
+    failed = [name for name, passed in checks if not passed]
+    found = journal.getvalue(), item, other, result, calls, drops
+    return [f"orphans: {name}: {found}" for name in failed], len(checks)
+
+
 def check_choose_agent(root):
     """A worker takes an agent only with a place and 1 GB free for it, as it refuses one
     without (2026-10-30: six agents sent to sebpc in three minutes, each refused, then here), and
@@ -2706,6 +2807,7 @@ def main():
         check_ramp,
         check_renew,
         check_leaving,
+        check_orphans,
         check_choose_agent,
         check_fallback,
         check_refused_once,

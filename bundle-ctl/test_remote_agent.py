@@ -17,6 +17,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import types
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -294,6 +295,44 @@ def check_type(root):
     check("the mark of a typed task goes with the job", left == [], left)
 
 
+def check_record(root):
+    """The daemon keeps a copy of remote.json out of the bundle folder: a pass makes it, the end
+    of the job drops it, and drop_orphan removes what a job no bundle has left here."""
+    remote_agent.STATE = remote_agent.DUMMIES = root / "record"
+    runs = []
+
+    def run(argv, **kwargs):
+        runs.append(argv)
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    remote_agent.subprocess.run = run
+    workers = types.SimpleNamespace(is_up=lambda name: False, ask=lambda name: None)
+    agent = root / "kept" / ".agent"
+    agent.mkdir(parents=True)
+    remote = {"worker": "sebpc", "job": "7", "dummy": "a" * 64}
+    (agent / "remote.json").write_text(json.dumps(remote))
+    remote_agent.keep("kept", root / "kept", workers)
+    found = remote_agent.load_remote(remote_agent.record_path("kept"))
+    check("a pass on a remote agent keeps its record", found == remote, found)
+    remote_agent.run_folder("kept").mkdir(parents=True)
+    (remote_agent.run_folder("kept") / "ended").write_text('{"reason": "verdict"}')
+    (agent / "remote-ended").write_text("{}\n")
+    remote_agent.keep("kept", root / "kept", workers)
+    found = remote_agent.record_path("kept").exists()
+    check("the end of its job drops it", not found, found)
+    remote_agent.keep_record("kept", remote)
+    (remote_agent.DUMMIES / remote["dummy"]).write_text("kept\n")
+    runs.clear()
+    remote_agent.drop_orphan("kept", remote)
+    left = [path.name for path in (root / "record").iterdir() if path.is_file()]
+    stops = [
+        ["systemctl", "--user", "stop", "rr-tunnel-kept.scope"],
+        ["podman", "rm", "-f", "rrs-kept"],
+    ]
+    check("drop_orphan stops the tunnel and the stand-in", runs == stops, runs)
+    check("and drops the dummy login and the record", left == [], left)
+
+
 def check_ended(root):
     """An exec in the stand-in writes its run folder: the daemon reads there no link, no FIFO,
     nothing over MAX_ENDED, and its end removes only the regular files."""
@@ -351,6 +390,7 @@ def main():
         check_start(root)
         check_binary(root)
         check_type(root)
+        check_record(root)
         check_ended(root)
     for line in failures:
         print(line)

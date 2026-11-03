@@ -427,6 +427,18 @@ necessary. but if we have a good setup, full remote should offer the same possib
   it seems it doesn't always close", as the Close of an agent whose window was open here closed
   that window alone, and the agent went on there; 3 Closes in a turn were refused at 13:35).
   `python3 test_agent_list.py` and `test_delete.py`.
+- An agent a worker lists for 2 minutes that no bundle here has (its folder is gone, or its
+  `remote.json` names no agent on that worker, and none starts or moves) gets one card in hok,
+  once per run of the daemon: its job, why, the newest session of the bundle here, and that its
+  tree stays on the worker. Seb's yes cancels the job there (`cancel`, not `forget`: the tree
+  stays until the worker drops it), and drops its tunnel, its stand-in and its dummy login here.
+  The worker lists no job id, so the daemon keeps a copy of each `remote.json` in
+  `~/.local/state/bundle-ctl/remote/BUNDLE.json`, out of the bundle folder and of what a
+  container mounts: the start writes it, a pass makes it for an agent that has none, the end of
+  the job drops it. An agent with no copy only gets a `stale wait` line in the journal. Until
+  2026-11-03 nothing saw such an agent: saas-19.2-website-snippets-leak-runbot-955924--seb ran a
+  day on sebpc after its deletion (see Deletion). Seb's pick, 2026-11-03. `python3
+  test_queue.py`, `test_remote_agent.py`.
 - `bctl bring-back BUNDLE`: claude stops once idle or in a tool call, its work tree comes back and
   is written in the worktrees when they are what was sent (else nothing is overwritten, and the
   commits stay in `refs/remote-runs/BUNDLE/`), the job is cancelled 11 minutes after at most,

@@ -61,6 +61,7 @@ from agents import (  # noqa: E402
     get_resume,
     get_session_records,
     get_session_status,
+    get_session_title,
     get_transcript,
     get_window_pids,
     has_window,
@@ -347,6 +348,7 @@ bundle_locks = {}
 moving_back = set()
 building_for_worker = set()
 missing_agents = {}
+orphans = {}
 stale_starts = set()
 bundle_rows = {"read": float("-inf"), "rows": []}
 folder_by_container = {}
@@ -1829,6 +1831,7 @@ def keep_launching():
             try:
                 keep_remote_agents()
                 outside.collect_all()
+                ask_orphans()
             except Exception:
                 traceback.print_exc()
             if time.monotonic() - checked > REVIEW_CHECK:
@@ -2041,6 +2044,88 @@ def keep_remote_agents():
         if name and not remote_agent.is_remote(folder):
             set_place(folder.name, "local")
             print(f"{folder.name}: placed here, {name} is leaving", flush=True)
+
+
+def ask_orphans():
+    """One card for each agent a worker listed for REMOTE_GONE_AFTER that no bundle here has: its
+    folder is gone, or names no agent on that worker, so nothing would stop it (2026-11-02:
+    saas-19.2-website-snippets-leak-runbot-955924--seb ran a day on sebpc after its deletion).
+    His yes cancels its job. Asked once per run of this daemon, as he may say no."""
+    listed, _silent = WORKERS.list_jobs()
+    seen = set()
+    for job in listed:
+        worker, bundle = job["worker"], job["bundle"]
+        try:
+            folder = pathlib.Path(get_worktree_bundle_folder(bundle))
+        except IndexError:
+            continue
+        if job["state"] != "agent" or is_known_agent(worker, bundle, folder):
+            continue
+        seen.add((worker, bundle))
+        since = orphans.setdefault((worker, bundle), time.time())
+        if since and time.time() - since > REMOTE_GONE_AFTER:
+            orphans[(worker, bundle)] = None
+            print(hold_orphan(worker, bundle, job["since"], folder), flush=True)
+    for key in [key for key, since in orphans.items() if since and key not in seen]:
+        del orphans[key]
+
+
+def is_known_agent(worker, bundle, folder):
+    """Whether the agent a worker lists is the one of a bundle here, or one starting or moving."""
+    remote = remote_agent.read_remote(folder)
+    if remote:
+        return remote["worker"] == worker
+    return remote_agent.is_remote(folder) or WORKERS.is_sending(bundle) or bundle in moving_back
+
+
+def hold_orphan(worker, bundle, since, folder):
+    """The card of an agent no bundle here has, or why there is none: the worker lists no job
+    id, so only the record of its start names the job to cancel."""
+    record = remote_agent.load_remote(remote_agent.record_path(bundle))
+    if not record or record["worker"] != worker:
+        return f"stale wait: {bundle}: its agent runs on {worker}, and nothing here names its job"
+    sessions = [
+        path
+        for path in PROJECTS.joinpath("-workspace").glob("*.jsonl")
+        if get_session_title(path) == bundle
+    ]
+    newest = max(sessions, key=get_mtime, default=None)
+    written = newest and format_time(get_mtime(newest))
+    item = {
+        "client": HOST,
+        "key": f"orphan {worker} {bundle}",
+        "lines": [
+            f"job {record['job']}, on {worker} since {format_time(since)}",
+            f"the bundle here has no agent on {worker}"
+            if folder.is_dir()
+            else "its bundle has no folder here",
+            f"its newest session here: {newest.stem}, written last at {written}"
+            if newest
+            else "no session of it here",
+            f"its tree stays on {worker} until the worker drops it (14 days, or a short fast disk)",
+        ],
+        "reason": "no bundle here has this agent, so nothing would stop it",
+        "send": {"orphan": {"worker": worker, "bundle": bundle, "job": record["job"]}},
+        "title": f"cancel the agent of {bundle} on {worker}",
+        "yes": f"its job is cancelled on {worker}, and its tunnel and stand-in here go",
+    }
+    return f"{bundle}: its agent runs on {worker} with no bundle here: hok {hold(item)}"
+
+
+def send_orphan(item):
+    """Seb's yes to cancel an agent no bundle here has. A bundle whose agent went back to a worker
+    since keeps its stand-in, as the stand-in is named after the bundle."""
+    worker, bundle, job = (item["send"]["orphan"][key] for key in ("worker", "bundle", "job"))
+    try:
+        remote_agent.ssh(WORKERS, worker, "cancel", bundle, job, timeout=60)
+    except (RuntimeError, subprocess.TimeoutExpired) as error:
+        raise ValueError(f"{worker}: {error}") from None
+    record = remote_agent.load_remote(remote_agent.record_path(bundle)) or {}
+    folder = pathlib.Path(get_worktree_bundle_folder(bundle))
+    if record.get("job") == job and not remote_agent.is_remote(folder):
+        remote_agent.drop_orphan(bundle, record)
+    print(f"{bundle}: its agent on {worker} is cancelled, no bundle here had it", flush=True)
+    return f"the agent of {bundle} on {worker} is cancelled (job {job}), its tree stays there"
 
 
 def is_gone(bundle, remote):
@@ -4099,6 +4184,8 @@ def send_held(item):
         if job["state"] == "done":
             return f"the node_modules of {base} is built: the bundles on its package.json load it"
         return f"the node_modules of {base} is being built, see {job['log']}"
+    if "orphan" in item["send"]:
+        return send_orphan(item)
     if "bundle" in item["send"]:
         return send_deletion(item)
     _code, answer = open_ops(HOST, "ops", {"task": item["send"]["task"]})

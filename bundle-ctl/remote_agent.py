@@ -222,8 +222,12 @@ def read_remote(bundle_folder):
     write this file: the daemon names files, units and ssh words after it, so each value must
     have its form, and a file with any other value counts as no remote agent.
     """
+    return load_remote(get_agent(bundle_folder) / "remote.json")
+
+
+def load_remote(path):
     try:
-        remote = json.loads((get_agent(bundle_folder) / "remote.json").read_text())
+        remote = json.loads(pathlib.Path(path).read_text())
     except (OSError, ValueError):
         return None
     if type(remote) is not dict or not {"worker", "job"} <= remote.keys():
@@ -236,6 +240,29 @@ def read_remote(bundle_folder):
         elif form is None or type(value) is not str or not form.fullmatch(value):
             return None
     return remote
+
+
+def record_path(bundle):
+    """The copy of the remote.json of the bundle's agent, in a folder no container mounts: the
+    daemon still finds its job once the bundle folder is gone (README.md, "Remote agents")."""
+    return STATE / "remote" / f"{bundle}.json"
+
+
+def keep_record(bundle, remote):
+    record_path(bundle).parent.mkdir(parents=True, exist_ok=True)
+    write(record_path(bundle), json.dumps(remote) + "\n")
+
+
+def drop_orphan(bundle, record):
+    """What the agent of a bundle left here once its job is cancelled with no remote.json to
+    finish it from: its tunnel, its stand-in, its dummy login and its record."""
+    subprocess.run(
+        ["systemctl", "--user", "stop", tunnel_unit(bundle)], capture_output=True, check=False
+    )
+    subprocess.run(["podman", "rm", "-f", standin_name(bundle)], capture_output=True, check=False)
+    if record.get("dummy"):
+        (DUMMIES / record["dummy"]).unlink(missing_ok=True)
+    record_path(bundle).unlink(missing_ok=True)
 
 
 def is_remote(bundle_folder):
@@ -583,6 +610,7 @@ def start(log, bundle, bundle_folder, worker, workers, base, session, resume):
         }
         (run_folder(bundle) / "ended").unlink(missing_ok=True)
         write(agent / "remote.json", json.dumps(remote) + "\n")
+        keep_record(bundle, remote)
     except Exception:
         if "job" in answer:
             subprocess.run(
@@ -727,6 +755,8 @@ def keep(bundle, bundle_folder, workers):
     remote = read_remote(bundle_folder)
     if remote is None:
         return None, False
+    if not record_path(bundle).exists():
+        keep_record(bundle, remote)
     agent = get_agent(bundle_folder)
     ended = read_ended(bundle)
     if ended is not None:
@@ -791,6 +821,7 @@ def finish(bundle, bundle_folder, end):
         )
         if remote.get("dummy"):
             (DUMMIES / remote["dummy"]).unlink(missing_ok=True)
+        record_path(bundle).unlink(missing_ok=True)
         moved = (agent / "remote-moving").exists()
         for name in (
             "remote.json",
