@@ -12,6 +12,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -24,6 +25,7 @@ sys.path.insert(0, str(HERE))
 
 import remote_agent
 
+RUN = subprocess.run
 failures = []
 total = 0
 
@@ -273,6 +275,8 @@ def check_standin(root):
     check("and its transcripts folder", named in runs[:-1], runs)
     mirror = f"{root / 'share' / 'claude-transcripts' / 'b'}:/mirror/projects:rw"
     check("its own transcripts mirrored, no other bundle's", mirror in volumes, runs[-1])
+    check("not the memory: the daemon merges its notes",
+          not any("/mirror/projects/memory" in volume for volume in volumes), runs[-1])
     check("not the copy hok merges with", not any("handoff-base" in v for v in volumes), runs[-1])
     check("the config stays a file", (git_dir / "config").is_file())
     scope = ["systemd-run", "--user", "--scope", "--collect", "--quiet", "podman", "run"]
@@ -584,6 +588,112 @@ def check_stop_again(root):
     vars(remote_agent).update(kept)
 
 
+def check_notes(root):
+    """A memory note the job sends is merged with what changed here after the copy it got, and
+    the stand-in no longer writes the memory itself (Seb, 2026-11-05)."""
+    subprocess.run = RUN
+    home = root / "notes-home"
+    memory = home / ".claude" / "projects" / "-workspace" / "memory"
+    memory.mkdir(parents=True)
+    remote_agent.HOME = home
+    remote_agent.STATE = root / "notes-state"
+    remote_agent.HANDOFF_BASE = root / "notes-base"
+    remote_agent.get_values = lambda: {"CACHE_ROOT": str(root / "notes-cache")}
+    copy = remote_agent.HANDOFF_BASE / "n" / "dev-memory"
+    copy.mkdir(parents=True)
+    sent = remote_agent.run_folder("n") / "memory"
+    sent.mkdir(parents=True)
+    agent = root / "n" / ".agent"
+    agent.mkdir(parents=True)
+    remote = {"worker": "sebpc", "job": "1", "tunnel": time.time()}
+    (agent / "remote.json").write_text(json.dumps(remote))
+    remote_agent.keep_record("n", remote)
+    saved = remote_agent.is_tunnel_up
+    remote_agent.is_tunnel_up = lambda bundle: True
+    old = "# Note\n\nfirst\nsecond\nthird\nfourth\nfifth\n"
+    notes = {
+        "both.md": (old, old.replace("first", "first, here"), old.replace("fifth", "fifth, job")),
+        "same.md": (old, old.replace("third", "third, here"), old.replace("third", "third, job")),
+        "new.md": (None, None, "from the job\n"),
+        "kept.md": (old, old.replace("first", "first, here"), old),
+        "removed.md": (old, None, old.replace("fifth", "fifth, job")),
+        "plain.md": (old, old, old.replace("second", "second, job")),
+    }
+    for name, (base, here, mine) in notes.items():
+        for folder, text in ((copy, base), (memory, here), (sent, mine)):
+            if text is not None:
+                (folder / name).write_text(text)
+    secret = root / "secret"
+    secret.write_text("a host file\n")
+    (memory / "linked.md").symlink_to(secret)
+    (sent / "linked.md").write_text("from the job\n")
+    (sent / "staged-link.md").symlink_to(secret)
+    (sent / ".left.md.taking").write_text("taken by a pass that stopped\n")
+    printed = io.StringIO()
+    stdout, sys.stdout = sys.stdout, printed
+    try:
+        found = remote_agent.keep("n", root / "n", None)
+    finally:
+        sys.stdout = stdout
+        remote_agent.is_tunnel_up = saved
+
+    def read(name):
+        path = memory / name
+        return path.read_text() if path.is_file() and not path.is_symlink() else None
+
+    check("a pass on a remote agent takes the notes of its job", found == (None, False), found)
+    both = read("both.md")
+    check("the laptop changed a note after the copy, the job another part: both stay",
+          both == old.replace("first", "first, here").replace("fifth", "fifth, job"), both)
+    same = read("same.md")
+    check("both changed the same line: both kept",
+          same is not None and "third, here" in same and "third, job" in same
+          and "<<<<<<<" not in same, same)
+    check("a new note of the job is written", read("new.md") == "from the job\n")
+    check("a note the job did not change keeps what changed here",
+          read("kept.md") == old.replace("first", "first, here"))
+    check("a note removed here that the job changed comes back",
+          read("removed.md") == old.replace("fifth", "fifth, job"))
+    check("a note changed by the job only is the job's",
+          read("plain.md") == old.replace("second", "second, job"))
+    check("a link in the memory is not read, the note replaces it",
+          read("linked.md") == "from the job\n" and secret.read_text() == "a host file\n")
+    check("a link the stand-in left is not read", read("staged-link.md") is None)
+    check("a note a stopped pass took is taken again",
+          read("left.md") == "taken by a pass that stopped\n")
+    left = sorted(path.name for path in sent.iterdir())
+    check("and none waits", left == [], left)
+    lines = printed.getvalue()
+    for name, said in (("same.md", "both kept"), ("both.md", "merged"), ("removed.md", "is back"),
+                       ("staged-link.md", "no plain file")):
+        check(f"the journal names {name}", f"n: the memory note {name}" in lines and said in lines,
+              lines)
+    check("and is quiet on a note changed on one side",
+          "plain.md" not in lines and "new.md" not in lines, lines)
+    check("the copy of a note becomes the job's note",
+          (copy / "both.md").read_text() == old.replace("fifth", "fifth, job"))
+    (memory / "both.md").write_text(both.replace("third", "third, here again"))
+    (sent / "both.md").write_text(old.replace("fifth", "fifth, job, again"))
+    remote_agent.take_notes("n", root / "n")
+    again = read("both.md")
+    check("so its next change keeps what changed here since, with no conflict",
+          again == old.replace("first", "first, here").replace("third", "third, here again")
+          .replace("fifth", "fifth, job, again"), again)
+    shutil.rmtree(copy)
+    (memory / "plain.md").write_text("changed here\n")
+    (sent / "plain.md").write_text("the job's, whole\n")
+    remote_agent.take_notes("n", root / "n")
+    check("with no copy, the note is written whole", read("plain.md") == "the job's, whole\n")
+    own = root / "notes-cache" / "devcontainer" / "claude-config" / "n"
+    (own / "memory").mkdir(parents=True)
+    (own / "outside").write_text("{}\n")
+    (sent / "outside.md").write_text("from the job\n")
+    remote_agent.take_notes("n", root / "n")
+    check("on an outside PR, the note goes to the copy of the bundle",
+          (own / "memory" / "outside.md").read_text() == "from the job\n"
+          and read("outside.md") is None)
+
+
 def main():
     check_mounts()
     with tempfile.TemporaryDirectory() as folder:
@@ -601,6 +711,7 @@ def main():
         check_ended(root)
         check_stop_again(root)
         check_conflict(root)
+        check_notes(root)
     for line in failures:
         print(line)
     print(f"{total - len(failures)}/{total} cases as expected")

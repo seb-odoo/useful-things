@@ -347,6 +347,21 @@ necessary. but if we have a good setup, full remote should offer the same possib
   commit and a paragraph the laptop got after (his yes of 2026-11-05 asked for the merge). The
   next start replaces it, and a start drops the copy of a bundle that is gone. TestWarden and
   DiscussModelParser are not in the part, so a proposal for them is written whole.
+- The memory notes the job sends are merged with that copy too (Seb's yes, 2026-11-05: a note
+  the job wrote whole overwrote what the laptop changed in it after the copy). The stand-in does
+  not mount the memory: `standin.py` leaves each note in its run folder
+  (`~/.local/state/bundle-ctl/standin/BUNDLE/memory/`), and each pass of the daemon, the end of
+  the job and its next start (`take_notes`) write it in the memory of the bundle as `git
+  merge-file` of the note there, the copy (`dev-memory/`) and the job's note. Where both changed
+  the same lines, both are kept (`--union`, as for an outside PR), and the journal says `BUNDLE:
+  the memory note NAME of its job is merged with what changed here, both kept where both changed
+  the same lines`. A note removed here after the copy and changed by the job comes back, and the
+  journal says so; a note the job sent unchanged writes nothing. The copy of a note then becomes
+  the job's note, as its next change starts from it. With no copy (a job started before
+  bundle-ctl kept one, on 2026-11-05), the note is written whole, as before. On an outside PR the note goes to the copy
+  of the bundle (see Outside PRs in `devcontainer/README.md`), which nothing else writes while
+  its agent is remote. A note reaches the memory at the next pass, 10 s to a minute after the job
+  wrote it. `python3 test_remote_agent.py`.
 - `MOUNTS` says, for each mount of a bundle (`devcontainer/base.jsonc`), how the remote agent gets
   it: sent in its config, served by the stand-in, in the runner image, made in the job, or of no
   use there. `python3 test_remote_agent.py` fails on a mount it does not name, and checks that the

@@ -21,6 +21,7 @@ import stat
 import subprocess
 import sys
 import tarfile
+import tempfile
 import threading
 import time
 
@@ -32,6 +33,7 @@ devconfig = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(devconfig)
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
+import outside
 from agents import read_text, touch, write_text
 
 HOME = pathlib.Path.home()
@@ -461,6 +463,131 @@ def get_proposed(name):
     return None
 
 
+def take_notes(bundle, bundle_folder):
+    """Write in the memory of the bundle the notes its job sent, which the stand-in leaves in
+    its run folder: each is the merge of the note here, the copy the job got (keep_base) and the
+    job's note, so that what changed here after the copy stays. Where both changed the same
+    lines, both are kept. The copy of a note then becomes the job's note, which its next change
+    starts from. With no copy, the note is written whole. Never raises: the notes wait for the
+    next call. Prints and returns the lines for the journal."""
+    lines = []
+    try:
+        sent_fd = outside.open_folder(run_folder(bundle) / "memory")
+    except OSError:
+        return lines
+    fds = [sent_fd]
+    try:
+        names = get_sent_notes(sent_fd)
+        if names:
+            fds.append(outside.open_folder(get_memory(get_paths(bundle_folder)[1])))
+            try:
+                fds.append(outside.open_folder(HANDOFF_BASE / bundle / "dev-memory"))
+            except OSError:
+                fds.append(None)
+        for name in names:
+            if line := take_note(bundle, name, *fds):
+                lines.append(line)
+    except OSError as error:
+        lines.append(f"{bundle}: the memory notes of its job wait: {error}")
+    finally:
+        for fd in fds:
+            if fd is not None:
+                os.close(fd)
+    for line in lines:
+        print(line, flush=True)
+    return lines
+
+
+def get_sent_notes(sent_fd):
+    """The notes the stand-in left, each taken by a rename that a newer one of the same name does
+    not overwrite. One taken by a call that stopped is taken again, unless a newer one came."""
+    names = set(os.listdir(sent_fd))
+    for name in sorted(names):
+        note = name[1:].removesuffix(".taking")
+        if name == f".{note}.taking" and outside.NOTE.fullmatch(note):
+            if note in names:
+                os.unlink(name, dir_fd=sent_fd)
+            else:
+                os.rename(name, note, src_dir_fd=sent_fd, dst_dir_fd=sent_fd)
+                names.add(note)
+    taken = sorted(name for name in names if outside.NOTE.fullmatch(name))
+    for name in taken:
+        os.rename(name, f".{name}.taking", src_dir_fd=sent_fd, dst_dir_fd=sent_fd)
+    return taken
+
+
+def take_note(bundle, name, sent_fd, memory_fd, copy_fd):
+    """Write one note of the job, then drop it: a line for the journal or None."""
+    taking = f".{name}.taking"
+    mine = read_note(sent_fd, taking)
+    if mine is None:
+        os.unlink(taking, dir_fd=sent_fd)
+        return f"{bundle}: the memory note {name} of its job is no plain file of 1 MB at most"
+    here = read_note(memory_fd, name)
+    data, line = mine, None
+    if copy_fd is not None:
+        data, line = merge_note(bundle, name, here, read_note(copy_fd, name), mine)
+    if data not in (None, here):
+        outside.write_note(memory_fd, name, data)
+    if copy_fd is not None:
+        outside.write_note(copy_fd, name, mine)
+    os.unlink(taking, dir_fd=sent_fd)
+    return line
+
+
+def merge_note(bundle, name, here, base, mine):
+    """What to write for a note of the job, None for nothing, and a line for the journal or
+    None."""
+    if mine == base:
+        return None, None
+    if here in (base, mine):
+        return mine, None
+    if here is None:
+        return mine, f"{bundle}: the memory note {name}, removed here after its job got it, is back"
+    merged, conflicts = merge_file(here, base or b"", mine)
+    line = f"{bundle}: the memory note {name} of its job is merged with what changed here"
+    if conflicts > 127:
+        return mine, f"{line}: not text, written as its job sent it"
+    if conflicts:
+        merged, _ = merge_file(here, base or b"", mine, "--union")
+        line += ", both kept where both changed the same lines"
+    return merged, line
+
+
+def merge_file(here, base, mine, *options):
+    """git merge-file of the note here, the copy and the job's note: (its bytes, the number of
+    conflicts, over 127 when one is not text)."""
+    with tempfile.TemporaryDirectory(prefix="bctl-note-") as folder:
+        paths = []
+        for label, data in (("here", here), ("copy", base), ("job", mine)):
+            paths.append(os.path.join(folder, label))
+            with open(paths[-1], "wb") as file:
+                file.write(data)
+        done = subprocess.run(
+            ["git", "merge-file", "-p", "-q", *options, *paths],
+            capture_output=True,
+            check=False,
+            cwd=folder,
+        )
+    return done.stdout, done.returncode % 256
+
+
+def read_note(fd, name):
+    """A note of an open folder, None when it is missing, or no plain file of 1 MB at most: no
+    link followed, as a bundle writes the memory."""
+    try:
+        child = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+    except OSError:
+        return None
+    try:
+        info = os.fstat(child)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > outside.MAX_SIZE:
+            return None
+        return os.read(child, outside.MAX_SIZE + 1)
+    finally:
+        os.close(child)
+
+
 def find_binary(bundle_folder, pattern):
     """The newest PATTERN of the bundle's extension store, else of any store of a bundle, else of
     the store of the ops container, else None."""
@@ -522,7 +649,6 @@ def start_standin(bundle, bundle_folder, worker, session):
     mounts = [
         (bundle_folder, "/workspace", "rw"),
         (get_transcripts(bundle), "/mirror/projects", "rw"),
-        (get_memory(own), "/mirror/projects/memory", "rw"),
         (own / "sessions", "/mirror/sessions", "rw"),
         (own / "file-history", "/mirror/file-history", "rw"),
         (HOME / ".claude" / "handoff" / bundle, "/mirror/handoff", "rw"),
@@ -641,6 +767,7 @@ def start(log, bundle, bundle_folder, worker, workers, base, session, resume):
         repos = json.loads(files.pop("spec.json"))
         for name, data in files.items():
             ssh(workers, worker, "agent-put", bundle, name, data=data)
+        take_notes(bundle, bundle_folder)
         taken = time.time()
         parts = {
             "config": build_config(bundle_folder),
@@ -839,6 +966,7 @@ def keep(bundle, bundle_folder, workers):
     remote = read_remote(bundle_folder)
     if remote is None:
         return None, False
+    take_notes(bundle, bundle_folder)
     agent = get_agent(bundle_folder)
     ended = read_ended(bundle)
     if ended is not None:
@@ -872,6 +1000,7 @@ def finish(bundle, bundle_folder, end):
         remote = read_remote(bundle_folder)
         if remote is None:
             return None, False
+        take_notes(bundle, bundle_folder)
         agent = get_agent(bundle_folder)
         sent_end = (agent / "remote-ended").exists()
         line = f"{bundle}: its agent on {remote['worker']} ended ({end.get('reason') or end.get('exit')})"
