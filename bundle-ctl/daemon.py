@@ -4191,14 +4191,31 @@ def prompt_window(caller, query, body):
     if text.lstrip().startswith("/"):
         raise Refused("a slash command may open a menu deck does not show: type it in the terminal")
     folder, why = get_deck_window(body)
-    if folder is None:
+    worker = folder is None and get_remote_worker(body["agent"], body["session"])
+    if worker:
+        folder = TOLD_DIR / body["agent"] / body["session"]
+        folder.parent.mkdir(parents=True, exist_ok=True)
+    elif folder is None:
         return 404, {"error": why}
     try:
         leave_event(folder.parent, text, folder.name)
     except OSError as error:
         raise Refused(f"{body['agent']}: the prompt was not left: {error}") from error
-    print(f"{body['agent']}: a prompt from deck, {len(text)} characters", flush=True)
+    on = f", typed on {worker} as the lines of the host" if worker else ""
+    print(f"{body['agent']}: a prompt from deck, {len(text)} characters{on}", flush=True)
     return 200, {"bundle": body["agent"]}
+
+
+def get_remote_worker(agent, session):
+    """The worker that runs the agent of a bundle on that session, which its terminal here does
+    not type in: a prompt of deck goes there as the lines of the host in told/ (README.md,
+    "Prompts from deck"). None for an ops agent, or another session."""
+    if agent.startswith(OPS) or agent in get_terminals():
+        return None
+    worker = get_remote_agents().get(agent)
+    if not worker or read_text(get_agent_folder(agent) / "session") != session:
+        return None
+    return worker
 
 
 def stop_window(caller, query, body):

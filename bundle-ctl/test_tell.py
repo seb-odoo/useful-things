@@ -487,6 +487,23 @@ def check_prompt(root, check):
     found = ask(daemon.prompt_window, BUNDLE_SESSION, agent="b4", text="go on")
     check("an agent on a worker is not told", found[0] == 404 and "worker" in found[1]["error"])
     remote.clear()
+    agents["b7"] = root / "b7" / ".agent"
+    agents["b7"].mkdir(parents=True)
+    (agents["b7"] / "session").write_text(f"{BUNDLE_SESSION}\n")
+    daemon.get_remote_agents = lambda: {"b7": "sebpc"}
+    daemon.TOLD_DIR = root / "told"
+    found = ask(daemon.prompt_window, BUNDLE_SESSION, agent="b7", text="go on there")
+    told = sorted(
+        path.read_text() for path in (root / "told" / "b7" / BUNDLE_SESSION).glob("*.txt")
+    )
+    check(
+        "an agent on a worker with no terminal here gets it as a line of the host",
+        told == ["go on there"],
+        found,
+    )
+    found = ask(daemon.prompt_window, STOPPED_SESSION, agent="b7", text="go on there")
+    check("but not on another session", found[0] == 404, found)
+    daemon.get_remote_agents = dict
     found = ask(daemon.prompt_window, BUNDLE_SESSION, agent="b4", text=" /model opus")
     check("a slash command is refused", found[0] == "Refused", found)
     for bad in ("a\x1b[201~b", "a\rb", "  \n", "a" * (daemon.MAX_TASK + 1)):
@@ -551,7 +568,7 @@ def main():
         check("no podman ran", not (root / "podman.log").exists())
     for line in failures:
         print(line)
-    print(f"{85 - len(failures)}/85 cases as expected")
+    print(f"{87 - len(failures)}/87 cases as expected")
     sys.exit(1 if failures else 0)
 
 
