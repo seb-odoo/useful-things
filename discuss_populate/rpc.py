@@ -28,9 +28,11 @@ async def make_orm_call(server_url, model, method, parameters, cookies=None):
     }, cookies=cookies)
 
 
+DATABASE = None
+
+
 async def authenticate(url, login, password):
-    result = await make_rpc(f"{url}/web/database/list")
-    db_name = result["result"][0]
+    db_name = DATABASE or (await make_rpc(f"{url}/web/database/list"))["result"][0]
     async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
         async with session.post(
             f"{url}/web/session/authenticate",

@@ -20,6 +20,7 @@ import argcomplete
 import tab_groups
 from command_runner import ignore_error
 from commands import (
+    BUNDLE_NAME,
     GIT,
     clean_bundle_name,
     get_database_bundle_prefixes,
@@ -194,7 +195,11 @@ def delete_bundle(
     Nothing is touched either while the dev container of the bundle runs: VS Code stops it when
     its window closes, but only while the bundle folder is still there. Nor while its agent runs
     on a worker: bundle-ctl finds it by its `.agent/remote.json`, which goes with the folder.
+    Nor a name that is no bundle name: the folders below are named after it, and the branch
+    names gbs deletes come from refs every bundle writes (security check 11-03, C8).
     """
+    if not BUNDLE_NAME.fullmatch(bundle_name):
+        return {"name": {"no bundle name": [repr(bundle_name)]}}
     agent = os.path.join(get_worktree_bundle_folder(bundle_name), ".agent")
     if any(
         os.path.exists(os.path.join(agent, name)) for name in ("remote.json", "remote-starting")

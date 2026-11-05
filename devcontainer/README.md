@@ -80,8 +80,16 @@ with pip inside. The rest follows from that choice.
   the first such start: SMTP on `127.0.0.1:1025`, its page on 8025, which the proxy gives as
   `http://mail.<bundle>.localhost`. The mails stay in a temporary database until the container
   stops, the last 500. It takes 26 MB of memory, only in a container that served an Odoo. Tests
-  send no mail, so the flag changes nothing for them. Like 8069, port 8025 answers the other
-  bundles on devnet.
+  send no mail, so the flag changes nothing for them.
+- **No other bundle reaches its Odoo** (Seb, 2026-11-05, security check 11-03 C7: a bundle
+  restored a database of its own into the Odoo of another one, whose `psql` then ran its code
+  there). The wall of gateway-core drops the traffic between bundles on devnet (README of
+  gateway-core, "The dev network"), and odoo-proxy serves the host only, with no database route.
+  Every Odoo of the `odoo-bin` helper in a container, tests included, takes a master password of
+  the bundle (`-c`): [`container-rw/odoo-serve-conf.sh`](../container-rw/odoo-serve-conf.sh)
+  writes it at random in `/workspace/.odoo-serve.conf` at the first run, kept with the bundle,
+  and `odoo-master-password` prints it. A served one, by the helper or the serve-for-seb scripts,
+  also gets `--no-database-list`; tests do not, as some open the database selector.
 - **Commits are not signed in a container.** The `.git/config` shared with the host asks for a
   signature with a key the container does not have. `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_0` and
   `GIT_CONFIG_VALUE_0` in `containerEnv` turn it off there only: the environment wins over every

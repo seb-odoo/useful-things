@@ -40,6 +40,7 @@ OWNER = "odoo"
 WAIT = 70
 RETRY = (30, 600)
 LIST_AGAIN = 600
+MAX_READ = 64 * 1024
 REVIEWS = {
     "APPROVED": ("approval", "approvals"),
     "CHANGES_REQUESTED": ("request for changes", "requests for changes"),
@@ -183,7 +184,7 @@ def take(folder=None, note=None, only=None):
             try:
                 os.rename(name, mine, src_dir_fd=events, dst_dir_fd=events)
                 with open(open_file(mine, os.O_RDONLY, events)) as file:
-                    line = file.read().strip()
+                    line = file.read(MAX_READ).strip()
                 if only and not only(line):
                     os.rename(mine, name, src_dir_fd=events, dst_dir_fd=events)
                     continue

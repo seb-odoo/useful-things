@@ -94,6 +94,7 @@ from agents import (  # noqa: E402
     get_agent_folder,
     get_mtime,
     get_session_records,
+    read_bytes,
     read_state,
     read_text,
 )
@@ -117,6 +118,7 @@ KEY, WINDOW, TITLE = 9, 10, 11
 NOT_BUILT = "Nothing of this bundle is checked out yet"
 OPS_CONTAINER = os.path.basename(HOST_FOLDER or "")
 OWNED = "🔑 hok"
+PROMPT_TAIL = 16 << 20
 PICK_TIME = 10
 SORTS = (12, 13, 2, 14, 15, 16, 17, 7, 8)
 PLACE = (
@@ -463,28 +465,28 @@ def ask(method, path, body=None):
 
 def get_last_prompt(path):
     """The last prompt someone wrote in a transcript, a resume of the daemon aside, on one line and
-    without the note of a bundle not built yet."""
+    without the note of a bundle not built yet. The last PROMPT_TAIL bytes only: the bundle writes
+    its transcripts."""
     prompt = ""
-    with path.open("rb") as file:
-        for line in file:
-            if b'"type":"user"' not in line:
-                continue
-            try:
-                entry = json.loads(line)
-                content = entry["message"]["content"]
-                if isinstance(content, list):
-                    content = "\n".join(part["text"] for part in content if part["type"] == "text")
-                origin = (entry.get("origin") or {}).get("kind", "human")
-            except (KeyError, TypeError, ValueError):
-                continue
-            text = content.strip()
-            if entry.get("isMeta") or origin != "human" or not text:
-                continue
-            if text.startswith((bctl.GO_ON, "<", "[Request interrupted")):
-                continue
-            if text.startswith(NOT_BUILT):
-                text = text.partition("\n\n")[2]
-            prompt = " ".join(text.split())
+    for line in (read_bytes(path, PROMPT_TAIL, tail=True) or b"").splitlines():
+        if b'"type":"user"' not in line:
+            continue
+        try:
+            entry = json.loads(line)
+            content = entry["message"]["content"]
+            if isinstance(content, list):
+                content = "\n".join(part["text"] for part in content if part["type"] == "text")
+            origin = (entry.get("origin") or {}).get("kind", "human")
+        except (KeyError, TypeError, ValueError):
+            continue
+        text = content.strip()
+        if entry.get("isMeta") or origin != "human" or not text:
+            continue
+        if text.startswith((bctl.GO_ON, "<", "[Request interrupted")):
+            continue
+        if text.startswith(NOT_BUILT):
+            text = text.partition("\n\n")[2]
+        prompt = " ".join(text.split())
     return prompt
 
 

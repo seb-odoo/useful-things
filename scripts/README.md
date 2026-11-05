@@ -291,6 +291,10 @@ than its packs plus 10 GB, as the new pack is written before the old ones go.
 
 Removes a bundle from the local system (worktrees, branches, filestore, databases, images).
 
+- Refuses a name that is no bundle name (`BUNDLE_NAME`, no `/`), and so does `gbs` with the
+  branches it reads: every bundle writes the refs of the shared `.git`, and a branch `x/link`
+  made the deletion of a merged bundle follow a link it put in its folder (security check 11-03,
+  C8, `test_merged_bundles.py`).
 - Deletes git worktrees and local branches for each repo, and its `.git/worktrees/<bundle>`.
   git runs only in a folder whose real path is `WORKTREE_ROOT/<base>/<bundle>/<repo>`, with no
   link on the way (`commands.is_bundle_worktree`), and with the `-c` options that turn off the
@@ -647,7 +651,8 @@ left to do, dim is background, cyan is a worktree, magenta is merged.
 - The state of a colleague's PR is dim as a whole.
 
 All the PRs come from GraphQL queries of 5 branches each, one alias per repo and branch, sent
-together while git works: GitHub takes about 0.1 s per PR of a query, so one query for every
+together while git works (the owner and the name of a repo go in as JSON strings, and only when
+the URL of its remote names them in `[\w.-]+`: the bundles write that config, C8): GitHub takes about 0.1 s per PR of a query, so one query for every
 branch made the table wait 5 s or more. A `gh` call that fails or a mergebot that does not answer
 prints `PR state incomplete, <source>: <reason>` under the table, and `create PR` only shows when
 the PR queries worked.

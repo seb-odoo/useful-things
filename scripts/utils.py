@@ -9,7 +9,7 @@ import re
 import subprocess
 import sys
 
-from agents import mark_handled
+from agents import mark_handled, read_bytes
 from command_runner import Runner, ignore_error
 from commands import (
     BUNDLE_SUFFIX,
@@ -31,6 +31,8 @@ from commands import (
 )
 from config import BUNDLE_DB_CONTAINER, HOST_BOX, WORKTREE_CONTAINER, node_modules_key
 
+MAX_GITDIR = 4096
+MAX_PACKAGE = 1 << 20
 WORKSPACE_FOLDER = "/workspace"
 
 _USEFUL_THINGS_FOLDER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -123,10 +125,11 @@ class UtilsRunner(Runner):
         `.git` names no gitdir, or one with no index, so git sees its files as untracked."""
         if os.path.islink(target_folder):
             return
-        try:
-            with open(f"{target_folder}/.git") as file:
-                gitdir = file.read().removeprefix("gitdir:").strip()
-        except OSError:
+        found = read_bytes(f"{target_folder}/.git", MAX_GITDIR)
+        if found is None:
+            return
+        gitdir = found.decode(errors="replace").removeprefix("gitdir:").strip()
+        if not gitdir or "\0" in gitdir:
             return
         gitdir = os.path.join(target_folder, gitdir)
         if os.path.isfile(f"{gitdir}/index"):
@@ -306,11 +309,10 @@ class UtilsRunner(Runner):
         enable = [HOST_BOX, "--only", folder, "--dir", folder, "--", "env", *npm]
         enable += ["bash", "./odoo/addons/web/tooling/enable.sh"]
         runner.run(enable, input="y\n" if has_enterprise else "n\n")
-        try:
-            with open(f"{odoo_wt}/addons/web/tooling/_package.json", "rb") as file:
-                key = node_modules_key(file.read())
-        except OSError:
+        package = read_bytes(f"{odoo_wt}/addons/web/tooling/_package.json", MAX_PACKAGE)
+        if package is None:
             return
+        key = node_modules_key(package)
         for repo_wt in repo_wts:
             runner.run(
                 ["ln", "-sfn", f"/opt/node_modules/{key}/node_modules", f"{repo_wt}/node_modules"]

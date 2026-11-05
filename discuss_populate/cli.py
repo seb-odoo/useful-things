@@ -7,6 +7,7 @@ import tqdm
 import click
 from tqdm import trange, tqdm
 from random_unicode_emoji import random_emoji
+import rpc
 from rpc import authenticate, make_rpc, make_orm_call
 from faker import Faker
 import random
@@ -110,10 +111,12 @@ async def _init_auth(url, login):
 @click.option("--server-url", "url", default="http://localhost:8069", show_default=True, help="Odoo server URL.")
 @click.option("--guest-cookie", "guest_cookie", show_default=True, help="Guest session cookie (dgid).")
 @click.option("--login", "login", default="admin", show_default=True, help="User login for authentication.")
+@click.option("--db", "database", help="Database to log in to, for a server with no database list.")
 @click.pass_context
-def cli(ctx, url, login, guest_cookie=None):
+def cli(ctx, url, login, guest_cookie=None, database=None):
     """Odoo Discuss data generation CLI."""
     ctx.ensure_object(dict)
+    rpc.DATABASE = database
     ctx.obj["server_url"] = url
     if guest_cookie:
         ctx.obj["cookie"] = {"dgid": guest_cookie}

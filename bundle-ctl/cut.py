@@ -17,13 +17,20 @@ A `claude -p` run (`sdk-cli`) is never cut: nobody waits for it.
 
 import json
 import os
+import pathlib
 import re
+import sys
 import time
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "scripts"))
+
+from agents import MAX_RECORD, open_regular, read_bytes  # noqa: E402
 
 CLOSE = re.compile(r"[*_\s]*(nothing (is )?left|(waiting|waits) (for|on) you)\b", re.IGNORECASE)
 GO_ON = "Continue from where you left off."
 INTERRUPTED = "[Request interrupted by user"
 LOCAL = ("<bash-", "<command-", "<local-command-")
+MAX_TAIL = 64 << 20
 NOTIFIED = re.compile(rb"<task-id>([^<]+)</task-id>")
 PARTS = re.compile(r"^\s*(#+\s*|\*\*)(Done|Decide|Your action)\b", re.IGNORECASE | re.MULTILINE)
 REPORT_LINES = 15
@@ -40,15 +47,20 @@ WINDOW = 3 * 86400
 
 
 def shorten(text, size=SHORT):
-    text = " ".join(str(text).split())
+    """One line of printable characters, `size` at most: it goes into the prompt of a resume,
+    where a control key would end the paste (agent-terminal.py drops such a task)."""
+    text = " ".join("".join(char if char.isprintable() else " " for char in str(text)).split())
     return text if len(text) <= size else f"{text[: size - 3]}..."
 
 
 def read_lines(path, tail):
-    with path.open("rb") as file:
-        size = file.seek(0, os.SEEK_END)
+    file = open_regular(path)
+    if file is None:
+        return []
+    with file:
+        size = os.fstat(file.fileno()).st_size
         file.seek(max(0, size - tail))
-        lines = file.read().splitlines()
+        lines = file.read(tail).splitlines()
     return lines[1:] if size > tail else lines
 
 
@@ -145,8 +157,10 @@ def parse(lines):
 def read_session(path, tail=TAIL):
     """What the end of a transcript says: its title, its last message, the last prompt typed in it,
     its last tool call, and how many of the background commands and agents it started never ended.
-    A tail that holds no message is read again four times longer, up to the whole file."""
-    size = path.stat().st_size
+    A tail that holds no message is read again four times longer, up to the whole file or
+    MAX_TAIL: the bundle writes its transcripts."""
+    size = min(path.lstat().st_size, MAX_TAIL)
+    tail = min(tail, MAX_TAIL)
     while True:
         session = parse(read_lines(path, tail))
         if session["last"] or tail >= size:
@@ -213,7 +227,7 @@ def get_live_sessions(records, proc="/proc"):
     for folder in records:
         for path in folder.glob("*.json"):
             try:
-                record = json.loads(path.read_text())
+                record = json.loads(read_bytes(path, MAX_RECORD) or b"")
                 if (str(record["pid"]), str(record["procStart"])) in running:
                     live.add(record["sessionId"])
             except (KeyError, OSError, TypeError, ValueError):

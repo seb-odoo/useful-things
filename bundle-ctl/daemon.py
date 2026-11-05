@@ -228,7 +228,6 @@ MAX_AGENTS = int(
 MAX_BODY = 64 * 1024
 MAX_PRIORITY = 100
 MAX_RELAUNCHES = 3
-MAX_REPORT_LINE = 200
 MAX_TASK = 32 * 1024
 GITHUB_RAW = "https://raw.githubusercontent.com"
 MAX_PACKAGE = 256 * 1024
@@ -332,6 +331,19 @@ TERMINAL_FILES = (
 )
 PRWATCH = load_client("prwatch", "prwatch.py")
 TITLE = load_client("title", "window-title.py")
+VERDICT = re.compile(
+    r"(pushed:|ready to push|needs seb:|stays a draft:|blocked:|nothing to do:)[\s`*_]*"
+    r"([0-9a-f]{7,40}\b)?",
+    re.IGNORECASE,
+)
+VERDICTS = {
+    "blocked": "blocked",
+    "needs seb": "needs Seb",
+    "nothing to do": "nothing to do",
+    "pushed": "pushed",
+    "ready to push": "ready to push",
+    "stays a draft": "stays a draft",
+}
 WAIT_LIMITS = (
     ("a manual resume", None),
     ("its time, ", None),
@@ -1275,8 +1287,11 @@ def check_terminal(caller, bundle, body):
     """Why the agent terminal of a bundle cannot open on its last session, with no prompt, or for
     the host on a new session with no task when the bundle has no agent.
 
-    The window of the bundle closes for it: only that bundle or the host may ask.
+    Only the host, the bundle or its parent may ask (may_open): the terminal also types the lines
+    left for it.
     """
+    if not may_open(caller, bundle):
+        raise Refused(f"{bundle}: only the host, the bundle or its parent opens its terminal")
     if "task" in body or body.get("resume"):
         raise ValueError("terminal: only without a task")
     agent = get_agent_folder(bundle)
@@ -1289,6 +1304,13 @@ def check_terminal(caller, bundle, body):
     container = get_bundle_container(bundle)
     if caller not in (HOST, bundle) and container and has_window(container):
         raise Refused(f"{bundle} is open in a window: its session goes on in its Claude tab")
+
+
+def may_open(caller, bundle):
+    """Whether a caller may open the terminal or the window of a bundle: the host, the bundle or
+    its parent. Either starts a container and a claude at once, past the cap and the memory check
+    (security check 11-03, B11)."""
+    return caller in (HOST, bundle) or caller == read_parent(bundle).get("parent")
 
 
 def check_task(bundle, body, session=None):
@@ -1313,6 +1335,8 @@ def check_task(bundle, body, session=None):
         raise ValueError("paused: true or false")
     if not isinstance(task, str) or not task.strip() or len(task) > MAX_TASK:
         raise ValueError(f"task: a text of at most {MAX_TASK} characters")
+    if CONTROL.search(task):
+        raise ValueError("task: no control character but new lines and tabs")
     if "after" in body and not (isinstance(body["after"], str) and AFTER.fullmatch(body["after"])):
         raise ValueError("after: a time of the day, HH:MM")
     if type(priority) is not int or abs(priority) > MAX_PRIORITY:
@@ -4081,11 +4105,13 @@ def tell_verdicts():
                 path.unlink(missing_ok=True)
 
 
-def tell_verdict(bundle):
+def tell_verdict(bundle, gone=False):
     """Tell the parent of a bundle that its agent ended the run of the task that started last
     (note_task_start), once: the bundle writes its .agent/ folder, and could touch `done` again.
-    On a verdict, the first line of its report goes too, printable and cut, as the words of the
-    agent (Seb, 2026-11-02)."""
+    On a verdict, its word goes too, and the sha of a push (get_verdict): never a word of the
+    report, which the parent reads with `bctl --json status`, as a text typed in its window
+    reads as its prompt (Seb, 2026-11-05, security check 11-03, B10). A bundle `gone` at Seb's
+    yes leaves its report where keep_last_answer copies it, on the host."""
     with parents_lock:
         kept = read_parent(bundle)
         agent = get_agent_folder(bundle)
@@ -4099,13 +4125,23 @@ def tell_verdict(bundle):
         word = word if DONE_WORD.fullmatch(word) else "something else"
         tell_parent(bundle, f"{said} with no verdict: its .agent/done says {word}.")
         return
-    report = read_head(agent / "result.md").splitlines()
-    first = next((line for line in report if line.strip()), "").strip().lstrip("#*_` ")
-    first = "".join(char for char in " ".join(first.split()) if char.isprintable())
-    if len(first) > MAX_REPORT_LINE:
-        first = f"{first[: MAX_REPORT_LINE - 3]}..."
-    opens = "Its report opens on, in its words, not Seb's:"
-    tell_parent(bundle, f"{said} on its verdict. {opens} {first}")
+    verdict = get_verdict(read_head(agent / "result.md"))
+    report = f"Its report: agent.result of {bundle} in bctl --json status."
+    if gone:
+        report = f"Its report is kept on the host in {get_kept(bundle)}, as {bundle} is deleted."
+    tell_parent(bundle, f"{said} on {verdict}. {report}")
+
+
+def get_verdict(report):
+    """The verdict the first line of a report opens on, in the words of VERDICTS, with the sha of
+    a push: nothing else of the report, which the bundle wrote."""
+    first = next((line for line in report.splitlines() if line.strip()), "")
+    found = VERDICT.match(first.strip().lstrip("#*_` "))
+    if not found:
+        return "a report with no verdict word"
+    word = VERDICTS[found[1].lower().rstrip(":")]
+    sha = found[2] if word == "pushed" else None
+    return f"its verdict, {word}: {sha}" if sha else f"its verdict, {word}"
 
 
 def read_head(path):
@@ -4261,7 +4297,7 @@ def delete_stopped():
 
         def work(log, bundle=bundle, drop=drops[bundle]):
             _branches, force = check_deletion(bundle, drop)
-            tell_verdict(bundle)
+            tell_verdict(bundle, gone=True)
             keep_last_answer(bundle)
             run_script(log, "delete_bundle.py", *(["--force"] if force else []), bundle)
             with state_lock:
@@ -5103,6 +5139,8 @@ def open_bundle(caller, query, body):
         return hold_task(caller, bundle, body)
     if "task" in body:
         return 202, queue_task(caller, bundle, body)
+    if not may_open(caller, bundle):
+        raise Refused(f"{bundle}: only the host, the bundle or its parent opens its window")
     return start_job(
         caller,
         "open",

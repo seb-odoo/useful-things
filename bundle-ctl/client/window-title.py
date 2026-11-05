@@ -32,6 +32,7 @@ import json
 import os
 import pathlib
 import re
+import stat
 import sys
 import time
 
@@ -53,6 +54,8 @@ KINDS = (
 LEFT = re.compile(r"[*_\s]*nothing (is )?left\b", re.IGNORECASE)
 LINK = re.compile(r"\[([^\]]+)\]\([^)\s]+\)")
 LOGIN_WAIT = "claude-switch: the main login expires"
+MAX_LINE = 4 << 20
+MAX_SCAN = 16 << 20
 NEW = "new session"
 OPS = "ops-"
 PARTS = re.compile(r"^[#*_ ]*(Done|Decide|Your action)\b", re.MULTILINE)
@@ -94,25 +97,38 @@ def get_transcript(session, bundle=""):
     if not SESSION_NAME.fullmatch(session or ""):
         return None
     paths = [folder / f"{session}.jsonl" for folder in get_projects(bundle)]
-    return next((path for path in paths if path.is_file()), None)
+    return next((path for path in paths if path.is_file() and not path.is_symlink()), None)
+
+
+def open_transcript(session, bundle=""):
+    """The transcript of a session open for reading, None when it has none: a regular file, with
+    no link followed and no wait on a FIFO, as a bundle writes its transcripts (security check
+    11-03, B13)."""
+    try:
+        fd = os.open(get_transcript(session, bundle), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except (OSError, TypeError):
+        return None
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        return None
+    return os.fdopen(fd, "rb")
 
 
 def read_tail(session, bundle=""):
-    path = get_transcript(session, bundle)
     try:
-        with path.open("rb") as file:
+        with open_transcript(session, bundle) as file:
             file.seek(max(0, file.seek(0, os.SEEK_END) - TAIL))
-            return file.read().splitlines()
-    except (AttributeError, OSError):
+            return file.read(TAIL).splitlines()
+    except (AttributeError, OSError, TypeError):
         return []
 
 
 def get_first_prompt(session, bundle=""):
     """The first line of the first prompt typed in a session, PROMPT characters at most."""
     try:
-        with get_transcript(session, bundle).open("rb") as file:
+        with open_transcript(session, bundle) as file:
             lines = file.read(TAIL).splitlines()
-    except (AttributeError, OSError):
+    except (AttributeError, OSError, TypeError):
         return None
     for line in lines:
         try:
@@ -187,15 +203,18 @@ def read_answers(session, bundle=""):
     """The answers of the main thread of a session, the last one first, read TAIL bytes at a time
     up its transcript: a turn that ends on an API error writes the blobs of its request first,
     77 KB a turn in a bundle on 2026-10-30, so that TAIL held 3 such turns, never the 6 of the
-    requeue, and its terminal typed GO_ON 423 times."""
+    requeue, and its terminal typed GO_ON 423 times. MAX_SCAN bytes at most, and a line longer
+    than MAX_LINE is dropped."""
     try:
-        with get_transcript(session, bundle).open("rb") as file:
+        with open_transcript(session, bundle) as file:
             end, rest = file.seek(0, os.SEEK_END), b""
-            while end:
-                start = max(0, end - TAIL)
+            last = max(0, end - MAX_SCAN)
+            while end > last:
+                start = max(last, end - TAIL)
                 file.seek(start)
                 lines = (file.read(end - start) + rest).split(b"\n")
                 rest = lines.pop(0) if start else b""
+                rest = rest if len(rest) <= MAX_LINE else b""
                 for line in reversed(lines):
                     try:
                         entry = json.loads(line)
@@ -204,7 +223,7 @@ def read_answers(session, bundle=""):
                     except (KeyError, TypeError, ValueError):
                         continue
                 end = start
-    except (AttributeError, OSError):
+    except (AttributeError, OSError, TypeError):
         return
 
 

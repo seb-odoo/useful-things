@@ -427,6 +427,10 @@ def check_task(case):
     case.check("a link in place of task.md is not followed",
                not lines() and not (case.agent / "run.lock").exists())
     (case.agent / "task.md").unlink()
+    (case.agent / "task.md").write_text("Rebase.\x1b[201~\x1b[Z\r1")
+    case.check("a task with a control key is dropped, not typed (B9)",
+               wait(lambda: not (case.agent / "task.md").exists()) and not lines()
+               and not (case.agent / "run.lock").exists())
     (case.root / "task.md").rename(case.agent / "task.md")
     pasted = ["\x1b[200~next", "task\x1b[201~", "\x1b[200~PR event: one\x1b[201~"]
     case.check("an idle one gets the task, then the event", wait(lambda: lines() == pasted))

@@ -57,6 +57,7 @@ import re
 import subprocess
 import sys
 import time
+import unicodedata
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
@@ -70,6 +71,7 @@ from cut import get_live_sessions  # noqa: E402
 AGENT_WAIT = 60
 FAILED = "❌"
 FIRST_KINDS = ("fw", "mine", "ops", "runbot")
+KIND_BY_CLASS = {"code": "code", "gnome-terminal-server": "terminal", "terminator": "terminal"}
 FOR_SEB = ("✅", "✋")
 KINDS = ("ops", "fw", "runbot", "task", "mine", "analysis", "review")
 LIVE = ("✅", "✋", "⏳")
@@ -202,10 +204,10 @@ def get_windows():
             ops.append((title, window))
             continue
         match = pattern.match(title)
-        if not match or not is_bundle(match[1]):
+        kind = KIND_BY_CLASS.get(wm_class.partition(".")[0])
+        if not match or not kind or not is_bundle(match[1]):
             others.append((title, window))
             continue
-        kind = "code" if wm_class.startswith("code.") else "terminal"
         bundle = bundles.setdefault(match[1], {})
         bundle[kind] = window
         if kind == "code" or "title" not in bundle:
@@ -470,10 +472,16 @@ def main():
     closes = get_close_lines(rows)
     for row in rows:
         word = MARKS[row.rank][1] if row.rank < len(MARKS) else ""
-        text = f"{row.title}   {closes[row.key]}".rstrip()
+        text = clean(f"{row.title}   {closes[row.key]}").rstrip()
         sys.stdout.write(f"{text}\0info\x1f{row.key}\x1fmeta\x1f{word}\n")
     for title, window in sorted(windows[2]):
-        sys.stdout.write(f"{title}\0info\x1f{window}\x1fmeta\x1f\n")
+        sys.stdout.write(f"{clean(title)}\0info\x1f{window}\x1fmeta\x1f\n")
+
+
+def clean(text):
+    """A text of a bundle or a window as one row of rofi: no control or format character, as a
+    NUL starts the options of the row, which a bundle would set (security check 11-03, B12)."""
+    return "".join(char for char in text if unicodedata.category(char) not in ("Cc", "Cf"))
 
 
 if __name__ == "__main__":

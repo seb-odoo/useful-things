@@ -12,6 +12,7 @@ sys.path.insert(0, str(HERE))
 
 import daemon
 
+CONTROL = "task: no control character but new lines and tabs"
 EFFORT = "effort: one of low, medium, high, xhigh"
 MODEL = "model: one of haiku, opus, sonnet"
 
@@ -23,6 +24,10 @@ REFUSED = [
     ({"task": "do", "model": "claude-fable-5-1"}, MODEL),
     ({"task": "do", "model": "default"}, MODEL),
     ({"task": "do", "model": "fable"}, MODEL),
+    ({"task": "Rebase.\x1b[201~\x1b[Z"}, CONTROL),
+    ({"task": "Rebase.\r1"}, CONTROL),
+    ({"task": "Rebase.\x9b2J"}, CONTROL),
+    ({"task": "Rebase\tthe branch.\n\nPush it."}, None),
 ]
 WRITTEN = [
     ({}, (None, None)),

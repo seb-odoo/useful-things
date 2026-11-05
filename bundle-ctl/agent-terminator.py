@@ -56,11 +56,13 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
 from agents import (  # noqa: E402
+    MAX_RECORD,
     OPS,
     get_agent_folder,
     get_mtime,
     get_transcript,
     is_agent_running,
+    read_bytes,
     read_text,
 )
 from config import CLAUDE_CONFIG_CONTAINER, HOST_FOLDER  # noqa: E402
@@ -173,10 +175,12 @@ def get_record(bundle, since):
     key, value = ("sessionId", session) if session else ("name", bundle)
     records = []
     for path in (CLAUDE_CONFIG / container / "sessions").glob("*.json"):
+        data = read_bytes(path, MAX_RECORD) or b""
         try:
-            data = path.read_bytes()
             record = json.loads(data) if value.encode() in data else {}
-        except (OSError, ValueError):
+        except ValueError:
+            continue
+        if not isinstance(record, dict):
             continue
         if record.get(key) == value and record.get("startedAt", 0) >= since:
             records.append(record)

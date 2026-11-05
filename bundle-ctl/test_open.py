@@ -15,20 +15,25 @@ sys.path.insert(0, str(HERE))
 
 import daemon
 
+ONLY_OWN = "bundle: only the host, the bundle or its parent opens its terminal"
 # The files of the .agent folder, whether its container has a window, the caller and the refusal.
+# "parent" queued the last task of the bundle; "other" is any other bundle (B11).
 CASES = [
-    ({}, False, "other", "bundle has no agent session to open in a terminal"),
+    ({}, False, "parent", "bundle has no agent session to open in a terminal"),
     ({}, False, "bundle", "bundle has no agent session to open in a terminal"),
     ({}, False, daemon.HOST, None),
-    ({"task.md"}, False, "other", "bundle has no agent session to open in a terminal"),
+    ({"task.md"}, False, "parent", "bundle has no agent session to open in a terminal"),
     ({"task.md"}, False, daemon.HOST, "bundle has no agent session to open in a terminal"),
     ({"session"}, False, daemon.HOST, "bundle has no agent session to open in a terminal"),
-    ({"task.md", "session", "held"}, False, "other", "a terminal holds its session"),
+    ({"task.md", "session", "held"}, False, "parent", "a terminal holds its session"),
     ({"task.md", "session", "held"}, True, "bundle", "a terminal holds its session"),
-    ({"task.md", "session"}, True, "other", "bundle is open in a window"),
+    ({"task.md", "session"}, True, "parent", "bundle is open in a window"),
     ({"task.md", "session"}, True, "bundle", None),
     ({"task.md", "session"}, True, daemon.HOST, None),
-    ({"task.md", "session"}, False, "other", None),
+    ({"task.md", "session"}, False, "parent", None),
+    ({"task.md", "session"}, False, "other", ONLY_OWN),
+    ({"task.md", "session"}, True, "other", ONLY_OWN),
+    ({}, False, "other", ONLY_OWN),
 ]
 BODIES = [
     ({"terminal": True, "task": "do"}, "terminal: only without a task"),
@@ -82,7 +87,7 @@ TASK_CASES = [
 ]
 
 
-def refusal(body, caller="other"):
+def refusal(body, caller="parent"):
     try:
         daemon.check_terminal(caller, "bundle", body)
     except (ValueError, daemon.Refused) as error:
@@ -170,6 +175,23 @@ def open_twice(root, agent, start_job):
         for window in windows:
             window.kill()
     return [] if opened == ["bundle"] else [f"open twice: opened {opened!r}, expected ['bundle']"]
+
+
+def open_window(root):
+    """A window of a bundle opens for the host, the bundle and its parent only, as a terminal does
+    (security check 11-03, B11)."""
+    daemon.get_worktree_bundle_folder = lambda bundle: str(root)
+    daemon.is_made = lambda folder: True
+    daemon.remote_agent.is_remote = lambda folder: False
+    daemon.start_job = lambda caller, verb, work, **kwargs: (202, {"job": verb})
+    found = []
+    for caller in ("other", "parent", "bundle", daemon.HOST):
+        try:
+            found.append(daemon.open_bundle(caller, {}, {"bundle": "bundle"})[1]["job"])
+        except daemon.Refused as error:
+            found.append(str(error))
+    expected = ["bundle: only the host, the bundle or its parent opens its window", *["open"] * 3]
+    return [f"open a window: {found}, expected {expected}"] if found != expected else []
 
 
 def answer_held(root, start_job):
@@ -260,6 +282,8 @@ def main():
     with tempfile.TemporaryDirectory() as root:
         daemon.HELD_DIR = pathlib.Path(root) / "held"
         daemon.PARENTS_DIR = pathlib.Path(root) / "parents"
+        daemon.PARENTS_DIR.mkdir()
+        daemon.write_parent("bundle", {"parent": "parent"})
         agent = pathlib.Path(root) / "bundle" / ".agent"
         agent.mkdir(parents=True)
         daemon.get_agent_folder = lambda bundle: agent
@@ -287,6 +311,8 @@ def main():
             if found != expected:
                 failures.append(f"open ops {caller} {body}: {found!r}, expected {expected!r}")
         failures += answer_held(pathlib.Path(root), start_job)
+        failures += open_window(pathlib.Path(root))
+        daemon.start_job = start_job
         queued = []
         daemon.get_agent_folder = lambda bundle: agent
         daemon.has_window = lambda container: False
@@ -304,7 +330,7 @@ def main():
         failures += get_moved(pathlib.Path(root))
     for line in failures:
         print(line)
-    cases = len(CASES) + len(BODIES) + len(OPS_CASES) + len(TASK_CASES) + 5
+    cases = len(CASES) + len(BODIES) + len(OPS_CASES) + len(TASK_CASES) + 6
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

@@ -34,7 +34,7 @@ spec.loader.exec_module(devconfig)
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
 import outside
-from agents import read_text, touch, write_text
+from agents import read_bytes, read_text, touch, write_text
 
 HOME = pathlib.Path.home()
 STATE = pathlib.Path("~/.local/state/bundle-ctl").expanduser()
@@ -54,8 +54,11 @@ PAIR_RETRY = 30
 STOP_WAIT = 660
 STARTING = 1800
 STOP_AGAIN = 300
+MAX_CLAUDE_JSON = 16 << 20
+MAX_CONFIG_FILE = 64 << 20
 MAX_ENDED = 64 * 1024
 MAX_LOSSES = 3
+MAX_PART = 2 << 30
 RENEW_BEFORE = 240
 RENEW_EVERY = 300
 REMOTE_FORMS = {
@@ -366,9 +369,9 @@ def build_config(bundle_folder):
         shared = pathlib.Path(values["SHARED_CLAUDE"])
         for path in sorted(project.iterdir()) if project.is_dir() else ():
             source = shared / path.name if path.is_symlink() else path
-            if not source.is_file():
+            data = read_bytes(source, MAX_CONFIG_FILE + 1)
+            if data is None or len(data) > MAX_CONFIG_FILE:
                 continue
-            data = source.read_bytes()
             if path.name == "settings.json":
                 data = data.replace(str(HERE / "client").encode(), JOB_CLIENT.encode())
             info = tarfile.TarInfo(f"workspace/.claude/{path.name}")
@@ -385,9 +388,10 @@ def build_config(bundle_folder):
         add(HERE / "client", "home/bundle-ctl/client")
         add(HERE / "agentbar", "home/bundle-ctl/agentbar")
         try:
-            whole = json.loads((own / ".claude.json").read_text())
-        except (OSError, ValueError):
+            whole = json.loads(read_bytes(own / ".claude.json", MAX_CLAUDE_JSON) or b"")
+        except ValueError:
             whole = {}
+        whole = whole if isinstance(whole, dict) else {}
         kept = {key: whole[key] for key in CLAUDE_JSON_KEYS if key in whole}
         if isinstance(kept.get("projects"), dict):
             kept["projects"] = {
@@ -403,11 +407,15 @@ def build_config(bundle_folder):
 
 
 def keep_regular(info, sent):
-    """Regular files, folders and links inside the tree only: no device, no link out. A link to
-    a folder the part sends too (`sent`, its path here and its name in the part) goes, made to
-    point at that copy: the skills and agent types linked into runbot-fix-agents.
+    """Regular files of MAX_CONFIG_FILE at most, folders and links inside the tree only: no
+    device, no link out, and no sparse file of any size a bundle wrote in its own config (security
+    check 11-03, B13). A link to a folder the part sends too (`sent`, its path here and its name
+    in the part) goes, made to point at that copy: the skills and agent types linked into
+    runbot-fix-agents.
     """
-    if info.isfile() or info.isdir():
+    if info.isfile():
+        return info if info.size <= MAX_CONFIG_FILE else None
+    if info.isdir():
         return info
     if not info.issym():
         return None
@@ -605,6 +613,16 @@ def find_binary(bundle_folder, pattern):
     return None
 
 
+def read_part(path):
+    """The bytes of a binary a job gets, a regular file of MAX_PART at most, with no link
+    followed: the remote start never reads what a path names without a bound (security check
+    11-03, B13)."""
+    data = read_bytes(path, MAX_PART + 1)
+    if data is None or len(data) > MAX_PART:
+        raise RuntimeError(f"{path}: no regular file of {MAX_PART >> 30} GB at most")
+    return data
+
+
 def find_claude(bundle_folder):
     """The claude of the bundle's extension store, the newest version."""
     found = find_binary(bundle_folder, "anthropic.claude-code-*/resources/native-binary/claude")
@@ -780,7 +798,7 @@ def start(log, bundle, bundle_folder, worker, workers, base, session, resume):
             parts["ruff"] = ruff
         shas = {}
         for name, value in parts.items():
-            data = value if isinstance(value, bytes) else pathlib.Path(value).read_bytes()
+            data = value if isinstance(value, bytes) else read_part(value)
             shas[name] = (hashlib.sha256(data).hexdigest(), data)
         spec = {
             "session": session,

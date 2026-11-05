@@ -19,6 +19,8 @@ from config import CLAUDE_CONFIG_CONTAINER, HOST_PROJECT, STATE_ROOT, TRANSCRIPT
 EFFORTS = ("low", "medium", "high", "xhigh")
 HANDLED_FOR = 24 * 3600
 MAX_HANDLED = 64 * 1024
+MAX_READ = 1 << 20
+MAX_RECORD = 64 * 1024
 IDLE_AFTER = 15 * 60
 LAUNCH_GRACE = 15 * 60
 MAX_VALUE = 128
@@ -45,25 +47,48 @@ VALUE_FORMS = {
 title_by_session = {}
 
 
-def read_text(path, limit=None):
+def read_text(path, limit=MAX_READ):
     """The text of a regular file, None when it cannot be read or holds more than `limit` bytes.
     The bundle writes its `.agent/` folder: a link there is not followed, a FIFO does not block,
     and a file of VALUE_FORMS gives None unless its value has its form, as the host puts them in
     paths, commands and the queue."""
     form = VALUE_FORMS.get(path.name)
+    data = read_bytes(path, MAX_VALUE if form else limit + 1)
+    if data is None or len(data) > limit:
+        return None
+    text = data.decode(errors="replace").strip()
+    return text if form is None or form.fullmatch(text) else None
+
+
+def read_bytes(path, limit, tail=False):
+    """At most `limit` bytes of a regular file, its last ones with `tail`, None when it cannot be
+    read: what a bundle writes (its `.agent/`, its transcripts and session records) is read with
+    no link followed, a FIFO does not block, and a link to /dev/zero or a sparse file of any size
+    costs `limit` bytes at most (security check 11-03, B13)."""
+    file = open_regular(path)
+    if file is None:
+        return None
+    with file:
+        size = os.fstat(file.fileno()).st_size
+        if tail and size > limit:
+            file.seek(size - limit)
+        try:
+            return file.read(limit)
+        except OSError:
+            return None
+
+
+def open_regular(path):
+    """A regular file open for reading in binary, None when it is none or cannot be opened: no
+    link followed, no wait on a FIFO."""
     try:
-        fd = open_unlinked(path, os.O_RDONLY)
+        fd = open_unlinked(pathlib.Path(path), os.O_RDONLY)
     except OSError:
         return None
-    with open(fd, errors="replace") as file:
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or limit is not None and info.st_size > limit:
-            return None
-        text = file.read(MAX_VALUE if form else -1 if limit is None else limit + 1)
-    if limit is not None and len(text) > limit:
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
         return None
-    text = text.strip()
-    return text if form is None or form.fullmatch(text) else None
+    return open(fd, "rb")
 
 
 def write_text(path, text):
@@ -122,7 +147,7 @@ def get_transcript(session, bundle=""):
     if not re.fullmatch(r"[\w-]+", session or ""):
         return None
     paths = [folder / f"{session}.jsonl" for folder in get_projects(bundle)]
-    return next((path for path in paths if path.is_file()), None)
+    return next((path for path in paths if path.is_file() and not path.is_symlink()), None)
 
 
 def get_session_records(container):
@@ -130,8 +155,8 @@ def get_session_records(container):
     records = {}
     for path in pathlib.Path(CLAUDE_CONFIG_CONTAINER, container, "sessions").glob("*.json"):
         try:
-            record = json.loads(path.read_text())
-        except (OSError, ValueError):
+            record = json.loads(read_bytes(path, MAX_RECORD) or b"")
+        except ValueError:
             continue
         if not isinstance(record, dict) or not record.get("sessionId"):
             continue
@@ -319,9 +344,9 @@ def format_time(stamp):
 def get_session_title(path):
     if path not in title_by_session:
         try:
-            with path.open() as file:
-                title_by_session[path] = json.loads(file.readline()).get("customTitle")
-        except (OSError, ValueError):
+            first = (read_bytes(path, MAX_RECORD) or b"").partition(b"\n")[0]
+            title_by_session[path] = json.loads(first).get("customTitle")
+        except (AttributeError, ValueError):
             return None
     return title_by_session[path]
 

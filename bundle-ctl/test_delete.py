@@ -194,7 +194,9 @@ def prepare(root):
     daemon.is_in_container = lambda connection: world["caller"] != daemon.HOST
     daemon.read_state = lambda: world["state"]
     daemon.run_script = lambda log, script, *args: world["calls"].append((script, *args))
-    daemon.tell_verdict = lambda bundle: world["verdicts"].append((bundle, len(world["calls"])))
+    daemon.tell_verdict = lambda bundle, gone=False: world["verdicts"].append(
+        (bundle, len(world["calls"]), gone),
+    )
     daemon.write_state = lambda state: None
     daemon.tab_groups.ask = lambda request: world["tabs"].append(request) or {
         "groups": [{"bundle": REPORTED, "title": f"🚀 {REPORTED}"}],
@@ -358,8 +360,8 @@ def check(root):
     )
     checks.append(
         (
-            "its parent is told its verdict before its folder goes",
-            world["verdicts"] == [(CLEAN, 0)],
+            "its parent is told its verdict before its folder goes, and where its report stays",
+            world["verdicts"] == [(CLEAN, 0, True)],
         ),
     )
     answer_later(REFUSED, "no it still runs")

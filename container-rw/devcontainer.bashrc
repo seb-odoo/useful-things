@@ -115,14 +115,22 @@ function testdb() {
 }
 
 function bug-fix() { bash ~/.claude/skills/serve-for-seb/bug-fix.sh "$@"; }
+function odoo-master-password() { bash "$(dirname "${CONTAINER_BASHRC}")/odoo-serve-conf.sh" --password; }
 
 # --- odoo-bin helpers ---
 function odoo-bin() {
-	RES="./odoo-bin $(odoo-bin-params $*)"
-	echo "Executing: ${RES}"
+	local params
+	params="$(odoo-bin-params $*)" || return 1
+	RES="./odoo-bin ${params}"
 	# Only when actually serving: ODOO_PROXY_HOST is set only inside the container, and skip
 	# shell/populate editions (s/p) and --stop-after-init runs.
+	local serving=""
 	if [[ -n "${ODOO_PROXY_HOST}" && "${1}" != *[sp]* && "${RES}" != *"--stop-after-init"* ]]; then
+		serving=1
+		RES="${RES} --no-database-list"
+	fi
+	echo "Executing: ${RES}"
+	if [[ -n "${serving}" ]]; then
 		echo "URL: http://admin.${ODOO_PROXY_HOST}.localhost/?debug=assets"
 		bash "$(dirname "${CONTAINER_BASHRC}")/mailpit.sh" && echo "Mails: http://mail.${ODOO_PROXY_HOST}.localhost"
 	fi
@@ -158,8 +166,8 @@ function odoo-bin-params() {
 	if [[ -n "${ODOO_PROXY_HOST}" && "${edition}" != *[sp]* ]]; then
 		# In-container only: bind the bridge IP so the nginx proxy can reach Odoo (master's
 		# default is now 127.0.0.1), trust the proxy's forwarded headers, send mails to the Mailpit
-		# of the container, and load demo and test data in new DBs. Placed before ${rest} so an
-		# explicit flag can override.
+		# of the container, take the master password of the bundle, and load demo and test data in
+		# new DBs. Placed before ${rest} so an explicit flag can override.
 		demo=""
 		if grep -q '"--with-demo"' ./odoo/tools/config.py 2>/dev/null; then
 			# The demo default flipped to none in saas-18.3, which added --with-demo;
@@ -170,7 +178,12 @@ function odoo-bin-params() {
 		if grep -q '"--with-test-data"' ./odoo/tools/config.py 2>/dev/null; then
 			demo="${demo}--with-test-data "
 		fi
-		iface="--http-interface=0.0.0.0 --proxy-mode --smtp-port=1025 ${demo}"
+		odoo_conf="$(bash "$(dirname "${CONTAINER_BASHRC}")/odoo-serve-conf.sh")"
+		if [[ -z "${odoo_conf}" ]]; then
+			echo "odoo-serve-conf.sh gave no config: Odoo would run with the master password admin" >&2
+			return 1
+		fi
+		iface="--http-interface=0.0.0.0 --proxy-mode --smtp-port=1025 -c ${odoo_conf} ${demo}"
 	fi
 	echo "${cli}-d ${d} --addons-path ${addons_path} --dev replica ${iface}${rest}"
 }

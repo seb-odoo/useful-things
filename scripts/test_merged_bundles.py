@@ -172,6 +172,30 @@ def main():
                 os.path.isdir(commands.get_worktree_bundle_folder(name)),
                 name not in expected,
             )
+        odoo = commands.get_repo_folder("odoo")
+        git(odoo, "branch", "master-x/link")
+        names = [branch[0] for branch in branch_status.get_local_branches("odoo")]
+        found["a ref that is no bundle name is no branch (C8)"] = (
+            ("master-x/link" in names, "master-closed" in names),
+            (False, True),
+        )
+        victim = f"{root}/src/victim"
+        os.makedirs(f"{root}/src/master/master-x")
+        os.makedirs(victim)
+        with redirect_stdout(io.StringIO()):
+            refused = delete_bundle.delete_bundle(
+                runner, bundle_name="master-x/../../victim", force=True
+            )
+        found["a name that is no bundle name deletes nothing (C8)"] = (
+            (list(refused), os.path.isdir(victim)),
+            (["name"], True),
+        )
+        git(odoo, "remote", "add", "quoted", 'git@github.com:a") { viewer { login } } x: "b/c.git')
+        try:
+            repo = branch_status.get_github_repo("odoo", "quoted")
+        except ValueError:
+            repo = None
+        found["a remote URL that is no GitHub name goes into no query (C8)"] = (repo, None)
     chain = f"20.0-master-x{branch_status.BUNDLE_SUFFIX}-123-fw"
     for case, author, head, expected in (
         ("my PR", "me", "master-x", True),

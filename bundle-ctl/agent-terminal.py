@@ -71,6 +71,7 @@ from agents import (  # noqa: E402
     get_session_status,
     get_transcript,
     has_window,
+    open_regular,
     open_unlinked,
     read_text,
     write_text,
@@ -216,8 +217,9 @@ def keep_open(ending, session=None, bundle=""):
         sys.stdout.write(RESET)
         sys.stdout.flush()
         subprocess.run(["stty", "sane"], check=False)
-        if transcript:
-            with transcript.open() as file, tempfile.TemporaryDirectory() as folder:
+        file = transcript and open_regular(transcript)
+        if file:
+            with file, tempfile.TemporaryDirectory() as folder:
                 subprocess.run(
                     [sys.executable, str(HERE / "client" / "stream-format.py"), f"{folder}/result"],
                     check=False,
@@ -519,8 +521,15 @@ class Waker:
         return self.due
 
     def take_task(self):
+        """The paste of the task the daemon left, once. One with a control character but a new
+        line or a tab is dropped, as it would end the paste and type keys (security check 11-03,
+        B9): the daemon refuses such a task, but the bundle writes its task.md."""
         task = read_text(self.agent / "task.md")
         if task is None:
+            return None
+        if CONTROL.search(task):
+            (self.agent / "task.md").unlink(missing_ok=True)
+            self.note(f"dropped a task that would type keys: {task[:100]!r}")
             return None
         try:
             (self.agent / "run.lock").mkdir()

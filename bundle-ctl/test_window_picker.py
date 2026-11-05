@@ -318,6 +318,31 @@ def get_named(folder, log):
     return [f"titles that name no bundle: {found}, expected {expected}"] if found != expected else []
 
 
+def get_spoofed(folder):
+    """A page of Firefox titled as a bundle gives that bundle no row, and no text of a bundle or
+    of a window sets an option of rofi: each goes out with no control or format character
+    (security check 11-03, B12)."""
+    (folder / "windows").write_text(
+        "0x31 0 firefox.Firefox box ✅ ⭐ master-a--seb (mine)\n"
+        "0x32 0 terminator.Terminator box ⏳ ⭐ master-b--seb (mine)\n"
+        "0x33 0 firefox.Firefox box tab\x1fmeta\x1fx\u200b - Mozilla Firefox\n"
+    )
+    write_answer(
+        folder, "S-b", "pushed: c4d3b85\n\nWaiting for you: x\0info\x1f/victim\x1fmeta\x1fy"
+    )
+    rows = run(folder).splitlines()[4:]
+    expected = [
+        "⭐ master-b--seb (mine)   Waiting for you: xinfo/victimmetay\0info\x1fmaster-b--seb\x1fmeta\x1f",
+        "tabmetax - Mozilla Firefox\0info\x1f0x33\x1fmeta\x1f",
+        "✅ ⭐ master-a--seb (mine)\0info\x1f0x31\x1fmeta\x1f",
+    ]
+    return (
+        [f"rows a bundle or a page sets: {rows!r}, expected {expected!r}"]
+        if rows != expected
+        else []
+    )
+
+
 def write_fake(folder, name, script):
     path = folder / name
     path.write_text(f"#!/bin/sh\n{script}\n")
@@ -443,6 +468,7 @@ def main():
             if found != expected:
                 failures.append(f"close lines {found!r}, expected {expected!r}")
         failures += get_named(folder, log)
+        failures += get_spoofed(folder)
     new_ops = [str(HERE / "client" / "bctl.py"), "open", "ops", "--terminal"]
     if (started := get_new_ops()) != [new_ops]:
         failures.append(f"pick 1 new-ops: started {started!r}, expected {[new_ops]!r}")
@@ -462,7 +488,7 @@ def main():
         failures.append(f"--agent {OPS_SESSION}: {found!r}, expected {started!r}")
     for line in failures:
         print(line)
-    cases = 23 + len(PICKS) + len(BRING_UPS) + len(CLOSE_LINES)
+    cases = 24 + len(PICKS) + len(BRING_UPS) + len(CLOSE_LINES)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

@@ -42,6 +42,7 @@ import pathlib
 import re
 import secrets
 import shutil
+import stat
 import string
 import subprocess
 import sys
@@ -98,6 +99,7 @@ HOME_PROJECT = {
 # Where base.jsonc mounts the shared project folder, read-only.
 SHARED_INSIDE = pathlib.Path("/home/vscode/.claude-project")
 DUMMY = "sk-ant-oat01-rr-"
+MAX_STATE = 64 << 20
 # What the Claude switch serves a dummy login: it says it has these scopes only.
 DUMMY_SCOPES = ["user:inference", "user:profile", "user:sessions:claude_code"]
 BASE62 = string.digits + string.ascii_uppercase + string.ascii_lowercase
@@ -172,16 +174,32 @@ def write_fakes(own, name, values):
     return token
 
 
+def read_own(path):
+    """The JSON object of a file the bundle writes, {} when it is none: no link followed, a
+    regular file of MAX_STATE at most, as a sparse file of 8 GB ran the host out of memory
+    (security check 11-03, B13)."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return {}
+    with os.fdopen(fd, "rb") as file:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return {}
+        data = file.read(MAX_STATE + 1)
+    try:
+        found = json.loads(data) if len(data) <= MAX_STATE else {}
+    except ValueError:
+        return {}
+    return found if isinstance(found, dict) else {}
+
+
 def write_settings(claude, own, token=None):
     path = own / "settings.json"
     if not (claude / "settings.json").is_file():
         path.touch()
         return
     settings = json.loads((claude / "settings.json").read_text())
-    try:
-        picked = json.loads(path.read_text()).get("model")
-    except (OSError, ValueError):
-        picked = None
+    picked = read_own(path).get("model")
     settings.pop("model", None)
     if picked:
         settings["model"] = picked
@@ -281,10 +299,10 @@ def main():
     state_path = own / ".claude.json"
     seed = claude / ".claude.json"
     state = {}
-    for path in (state_path, seed):
-        if path.is_file():
-            state = json.loads(path.read_text())
-            break
+    if state_path.is_file():
+        state = read_own(state_path)
+    elif seed.is_file():
+        state = json.loads(seed.read_text())
     folder = args[1] if len(args) > 1 else "/workspace"
     workspace = state.setdefault("projects", {}).setdefault(folder, {})
     workspace["hasTrustDialogAccepted"] = True

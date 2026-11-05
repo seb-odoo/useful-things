@@ -32,6 +32,7 @@ from rich.text import Text
 
 from agents import LAUNCH_GRACE, STATE, get_agent, is_handled, read_state
 from commands import (
+    BUNDLE_NAME,
     BUNDLE_SUFFIX,
     get_base_for_repo,
     get_base_from_bundle_name,
@@ -68,6 +69,7 @@ FW_BOT = "fw-bot"
 # A bundle writes the .git/config of these repos: git runs none of the programs it may name there.
 GIT = ("git", "-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null", "-c", "core.pager=cat")
 GIT_CACHE = STATE / "branch-status.json"
+GITHUB_NAME = r"[\w.-]+"
 GROUPS = {
     "open": "Running",
     "me": "Waits on me",
@@ -147,6 +149,9 @@ def has_write_tree():
 
 
 def get_local_branches(repo):
+    """The branches of a base repo that are bundle names: every bundle writes the refs of the
+    shared `.git`, and a name with a `/` would make the deletion of a merged bundle follow a link
+    it put on the way (security check 11-03, C8)."""
     out = git(
         repo,
         "for-each-ref",
@@ -156,6 +161,7 @@ def get_local_branches(repo):
     return [
         (name, int(date), head, any(path))
         for name, date, head, *path in (line.split(" ", 3) for line in out.splitlines())
+        if BUNDLE_NAME.fullmatch(name)
     ]
 
 
@@ -168,8 +174,13 @@ def get_subjects(repo):
 
 @functools.cache
 def get_github_repo(repo, remote=None):
+    """OWNER/NAME of the GitHub repo of a remote, each a word of GITHUB_NAME: the URL is in the
+    config of the shared `.git`, and goes into a GraphQL query."""
     url = git(repo, "remote", "get-url", remote or get_remote_repo(repo))
-    return re.search(r"github\.com[:/](.+?)(?:\.git)?$", url)[1]
+    found = re.search(rf"github\.com[:/]({GITHUB_NAME})/({GITHUB_NAME}?)(?:\.git)?$", url)
+    if not found:
+        raise ValueError(f"{repo}: no GitHub repo in the URL of its remote")
+    return f"{found[1]}/{found[2]}"
 
 
 def get_pr(github_repo, number, fields):
@@ -189,7 +200,8 @@ def read_prs(pairs):
     for i, (repo, branch) in enumerate(pairs):
         owner, name = get_github_repo(repo).split("/")
         queries.append(
-            f'p{i}: repository(owner: "{owner}", name: "{name}") {{ pullRequests('
+            f"p{i}: repository(owner: {json.dumps(owner)}, name: {json.dumps(name)}) "
+            "{ pullRequests("
             f"headRefName: {json.dumps(branch)}, first: 1, "
             "orderBy: {field: CREATED_AT, direction: DESC}) "
             "{ nodes { author { login } createdAt headRefName headRefOid isDraft number "

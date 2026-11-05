@@ -11,6 +11,7 @@ Usage:
  $ python proxy.py watch     # regen on every container start/stop (run as a systemd-user unit)
 """
 
+import ipaddress
 import json
 import os
 import subprocess
@@ -29,18 +30,23 @@ CONF_PATH = Path.home() / ".config" / "odoo-proxy" / "odoo-dev.conf"
 
 
 def _proxy_networks():
-    """The networks the proxy is on: it reaches a dev container on one they share."""
+    """The networks the proxy is on, by name: it reaches a dev container on one they share."""
     res = subprocess.run(
         ["podman", "inspect", "--format", "{{json .NetworkSettings.Networks}}", CONTAINER_NAME],
         capture_output=True,
         text=True,
     )
-    return set(json.loads(res.stdout or "{}") or {}) if res.returncode == 0 else set()
+    try:
+        networks = json.loads(res.stdout or "{}") if res.returncode == 0 else {}
+    except ValueError:
+        return {}
+    return networks if isinstance(networks, dict) else {}
 
 
-def _running_dev_containers():
+def _running_dev_containers(shared):
     """Yield (subdomain, ip) for every running dev container, newest last, but one whose folder
-    name is no bundle name: it would add directives to the config of nginx."""
+    name is no bundle name: it would add directives to the config of nginx. `shared`: the networks
+    of the proxy, where its address is looked up first."""
     ids = subprocess.run(
         ["podman", "ps", "--format", "{{.ID}}"],
         capture_output=True,
@@ -57,7 +63,6 @@ def _running_dev_containers():
             check=True,
         ).stdout,
     )
-    shared = _proxy_networks()
     for container in info:
         labels = container.get("Config", {}).get("Labels") or {}
         folder = labels.get(DEVCONTAINER_LABEL)
@@ -90,6 +95,10 @@ def _render(server_name, ip, port=HTTP_PORT, websocket="/websocket"):
     gzip on;
     gzip_types text/css text/plain text/xml application/xml application/json application/javascript image/svg+xml;
 
+    location ~ ^/(web/database/|xmlrpc/(2/)?db/?$) {{
+        return 403;
+    }}
+
     location {websocket} {{
         # Threaded dev: websockets ride on {port}; under --workers>0 switch this to 8072.
         proxy_pass http://{ip}:{port};
@@ -114,17 +123,30 @@ def _render(server_name, ip, port=HTTP_PORT, websocket="/websocket"):
 """
 
 
+def _clients(networks):
+    """The lines that let the host alone use the proxy: its published port comes from loopback or
+    from the gateway of a network of the proxy, and any other client is refused, as a dev
+    container would reach the server of another bundle by its Host (security check 11-03, C7)."""
+    allowed = ["127.0.0.1", "::1"]
+    for network in networks.values():
+        try:
+            allowed.append(str(ipaddress.ip_address(network["Gateway"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return "".join(f"allow {address};\n" for address in dict.fromkeys(allowed)) + "deny all;\n"
+
+
 def regen():
     """Rebuild the nginx config from the live container list and reload the proxy."""
-    blocks = []
-    for subdomain, ip in _running_dev_containers():
+    blocks, networks = [], _proxy_networks()
+    for subdomain, ip in _running_dev_containers(networks):
         blocks.append(_render(f"{subdomain}.localhost *.{subdomain}.localhost", ip))
         blocks += [
             _render(f"{side}.{subdomain}.localhost", ip, port) for side, port in SIDES.items()
         ]
         blocks.append(_render(f"mail.{subdomain}.localhost", ip, MAILPIT_PORT, "/api/events"))
     # Bundle names are long, so the default 64-byte server-name hash bucket overflows.
-    header = "server_names_hash_bucket_size 128;\n\n"
+    header = f"server_names_hash_bucket_size 128;\n{_clients(networks)}\n"
     CONF_PATH.parent.mkdir(parents=True, exist_ok=True)
     CONF_PATH.write_text(header + "\n".join(blocks))
     # Reload without restart; no-op (rc != 0) when the proxy is not running yet.

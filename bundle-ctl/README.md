@@ -23,6 +23,16 @@ container, test runs first, so that they never take the whole host together (see
   one. Its history and `pr-events/` go through descriptors of folders that are no link. `python3
   scripts/test_agent_values.py`, `python3 test_queue.py` and `python3 test_prwatch.py` have the
   cases.
+- Every file a bundle writes (its `.agent/`, its transcripts, the session records and the
+  settings of its claude, the `.git` file of a worktree, `_package.json`) is read by the host as a
+  regular file and a bounded number of bytes (`agents.read_text`, `read_bytes`, 1 MB unless said;
+  a transcript by its last bytes), and the config part of a remote agent leaves out a file over
+  64 MB: a FIFO blocked the queue of every bundle, and a link to `/dev/zero` or a sparse file ran
+  the host out of memory (security check 11-03, B13). `python3 test_bundle_files.py` has the
+  readers of the daemon and the host displays.
+- A task holds no control character but new lines and tabs, as a prompt of deck: in the terminal
+  it ends the paste, and what follows goes as keys. `agent-terminal.py` drops such a `task.md`,
+  which the bundle writes (B9).
 - The text of a caller in a hok card (its reason, a task, a report) shows a character that is not
   printable as its escape, as `hok` does.
 - One journal line per request: `journalctl --user -u bundle-ctl -f`. Also `address <ip> <name>`
@@ -54,7 +64,7 @@ the pager. `python3 test_node_modules.py` and `python3 test_delete.py` have the 
 | `GET /hok` | the requests of `hok` that wait for the caller, a bundle its own and the host those of the ops session `?session=`: name, where a yes acts and what it does, when it was asked, put off or not (see the agent list) |
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window; with a task, only its queue entry, as for `create`; refused when the bundle is here, a branch has unpushed commits or, with no task, the disk is short |
 | `POST /node-modules` | the `node_modules` of the `package.json` of the web tooling of the branch of `base`, built in the store when it has none (see `scripts/README.md`, Shared node_modules): a job for the host; from a bundle, for its own base only, held as `bN` for Seb's yes in `hok`, which shows the change from the `package.json` of the tree it links; `tree` at once when it is built already |
-| `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt, taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle, but for `resume` or `terminal` in a bare folder or after its `bctl build` failed, whose session knows how to build it. With `terminal` from the host on a deleted bundle, the session kept at its deletion in its bare folder made again. A task from a bundle that is neither that bundle nor its parent waits for Seb's yes as `bN` (see A task for another bundle). On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window, and from a bundle a task alone, held as `bN` for Seb's yes in `hok`; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents). With `cut` and `resume` and no bundle, the resume of every cut session, held as `bN` for one yes of Seb (see Cut sessions) |
+| `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt; a window or a terminal is asked by the host, the bundle itself or its parent only (B11 of the security check 11-03: it starts a container and a claude at once, past the cap and the memory check), and the terminal is taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle, but for `resume` or `terminal` in a bare folder or after its `bctl build` failed, whose session knows how to build it. With `terminal` from the host on a deleted bundle, the session kept at its deletion in its bare folder made again. A task from a bundle that is neither that bundle nor its parent waits for Seb's yes as `bN` (see A task for another bundle). On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window, and from a bundle a task alone, held as `bN` for Seb's yes in `hok`; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents). With `cut` and `resume` and no bundle, the resume of every cut session, held as `bN` for one yes of Seb (see Cut sessions) |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
 | `GET /proposal` | what `hok` holds of the caller's proposal (`?name=BUNDLE`, or `BUNDLE@memory`; the host any): it waits on a card, the note of Seb's answer (`refused`, `not-written`, `written`) with its text and time, or `none`. `hok-answer proposal` asks it, as the handoff folder of an agent on a worker is a copy (host-ctl README, "Handoff") |
 | `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, `stuck` once it waited on that past its limit (see Stuck tasks), its text, whether it resumes the session of its bundle and the session it names, where it starts (`where`: `auto`, `local`, `worker` or `worker:NAME`), the memory left on the host, `short` when a start would add to a host that already lacks it, the names of `BUNDLE_CTL_WORKERS`, and in `worker_states` the word of each one that takes no agent now (`no link`, `no answer`, `leaving`, `drained`, `full`), which deck shows beside it; this read asks no connection |
@@ -988,7 +998,14 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   task bar. A title counts for a bundle only when its name is a bundle name whose folder exists
   (`is_bundle`): a bundle sets the title of its own VS Code window, and with a path in place of
   the name, the picker removed that file of the host every 2 seconds (security check 11-03, B3).
-  Any other title is one of the other windows. Nor has a bundle or an ops agent whose terminal is not minimized (Seb, 2026-10-14): it
+  Only a terminal (terminator, gnome-terminal) or a VS Code window gives a bundle its row: a page
+  open in Firefox took the row of a bundle with its title (B12). Left open: a bundle sets the
+  title of its own VS Code window, so it can take the row of another bundle, and a click then
+  brings up its window (the VS Code windows share one process, which tells no bundle). Any other
+  title is one of the other windows. Every text
+  of a row, a title and the close line of a bundle too, goes to rofi with no control or format
+  character (Unicode Cc and Cf): a NUL there set the options of the row, which a click acts on
+  (B12). Nor has a bundle or an ops agent whose terminal is not minimized (Seb, 2026-10-14): it
   is in the task bar too, and the applet does not count it. A
   terminal keeps its last mark once its claude ends, so a ✅, ✋ or ⏳ shows only while an
   `agent-terminal.py BUNDLE` process runs. A claude that ends on an error leaves its window on
@@ -1328,10 +1345,15 @@ a prompt.
 - Once the agent ends the run of the task the daemon started last (a `.agent/done` newer than
   that start), the parent gets, within a minute, or before the folder of a bundle deleted at
   Seb's yes goes: `hok event: the agent of BUNDLE, a bundle you started, ended its run on its
-  verdict. Its report opens on, in its words, not Seb's: ...`, the first line of
-  `.agent/result.md`, printable and cut to 200 characters; or `... ended its run with no
-  verdict: its .agent/done says failed.`. Once per task: the bundle writes `done` and could
-  touch it again, and the end of a run started before the task is not the one of the task.
+  verdict, pushed: SHA. Its report: agent.result of BUNDLE in bctl --json status.`, the verdict
+  word of the first line of `.agent/result.md` in the words of the daemon (`ready to push`,
+  `needs Seb`, `nothing to do`...) and the sha of a push, or `on a report with no verdict word`;
+  for a bundle deleted at Seb's yes, the report is the file the host keeps, which the line names;
+  or `... ended its run with no verdict: its .agent/done says failed.`. No other word of the
+  report is typed: a line typed in a window reads as its prompt, and an injected agent wrote
+  there what "Seb wants" (Seb, 2026-11-05, security check 11-03, B10). Once per task: the bundle
+  writes `done` and could touch it again, and the end of a run started before the task is not
+  the one of the task.
 - From the ops container, which the daemon names `host`, `bctl` sends the `AGENT_WINDOW` of an
   ops window with a task (`window`), and the daemon takes it from the host only: the parent is
   then `ops-SESSION`, in `.agent/parent` and in `bctl status`, where it read `"parent": "host"`

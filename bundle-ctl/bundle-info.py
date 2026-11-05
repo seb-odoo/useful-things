@@ -13,14 +13,13 @@ of the transcript, each cut at MAX_TEXT but the last answer.
 
 import importlib.util
 import json
-import os
 import pathlib
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
-from agents import SESSION_ID, get_agent_folder, get_transcript, read_text  # noqa: E402
+from agents import SESSION_ID, get_agent_folder, get_transcript, read_bytes, read_text  # noqa: E402
 
 INPUT_KEYS = ("command", "file_path", "pattern", "path", "url", "description", "prompt")
 MAX_ITEMS = 120
@@ -36,11 +35,8 @@ def load_title():
 
 
 def read_entries(path):
-    with path.open("rb") as file:
-        size = file.seek(0, os.SEEK_END)
-        file.seek(max(0, size - TAIL))
-        lines = file.read().splitlines()[size > TAIL:]
-    for line in lines:
+    data = read_bytes(path, TAIL, tail=True) or b""
+    for line in data.splitlines()[len(data) >= TAIL :]:
         try:
             entry = json.loads(line)
         except ValueError:
