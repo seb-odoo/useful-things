@@ -130,10 +130,11 @@ Its login is a dummy one, made by [`claude-config.py`](claude-config.py) at each
 for the Claude switch of gateway-core, which sends its requests with the main login in its place
 (gateway-core README, "The Claude switch"): no credential of the host is in a bundle, so code in a
 bundle has no login to send away or swap. The bundle's Claude cannot renew it, and needs not: the
-switch takes the access token of the host's login, which the ops sessions, and bundle-ctl while a
-bundle runs, renew. What it costs (Seb, 2026-10-28): Remote Control and the claude.ai connectors of
-the account, which the settings of a bundle do not load (`disableClaudeAiConnectors`). The ops
-container keeps the host's `~/.claude` as its config folder, the login with it: never give a
+switch takes the access token of the host's login, which bundle-ctl renews while a bundle, a remote
+agent or the ops container runs, and the host sessions. What it costs (Seb, 2026-10-28): Remote
+Control and the claude.ai connectors of the account, which the settings of a bundle do not load
+(`disableClaudeAiConnectors`). The ops container has the same since 11-03 (security check, K1: his
+pick "Own folder and dummy login"), with a `~/.claude` of its own (host-ctl README): never give a
 container a copy or a link of `.credentials.json`, as a refresh replaces the link with a copy and
 revokes every other one. `host-ctl/test_escape.py` holds the same list, and its `claude-entries`
 line is OPEN on a name of the host's `~/.claude` that the list does not hold, as the ops container
@@ -173,6 +174,27 @@ root `dev-memory`), a no drops them from the copy at its next start. A note the 
 not proposed. `memory-base` beside the copy holds what the bundle got last, read by the host only.
 A remote agent takes the copy too, and its notes come back to it.
 
+A bundle on an outside PR marks the bundles it creates with its own mark (`via` names it), and
+their task starts with a line that names it; a `bctl fetch` it asks waits for Seb's yes in hok
+(`bN`), whose card says the sender is on an outside PR (security check 11-03, B6, his pick "Card
+for fetch, mark for create"): a fetched bundle of Seb is not marked, and its agent pushes his
+branch by itself.
+
+**Transcripts.** Each bundle writes its own transcripts,
+`SHARE_ROOT/claude-transcripts/<bundle>`, mounted as its `~/.claude/projects/-workspace` (where
+Claude keeps the sessions of `/workspace`), with the memory of the bundles over it. It reads the
+transcripts of the others read-only at `~/bundle-transcripts/<bundle>`, and those of before
+2026-11-03, when every bundle wrote one shared folder, at `~/bundle-transcripts-before`: a bundle
+learns from another, and adds no turn to its session, which the host resumed in that bundle
+(security check 11-03, B7; Seb: "make them read-only? or whatever you think is best"). A bundle on
+an outside PR reads neither: both are links of `claude-config/<bundle>`, to an empty folder for
+it. [`transcripts.py`](transcripts.py) makes them at each start, and copies the session of
+`.agent/session` from the old folder when the own one has none (regular files only). The host
+reads a bundle's sessions in its own folder, then in the old one for a container that has not
+restarted since; it resumes one, or names the bundle of a cut session, from the own folder and
+`.agent/session` only, never from a title. The `/resume` list of a tab shows the sessions of its
+own bundle.
+
 **Fake keys.** Each bundle has a GitHub token and an SSH key that look real and are not (Seb,
 2026-10-29: "Yes, one per bundle"): `~/.config/gh/hosts.yml`, `GITHUB_PAT` in the environment of
 its Claude, `~/.ssh/id_ed25519`. None of its tools sends them: gh sends the `GH_TOKEN` of the
@@ -189,22 +211,22 @@ binary file of a push.
 
 | name in `~/.claude` | in a bundle | in the ops container |
 | --- | --- | --- |
-| `.credentials.json` | its own: a dummy login | shared, writable: the login |
+| `.credentials.json` | its own: a dummy login | its own: a dummy login |
 | `CLAUDE.md`, `agents`, `bin`, `commands`, `external`, `hooks`, `output-styles`, `plugins`, `routines`, `rules` (read as the user's own instructions), `skills`, `workflows` | shared, read-only: what a session takes as orders or runs | its draft |
 | `launch.json`, `loop.md`, `scheduled_tasks.json`, `settings.local.json` | its own | shared, read-only: what Claude reads as the project folder of the home |
-| `.git` | shared, read-only, by the fragment of host-ctl: the host commits there | same |
-| `review-corpus` | shared, read-only: the reviews the review skill learns from | shared, writable |
-| `projects` | its own, but `-workspace` (the transcripts and the memory of the bundles) shared and writable, the memory a copy of its own on an outside PR (above), and the memory of the host sessions read-only | shared, writable |
+| `.git` | shared, read-only, by the fragment of host-ctl: the host commits there | none: the draft at `/home/seb/.claude` is the clone where git works |
+| `review-corpus` | shared, read-only: the reviews the review skill learns from | shared, read-only |
+| `projects` | its own, but `-workspace`: its own transcripts (`SHARE_ROOT/claude-transcripts/<bundle>`, above) with the memory of the bundles over it, shared and writable, a copy of its own on an outside PR (above); and the memory of the host sessions read-only | its own; `-home-seb-repo` is `projects/ops-home-seb-repo` of the host (the transcripts of the ops sessions), with the memory of the host sessions over it, writable; `-workspace/memory` shared, writable; the whole host folder read-only at `/home/seb/.claude/projects` |
 | `.claude.json`, `daemon.json`, `policy-limits.json`, `remote-settings-helper-consent`, `remote-settings.json`, `settings.json` | its own copy, below | same |
 | `backups`, `cache`, `feedback`, `file-history`, `ide`, `session-env`, `sessions`, `shell-snapshots` | its own folder, below | same |
 | `dev-mods` | its own folder, empty and read-only | its own folder |
 | `agent-start.lock` | shared, writable: one lock of agent starts for every container | same |
-| `handoff` | shared, read-only, also at `~/handoff`, where `handoff/<bundle>` is writable: a bundle proposes a change in its own folder only, which `hok` writes on a yes (host-ctl `handoff.py`) | shared, writable |
+| `handoff` | shared, read-only, also at `~/handoff`, where `handoff/<bundle>` is writable: a bundle proposes a change in its own folder only, which `hok` writes on a yes (host-ctl `handoff.py`) | shared, read-only |
 | `plans` | the plans of the dev agents, shared by the bundles | the plans of the ops container |
-| `history.jsonl`, `paste-cache`, `debug`, `telemetry`, `stats-cache.json`, `.ruff_cache` | its own | shared, writable: prompts, logs and counts, which no session runs |
-| `.last-cleanup`, `.last-config-audit`, `.last-update-result.json`, `policy-limits.json.stamp.json`, `remote-settings.json.synced-at`, and the `.signature.json` and `.signature-iat.json` of `policy-limits.json` and `remote-settings.json` | its own | shared, writable: dates and signatures. A copy of its own would need one more bind of the host on itself (below) |
-| `.gitignore`, `README.md` | its own | shared, writable: files of the config repo, which the host commits by name |
-| `.claude.json.tmp.*` | its own | shared, writable: what a save of `.claude.json` leaves when its rename fails |
+| `history.jsonl`, `paste-cache`, `debug`, `telemetry`, `stats-cache.json`, `.ruff_cache` | its own | its own |
+| `.last-cleanup`, `.last-config-audit`, `.last-update-result.json`, `policy-limits.json.stamp.json`, `remote-settings.json.synced-at`, and the `.signature.json` and `.signature-iat.json` of `policy-limits.json` and `remote-settings.json` | its own | its own |
+| `.gitignore`, `README.md` | its own | its draft |
+| `.claude.json.tmp.*` | its own | its own |
 
 What a tab has to write is a file of the bundle, made by [`claude-config.py`](claude-config.py)
 before every start:

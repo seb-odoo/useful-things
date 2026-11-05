@@ -53,16 +53,17 @@ from agents import (  # noqa: E402
     SESSION_ID,
     STATE,
     STATE_FILE,
+    TRANSCRIPTS,
     format_time,
     get_agent,
     get_agent_folder,
     get_bundle_container,
     get_last_text,
     get_mtime,
+    get_own_transcript,
     get_resume,
     get_session_records,
     get_session_status,
-    get_session_title,
     get_transcript,
     get_window_pids,
     has_window,
@@ -765,12 +766,25 @@ def get_queue(caller, query, body):
 
 def get_remote_agents():
     """The worker of each bundle whose agent runs on one, as the daemon started it."""
-    root = pathlib.Path(get_worktree_container_folder())
     agents = {}
-    for found in sorted(root.glob("*/*/.agent/remote.json")):
-        if remote := remote_agent.read_remote(found.parent.parent):
-            agents[found.parent.parent.name] = remote["worker"]
+    for folder in get_remote_folders():
+        if remote := remote_agent.read_remote(folder):
+            agents[folder.name] = remote["worker"]
     return agents
+
+
+def get_remote_folders():
+    """The bundle folder of each agent this daemon started on a worker, from its records: the
+    bundle writes its `.agent/remote.json` (security check 11-03, G1)."""
+    folders = []
+    for bundle in remote_agent.get_recorded():
+        try:
+            folder = BUNDLE_NAME.fullmatch(bundle) and pathlib.Path(get_worktree_bundle_folder(bundle))
+        except ValueError:
+            continue
+        if folder and folder.is_dir():
+            folders.append(folder)
+    return folders
 
 
 def force_queue(caller, query, body):
@@ -1949,12 +1963,12 @@ def start_remote(log, bundle, worker):
     agent = get_agent_folder(bundle)
     session = read_text(agent / "session") or str(uuid.uuid4())
     write_text(agent / "session", f"{session}\n")
-    transcript = pathlib.Path("~/.claude/projects/-workspace").expanduser() / f"{session}.jsonl"
+    transcript = get_own_transcript(session, bundle)
     folder = pathlib.Path(get_worktree_bundle_folder(bundle))
     try:
         remote_agent.start(
             log, bundle, folder, worker, WORKERS, get_base_from_bundle_name(bundle), session,
-            transcript.exists(),
+            transcript is not None,
         )
     except Exception as error:
         log.write(traceback.format_exc())
@@ -1970,7 +1984,7 @@ def queue_here(bundle):
     """Queue again, to start here that once, the task of a bundle whose agent started on no
     worker: its queue entry went when its start began."""
     agent = get_agent_folder(bundle)
-    transcript = PROJECTS / "-workspace" / f"{read_text(agent / 'session')}.jsonl"
+    transcript = get_own_transcript(read_text(agent / "session"), bundle)
     task = {
         "task": read_text(agent / "task.md") or GO_ON,
         "where": "local",
@@ -1978,7 +1992,7 @@ def queue_here(bundle):
         "priority": get_task_priority(bundle),
         "effort": read_text(agent / "effort") or None,
         "model": read_text(agent / "model") or None,
-        "resume": transcript.exists(),
+        "resume": transcript is not None,
     }
     enqueue(read_text(agent / "parent") or HOST, bundle, task)
 
@@ -1993,9 +2007,11 @@ def keep_remote_agents():
     for good (README.md, "Stuck tasks").
     """
     root = pathlib.Path(get_worktree_container_folder())
-    remotes = sorted(root.glob("*/*/.agent/remote.json"))
+    remotes = [folder / ".agent" / "remote.json" for folder in get_remote_folders()]
     users = [found.parent.parent for found in remotes]
     users = users or sorted(map(pathlib.Path, get_open_windows()))
+    if not users and HOST_FOLDER and HOST_FOLDER in read_open_folders():
+        users = [pathlib.Path(HOST_FOLDER)]
     if users:
         remote_agent.renew_login_soon(users[0])
     for found in remotes:
@@ -2026,8 +2042,7 @@ def keep_remote_agents():
         if line:
             print(line, flush=True)
         if lost and not (found.parent / "done").exists():
-            transcript = PROJECTS / "-workspace" / f"{read_text(found.parent / 'session')}.jsonl"
-            if transcript.exists():
+            if get_own_transcript(read_text(found.parent / "session"), bundle):
                 enqueue(HOST, bundle, {"task": GO_ON, "resume": True})
             else:
                 enqueue(HOST, bundle, {"task": read_text(found.parent / "task.md") or GO_ON})
@@ -2093,11 +2108,7 @@ def hold_orphan(worker, bundle, since, folder):
     record = remote_agent.load_remote(remote_agent.record_path(bundle))
     if not record or record["worker"] != worker:
         return f"stale wait: {bundle}: its agent runs on {worker}, and nothing here names its job"
-    sessions = [
-        path
-        for path in PROJECTS.joinpath("-workspace").glob("*.jsonl")
-        if get_session_title(path) == bundle
-    ]
+    sessions = list((TRANSCRIPTS / bundle).glob("*.jsonl")) if BUNDLE_NAME.fullmatch(bundle) else []
     newest = max(sessions, key=get_mtime, default=None)
     written = newest and format_time(get_mtime(newest))
     item = {
@@ -3206,39 +3217,33 @@ def find_cut():
     live = cut.get_live_sessions(
         [*pathlib.Path(CLAUDE_CONFIG_CONTAINER).glob("*/sessions"), PROJECTS.parent / "sessions"],
     )
-    live |= {
-        read_text(path.parent / "session")
-        for path in pathlib.Path(get_worktree_container_folder()).glob("*/*/.agent/remote.json")
-    }
-    agents = {
-        read_text(path): path.parent.parent.name
-        for path in pathlib.Path(get_worktree_container_folder()).glob("*/*/.agent/session")
-    }
-    folders = [(PROJECTS / "-workspace", False)]
+    live |= {read_text(folder / ".agent" / "session") for folder in get_remote_folders()}
+    # A bundle's session is the one of its .agent/session, in its own folder: a bundle writes the
+    # title of any transcript it reaches (security check 11-03, B7).
+    paths = []
+    for found in pathlib.Path(get_worktree_container_folder()).glob("*/*/.agent/session"):
+        bundle = found.parent.parent.name
+        if BUNDLE_NAME.fullmatch(bundle) and (path := get_own_transcript(read_text(found), bundle)):
+            paths.append((bundle, path))
     if HOST_FOLDER:
-        folders.append((PROJECTS / re.sub(r"[^A-Za-z0-9]", "-", CONFIG["REPO_ROOT"]), True))
+        project = re.sub(r"[^A-Za-z0-9]", "-", CONFIG["REPO_ROOT"])
+        for folder in (PROJECTS / f"ops{project}", PROJECTS / project):
+            paths += [(f"{OPS}{path.stem}", path) for path in folder.glob("*.jsonl")]
     newest = {}
-    for folder, ops in folders:
-        for path in folder.glob("*.jsonl"):
-            try:
-                stopped = path.lstat().st_mtime
-                if (
-                    path.is_symlink()
-                    or now - stopped > cut.WINDOW
-                    or not cut.SESSION_ID.fullmatch(path.stem)
-                ):
-                    continue
-                session = cut.read_session(path)
-                name = f"{OPS}{path.stem}" if ops else agents.get(path.stem) or session["title"]
-                if not ops and not (
-                    BUNDLE_NAME.fullmatch(name or "")
-                    and os.path.isdir(get_worktree_bundle_folder(name))
-                ):
-                    continue
-            except (IndexError, OSError):
+    for name, path in paths:
+        try:
+            stopped = path.lstat().st_mtime
+            if (
+                path.is_symlink()
+                or now - stopped > cut.WINDOW
+                or not cut.SESSION_ID.fullmatch(path.stem)
+            ):
                 continue
-            if stopped > newest.get(name, (0,))[0]:
-                newest[name] = (stopped, path, session)
+            session = cut.read_session(path)
+        except (IndexError, OSError):
+            continue
+        if stopped > newest.get(name, (0,))[0]:
+            newest[name] = (stopped, path, session)
     running = get_open_windows()
     rows = []
     for name, (stopped, path, session) in newest.items():

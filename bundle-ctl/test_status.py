@@ -122,6 +122,8 @@ def check_remote(root):
     try:
         checks.append(("an agent with no window and no worker is stopped", read() == (False, None)))
         (agent / "remote.json").write_text('{"worker": "sebpc", "job": "1"}')
+        daemon.remote_agent.STATE = agent.parent / "state"
+        daemon.remote_agent.keep_record("master-a--seb", {"worker": "sebpc", "job": "1"})
         checks.append(("an agent on a worker is alive, with its worker", read() == (True, "sebpc")))
     finally:
         vars(daemon).update(stubs)

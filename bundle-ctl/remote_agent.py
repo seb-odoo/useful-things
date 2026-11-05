@@ -32,7 +32,7 @@ devconfig = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(devconfig)
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
-from agents import read_text
+from agents import read_text, touch, write_text
 
 HOME = pathlib.Path.home()
 STATE = pathlib.Path("~/.local/state/bundle-ctl").expanduser()
@@ -73,6 +73,8 @@ REPOS = (
 )
 # The folders of a base .git a bundle writes (devcontainer/base.jsonc).
 GIT_WRITABLE = ("objects", "refs", "logs", "rr-cache", "packed")
+MAX_READ = 64 * 1024
+MAX_REMOTE = 4096
 finishing = {}
 renewing = threading.Lock()
 renewed = [0]
@@ -117,7 +119,9 @@ MOUNTS = {
     "/home/vscode/.claude/output-styles": ("send", "output styles"),
     "/home/vscode/.claude/plugins": ("send", "plugins"),
     "/home/vscode/.claude/projects/@HOST_PROJECT@/memory": ("send", "the host memory, read-only"),
-    "/home/vscode/.claude/projects/-workspace": ("send", "the memory of the bundles, the session"),
+    "/home/vscode/.claude/projects/-workspace": ("send", "the transcripts of the bundle, the session"),
+    "/home/vscode/bundle-transcripts": ("drop", "the transcripts of the other bundles: read here"),
+    "/home/vscode/bundle-transcripts-before": ("drop", "the transcripts of before 11-03: read here"),
     "/home/vscode/.claude/projects/-workspace/memory": (
         "send",
         "the memory of the bundles, a copy of its own on an outside PR",
@@ -202,6 +206,11 @@ def get_memory(own):
     return HOME / ".claude" / "projects" / "-workspace" / "memory"
 
 
+def get_transcripts(bundle):
+    """The folder of the transcripts of the bundle, its ~/.claude/projects/-workspace (B7)."""
+    return pathlib.Path(get_values()["SHARE_ROOT"]) / "claude-transcripts" / bundle
+
+
 def get_agent(bundle_folder):
     return bundle_folder / ".agent"
 
@@ -211,24 +220,30 @@ def forget_records(bundle_folder, session):
     on the worker, they would say it is idle, and the daemon would type in a pty nobody reads."""
     for path in (get_paths(bundle_folder)[1] / "sessions").glob("*.json"):
         try:
-            if json.loads(path.read_text()).get("sessionId") == session:
+            if json.loads(read_text(path, MAX_READ) or "").get("sessionId") == session:
                 path.unlink()
         except (OSError, ValueError, AttributeError):
             continue
 
 
 def read_remote(bundle_folder):
-    """The worker and the job of the bundle's agent while it is remote, else None. The bundle can
-    write this file: the daemon names files, units and ssh words after it, so each value must
-    have its form, and a file with any other value counts as no remote agent.
+    """The worker and the job of the bundle's agent while it is remote, else None: the record of
+    the daemon, when the `.agent/remote.json` of the bundle names the same job. The bundle writes
+    that file, which alone made the daemon write host files with the bundle's text (security
+    check 11-03, G1). The daemon names files, units and ssh words after it, so each value must
+    have its form, and a record with any other value counts as no remote agent.
     """
-    return load_remote(get_agent(bundle_folder) / "remote.json")
+    record = load_remote(record_path(bundle_folder.name))
+    written = load_remote(get_agent(bundle_folder) / "remote.json")
+    if not record or not written:
+        return None
+    return record if (written["worker"], written["job"]) == (record["worker"], record["job"]) else None
 
 
 def load_remote(path):
     try:
-        remote = json.loads(pathlib.Path(path).read_text())
-    except (OSError, ValueError):
+        remote = json.loads(read_text(pathlib.Path(path), MAX_REMOTE) or "")
+    except ValueError:
         return None
     if type(remote) is not dict or not {"worker", "job"} <= remote.keys():
         return None
@@ -246,6 +261,11 @@ def record_path(bundle):
     """The copy of the remote.json of the bundle's agent, in a folder no container mounts: the
     daemon still finds its job once the bundle folder is gone (README.md, "Remote agents")."""
     return STATE / "remote" / f"{bundle}.json"
+
+
+def get_recorded():
+    """The bundles whose agent this daemon started on a worker, from their records."""
+    return sorted(path.stem for path in (STATE / "remote").glob("*.json"))
 
 
 def keep_record(bundle, remote):
@@ -389,11 +409,17 @@ def keep_regular(info, sent):
 
 
 def find_binary(bundle_folder, pattern):
-    """The newest PATTERN of the bundle's extension store, else of any store, else None."""
+    """The newest PATTERN of the bundle's extension store, else of any store of a bundle, else of
+    the store of the ops container, else None."""
     values, _own = get_paths(bundle_folder)
     store = pathlib.Path(values["CACHE_ROOT"]) / "devcontainer" / "vscode-extensions"
-    for where in (bundle_folder.name, "*"):
-        found = sorted(store.glob(f"{where}/{pattern}"), key=lambda path: path.stat().st_mtime)
+    ops = pathlib.Path(values["CACHE_ROOT"]) / "host-ctl" / "vscode-server-extensions"
+    for found in (
+        store.glob(f"{bundle_folder.name}/{pattern}"),
+        store.glob(f"*/{pattern}"),
+        ops.glob(pattern),
+    ):
+        found = sorted(found, key=lambda path: path.stat().st_mtime)
         if found:
             return found[-1]
     return None
@@ -442,7 +468,7 @@ def start_standin(bundle, bundle_folder, worker, session):
     state_root = pathlib.Path(values.get("STATE_ROOT") or HOME / ".local" / "state")
     mounts = [
         (bundle_folder, "/workspace", "rw"),
-        (HOME / ".claude" / "projects" / "-workspace", "/mirror/projects", "rw"),
+        (get_transcripts(bundle), "/mirror/projects", "rw"),
         (get_memory(own), "/mirror/projects/memory", "rw"),
         (own / "sessions", "/mirror/sessions", "rw"),
         (own / "file-history", "/mirror/file-history", "rw"),
@@ -457,6 +483,8 @@ def start_standin(bundle, bundle_folder, worker, session):
     subprocess.run([sys.executable, str(admin), str(bundle_folder)], check=True)
     config = HERE.parent / "devcontainer" / "claude-config.py"
     subprocess.run([sys.executable, str(config), bundle_folder.name, "--bundle"], check=True)
+    transcripts = HERE.parent / "devcontainer" / "transcripts.py"
+    subprocess.run([sys.executable, str(transcripts), bundle, str(bundle_folder)], check=True)
     for repo in REPOS:
         git_dir = repo_root / repo / ".git"
         if git_dir.is_dir():
@@ -481,6 +509,8 @@ def start_standin(bundle, bundle_folder, worker, session):
         f"--label=remote-runs.worker={worker}",
         "-e",
         f"STANDIN_BUNDLE={bundle}",
+        "-e",
+        f"STANDIN_REPO_ROOT={repo_root}",
         "-e",
         f"STANDIN_SESSION={session}",
         "-e",
@@ -535,7 +565,7 @@ def start(log, bundle, bundle_folder, worker, workers, base, session, resume):
     """
     agent = get_agent(bundle_folder)
     log.write(f"starting the agent of {bundle} on {worker}\n")
-    (agent / "remote-starting").touch()
+    touch(agent / "remote-starting")
     dummy = f"sk-ant-oat01-rr-{secrets.token_urlsafe(36)}"
     named = DUMMIES / hashlib.sha256(dummy.encode()).hexdigest()
     answer = {}
@@ -754,8 +784,6 @@ def keep(bundle, bundle_folder, workers):
     remote = read_remote(bundle_folder)
     if remote is None:
         return None, False
-    if not record_path(bundle).exists():
-        keep_record(bundle, remote)
     agent = get_agent(bundle_folder)
     ended = read_ended(bundle)
     if ended is not None:
@@ -769,6 +797,7 @@ def keep(bundle, bundle_folder, workers):
         return None, False
     remote["tunnel"] = time.time()
     write(agent / "remote.json", json.dumps(remote) + "\n")
+    keep_record(bundle, remote)
     if not is_standin_up(bundle):
         start_standin(bundle, bundle_folder, remote["worker"], remote.get("session", ""))
     open_tunnel(bundle, remote, workers)
@@ -796,16 +825,15 @@ def finish(bundle, bundle_folder, end):
                 (agent / "remote-lost").unlink(missing_ok=True)
                 shutil.rmtree(agent / "remote-back", ignore_errors=True)
             else:
-                why = back.stderr.decode().strip()[-300:]
+                # One line of printable characters: the stand-in prints names of the bundle.
+                why = "".join(char for char in " ".join(back.stderr.decode().split()) if char.isprintable())[-300:]
                 line += f", its work tree stays in .agent/remote-back: {why}"
                 write(agent / "remote-conflict", why + "\n")
                 write(agent / "where", "local\n")
         else:
             losses = int(read(agent / "remote-lost") or 0) + 1
-            transcript = (
-                HOME / ".claude" / "projects" / "-workspace" / f"{remote.get('session')}.jsonl"
-            )
-            if transcript.exists() and losses < MAX_LOSSES:
+            transcript = get_transcripts(bundle) / f"{remote.get('session')}.jsonl"
+            if transcript.is_file() and losses < MAX_LOSSES:
                 line += ", lost: its next start goes on from its tree on the worker"
                 write(agent / "remote-lost", f"{losses}\n")
             else:
@@ -851,7 +879,7 @@ def end(bundle, bundle_folder):
     agent = get_agent(bundle_folder)
     if time.time() - get_mtime(agent / "remote-ending") < STOP_AGAIN:
         return None
-    (agent / "remote-ending").touch()
+    touch(agent / "remote-ending")
     in_standin(bundle, "order", json.dumps({"op": "stop"}).encode() + b"\n", check=False)
     return f"{bundle}: its agent gave its verdict, it stops on its worker"
 
@@ -865,7 +893,7 @@ def move_back(log, bundle, bundle_folder, workers):
     if remote is None:
         raise RuntimeError(f"the agent of {bundle} is not remote")
     log.write(f"bringing the agent of {bundle} back from {remote['worker']}\n")
-    (get_agent(bundle_folder) / "remote-moving").touch()
+    touch(get_agent(bundle_folder) / "remote-moving")
     in_standin(bundle, "order", json.dumps({"op": "stop"}).encode() + b"\n", check=False)
     deadline = time.time() + STOP_WAIT
     cancelled = False
@@ -901,10 +929,10 @@ def renew_login_soon(bundle_folder):
 
 
 def renew_login(bundle_folder):
-    """While a remote agent or a bundle needs it, the main login renewed before it expires:
-    claude-switch sends their requests with it, as both hold a dummy login, and at night no ops
-    session may renew it. A one-shot claude in a container that shares the login, as the ops
-    container does, renews it with their lock.
+    """While a remote agent, a bundle or the ops container needs it, the main login renewed before
+    it expires: claude-switch sends their requests with it, as all hold a dummy login, and at
+    night no session of the laptop may renew it. A one-shot claude in a container that mounts the
+    host's ~/.claude renews it, with the lock of the host's claude.
     """
     left = get_login_left()
     if left is None or left > RENEW_BEFORE or time.time() - renewed[0] < RENEW_EVERY:
@@ -954,13 +982,13 @@ def get_login_left():
 
 
 def read(path):
-    try:
-        return pathlib.Path(path).read_text().strip()
-    except OSError:
-        return ""
+    """A file of an `.agent/` folder, or of the state of the daemon, "" when it is no regular file
+    of MAX_READ at most: the bundle writes the first (security check 11-03, G1)."""
+    return read_text(pathlib.Path(path), MAX_READ) or ""
 
 
 def write(path, text):
+    """Write a file whole, through a temporary file that replaces a link a bundle left there."""
     temporary = pathlib.Path(f"{path}.tmp")
-    temporary.write_text(text)
-    temporary.replace(path)
+    write_text(temporary, text)
+    os.replace(temporary, path)

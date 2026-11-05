@@ -14,7 +14,7 @@ import subprocess
 import time
 
 from commands import BUNDLE_NAME, get_worktree_bundle_folder
-from config import CLAUDE_CONFIG_CONTAINER, HOST_PROJECT, STATE_ROOT
+from config import CLAUDE_CONFIG_CONTAINER, HOST_PROJECT, STATE_ROOT, TRANSCRIPTS_CONTAINER
 
 EFFORTS = ("low", "medium", "high", "xhigh")
 HANDLED_FOR = 24 * 3600
@@ -26,7 +26,7 @@ MODELS = ("haiku", "opus", "sonnet")
 OPS = "ops-"
 PROJECTS = pathlib.Path.home() / ".claude" / "projects"
 SESSION_ID = re.compile(r"[0-9a-f-]{36}")
-SESSIONS = pathlib.Path.home() / ".claude" / "projects" / "-workspace"
+TRANSCRIPTS = pathlib.Path(TRANSCRIPTS_CONTAINER)
 STATE = pathlib.Path(STATE_ROOT) / "bundle-ctl"
 STATE_FILE = STATE / "state.json"
 TAKEOVER = pathlib.Path(__file__).resolve().parent.parent / "bundle-ctl/client/agent-takeover.py"
@@ -99,11 +99,21 @@ def get_agent_folder(bundle):
 def get_projects(bundle):
     """The folders that hold the transcripts of a bundle, or of an ops window (ops-SESSION): the
     ops container's own, then the host's of before (security check 11-03, K1). Never a folder of
-    the other kind: every bundle writes `-workspace`, and a transcript there named after an ops
-    session would become its resume prompt (security check 11-03, B5)."""
+    the other kind: every bundle wrote `-workspace`, and a transcript there named after an ops
+    session would become its resume prompt (security check 11-03, B5). A bundle has a folder of
+    its own since 11-03 (B7), then `-workspace`, which no bundle writes once it restarted."""
     if bundle.startswith(OPS):
         return [PROJECTS / f"ops{HOST_PROJECT}", PROJECTS / HOST_PROJECT]
-    return [PROJECTS / "-workspace"]
+    return [TRANSCRIPTS / bundle, PROJECTS / "-workspace"]
+
+
+def get_own_transcript(session, bundle):
+    """The transcript of a session in the own folder of a bundle only, as a file, None when it
+    has none there: what the host resumes or acts on (security check 11-03, B7)."""
+    if not re.fullmatch(r"[\w-]+", session or "") or not BUNDLE_NAME.fullmatch(bundle):
+        return None
+    path = TRANSCRIPTS / bundle / f"{session}.jsonl"
+    return path if path.is_file() and not path.is_symlink() else None
 
 
 def get_transcript(session, bundle=""):
@@ -149,6 +159,8 @@ def load_takeover():
 def get_resume(transcript):
     """The permission mode a session last ran in, and whether its turn was cut: its last message
     is a prompt, or a tool call with no result."""
+    if transcript is None:
+        return None, False
     takeover = load_takeover()
     author, kinds = takeover.get_last_message(takeover.read_entries(transcript))
     return takeover.get_mode(transcript), author == "user" or "tool_use" in kinds
@@ -315,9 +327,9 @@ def get_session_title(path):
 
 
 def get_activity(bundle, session):
-    paths = [path for path in SESSIONS.glob("*.jsonl") if get_session_title(path) == bundle]
-    if SESSION_ID.fullmatch(session or ""):
-        paths.append(SESSIONS / f"{session}.jsonl")
+    paths = list((TRANSCRIPTS / bundle).glob("*.jsonl")) if BUNDLE_NAME.fullmatch(bundle) else []
+    if found := get_transcript(session, bundle):
+        paths.append(found)
     active = max(filter(None, map(get_mtime, paths)), default=None)
     if not active:
         return None, False

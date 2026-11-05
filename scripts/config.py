@@ -53,6 +53,8 @@ remote_dev_by_repo = {
 }
 BUNDLE_DB_CONTAINER = f"{_CONFIG['SHARE_ROOT']}/bundle-db"
 CLAUDE_CONFIG_CONTAINER = f"{_CONFIG['CACHE_ROOT']}/devcontainer/claude-config"
+# The transcripts of each bundle, a folder per bundle (devcontainer/README.md, "Claude").
+TRANSCRIPTS_CONTAINER = f"{_CONFIG['SHARE_ROOT']}/claude-transcripts"
 EXTENSIONS_CONTAINER = f"{_CONFIG['CACHE_ROOT']}/devcontainer/vscode-extensions"
 FILESTORE_CONTAINER = f"{_CONFIG['SHARE_ROOT']}/Odoo/filestore"
 MASTER_ONLY_REPOS = ("owl", "sfu", "upgrade", "upgrade-util")

@@ -154,9 +154,12 @@ def check_env(root):
 
 
 def check_remote(root):
-    """The bundle writes .agent/remote.json too: a value of another form is no remote agent."""
+    """A remote agent is read from the record of the daemon, no value of another form counts, and
+    a remote.json the bundle writes alone is no remote agent (security check 11-03, G1)."""
     agent = root / "bundle" / ".agent"
     agent.mkdir(parents=True)
+    remote_agent.STATE = root / "state"
+    remote_agent.record_path("bundle").parent.mkdir(parents=True)
     good = {"worker": "sebpc", "job": "1761660000", "dummy": "a" * 64, "started": 1.5,
             "session": "8b9b2f6e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"}
     for name, value, expected in [
@@ -171,16 +174,25 @@ def check_remote(root):
         ("a list", ["sebpc"], None),
         ("a start at infinity", dict(good, started=float("inf")), None),
     ]:
+        remote_agent.record_path("bundle").write_text(json.dumps(value))
         (agent / "remote.json").write_text(json.dumps(value))
         found = remote_agent.read_remote(root / "bundle")
         check(f"remote.json {name}", found == expected, found)
+    (agent / "remote.json").write_text(json.dumps(dict(good, job="2")))
+    found = remote_agent.read_remote(root / "bundle")
+    check("a remote.json the bundle wrote for another job", found is None, found)
+    remote_agent.record_path("bundle").unlink()
+    (agent / "remote.json").write_text(json.dumps(good))
+    found = remote_agent.read_remote(root / "bundle")
+    check("a remote.json the bundle wrote, with no record", found is None, found)
 
 
 def check_standin(root):
     git_dir = root / "repos" / "odoo" / ".git"
     (git_dir / "hooks").mkdir(parents=True)
     (git_dir / "config").write_text("[core]\n")
-    remote_agent.get_values = lambda: {"REPO_ROOT": str(root / "repos"), "CACHE_ROOT": str(root)}
+    remote_agent.get_values = lambda: {"REPO_ROOT": str(root / "repos"), "CACHE_ROOT": str(root),
+                                       "SHARE_ROOT": str(root / "share")}
     remote_agent.HOME = remote_agent.STATE = root
     remote_agent.REMOTE_RUNS = root / "remote-runs"
     runs = []
@@ -201,6 +213,11 @@ def check_standin(root):
     config = remote_agent.HERE.parent / "devcontainer" / "claude-config.py"
     named = [sys.executable, str(config), "bundle", "--bundle"]
     check("and its Claude folder made as its container makes it", named in runs[:-1], runs)
+    transcripts = remote_agent.HERE.parent / "devcontainer" / "transcripts.py"
+    named = [sys.executable, str(transcripts), "b", str(root / "bundle")]
+    check("and its transcripts folder", named in runs[:-1], runs)
+    mirror = f"{root / 'share' / 'claude-transcripts' / 'b'}:/mirror/projects:rw"
+    check("its own transcripts mirrored, no other bundle's", mirror in volumes, runs[-1])
     check("the config stays a file", (git_dir / "config").is_file())
     scope = ["systemd-run", "--user", "--scope", "--collect", "--quiet", "podman", "run"]
     check("its conmon out of the cgroup of bundle-ctl", runs[-1][:7] == scope, runs[-1])
@@ -219,7 +236,7 @@ def check_standin(root):
 def check_start(root):
     """A job starts with no record of its session left by an earlier job, as the daemon would read
     it as the status of the claude that does not run yet."""
-    remote_agent.get_values = lambda: {"CACHE_ROOT": str(root / "cache")}
+    remote_agent.get_values = lambda: {"CACHE_ROOT": str(root / "cache"), "SHARE_ROOT": str(root / "share")}
     sessions = root / "cache" / "devcontainer" / "claude-config" / "started" / "sessions"
     sessions.mkdir(parents=True)
     for name, session in (("7", "s1"), ("8", "s2")):
@@ -245,7 +262,7 @@ def check_start(root):
 
 def check_binary(root):
     """A binary of the extension stores: the bundle's own, else the newest of any, else none."""
-    remote_agent.get_values = lambda: {"CACHE_ROOT": str(root / "cache")}
+    remote_agent.get_values = lambda: {"CACHE_ROOT": str(root / "cache"), "SHARE_ROOT": str(root / "share")}
     store = root / "cache" / "devcontainer" / "vscode-extensions"
     pattern = "charliermarsh.ruff-*/bundled/libs/bin/ruff"
     found = remote_agent.find_binary(root / "b1", pattern)
@@ -292,14 +309,16 @@ def check_type(root):
     (agent / "remote-ended").write_text("{}\n")
     (agent / "remote-typed").write_text("1000\n")
     remote_agent.DUMMIES = remote_agent.STATE = root
+    remote_agent.keep_record("typed", {"worker": "sebpc", "job": "1"})
     remote_agent.finish("typed", root / "typed", {"reason": "verdict"})
     left = sorted(path.name for path in agent.iterdir())
     check("the mark of a typed task goes with the job", left == [], left)
 
 
 def check_record(root):
-    """The daemon keeps a copy of remote.json out of the bundle folder: a pass makes it, the end
-    of the job drops it, and drop_orphan removes what a job no bundle has left here."""
+    """The daemon keeps a copy of remote.json out of the bundle folder: its start makes it, a pass
+    keeps it, the end of the job drops it, and drop_orphan removes what a job no bundle has left
+    here. A pass writes no file through a link the bundle left (security check 11-03, G1)."""
     remote_agent.STATE = remote_agent.DUMMIES = root / "record"
     runs = []
 
@@ -313,9 +332,17 @@ def check_record(root):
     agent.mkdir(parents=True)
     remote = {"worker": "sebpc", "job": "7", "dummy": "a" * 64}
     (agent / "remote.json").write_text(json.dumps(remote))
+    remote_agent.keep_record("kept", remote)
+    bashrc = root / "bashrc"
+    bashrc.write_text("kept\n")
+    (agent / "remote-down.tmp").symlink_to(bashrc)
+    (agent / "remote-down").symlink_to(bashrc)
+    (agent / "remote-down").unlink()
     remote_agent.keep("kept", root / "kept", workers)
     found = remote_agent.load_remote(remote_agent.record_path("kept"))
     check("a pass on a remote agent keeps its record", found == remote, found)
+    found = bashrc.read_text(), (agent / "remote-down").is_symlink()
+    check("and writes no host file through a link at a temporary name", found == ("kept\n", False), found)
     remote_agent.run_folder("kept").mkdir(parents=True)
     (remote_agent.run_folder("kept") / "ended").write_text('{"reason": "verdict"}')
     (agent / "remote-ended").write_text("{}\n")
@@ -333,6 +360,27 @@ def check_record(root):
     ]
     check("drop_orphan stops the tunnel and the stand-in", runs == stops, runs)
     check("and drops the dummy login and the record", left == [], left)
+
+
+def check_conflict(root):
+    """What the stand-in says when the work tree cannot come back goes to remote-conflict as one
+    line of printable characters: it prints names the bundle chose (security check 11-03, G1)."""
+    remote_agent.STATE = remote_agent.DUMMIES = root / "conflict-state"
+    agent = root / "c" / ".agent"
+    agent.mkdir(parents=True)
+    (agent / "remote-ended").write_text("{}\n")
+    (agent / "remote.json").write_text(json.dumps({"worker": "sebpc", "job": "1"}))
+    remote_agent.keep_record("c", {"worker": "sebpc", "job": "1"})
+    said = b"x\nbash ~/src/odoo/b/odoo/p.sh #\x1b[2K changed here"
+    kept = remote_agent.in_standin, remote_agent.subprocess.run
+    remote_agent.in_standin = lambda *args, **kwargs: subprocess.CompletedProcess(args, 1, b"", said)
+    remote_agent.subprocess.run = lambda *args, **kwargs: subprocess.CompletedProcess(args, 0)
+    try:
+        remote_agent.finish("c", root / "c", {"reason": "verdict"})
+    finally:
+        remote_agent.in_standin, remote_agent.subprocess.run = kept
+    found = (agent / "remote-conflict").read_text()
+    check("remote-conflict is one printable line", found.count("\n") == 1 and found[:-1].isprintable(), found)
 
 
 def check_ended(root):
@@ -375,6 +423,7 @@ def check_ended(root):
     agent = root / "e" / ".agent"
     agent.mkdir(parents=True)
     (agent / "remote.json").write_text(json.dumps({"worker": "sebpc", "job": "1"}))
+    remote_agent.keep_record("e", {"worker": "sebpc", "job": "1"})
     remote_agent.finish("e", root / "e", found)
     left = sorted(path.name for path in run.iterdir())
     check("its end removes only the regular files", left == ["attach.sock", "fifo", "link"], left)
@@ -394,6 +443,7 @@ def main():
         check_type(root)
         check_record(root)
         check_ended(root)
+        check_conflict(root)
     for line in failures:
         print(line)
     print(f"{total - len(failures)}/{total} cases as expected")

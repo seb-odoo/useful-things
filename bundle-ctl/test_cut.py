@@ -195,20 +195,22 @@ def check_live(root):
 
 
 def prepare(root):
-    """Transcripts of bundles and of the ops container (projects/-repo), and the bundle folders."""
-    projects, src = root / "projects", root / "src" / "master"
+    """Transcripts of bundles, each in its own folder, and of the ops container (projects/-repo),
+    and the bundle folders. The session of a bundle is the one of its .agent/session: a cut
+    session the old shared folder holds under the title of a bundle is no session of it (security
+    check 11-03, B7)."""
+    projects, src, own = root / "projects", root / "src" / "master", root / "transcripts"
     ended = [*ASKED, result(), answer("pushed")]
-    bundles = projects / "-workspace"
-    write(bundles / f"{session('a', 1)}.jsonl", [title(NEWER), *ASKED[1:]], 200)
-    write(bundles / f"{session('a', 2)}.jsonl", [title(NEWER), *ended[1:]], 100)
-    write(bundles / f"{session('b')}.jsonl", [title(BUNDLE), prompt("go on")], 50)
-    write(bundles / f"{session('b', 2)}.jsonl", ended, 300)
-    (bundles / f"{session('b', 3)}.jsonl").symlink_to(bundles / f"{session('b', 2)}.jsonl")
-    write(bundles / "b-named.jsonl", [title(BUNDLE), *ASKED[1:]], 40)
-    write(bundles / f"{session('c')}.jsonl", [title(RUNNING), *ASKED[1:]], 50)
-    write(bundles / f"{session('d')}.jsonl", [*ASKED[1:], result()], 60, cut.TAIL)
-    write(bundles / f"{session('e')}.jsonl", [title(GONE), *ASKED[1:]], 50)
-    write(bundles / f"{session('f')}.jsonl", [title("Branch status"), *ASKED[1:]], 50)
+    shared = projects / "-workspace"
+    write(own / NEWER / f"{session('a', 1)}.jsonl", [title(NEWER), *ASKED[1:]], 200)
+    write(own / NEWER / f"{session('a', 2)}.jsonl", [title(NEWER), *ended[1:]], 100)
+    write(own / BUNDLE / f"{session('b')}.jsonl", [title(BUNDLE), prompt("go on")], 50)
+    write(own / BUNDLE / f"{session('b', 2)}.jsonl", ended, 300)
+    write(own / RUNNING / f"{session('c')}.jsonl", [title(RUNNING), *ASKED[1:]], 50)
+    write(own / MAPPED / f"{session('d')}.jsonl", [*ASKED[1:], result()], 60, cut.TAIL)
+    write(own / GONE / f"{session('e')}.jsonl", [title(GONE), *ASKED[1:]], 50)
+    write(shared / f"{session('f')}.jsonl", [title(NEWER), *ASKED[1:]], 50)
+    sessions = {NEWER: session("a", 2), BUNDLE: session("b"), RUNNING: session("c")}
     for name, entries, age in (
         (OPS_CUT, [*ASKED[1:], call(command="hctl job 3")], 70),
         (OPS_TAKEN, ASKED[1:], 80),
@@ -220,10 +222,13 @@ def prepare(root):
         write(projects / "-repo" / f"{name}.jsonl", entries, age)
     for bundle in (NEWER, BUNDLE, RUNNING, MAPPED):
         (src / bundle / ".agent").mkdir(parents=True)
+    for bundle, name in sessions.items():
+        (src / bundle / ".agent" / "session").write_text(f"{name}\n")
     (src / MAPPED / ".agent" / "session").write_text(f"{session('d')}\n")
     (src / MAPPED / ".agent" / "priority").write_text("5\n")
     (src / MAPPED / ".agent" / "model").write_text("sonnet\n")
     (src / BUNDLE / ".agent" / "done").write_text("0\n")
+    daemon.TRANSCRIPTS = daemon.sys.modules["agents"].TRANSCRIPTS = own
     daemon.PROJECTS = projects
     daemon.HOST_FOLDER = str(root / "repo" / "host-ctl")
     daemon.CONFIG["REPO_ROOT"] = "/repo"

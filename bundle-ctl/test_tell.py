@@ -94,6 +94,8 @@ def check_tell(root, check):
     check("a bundle with no terminal is not, by name",
           found[0] == 404 and not get_lines(agents["b2"]), found)
     (agents["b2"] / "remote.json").write_text('{"worker": "sebpc", "job": "1"}')
+    daemon.remote_agent.STATE = root / "state"
+    daemon.remote_agent.keep_record("b2", {"worker": "sebpc", "job": "1"})
     daemon.get_remote_agents = lambda: {"b2": "sebpc"}
     remote = root / "told" / "b2" / STOPPED_SESSION
     found = tell_bundle("b2"), tell(STOPPED_SESSION)
@@ -101,6 +103,7 @@ def check_tell(root, check):
           [answer[0] for answer in found] == [200, 200] and not get_lines(agents["b2"])
           and prwatch.take(remote) == [TEXT, TEXT], found)
     (agents["b2"] / "remote.json").unlink()
+    daemon.remote_agent.record_path("b2").unlink()
     daemon.get_remote_agents = dict
     check("a bad bundle name is refused", tell_bundle("../b1")[0] == "ValueError")
     found = tell(BUNDLE_SESSION, bundle="b1")

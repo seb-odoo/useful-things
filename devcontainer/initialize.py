@@ -83,6 +83,7 @@ def main():
         ("worktree-admin.py", folder),
         ("claude-config.py", name, "--bundle"),
         ("../scripts/outside.py", "start", name, folder),
+        ("transcripts.py", name, folder),
         ("extensions.py", name, folder),
         ("bundle-db.py", name),
     ):

@@ -65,6 +65,7 @@ from agents import (  # noqa: E402
     get_bundle_container,
     get_container,
     get_mtime,
+    get_own_transcript,
     get_resume,
     get_session_status,
     get_transcript,
@@ -122,7 +123,6 @@ STOP_GAP = 1
 STOP_TIME = 5
 TAKEOVER_WAIT = 30
 TOLD = STATE / "told"
-TRANSCRIPTS = pathlib.Path.home() / ".claude" / "projects" / "-workspace"
 # Without VTE_VERSION, claude writes each link of the agentbar band as its text and its URL.
 VTE = ["--env", f"VTE_VERSION={os.environ['VTE_VERSION']}"] if "VTE_VERSION" in os.environ else []
 USER = "vscode"
@@ -205,17 +205,17 @@ def copy_gitconfig(container):
         )
 
 
-def keep_open(ending, session=None):
+def keep_open(ending, session=None, bundle=""):
     """Show why no claude runs here, with what the agent ran, and wait for Enter in a shell.
 
     The claude of a terminal draws on the alternate screen, which empties when claude ends.
     """
-    transcript = TRANSCRIPTS / f"{session}.jsonl"
+    transcript = session and get_transcript(session, bundle)
     try:
         sys.stdout.write(RESET)
         sys.stdout.flush()
         subprocess.run(["stty", "sane"], check=False)
-        if session and transcript.is_file():
+        if transcript:
             with transcript.open() as file, tempfile.TemporaryDirectory() as folder:
                 subprocess.run(
                     [sys.executable, str(HERE / "client" / "stream-format.py"), f"{folder}/result"],
@@ -694,7 +694,7 @@ def leave_window(agent, bundle):
         (agent / "close-window").unlink(missing_ok=True)
     # A window opened later opens its tab on the session again.
     (agent / "tab-opened").unlink(missing_ok=True)
-    mode, cut = get_resume(TRANSCRIPTS / f"{read_text(agent / 'session')}.jsonl")
+    mode, cut = get_resume(get_own_transcript(read_text(agent / "session"), bundle))
     if mode:
         write_text(agent / "mode", mode)
     return container, cut
@@ -864,7 +864,7 @@ def main():
         if not taken_over and not ending:
             close_groups(agent, bundle)
     if ending and not taken_over:
-        keep_open(f"{bundle}: {ending}", session)
+        keep_open(f"{bundle}: {ending}", session, bundle)
     if handed and os.environ.get("BUNDLE_CTL_WINDOW_PID"):
         with contextlib.suppress(ProcessLookupError):
             os.kill(int(os.environ["BUNDLE_CTL_WINDOW_PID"]), signal.SIGUSR1)

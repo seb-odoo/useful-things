@@ -113,9 +113,9 @@
     // The Claude config of the bundle is a folder of its own, with a dummy login (claude-config.py):
     // no credential of the host is in a bundle. What it shares of the host's ~/.claude is mounted
     // in it: read-only what a session takes as orders or runs, as the host's Claude reads the same
-    // files and a hook written from a bundle would run on the host; writable the transcripts and
-    // memory of the bundles (projects/-workspace), the plans of the dev agents (a folder neither the
-    // host nor the ops container plans in), and the lock of agent starts. settings.json is a copy
+    // files and a hook written from a bundle would run on the host; writable its transcripts and
+    // the memory of the bundles (projects/-workspace), the plans of the dev agents (a folder neither
+    // the host nor the ops container plans in), and the lock of agent starts. settings.json is a copy
     // of the bundle, where a model picked in a tab is kept. HOST_PROJECT holds the memory of the
     // host sessions. Each name at the root of ~/.claude has its line in the table of README.md.
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/home,target=/home/vscode/.claude,type=bind,z",
@@ -133,7 +133,12 @@
     "source=@HOME@/.claude/output-styles,target=/home/vscode/.claude/output-styles,type=bind,readonly,z",
     "source=@HOME@/.claude/plugins,target=/home/vscode/.claude/plugins,type=bind,readonly,z",
     "source=@HOME@/.claude/projects/@HOST_PROJECT@/memory,target=/home/vscode/.claude/projects/@HOST_PROJECT@/memory,type=bind,readonly,z",
-    "source=@HOME@/.claude/projects/-workspace,target=/home/vscode/.claude/projects/-workspace,type=bind,z",
+    // The transcripts of the bundle, a folder of its own (transcripts.py); those of the other
+    // bundles and those of before 11-03, read-only, through links that name an empty folder for a
+    // bundle on an outside PR: a bundle that writes another's adds turns to its session.
+    "source=@SHARE_ROOT@/claude-transcripts/${localWorkspaceFolderBasename},target=/home/vscode/.claude/projects/-workspace,type=bind,z",
+    "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/transcripts,target=/home/vscode/bundle-transcripts,type=bind,readonly,z",
+    "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/transcripts-before,target=/home/vscode/bundle-transcripts-before,type=bind,readonly,z",
     // The memory of the bundles: a link to the shared one, or for a bundle on a PR of an author
     // outside odoo a copy of its own, whose changes go to Seb as a card (scripts/outside.py).
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/memory,target=/home/vscode/.claude/projects/-workspace/memory,type=bind,z",

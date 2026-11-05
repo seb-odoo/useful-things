@@ -134,6 +134,17 @@ CASES = [
     ),
 ]
 
+def written_remotes():
+    """The bundles whose .agent/remote.json a test wrote, as the records of the daemon list them:
+    the tests of the queue take that file as the truth, test_remote_agent.py checks the record."""
+    root = pathlib.Path(daemon.get_worktree_container_folder())
+    return sorted(path.parent.parent.name for path in root.glob("*/*/.agent/remote.json"))
+
+
+def read_written(module):
+    return lambda folder: module.load_remote(folder / ".agent" / "remote.json")
+
+
 def prepare(root, bundles, cap, short=False, disk=100, busy=False):
     """A daemon whose queue holds these bundles, each given as its `.agent` files, None when its
     folder is gone: its state, and the list its launches go to. `launching`, `old`, `window` and
@@ -1005,6 +1016,7 @@ def check_place(root):
         return f"{bundle}: back"
 
     daemon.remote_agent = types.SimpleNamespace(
+        get_recorded=lambda: [name for name in written_remotes() if name in remote],
         is_remote=lambda folder: (
             folder.name in remote or (folder / ".agent" / "remote-starting").exists()
         ),
@@ -2017,6 +2029,7 @@ def check_remote_type(root):
     daemon.get_session_status = lambda bundle, session: statuses.get(bundle, "idle")
     daemon.get_transcript = lambda session, *_: root / "t"
     daemon.remote_agent = types.SimpleNamespace(
+        get_recorded=written_remotes,
         is_remote=lambda folder: True,
         keep=lambda bundle, folder, workers: (None, False),
         read_remote=lambda folder: {"worker": "sebpc", "job": "1"},
@@ -2177,7 +2190,8 @@ def check_remote_told(root):
     daemon.get_session_status = lambda bundle, session: statuses.get(bundle, "idle")
     daemon.get_transcript = lambda session, *_: texts.get("transcript", transcript)
     daemon.remote_agent = types.SimpleNamespace(
-        read_remote=stubs["remote_agent"].read_remote,
+        get_recorded=written_remotes,
+        read_remote=read_written(stubs["remote_agent"]),
         type_keys=type_keys,
     )
     journal = io.StringIO()
@@ -2318,10 +2332,12 @@ def check_leaving(root):
     }
     daemon.remote_agent = types.SimpleNamespace(
         end=module.end,
-        is_remote=module.is_remote,
+        get_recorded=written_remotes,
+        is_remote=lambda folder: read_written(module)(folder) is not None
+        or (folder / ".agent" / "remote-starting").exists(),
         keep=lambda bundle, folder, workers: (None, False),
         move_back=move_back,
-        read_remote=module.read_remote,
+        read_remote=read_written(module),
         renew_login_soon=lambda folder: None,
     )
     daemon.get_session_status = lambda bundle, session: "busy" if bundle == "answering" else "idle"
@@ -2396,7 +2412,8 @@ def check_orphans(root):
     }
     prepare(root, bundles, 8)
     records = {
-        "elsewhere": {"worker": "vm", "job": "3"},
+        "known": {"worker": "sebpc", "job": "1"},
+        "elsewhere": {"worker": "vm", "job": "1"},
         "gone": {"worker": "sebpc", "job": "7", "dummy": "a" * 64},
         "recreated": {"worker": "sebpc", "job": "8"},
     }
@@ -2405,8 +2422,9 @@ def check_orphans(root):
     module.STATE = root / "state"
     for bundle, record in records.items():
         module.keep_record(bundle, record)
-    (root / "projects" / "-workspace").mkdir(parents=True)
-    (root / "projects" / "-workspace" / "s1.jsonl").write_text('{"customTitle": "gone"}\n')
+    (root / "transcripts" / "gone").mkdir(parents=True)
+    (root / "transcripts" / "gone" / "s1.jsonl").write_text('{"customTitle": "gone"}\n')
+    transcripts, daemon.TRANSCRIPTS = daemon.TRANSCRIPTS, root / "transcripts"
     calls, drops = [], []
     module.ssh = lambda workers, worker, verb, bundle, *args, **kwargs: (
         calls.append((worker, verb, bundle, *args)) or {"cancelled": args[0]}
@@ -2443,6 +2461,7 @@ def check_orphans(root):
     finally:
         vars(module).update(stubs)
         daemon.PROJECTS, daemon.WORKERS = projects, workers_stub
+        daemon.TRANSCRIPTS = transcripts
         daemon.orphans.clear()
     checks = [
         ("nothing before REMOTE_GONE_AFTER", first == ""),
@@ -2745,8 +2764,9 @@ def check_stale(root):
         STARTING=module.STARTING,
         drop_start=dropped.append,
         finish=finish,
+        get_recorded=written_remotes,
         keep=lambda bundle, folder, workers: (None, False),
-        read_remote=module.read_remote,
+        read_remote=read_written(module),
         renew_login_soon=lambda folder: None,
     )
     journal = io.StringIO()

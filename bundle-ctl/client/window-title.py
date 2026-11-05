@@ -64,8 +64,14 @@ PROJECTS = (
     pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or pathlib.Path.home() / ".claude")
     / "projects"
 )
+# The transcripts of each bundle on the host, a folder per bundle (devcontainer/transcripts.py).
+TRANSCRIPTS = (
+    pathlib.Path(os.environ.get("XDG_DATA_HOME") or pathlib.Path.home() / ".local" / "share")
+    / "claude-transcripts"
+)
 RESUMING = "continuing automatically at"
 SESSION_NAME = re.compile(r"[\w-]+")
+BUNDLE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 RESUMING_FOR = 5 * 3600
 RETRIES = 5
 SEPARATELY = re.compile(r"[*_\s]*Separately\s*:")
@@ -75,11 +81,13 @@ TITLES = {"ai-title": "aiTitle", "custom-title": "customTitle"}
 
 def get_projects(bundle):
     """The folders that hold the transcripts of a bundle, or of an ops window: never a folder of
-    the other kind, as every bundle writes `-workspace` (security check 11-03, B5). An ops
-    session is in the ops container's own folder, or in the host's for one of before."""
+    the other kind, as every bundle wrote `-workspace` (security check 11-03, B5). An ops
+    session is in the ops container's own folder, or in the host's for one of before. A bundle's
+    is in its own folder on the host (B7), else in `-workspace`, its own in its container."""
     if bundle.startswith(OPS):
         return [PROJECTS / f"ops{HOST_PROJECT}", PROJECTS / HOST_PROJECT]
-    return [PROJECTS / "-workspace"]
+    named = [TRANSCRIPTS / bundle] if BUNDLE_NAME.fullmatch(bundle or "") else []
+    return [*named, PROJECTS / "-workspace"]
 
 
 def get_transcript(session, bundle=""):

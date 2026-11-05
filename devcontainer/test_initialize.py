@@ -147,6 +147,7 @@ def main():
             "warden-chrome.py",
             "worktree-admin.py",
             "claude-config.py",
+            "transcripts.py",
             "extensions.py",
             "bundle-db.py",
         ):
@@ -174,7 +175,7 @@ def main():
         )
         calls = [
             json.loads(line)
-            for script in (*scripts, "extensions.py", "bundle-db.py")
+            for script in (*scripts, "transcripts.py", "extensions.py", "bundle-db.py")
             for line in (root / "tools" / f"{script}.calls").read_text().splitlines()
         ]
         outside = ["start", NAME, str(folder)]
@@ -184,6 +185,7 @@ def main():
             [str(folder)],
             [NAME, "--bundle"],
             outside,
+            [NAME, str(folder)],
             [NAME, str(folder)],
             [NAME],
         ]

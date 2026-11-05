@@ -111,7 +111,7 @@ def run_wrapper(root, bundle):
         pathlib.Path(os.environ["STATE"]) / "window"
     ).exists()
     module.BCTL = ["bash", "-c", 'echo "bctl $*" >>"$LOG"', "bctl"]
-    module.TRANSCRIPTS = root
+    module.get_own_transcript = lambda session, bundle: next(root.glob(f"{session}.jsonl"), None)
     module.DECK = root / "deck"
     module.TOLD = root / "told"
     module.ENTER_AFTER = float(os.environ.get("ENTER_AFTER") or module.ENTER_AFTER)

@@ -317,7 +317,9 @@ necessary. but if we have a good setup, full remote should offer the same possib
   `~/.config/odoo-dev/config.env`, set once a first agent ran whole on the worker.
 - `remote_agent.py` starts it: the stand-in `rrs-BUNDLE` (the runner image, `standin.py` of
   remote-runs, on `devnet`, `--cap-drop=ALL`, 256 MB, labels `remote-runs.folder` and
-  `remote-runs.worker`), the files of its start (`standin.py pack`: the branch and base past what
+  `remote-runs.worker`, the base `.git` mounted as in a bundle, and `STANDIN_REPO_ROOT`, with
+  which the git of `standin.py` names the admin folder of the bundle's worktree and the base
+  `.git` itself: the bundle writes the `.git` file of its worktree and the `commondir` there), the files of its start (`standin.py pack`: the branch and base past what
   the worker's store has, the changes, the untracked files, the session's transcript when it goes
   on), the parts (claude and ruff of the bundle's extension store, else of the newest other store,
   the config of `MOUNTS`, the CA; a store with no ruff sends none), a dummy
@@ -353,10 +355,13 @@ necessary. but if we have a good setup, full remote should offer the same possib
   its last answer opens on a verdict: a turn after it may wait for a card of hok. A job lost on
   the worker (a reboot) is queued again on its session, and goes on from its tree there. A work tree that cannot come back (the worktree changed here
   meanwhile) stays in `.agent/remote-back` with the reason in `.agent/remote-conflict`, and the
-  bundle's next task runs here. While a remote agent lives, a bundle container runs or a task
-  waits for the main login (see Agents in a terminal), and the main login expires within 4
-  minutes, a one-shot claude in a container that shares it renews it: at night no claude here
-  may, and a bundle has a dummy login (`python3 test_queue.py`). It goes through claude-switch
+  bundle's next task runs here. While a remote agent lives, a bundle container or the ops
+  container runs, or a task waits for the main login (see Agents in a terminal), and the main
+  login expires within 4 minutes, a one-shot claude in a container that mounts the host's
+  `~/.claude` renews it: at night no claude here may, and a bundle and the ops container have a
+  dummy login (security check 11-03, K1). Its claude is the one of a bundle's extension store,
+  else of the ops container's (`~/.cache/host-ctl/vscode-server-extensions`) (`python3
+  test_queue.py`). It goes through claude-switch
   as any claude, so it cannot when the switch does not reach the API: from 2026-10-30 to 11-02
   it ran 180 s and was stopped 716 times, `the main login expires in N s, its renewal ran 180 s
   and was stopped` in the journal. The journal says `BUNDLE: its agent started on NAME` and
@@ -435,8 +440,14 @@ necessary. but if we have a good setup, full remote should offer the same possib
   stays until the worker drops it), and drops its tunnel, its stand-in and its dummy login here.
   The worker lists no job id, so the daemon keeps a copy of each `remote.json` in
   `~/.local/state/bundle-ctl/remote/BUNDLE.json`, out of the bundle folder and of what a
-  container mounts: the start writes it, a pass makes it for an agent that has none, the end of
-  the job drops it. An agent with no copy only gets a `stale wait` line in the journal. Until
+  container mounts: the start writes it, the end of the job drops it. It is the remote agent for
+  the daemon (`read_remote`, `get_remote_folders`): the `.agent/remote.json` of the bundle is a
+  copy for the bundle and the windows, which the bundle writes too. Through it, a bundle had the
+  daemon start a stand-in and write `.agent/` files of a remote agent through links it left
+  there, with its own text: a line of shell in Seb's `~/.bashrc` (security check 11-03, G1).
+  Every `.agent/` file of a remote agent is now read and written through `agents.read_text`,
+  `write_text` and `touch` (no link followed, a link replaced), and what the stand-in says when
+  a work tree cannot come back goes to `remote-conflict` as one line of printable characters. An agent with no copy only gets a `stale wait` line in the journal. Until
   2026-11-03 nothing saw such an agent: saas-19.2-website-snippets-leak-runbot-955924--seb ran a
   day on sebpc after its deletion (see Deletion). Seb's pick, 2026-11-03. `python3
   test_queue.py`, `test_remote_agent.py`.

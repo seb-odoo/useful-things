@@ -985,6 +985,8 @@ def check_remote(root):
     agent = root / "master" / REMOTE / ".agent"
     agent.mkdir(parents=True)
     (agent / "remote.json").write_text('{"worker": "sebpc", "job": "1793634308"}\n')
+    daemon.remote_agent.STATE = root / "state"
+    daemon.remote_agent.keep_record(REMOTE, {"worker": "sebpc", "job": "1793634308"})
     daemon.get_session_status = lambda bundle, session: world["status"]
     daemon.remote_agent.end = lambda bundle, folder: world["ended"].append(bundle) or "stops"
     path = root / "ctl.sock"
@@ -1016,6 +1018,7 @@ def check_remote(root):
         ),
     )
     (agent / "remote.json").unlink()
+    daemon.remote_agent.record_path(REMOTE).unlink()
     daemon.delete_safely()
     wait_jobs()
     checks.append(
