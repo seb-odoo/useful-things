@@ -753,8 +753,45 @@ def check_takeover_container():
     return [], 1
 
 
+def check_ops_host_transcript():
+    """An ops session found in the host's folder of before (K1) is copied with its folder into the
+    ops container's, where its claude looks for it; a link stays behind."""
+    spec = importlib.util.spec_from_file_location("agent_terminal", HERE / "agent-terminal.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    with tempfile.TemporaryDirectory() as folder:
+        own, host = pathlib.Path(folder, "ops-home"), pathlib.Path(folder, "-home")
+        (host / "s1" / "subagents").mkdir(parents=True)
+        (host / "s1.jsonl").write_text("\n".join(CUT) + "\n")
+        (host / "s1" / "subagents" / "a.jsonl").write_text("sub\n")
+        (host / "s2.jsonl").symlink_to(host / "s1.jsonl")
+        module.get_projects = lambda bundle: [own, host]
+        module.get_transcript = lambda session, *_: next(
+            (
+                path
+                for path in (own / f"{session}.jsonl", host / f"{session}.jsonl")
+                if path.is_file()
+            ),
+            None,
+        )
+        start = module.get_ops_start("s1", "task")
+        module.get_ops_start("s2", "task")
+        copy = own / "s1.jsonl"
+        found = [
+            start[:2],
+            copy.is_file() and copy.read_text() == (host / "s1.jsonl").read_text(),
+            (own / "s1" / "subagents" / "a.jsonl").is_file(),
+            (own / "s2.jsonl").exists(),
+        ]
+    if found != [["--resume", "s1"], True, True, False]:
+        return [f"ops host transcript: {found}"], 1
+    return [], 1
+
+
 def main():
     failures, total = check_takeover_container()
+    found, count = check_ops_host_transcript()
+    failures, total = failures + found, total + count
     tabs = {
         check_from_window: CUT,
         check_from_idle_window: ENDED,

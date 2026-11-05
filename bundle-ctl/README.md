@@ -1447,6 +1447,10 @@ A bundle counts with its newest session only, found by the title its agent gives
 name) or by `.agent/session`: an older session cut there was followed by other work. A bundle whose
 folder is gone is left out. Every transcript of the project folder of `REPO_ROOT` is an ops
 session: a session of the host in `~/repo` too, which would go on in the ops container.
+Since the ops container has a project folder of its own (`ops-home-seb-repo`, security check
+11-03, K1), a session found only in the host's folder is copied there with its folder before
+`claude --resume`, which looks in its own folder only: on 2026-11-05 the first 3 cut sessions
+resumed after K1 ended at once on "claude ended with code 1".
 A `stopped` agent whose last turn ended is not cut: on 2026-10-16 the 5 of the last 3 days had all
 ended on a report Seb had read, after a chat of his ("ready thanks", "send to ops").
 

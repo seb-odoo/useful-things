@@ -66,6 +66,7 @@ from agents import (  # noqa: E402
     get_container,
     get_mtime,
     get_own_transcript,
+    get_projects,
     get_resume,
     get_session_status,
     get_transcript,
@@ -709,8 +710,26 @@ def get_ops_start(session, task):
         start = ["--session-id", session, "--permission-mode", "auto"]
         return start + (["--", task] if task else [])
     mode, cut = get_resume(transcript)
+    bring_from_host(transcript)
     start = ["--resume", session, "--permission-mode", mode if mode in MODES else "auto"]
     return start + (["--", task or GO_ON] if task or cut else [])
+
+
+def bring_from_host(transcript):
+    """Copy a transcript of the host's folder of before (security check 11-03, K1), with its
+    folder, into the ops container's own: claude resumes a session from that folder only."""
+    own = get_projects(OPS)[0]
+    if transcript.parent == own:
+        return
+    own.mkdir(parents=True, exist_ok=True)
+    for path in (transcript, transcript.with_suffix("")):
+        copy = own / path.name
+        if path.is_symlink() or not path.exists() or copy.exists() or copy.is_symlink():
+            continue
+        if path.is_dir():
+            shutil.copytree(path, copy, symlinks=True)
+        else:
+            shutil.copy2(path, copy)
 
 
 def space_start():
