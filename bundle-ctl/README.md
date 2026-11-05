@@ -337,6 +337,16 @@ necessary. but if we have a good setup, full remote should offer the same possib
   (`sessions/*.json` of the bundle's Claude folder): until the new claude runs, the daemon read
   them as its status, and on 2026-11-03 typed the lines of the host 20 s before that claude
   started, where nothing read them.
+- At each start, the files of the config part a proposal can write (`PROPOSED`: the folders of
+  `~/.claude` that `ROOTS` of host-ctl `handoff.py` names, the project `.claude`, the memory of the
+  bundles, runbot-fix-agents) are kept as the agent gets them, under the names of a proposal, in
+  `~/.local/state/bundle-ctl/handoff-base/BUNDLE/`, which no bundle, stand-in or job reaches (the
+  ops container reads it). Its time is the time of the copy. `hok` merges a proposal of that agent
+  with it (host-ctl README, "Handoff"): on 2026-11-03 a skill file the agent of
+  master-bus-group-resubscribe--seb proposed whole, from its copy of 09:37, removed at Seb's yes a
+  commit and a paragraph the laptop got after (his yes of 2026-11-05 asked for the merge). The
+  next start replaces it, and a start drops the copy of a bundle that is gone. TestWarden and
+  DiscussModelParser are not in the part, so a proposal for them is written whole.
 - `MOUNTS` says, for each mount of a bundle (`devcontainer/base.jsonc`), how the remote agent gets
   it: sent in its config, served by the stand-in, in the runner image, made in the job, or of no
   use there. `python3 test_remote_agent.py` fails on a mount it does not name, and checks that the

@@ -39,6 +39,7 @@ STATE = pathlib.Path("~/.local/state/bundle-ctl").expanduser()
 REMOTE_RUNS = pathlib.Path(os.environ.get("REMOTE_RUNS") or HOME / "repo" / "remote-runs")
 STANDIN_IMAGE = os.environ.get("BUNDLE_CTL_STANDIN_IMAGE", "localhost/remote-runs-runner:current")
 DUMMIES = pathlib.Path("~/.local/state/claude-switch/dummies").expanduser()
+HANDOFF_BASE = STATE / "handoff-base"
 # The log goes to the run folder: the bundle writes its .agent/, and could leave a link there.
 WATCH = (
     "while :; do python3 -I /opt/bundle-ctl/prwatch.py >>/run/standin/prwatch.log 2>&1;"
@@ -73,6 +74,16 @@ REPOS = (
 )
 # The folders of a base .git a bundle writes (devcontainer/base.jsonc).
 GIT_WRITABLE = ("objects", "refs", "logs", "rr-cache", "packed")
+# The roots a proposal writes in (ROOTS of host-ctl handoff.py), by their folder in the config.
+PROPOSED = {
+    **{
+        f"home/.claude/{name}": f"claude/{name}"
+        for name in ("CLAUDE.md", "agents", "bin", "commands", "hooks", "output-styles", "skills")
+    },
+    "home/.claude/projects/-workspace/memory": "dev-memory",
+    "home/runbot-fix-agents": "runbot-fix-agents",
+    "workspace/.claude": "project",
+}
 MAX_READ = 64 * 1024
 MAX_REMOTE = 4096
 finishing = {}
@@ -408,6 +419,48 @@ def keep_regular(info, sent):
     return None
 
 
+def keep_base(bundle, bundle_folder, config, taken):
+    """Keep the files of the config part a proposal can write, as the agent gets them, in a folder
+    no container mounts: hok merges a proposal of the agent with them (host-ctl README,
+    "Handoff"). Replaced at each start, its time the time of the copy. The copy of a bundle that
+    is gone goes."""
+    fresh, old = HANDOFF_BASE / f".{bundle}.new", HANDOFF_BASE / f".{bundle}.old"
+    for path in (fresh, old):
+        shutil.rmtree(path, ignore_errors=True)
+    fresh.mkdir(parents=True)
+    with tarfile.open(fileobj=io.BytesIO(config)) as tar:
+        for member in tar:
+            name = get_proposed(member.name)
+            if name is None or not (member.isfile() or member.isdir()):
+                continue
+            path = fresh / name
+            if member.isdir():
+                path.mkdir(parents=True, exist_ok=True)
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(tar.extractfile(member).read())
+    os.utime(fresh, (taken, taken))
+    kept = HANDOFF_BASE / bundle
+    if kept.exists():
+        kept.rename(old)
+    fresh.rename(kept)
+    shutil.rmtree(old, ignore_errors=True)
+    for path in HANDOFF_BASE.iterdir():
+        gone = not (bundle_folder.parent / path.name).is_dir()
+        if path.name != bundle and not path.name.startswith(".") and gone:
+            shutil.rmtree(path, ignore_errors=True)
+
+
+def get_proposed(name):
+    """The path a proposal gives a file of the config part, None when no proposal writes it."""
+    if ".git" in name.split("/"):
+        return None
+    for prefix, root in PROPOSED.items():
+        if name == prefix or name.startswith(f"{prefix}/"):
+            return f"{root}{name[len(prefix) :]}"
+    return None
+
+
 def find_binary(bundle_folder, pattern):
     """The newest PATTERN of the bundle's extension store, else of any store of a bundle, else of
     the store of the ops container, else None."""
@@ -588,11 +641,13 @@ def start(log, bundle, bundle_folder, worker, workers, base, session, resume):
         repos = json.loads(files.pop("spec.json"))
         for name, data in files.items():
             ssh(workers, worker, "agent-put", bundle, name, data=data)
+        taken = time.time()
         parts = {
             "config": build_config(bundle_folder),
             "claude": find_claude(bundle_folder),
             "ca": HOME / ".config" / "gateway-ca" / "ca-certificates.crt",
         }
+        keep_base(bundle, bundle_folder, parts["config"], taken)
         ruff = find_binary(bundle_folder, "charliermarsh.ruff-*/bundled/libs/bin/ruff")
         if ruff:
             parts["ruff"] = ruff

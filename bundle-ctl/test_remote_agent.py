@@ -129,6 +129,61 @@ def check_config(root):
           all(name.split("/")[0] in ("home", "workspace") for name in names), names)
 
 
+def check_base(root):
+    """The copy of what a proposal can write, kept at each start where no container reaches it:
+    hok merges a proposal of the agent with it (host-ctl README, "Handoff"). On the tree of
+    check_config."""
+    text = (HERE.parent / "devcontainer" / "base.jsonc").read_text()
+    found = re.findall(r"source=@STATE_ROOT@/bundle-ctl[^,]*", text)
+    check("a bundle mounts no folder of the daemon but its socket",
+          found == ["source=@STATE_ROOT@/bundle-ctl/sock"], found)
+    home = root / "home"
+    memory = home / ".claude" / "projects" / "-workspace" / "memory"
+    memory.mkdir(parents=True)
+    (memory / "note.md").write_text("a note\n")
+    git = root / "repo" / "runbot-fix-agents" / ".git"
+    git.mkdir()
+    (git / "config").write_text("[core]\n")
+    base = remote_agent.HANDOFF_BASE = root / "handoff-base"
+    for name in ("b1", "b2"):
+        (root / name).mkdir(exist_ok=True)
+    for name in ("b2", "gone"):
+        (base / name).mkdir(parents=True)
+    taken = time.time() - 30
+    remote_agent.keep_base("b1", root / "b1", remote_agent.build_config(root / "b1"), taken)
+    kept = base / "b1"
+
+    def read(relative):
+        path = kept / relative
+        return path.read_bytes() if path.is_file() and not path.is_symlink() else None
+
+    check("a skill is kept as the agent gets it", read("claude/skills/a/SKILL.md") == b"skill\n")
+    check("the rules too", read("claude/CLAUDE.md") == b"rules\n")
+    check("the skills of the runbot fixes",
+          read("runbot-fix-agents/skills/t/SKILL.md") == b"team skill\n")
+    project = json.loads(read("project/settings.json") or b"{}")
+    check("the project settings as the job has them",
+          project == {"hooks": {"Stop": "python3 /job/home/bundle-ctl/client/agent-stop.py"}},
+          project)
+    check("the memory of the bundles", read("dev-memory/note.md") == b"a note\n")
+    tops = sorted(path.name for path in kept.iterdir())
+    check("nothing a proposal does not write",
+          tops == ["claude", "dev-memory", "project", "runbot-fix-agents"], tops)
+    claude = sorted(path.name for path in (kept / "claude").iterdir())
+    check("not the bundle's settings nor its login", claude == ["CLAUDE.md", "skills"], claude)
+    check("no link", not os.path.lexists(kept / "claude" / "skills" / "t"))
+    check("no .git", not (kept / "runbot-fix-agents" / ".git").exists())
+    check("its time is the time of the copy", abs(kept.stat().st_mtime - taken) < 0.01)
+    left = sorted(path.name for path in base.iterdir())
+    check("the copy of a bundle that is gone goes", left == ["b1", "b2"], left)
+    (home / ".claude" / "skills" / "a" / "SKILL.md").unlink()
+    remote_agent.keep_base("b1", root / "b1", remote_agent.build_config(root / "b1"), time.time())
+    check("the next start replaces it",
+          read("claude/skills/a/SKILL.md") is None and read("claude/CLAUDE.md") == b"rules\n")
+    left = sorted(path.name for path in base.iterdir())
+    check("and leaves nothing beside", left == ["b1", "b2"], left)
+
+
 def check_env(root):
     config = root / "worktrees" / ".devcontainer" / "devcontainer.json"
     config.parent.mkdir(parents=True)
@@ -218,6 +273,7 @@ def check_standin(root):
     check("and its transcripts folder", named in runs[:-1], runs)
     mirror = f"{root / 'share' / 'claude-transcripts' / 'b'}:/mirror/projects:rw"
     check("its own transcripts mirrored, no other bundle's", mirror in volumes, runs[-1])
+    check("not the copy hok merges with", not any("handoff-base" in v for v in volumes), runs[-1])
     check("the config stays a file", (git_dir / "config").is_file())
     scope = ["systemd-run", "--user", "--scope", "--collect", "--quiet", "podman", "run"]
     check("its conmon out of the cgroup of bundle-ctl", runs[-1][:7] == scope, runs[-1])
@@ -258,6 +314,60 @@ def check_start(root):
         pass
     left = sorted(path.name for path in sessions.iterdir())
     check("a job starts with no record of its session", left == ["8.json", "9.json"], left)
+
+
+def check_start_keeps(root):
+    """A start keeps the copy before it asks the worker for the job: the agent proposes from it.
+    Nothing reaches podman, the worker or a stand-in."""
+    home = root / "home"
+    (home / ".claude" / "CLAUDE.md").write_text("rules the job gets\n")
+    ca = home / ".config" / "gateway-ca" / "ca-certificates.crt"
+    ca.parent.mkdir(parents=True, exist_ok=True)
+    ca.write_text("ca\n")
+    (root / "b1" / ".agent").mkdir(parents=True, exist_ok=True)
+    packed = io.BytesIO()
+    with tarfile.open(fileobj=packed, mode="w") as tar:
+        info = tarfile.TarInfo("spec.json")
+        info.size = 2
+        tar.addfile(info, io.BytesIO(b"{}"))
+    copies = []
+
+    def ssh(_workers, _worker, verb, *_args, **_kwargs):
+        if verb == "agent":
+            copies.append((remote_agent.HANDOFF_BASE / "b1" / "claude" / "CLAUDE.md").read_bytes())
+            raise RuntimeError("the worker refuses")
+        return {}
+
+    values = {"CACHE_ROOT": str(root / "cache"), "REPO_ROOT": str(root / "repo"),
+              "WORKTREE_ROOT": str(root / "worktrees"),
+              "SHARED_CLAUDE": str(root / "worktrees" / ".claude"),
+              "SHARE_ROOT": str(root / "share"), "HOST_PROJECT": "-home-seb-repo"}
+    fakes = {
+        "HOME": home,
+        "DUMMIES": root / "dummies",
+        "get_values": lambda: values,
+        "start_standin": lambda *args: None,
+        "in_standin": lambda *args, **kwargs: types.SimpleNamespace(
+            returncode=0, stdout=packed.getvalue(), stderr=b""
+        ),
+        "find_claude": lambda folder: ca,
+        "find_binary": lambda folder, pattern: None,
+        "ssh": ssh,
+    }
+    saved = {name: getattr(remote_agent, name) for name in fakes}
+    run = subprocess.run
+    subprocess.run = lambda argv, **kwargs: None
+    for name, value in fakes.items():
+        setattr(remote_agent, name, value)
+    try:
+        remote_agent.start(io.StringIO(), "b1", root / "b1", "w", None, "18.0", "s1", False)
+    except RuntimeError:
+        pass
+    finally:
+        subprocess.run = run
+        for name, value in saved.items():
+            setattr(remote_agent, name, value)
+    check("a start keeps its copy before the job", copies == [b"rules the job gets\n"], copies)
 
 
 def check_binary(root):
@@ -479,6 +589,8 @@ def main():
     with tempfile.TemporaryDirectory() as folder:
         root = pathlib.Path(folder)
         check_config(root)
+        check_base(root)
+        check_start_keeps(root)
         check_env(root)
         check_remote(root)
         check_standin(root)
