@@ -14,6 +14,11 @@ names that worktree: the `.git` file is the bundle's own. A repo the bundle has 
 gets an empty folder, locked against `git worktree prune`, as a missing mount source stops the
 start. With a repo, only that one, its base repo at the given folder.
 
+It also readies the base `.git` for the mounts of base.jsonc, read-only with a few folders
+writable over it: it makes the missing ones, and moves `packed-refs` into `packed/` behind a link,
+as git deletes a ref by renaming a new `packed-refs` over the old one. A folder there that is a
+link stops the start: its mount would bind the target in every bundle.
+
 Run by initialize.py before each start, by add_worktree for a new worktree, by the stand-in of a
 remote agent.
 """
@@ -39,6 +44,8 @@ REPOS = (
     "sfu",
 )
 EMPTY = "no worktree of the bundle: the source of its mount (devcontainer/worktree-admin.py)\n"
+WRITABLE = ("objects", "refs", "logs", "rr-cache", "packed")
+PACKED = "packed/packed-refs"
 
 
 def read(path, dir_fd=None):
@@ -104,10 +111,41 @@ def adopt(worktree, worktrees, name):
         os.close(fd)
 
 
+def ready(git_dir):
+    for name in WRITABLE:
+        if os.path.islink(git_dir / name):
+            sys.exit(f"{git_dir / name} is a link: its mount would bind what it points to")
+        (git_dir / name).mkdir(exist_ok=True)
+    moved = git_dir / PACKED
+    if os.path.lexists(moved) and not stat.S_ISREG(os.lstat(moved).st_mode):
+        print(f"{moved} is not a file, removed: git reads no packed ref", file=sys.stderr)
+        os.unlink(moved)
+    link = git_dir / "packed-refs"
+    if os.path.islink(link):
+        if os.readlink(link) != PACKED:
+            sys.exit(f"{link} links elsewhere than {PACKED}")
+        return
+    lock = git_dir / "packed-refs.lock"
+    try:
+        os.close(os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+    except FileExistsError:
+        print(f"{lock}: git writes it, packed-refs moves at the next start", file=sys.stderr)
+        return
+    try:
+        if os.path.lexists(link):
+            os.link(link, f"{moved}.new", follow_symlinks=False)
+            os.replace(f"{moved}.new", moved)
+        os.symlink(PACKED, git_dir / "packed-refs.new")
+        os.replace(git_dir / "packed-refs.new", link)
+    finally:
+        os.unlink(lock)
+
+
 def own(folder, repo, base):
     worktrees = base / ".git" / "worktrees"
-    if not (base / ".git").is_dir():
+    if not is_folder(base / ".git"):
         return
+    ready(base / ".git")
     worktrees.mkdir(exist_ok=True)
     try:
         adopt(folder / repo, worktrees, folder.name)

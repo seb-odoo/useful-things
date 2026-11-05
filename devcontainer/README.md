@@ -345,25 +345,32 @@ psql -d postgres -c "ALTER ROLE $USER NOSUPERUSER NOCREATEROLE"   # keeps CREATE
 
 What stays open, and what closes it:
 
-- the shared `.git` of every repo, as git has to work in a container. Its `config` and `hooks` are
-  read-only there (security review of 2026-10-29, S1): a `core.fsmonitor`, an alias or a hook
-  written there would run in the git of the host, of the ops container and of every other bundle.
-  The cost, which Seb accepted: `git push -u`, `git remote add`, `git branch -u` and `git branch -m`
-  fail in a container, a branch made there from a remote branch gets no upstream (two errors, the
-  branch is made), and a change of the config on the host reaches a container at its next start
-  (the bind holds the file of its start). So [`initialize.py`](initialize.py) has
-  `scripts/upstream.py` set the upstream of the bundle branch on the dev remote before each start.
-  `worktrees/` is read-only too but for the folder of the bundle's own worktree: there, the
-  `commondir` file of another bundle's worktree points its git at a config of the writer's choice
-  (proved on a copy, 10-29). git names that folder after the worktree folder (`odoo`, `odoo1`,
-  ...), and the config every bundle shares can only name it after the bundle, so
-  [`worktree-admin.py`](worktree-admin.py) moves it to `worktrees/<bundle>` and points the `.git`
-  file of the worktree there: at each start, after `add_worktree`, before a remote agent. A repo
-  the bundle has no worktree of gets an empty locked folder there, the source of its mount. The
-  cost: no `git worktree add` in a bundle (Seb, 10-29: another bundle, or another agent, instead),
-  and a `git gc` in a bundle prints two errors, the reflogs of the other worktrees. A running
-  container keeps its mounts until it restarts. The rest stays writable: refs and objects, which
-  every bundle shares.
+- the shared `.git` of every repo, as git has to work in a container. It is read-only there
+  (security reviews of 2026-10-29, S1, and 11-03, C1): a `core.fsmonitor`, an alias, a hook or an
+  `info/attributes` written there would run in the git of the host, of the ops container and of
+  every other bundle. Writable over it, as folders: `objects`, `refs`, `logs`, `rr-cache`, `packed`
+  and the bundle's own entry of `worktrees`. Never a file: git writes a file by renaming a new one
+  over it, and a rename on the host drops the bind of that file in every running container (the
+  kernel does so since 3.18), which undid S1 within the hour on 11-03. `packed-refs` is a file
+  git rewrites at each ref deletion, so [`worktree-admin.py`](worktree-admin.py) moves it to
+  `packed/packed-refs` and leaves a link in its place, which git follows on both sides. The cost,
+  which Seb accepted: `git push -u`, `git remote add`, `git branch -u`, `git branch -m`, `git gc`,
+  `git pack-refs` and `git worktree add` fail in a container (another bundle, or another agent,
+  instead, Seb 10-29), `git branch -D` prints an error on the config but deletes the branch, and a
+  branch made there from a remote branch gets no upstream (two errors, the branch is made). So
+  [`initialize.py`](initialize.py) has `scripts/upstream.py` set the upstream of the bundle branch
+  on the dev remote before each start. `gc.auto` is 0 there, as an automatic gc would print an
+  error after a commit. A change of the config on the host reaches a running container at once.
+  In `worktrees/`, the `commondir` file of another bundle's worktree points its git at a config of
+  the writer's choice (proved on a copy, 10-29). git names that folder after the worktree folder
+  (`odoo`, `odoo1`, ...), and the config every bundle shares can only name it after the bundle, so
+  `worktree-admin.py` moves it to `worktrees/<bundle>` and points the `.git` file of the worktree
+  there: at each start, after `add_worktree`, before a remote agent. A repo the bundle has no
+  worktree of gets an empty locked folder there, the source of its mount. The same script makes the
+  writable folders of the base `.git` that are missing, and stops the start when one is a link,
+  as its mount would bind what the link points to. A running container keeps its mounts until it
+  restarts. `devcontainer/test_worktree_admin.py` makes the mounts in a user namespace, renames the
+  config as the host does, and checks what a bundle writes there.
   What the host runs from a bundle folder, like the `enable.sh` of a fetched branch, runs bundle
   code too. A machine closes both with `HOST_BOX` in `config.env`: a command that runs its arguments
   with the bundle repos and nothing else of the machine. The bundle scripts run `enable.sh` through

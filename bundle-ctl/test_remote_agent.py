@@ -187,10 +187,12 @@ def check_standin(root):
     remote_agent.subprocess.run = lambda argv, **kwargs: runs.append(argv)
     remote_agent.start_standin("b", root / "bundle", "w", "")
     volumes = set(runs[-1])
-    check("the stand-in mounts the base .git", f"{git_dir}:{git_dir}:rw" in volumes, runs[-1])
-    for name in ("config", "hooks", "worktrees"):
-        mount = f"{git_dir / name}:{git_dir / name}:ro"
-        check(f"and its {name} read-only over it", mount in volumes, runs[-1])
+    check("the stand-in mounts the base .git read-only", f"{git_dir}:{git_dir}:ro" in volumes, runs[-1])
+    for name in ("objects", "refs", "logs", "rr-cache", "packed"):
+        mount = f"{git_dir / name}:{git_dir / name}:rw"
+        check(f"and its {name} writable over it", mount in volumes, runs[-1])
+    written = [volume for volume in volumes if volume.startswith(str(git_dir)) and volume.endswith(":rw")]
+    check("nothing else of it", len(written), 6)
     own = git_dir / "worktrees" / "bundle"
     check("but the folder of its worktree", f"{own}:{own}:rw" in volumes, runs[-1])
     admin = remote_agent.HERE.parent / "devcontainer" / "worktree-admin.py"

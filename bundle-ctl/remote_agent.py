@@ -71,6 +71,8 @@ REPOS = (
     "owl",
     "sfu",
 )
+# The folders of a base .git a bundle writes (devcontainer/base.jsonc).
+GIT_WRITABLE = ("objects", "refs", "logs", "rr-cache", "packed")
 finishing = {}
 renewing = threading.Lock()
 renewed = [0]
@@ -78,24 +80,22 @@ renewed = [0]
 # added to the bundles without a line here fails test_remote_agent.py.
 MOUNTS = {
     "/workspace/.agent": ("job", "its own, the laptop's stays with the laptop"),
-    "@REPO_ROOT@/odoo/.git": ("standin", "the agent's commits come back here, git-gate reads them"),
-    "@REPO_ROOT@/enterprise/.git": ("standin", "same"),
-    "@REPO_ROOT@/design-themes/.git": ("standin", "same"),
-    "@REPO_ROOT@/documentation/.git": ("standin", "same"),
-    "@REPO_ROOT@/upgrade/.git": ("standin", "same"),
-    "@REPO_ROOT@/upgrade-util/.git": ("standin", "same"),
-    "@REPO_ROOT@/owl/.git": ("standin", "same"),
-    "@REPO_ROOT@/sfu/.git": ("standin", "same"),
     **{
-        f"@REPO_ROOT@/{repo}/.git/{name}": ("standin", "read-only over the .git above")
+        f"@REPO_ROOT@/{repo}/.git": ("standin", "read-only, the folders below writable over it")
         for repo in REPOS
-        for name in ("config", "hooks")
     },
-    **{f"@REPO_ROOT@/{repo}/.git/worktrees": ("standin", "same") for repo in REPOS},
+    **{
+        f"@REPO_ROOT@/{repo}/.git/{name}": (
+            "standin",
+            "the agent's commits come back here, git-gate reads them",
+        )
+        for repo in REPOS
+        for name in GIT_WRITABLE
+    },
     **{
         f"@REPO_ROOT@/{repo}/.git/worktrees/${{localWorkspaceFolderBasename}}": (
             "standin",
-            "the bundle's own worktree, writable over it",
+            "the bundle's own worktree, writable",
         )
         for repo in REPOS
     },
@@ -460,9 +460,8 @@ def start_standin(bundle, bundle_folder, worker, session):
     for repo in REPOS:
         git_dir = repo_root / repo / ".git"
         if git_dir.is_dir():
-            mounts.append((git_dir, str(git_dir), "rw"))
-            names = ("config", "hooks", "worktrees")
-            mounts += [(git_dir / name, str(git_dir / name), "ro") for name in names]
+            mounts.append((git_dir, str(git_dir), "ro"))
+            mounts += [(git_dir / name, str(git_dir / name), "rw") for name in GIT_WRITABLE]
             own = git_dir / "worktrees" / bundle_folder.name
             mounts.append((own, str(own), "rw"))
     argv = [

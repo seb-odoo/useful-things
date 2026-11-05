@@ -7,6 +7,7 @@ Where `unshare -Urm` works, it also binds them as base.jsonc does and tries the 
 
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -17,19 +18,30 @@ GIT = ["git", "-c", "user.name=me", "-c", "user.email=me@localhost", "-c", "comm
 ENV = {**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}
 # Set by the ops container, where git with no config read trusts no repo.
 ENV.pop("GIT_TEST_ASSUME_DIFFERENT_OWNER", None)
-INSIDE = """set -e
-git_dir=$1; own=$2; other=$3; side=$4
-mount --bind "$git_dir/worktrees/$own" "$side"
-mount --bind "$git_dir/worktrees" "$git_dir/worktrees"
-mount -o remount,bind,ro "$git_dir/worktrees"
-mount --bind "$side" "$git_dir/worktrees/$own"
-set +e
-echo x > "$git_dir/worktrees/$own/commondir" && echo own
-echo x > "$git_dir/worktrees/$other/commondir" && echo other
-mkdir "$git_dir/worktrees/new" && echo new
+BASE = HERE / "base.jsonc"
+MOUNT = re.compile(r'"source=([^,"]+),target=([^,"]+),type=bind((?:,\w+)*)"')
+# A bundle after the mounts: what it writes in the base .git once the host renamed its config.
+WRITES = """
+cd "$1"
+for name in config hooks/x info/x worktrees/$3/commondir worktrees/new x \\
+    worktrees/$2/x objects/x refs/x logs/x rr-cache/x packed/x; do
+    (: >> "$name") 2>/dev/null && echo "wrote $name" && [ "${name##*/}" = x ] && rm "$name"
+done
+cd "$4"
+git commit -q --allow-empty -m bundle
+echo x > stashed && git stash -q --include-untracked 2>&1 && git stash pop -q 2>&1 >/dev/null && rm stashed
+git rev-parse -q --verify refs/stash && echo "a stash left"
+git checkout -q -b tmp 2>&1 && git checkout -q - 2>&1 && git update-ref -d refs/heads/tmp 2>&1
+git rebase -q --force-rebase HEAD~1 2>&1
+git branch -q gone 2>&1 && git update-ref -d refs/heads/gone 2>&1
+true
 """
 
 failures = []
+
+
+def is_folder(path):
+    return path.is_dir() and not path.is_symlink()
 
 
 def check(what, got, expected):
@@ -59,18 +71,56 @@ def add(base, folder):
     git(base, "worktree", "lock", "--reason", "managed bundle", str(folder / base.name))
 
 
-def check_bind(git_dir, own, other):
+def get_mounts(root, repo, bundle):
+    """The mounts of base.jsonc on the base .git of one repo, in the order podman makes them."""
+    mounts = []
+    for source, target, options in MOUNT.findall(BASE.read_text()):
+        if source.startswith(f"@REPO_ROOT@/{repo}/.git"):
+            names = [
+                path.replace("@REPO_ROOT@", str(root)).replace(
+                    "${localWorkspaceFolderBasename}", bundle
+                )
+                for path in (source, target)
+            ]
+            mounts.append((*names, "readonly" in options.split(",")))
+    return sorted(mounts, key=lambda mount: mount[1].count("/"))
+
+
+def check_bind(root, worktree, other):
+    """The mounts of a bundle in a user namespace, a rename of the config on the host, then what
+    the bundle can write: the same as a running container, as each is a mount namespace."""
     if subprocess.run(["unshare", "-Urm", "true"], capture_output=True, check=False).returncode:
         print("no user namespace here: the binds are not tried")
         return
+    git_dir = root / "odoo" / ".git"
     with tempfile.TemporaryDirectory() as side:
-        res = subprocess.run(
-            ["unshare", "-Urm", "bash", "-c", INSIDE, "_", git_dir, own, other, side],
-            capture_output=True,
-            check=False,
+        lines = [f'mount --bind "{root}" "{side}"']
+        for source, target, readonly in get_mounts(root, "odoo", worktree.parent.name):
+            lines.append(f'mount --bind "{side}{source.removeprefix(str(root))}" "{target}"')
+            if readonly:
+                lines.append(f'mount -o remount,bind,ro "{target}"')
+        script = "set -e\n" + "\n".join(lines) + "\nset +e\necho ready\nread go\n" + WRITES
+        args = [git_dir, worktree.parent.name, other, worktree]
+        with subprocess.Popen(
+            ["unshare", "-Urm", "bash", "-c", script, "_", *map(str, args)],
+            env={**ENV, **{f"GIT_{key}_EMAIL": "me@localhost" for key in ("AUTHOR", "COMMITTER")}},
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-        )
-    check("bound as in a bundle, what it writes", res.stdout.split(), ["own"])
+        ) as inside:
+            check("bound", inside.stdout.readline(), "ready\n")
+            git(root / "odoo", "config", "host.renamed", "true")
+            out, _ = inside.communicate("go\n", timeout=60)
+    wrote = [line.removeprefix("wrote ") for line in out.splitlines() if line.startswith("wrote ")]
+    check(
+        "bound as in a bundle, after a rename of the config on the host, what it writes",
+        wrote,
+        [f"worktrees/{worktree.parent.name}/x", "objects/x", "refs/x", "logs/x", "rr-cache/x", "packed/x"],
+    )
+    check("and what git says there", [line for line in out.splitlines() if line not in
+                                      [f"wrote {name}" for name in wrote]], [])
+    check("the config the host wrote", git(root / "odoo", "config", "host.renamed"), "true")
 
 
 def main():
@@ -90,6 +140,14 @@ def main():
         add(enterprise, one)
         worktrees = odoo / ".git" / "worktrees"
         check("git names them", sorted(os.listdir(worktrees)), ["odoo", "odoo1"])
+        git(odoo, "branch", "packed")
+        git(odoo, "pack-refs", "--all")
+        packed = (odoo / ".git" / "packed-refs").read_text()
+        (odoo / ".git" / "rr-cache").symlink_to(root / "elsewhere")
+        res = run(two, root=repos)
+        check("a folder of the base .git that is a link", res.returncode, 1)
+        check("says so", "is a link" in res.stderr, True)
+        (odoo / ".git" / "rr-cache").unlink()
 
         (two / "odoo" / ".git").write_text(f"gitdir: {worktrees / 'odoo'}\n")
         res = run(two, root=repos)
@@ -104,6 +162,18 @@ def main():
         (worktrees / one.name).symlink_to(root / "elsewhere")
         res = run(one, root=repos)
         check("exit code", (res.returncode, res.stderr), (0, ""))
+        for name in ("objects", "refs", "logs", "rr-cache", "packed"):
+            check(f"{name} a folder", is_folder(odoo / ".git" / name), True)
+        check("packed-refs a link", os.readlink(odoo / ".git" / "packed-refs"), "packed/packed-refs")
+        check("to what it held", (odoo / ".git" / "packed" / "packed-refs").read_text(), packed)
+        git(odoo, "branch", "-D", "packed")
+        check("a ref deleted on the host", git(odoo, "branch", "--list", "packed"), "")
+        check("keeps the link", (odoo / ".git" / "packed-refs").is_symlink(), True)
+        (odoo / ".git" / "packed" / "packed-refs").unlink()
+        (odoo / ".git" / "packed" / "packed-refs").symlink_to(root / "elsewhere")
+        res = run(one, root=repos)
+        check("a link there", (res.returncode, "removed" in res.stderr), (0, True))
+        check("is gone", os.path.lexists(odoo / ".git" / "packed" / "packed-refs"), False)
         check(
             "the folder named after the bundle",
             sorted(os.listdir(worktrees)),
@@ -159,7 +229,7 @@ def main():
             f"gitdir: {worktrees / two.name}\n",
         )
 
-        check_bind(odoo / ".git", one.name, two.name)
+        check_bind(repos, one / "odoo", two.name)
     for line in failures:
         print(line)
     print("all as expected" if not failures else f"{len(failures)} failure(s)")

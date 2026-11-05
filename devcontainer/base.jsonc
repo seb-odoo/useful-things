@@ -30,51 +30,69 @@
     "source=${localWorkspaceFolder}/.agent,target=/workspace/.agent,type=bind,Z",
     // The .git file of a worktree holds an absolute `gitdir: @REPO_ROOT@/<repo>/.git/worktrees/<name>`
     // shared with the host, so each base repo's .git is mounted at that same path, or git fails
-    // with "not a git repository". A new bundle repo needs its line here.
-    "source=@REPO_ROOT@/odoo/.git,target=@REPO_ROOT@/odoo/.git,type=bind,Z",
-    "source=@REPO_ROOT@/enterprise/.git,target=@REPO_ROOT@/enterprise/.git,type=bind,Z",
-    "source=@REPO_ROOT@/design-themes/.git,target=@REPO_ROOT@/design-themes/.git,type=bind,Z",
-    "source=@REPO_ROOT@/documentation/.git,target=@REPO_ROOT@/documentation/.git,type=bind,Z",
-    "source=@REPO_ROOT@/upgrade/.git,target=@REPO_ROOT@/upgrade/.git,type=bind,Z",
-    "source=@REPO_ROOT@/upgrade-util/.git,target=@REPO_ROOT@/upgrade-util/.git,type=bind,Z",
-    "source=@REPO_ROOT@/owl/.git,target=@REPO_ROOT@/owl/.git,type=bind,Z",
-    "source=@REPO_ROOT@/sfu/.git,target=@REPO_ROOT@/sfu/.git,type=bind,Z",
-    // Their config and hooks read-only: the host, every bundle and the ops container read them, and
-    // a `core.fsmonitor` or a hook written there runs in all of their git. initialize.py writes the
-    // upstream a bundle needs before the start, and the container sees the config of its start.
-    "source=@REPO_ROOT@/odoo/.git/config,target=@REPO_ROOT@/odoo/.git/config,type=bind,readonly,z",
-    "source=@REPO_ROOT@/odoo/.git/hooks,target=@REPO_ROOT@/odoo/.git/hooks,type=bind,readonly,z",
-    "source=@REPO_ROOT@/enterprise/.git/config,target=@REPO_ROOT@/enterprise/.git/config,type=bind,readonly,z",
-    "source=@REPO_ROOT@/enterprise/.git/hooks,target=@REPO_ROOT@/enterprise/.git/hooks,type=bind,readonly,z",
-    "source=@REPO_ROOT@/design-themes/.git/config,target=@REPO_ROOT@/design-themes/.git/config,type=bind,readonly,z",
-    "source=@REPO_ROOT@/design-themes/.git/hooks,target=@REPO_ROOT@/design-themes/.git/hooks,type=bind,readonly,z",
-    "source=@REPO_ROOT@/documentation/.git/config,target=@REPO_ROOT@/documentation/.git/config,type=bind,readonly,z",
-    "source=@REPO_ROOT@/documentation/.git/hooks,target=@REPO_ROOT@/documentation/.git/hooks,type=bind,readonly,z",
-    "source=@REPO_ROOT@/upgrade/.git/config,target=@REPO_ROOT@/upgrade/.git/config,type=bind,readonly,z",
-    "source=@REPO_ROOT@/upgrade/.git/hooks,target=@REPO_ROOT@/upgrade/.git/hooks,type=bind,readonly,z",
-    "source=@REPO_ROOT@/upgrade-util/.git/config,target=@REPO_ROOT@/upgrade-util/.git/config,type=bind,readonly,z",
-    "source=@REPO_ROOT@/upgrade-util/.git/hooks,target=@REPO_ROOT@/upgrade-util/.git/hooks,type=bind,readonly,z",
-    "source=@REPO_ROOT@/owl/.git/config,target=@REPO_ROOT@/owl/.git/config,type=bind,readonly,z",
-    "source=@REPO_ROOT@/owl/.git/hooks,target=@REPO_ROOT@/owl/.git/hooks,type=bind,readonly,z",
-    "source=@REPO_ROOT@/sfu/.git/config,target=@REPO_ROOT@/sfu/.git/config,type=bind,readonly,z",
-    "source=@REPO_ROOT@/sfu/.git/hooks,target=@REPO_ROOT@/sfu/.git/hooks,type=bind,readonly,z",
-    // Their worktrees read-only but the bundle's own entry, which worktree-admin.py names after it:
-    // a `commondir` written in the entry of another bundle points its git at any config.
-    "source=@REPO_ROOT@/odoo/.git/worktrees,target=@REPO_ROOT@/odoo/.git/worktrees,type=bind,readonly,z",
+    // with "not a git repository". A new bundle repo needs its lines here.
+    // Read-only, as the host, every bundle and the ops container run what its config, hooks and
+    // info name. Folders only: git writes a file by renaming a new one over it, and a rename on the
+    // host drops the bind of a file in every running container (security review 11-03, C1).
+    // Writable over it, the folders git writes from a worktree: objects, refs, reflogs, rerere, the
+    // packed refs (worktree-admin.py moves packed-refs there, as a ref deletion rewrites it), and
+    // the bundle's own entry in worktrees, which worktree-admin.py names after it: a `commondir`
+    // written in the entry of another bundle points its git at any config.
+    "source=@REPO_ROOT@/odoo/.git,target=@REPO_ROOT@/odoo/.git,type=bind,readonly,Z",
+    "source=@REPO_ROOT@/odoo/.git/objects,target=@REPO_ROOT@/odoo/.git/objects,type=bind,z",
+    "source=@REPO_ROOT@/odoo/.git/refs,target=@REPO_ROOT@/odoo/.git/refs,type=bind,z",
+    "source=@REPO_ROOT@/odoo/.git/logs,target=@REPO_ROOT@/odoo/.git/logs,type=bind,z",
+    "source=@REPO_ROOT@/odoo/.git/rr-cache,target=@REPO_ROOT@/odoo/.git/rr-cache,type=bind,z",
+    "source=@REPO_ROOT@/odoo/.git/packed,target=@REPO_ROOT@/odoo/.git/packed,type=bind,z",
     "source=@REPO_ROOT@/odoo/.git/worktrees/${localWorkspaceFolderBasename},target=@REPO_ROOT@/odoo/.git/worktrees/${localWorkspaceFolderBasename},type=bind,z",
-    "source=@REPO_ROOT@/enterprise/.git/worktrees,target=@REPO_ROOT@/enterprise/.git/worktrees,type=bind,readonly,z",
+    "source=@REPO_ROOT@/enterprise/.git,target=@REPO_ROOT@/enterprise/.git,type=bind,readonly,Z",
+    "source=@REPO_ROOT@/enterprise/.git/objects,target=@REPO_ROOT@/enterprise/.git/objects,type=bind,z",
+    "source=@REPO_ROOT@/enterprise/.git/refs,target=@REPO_ROOT@/enterprise/.git/refs,type=bind,z",
+    "source=@REPO_ROOT@/enterprise/.git/logs,target=@REPO_ROOT@/enterprise/.git/logs,type=bind,z",
+    "source=@REPO_ROOT@/enterprise/.git/rr-cache,target=@REPO_ROOT@/enterprise/.git/rr-cache,type=bind,z",
+    "source=@REPO_ROOT@/enterprise/.git/packed,target=@REPO_ROOT@/enterprise/.git/packed,type=bind,z",
     "source=@REPO_ROOT@/enterprise/.git/worktrees/${localWorkspaceFolderBasename},target=@REPO_ROOT@/enterprise/.git/worktrees/${localWorkspaceFolderBasename},type=bind,z",
-    "source=@REPO_ROOT@/design-themes/.git/worktrees,target=@REPO_ROOT@/design-themes/.git/worktrees,type=bind,readonly,z",
+    "source=@REPO_ROOT@/design-themes/.git,target=@REPO_ROOT@/design-themes/.git,type=bind,readonly,Z",
+    "source=@REPO_ROOT@/design-themes/.git/objects,target=@REPO_ROOT@/design-themes/.git/objects,type=bind,z",
+    "source=@REPO_ROOT@/design-themes/.git/refs,target=@REPO_ROOT@/design-themes/.git/refs,type=bind,z",
+    "source=@REPO_ROOT@/design-themes/.git/logs,target=@REPO_ROOT@/design-themes/.git/logs,type=bind,z",
+    "source=@REPO_ROOT@/design-themes/.git/rr-cache,target=@REPO_ROOT@/design-themes/.git/rr-cache,type=bind,z",
+    "source=@REPO_ROOT@/design-themes/.git/packed,target=@REPO_ROOT@/design-themes/.git/packed,type=bind,z",
     "source=@REPO_ROOT@/design-themes/.git/worktrees/${localWorkspaceFolderBasename},target=@REPO_ROOT@/design-themes/.git/worktrees/${localWorkspaceFolderBasename},type=bind,z",
-    "source=@REPO_ROOT@/documentation/.git/worktrees,target=@REPO_ROOT@/documentation/.git/worktrees,type=bind,readonly,z",
+    "source=@REPO_ROOT@/documentation/.git,target=@REPO_ROOT@/documentation/.git,type=bind,readonly,Z",
+    "source=@REPO_ROOT@/documentation/.git/objects,target=@REPO_ROOT@/documentation/.git/objects,type=bind,z",
+    "source=@REPO_ROOT@/documentation/.git/refs,target=@REPO_ROOT@/documentation/.git/refs,type=bind,z",
+    "source=@REPO_ROOT@/documentation/.git/logs,target=@REPO_ROOT@/documentation/.git/logs,type=bind,z",
+    "source=@REPO_ROOT@/documentation/.git/rr-cache,target=@REPO_ROOT@/documentation/.git/rr-cache,type=bind,z",
+    "source=@REPO_ROOT@/documentation/.git/packed,target=@REPO_ROOT@/documentation/.git/packed,type=bind,z",
     "source=@REPO_ROOT@/documentation/.git/worktrees/${localWorkspaceFolderBasename},target=@REPO_ROOT@/documentation/.git/worktrees/${localWorkspaceFolderBasename},type=bind,z",
-    "source=@REPO_ROOT@/upgrade/.git/worktrees,target=@REPO_ROOT@/upgrade/.git/worktrees,type=bind,readonly,z",
+    "source=@REPO_ROOT@/upgrade/.git,target=@REPO_ROOT@/upgrade/.git,type=bind,readonly,Z",
+    "source=@REPO_ROOT@/upgrade/.git/objects,target=@REPO_ROOT@/upgrade/.git/objects,type=bind,z",
+    "source=@REPO_ROOT@/upgrade/.git/refs,target=@REPO_ROOT@/upgrade/.git/refs,type=bind,z",
+    "source=@REPO_ROOT@/upgrade/.git/logs,target=@REPO_ROOT@/upgrade/.git/logs,type=bind,z",
+    "source=@REPO_ROOT@/upgrade/.git/rr-cache,target=@REPO_ROOT@/upgrade/.git/rr-cache,type=bind,z",
+    "source=@REPO_ROOT@/upgrade/.git/packed,target=@REPO_ROOT@/upgrade/.git/packed,type=bind,z",
     "source=@REPO_ROOT@/upgrade/.git/worktrees/${localWorkspaceFolderBasename},target=@REPO_ROOT@/upgrade/.git/worktrees/${localWorkspaceFolderBasename},type=bind,z",
-    "source=@REPO_ROOT@/upgrade-util/.git/worktrees,target=@REPO_ROOT@/upgrade-util/.git/worktrees,type=bind,readonly,z",
+    "source=@REPO_ROOT@/upgrade-util/.git,target=@REPO_ROOT@/upgrade-util/.git,type=bind,readonly,Z",
+    "source=@REPO_ROOT@/upgrade-util/.git/objects,target=@REPO_ROOT@/upgrade-util/.git/objects,type=bind,z",
+    "source=@REPO_ROOT@/upgrade-util/.git/refs,target=@REPO_ROOT@/upgrade-util/.git/refs,type=bind,z",
+    "source=@REPO_ROOT@/upgrade-util/.git/logs,target=@REPO_ROOT@/upgrade-util/.git/logs,type=bind,z",
+    "source=@REPO_ROOT@/upgrade-util/.git/rr-cache,target=@REPO_ROOT@/upgrade-util/.git/rr-cache,type=bind,z",
+    "source=@REPO_ROOT@/upgrade-util/.git/packed,target=@REPO_ROOT@/upgrade-util/.git/packed,type=bind,z",
     "source=@REPO_ROOT@/upgrade-util/.git/worktrees/${localWorkspaceFolderBasename},target=@REPO_ROOT@/upgrade-util/.git/worktrees/${localWorkspaceFolderBasename},type=bind,z",
-    "source=@REPO_ROOT@/owl/.git/worktrees,target=@REPO_ROOT@/owl/.git/worktrees,type=bind,readonly,z",
+    "source=@REPO_ROOT@/owl/.git,target=@REPO_ROOT@/owl/.git,type=bind,readonly,Z",
+    "source=@REPO_ROOT@/owl/.git/objects,target=@REPO_ROOT@/owl/.git/objects,type=bind,z",
+    "source=@REPO_ROOT@/owl/.git/refs,target=@REPO_ROOT@/owl/.git/refs,type=bind,z",
+    "source=@REPO_ROOT@/owl/.git/logs,target=@REPO_ROOT@/owl/.git/logs,type=bind,z",
+    "source=@REPO_ROOT@/owl/.git/rr-cache,target=@REPO_ROOT@/owl/.git/rr-cache,type=bind,z",
+    "source=@REPO_ROOT@/owl/.git/packed,target=@REPO_ROOT@/owl/.git/packed,type=bind,z",
     "source=@REPO_ROOT@/owl/.git/worktrees/${localWorkspaceFolderBasename},target=@REPO_ROOT@/owl/.git/worktrees/${localWorkspaceFolderBasename},type=bind,z",
-    "source=@REPO_ROOT@/sfu/.git/worktrees,target=@REPO_ROOT@/sfu/.git/worktrees,type=bind,readonly,z",
+    "source=@REPO_ROOT@/sfu/.git,target=@REPO_ROOT@/sfu/.git,type=bind,readonly,Z",
+    "source=@REPO_ROOT@/sfu/.git/objects,target=@REPO_ROOT@/sfu/.git/objects,type=bind,z",
+    "source=@REPO_ROOT@/sfu/.git/refs,target=@REPO_ROOT@/sfu/.git/refs,type=bind,z",
+    "source=@REPO_ROOT@/sfu/.git/logs,target=@REPO_ROOT@/sfu/.git/logs,type=bind,z",
+    "source=@REPO_ROOT@/sfu/.git/rr-cache,target=@REPO_ROOT@/sfu/.git/rr-cache,type=bind,z",
+    "source=@REPO_ROOT@/sfu/.git/packed,target=@REPO_ROOT@/sfu/.git/packed,type=bind,z",
     "source=@REPO_ROOT@/sfu/.git/worktrees/${localWorkspaceFolderBasename},target=@REPO_ROOT@/sfu/.git/worktrees/${localWorkspaceFolderBasename},type=bind,z",
     // Workspace .claude, .vscode and odools.toml are symlinks in each bundle pointing at these
     // absolute host paths; bind them at the same path (like the .git mounts above) so the symlinks
@@ -291,9 +309,14 @@
     // here, so git aborts with "Couldn't load public key". A --global override loses to repo-local
     // config and editing .git/config would change the host too; GIT_CONFIG_* env takes precedence
     // over all config files and is container-only. Host commits stay signed.
-    "GIT_CONFIG_COUNT": "1",
+    // No automatic gc either: it writes gc.pid in the base .git, read-only here (mounts above).
+    "GIT_CONFIG_COUNT": "3",
     "GIT_CONFIG_KEY_0": "commit.gpgsign",
     "GIT_CONFIG_VALUE_0": "false",
+    "GIT_CONFIG_KEY_1": "gc.auto",
+    "GIT_CONFIG_VALUE_1": "0",
+    "GIT_CONFIG_KEY_2": "maintenance.auto",
+    "GIT_CONFIG_VALUE_2": "false",
     "ODOO_PROXY_HOST": "${localWorkspaceFolderBasename}",
     // Make the reused 3.12 venv the default interpreter for every process (not just interactive
     // shells), so odoo-bin (#!/usr/bin/env python3) doesn't fall back to the base image's 3.10.
