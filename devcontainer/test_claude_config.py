@@ -144,9 +144,14 @@ def check_ops(root):
     res = run(root, "ops", str(root / "repo"))
     check("the ops container: exit code", (res.returncode, res.stderr), (0, ""))
     own = root / "cache" / "devcontainer" / "claude-config" / "ops"
-    check("no folder of its own: the host's login", (own / "home").exists(), False)
+    login = read_login(own)
+    check("a dummy login of its own", login["accessToken"].startswith("sk-ant-oat01-rr-"), True)
+    dummies = root / "state" / "claude-switch" / "dummies"
+    named = dummies / hashlib.sha256(login["accessToken"].encode()).hexdigest()
+    check("named for the switch", named.read_text(), "ops\n")
     settings = json.loads((own / "settings.json").read_text())
-    check("its connectors stay", "disableClaudeAiConnectors" in settings, False)
+    check("no claude.ai connector", settings.get("disableClaudeAiConnectors"), True)
+    check("no fake GitHub token", "GITHUB_PAT" in settings.get("env", {}), False)
 
 
 def check_mounts():

@@ -4,12 +4,12 @@
     python3 claude-config.py <folder name> --bundle       # initializeCommand of a bundle, on the host
     python3 claude-config.py <folder name> <workspace>    # the one of the ops container
 
-The CLAUDE_CONFIG_DIR of the ops container is the host's ~/.claude itself, so it shares the host's
-login: Claude locks a token refresh and saves the new token in that folder, and any copy or link of
-.credentials.json elsewhere gets revoked by the next refresh. A bundle has a folder of its own
-there instead (home), where what it shares of the host's is mounted (base.jsonc), with a dummy
-login that the Claude switch sends with the main one (gateway-core README, "The Claude switch"):
-its claude has no credential to give away, and loads no claude.ai connector. The dummy is kept out
+A bundle, and the ops container, have a folder of their own there (home), where what they share of
+the host's is mounted (base.jsonc, and host-ctl's devcontainer.base.jsonc), with a dummy login
+that the Claude switch sends with the main one (gateway-core README, "The Claude switch"): their
+claude has no credential to give away, and loads no claude.ai connector. Never give a container a
+copy or a link of the host's .credentials.json: Claude saves a refreshed token there, and the next
+refresh revokes every other copy. The dummy is kept out
 of the bundle's reach (dummy-login), and written again at each start over what a /login there
 left. session-env and shell-snapshots are
 mounted from a folder of the bundle, as the host's Claude sources its own. So is sessions, where
@@ -172,7 +172,7 @@ def write_fakes(own, name, values):
     return token
 
 
-def write_settings(claude, own, bundle, token=None):
+def write_settings(claude, own, token=None):
     path = own / "settings.json"
     if not (claude / "settings.json").is_file():
         path.touch()
@@ -188,8 +188,7 @@ def write_settings(claude, own, bundle, token=None):
     # An ask rule prompts even when a hook allowed the call, and in a container the hooks decide.
     settings.get("permissions", {}).pop("ask", None)
     settings.setdefault("claudeMdExcludes", []).append(str(claude / "CLAUDE.md"))
-    if bundle:
-        settings["disableClaudeAiConnectors"] = True
+    settings["disableClaudeAiConnectors"] = True
     if token:
         settings.setdefault("env", {})["GITHUB_PAT"] = token
     path.write_text(json.dumps(settings, indent=2) + "\n")
@@ -274,9 +273,8 @@ def main():
     (claude / "agent-start.lock").touch()
     (pathlib.Path(values["SHARE_ROOT"]) / "claude-plans" / "dev").mkdir(parents=True, exist_ok=True)
     token = write_fakes(own, args[0], values) if bundle else None
-    write_settings(claude, own, bundle, token)
-    if bundle:
-        write_login(claude, own, args[0], values)
+    write_settings(claude, own, token)
+    write_login(claude, own, args[0], values)
     make_files(claude, own)
     link_project(pathlib.Path(values["SHARED_CLAUDE"]), own / "project")
 
