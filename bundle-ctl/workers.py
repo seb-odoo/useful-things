@@ -10,6 +10,7 @@ See README.md, "Remote runs".
 import json
 import pathlib
 import re
+import socket
 import subprocess
 import threading
 import time
@@ -83,7 +84,15 @@ class Workers:
         return MUX / name / "sock" / "master"
 
     def is_up(self, name):
-        return self.socket(name).is_socket()
+        """Connect rather than test the file: a crash of the host leaves the socket file with
+        nothing listening."""
+        with socket.socket(socket.AF_UNIX) as client:
+            client.settimeout(5)
+            try:
+                client.connect(str(self.socket(name)))
+            except OSError:
+                return False
+        return True
 
     def ssh(self, name, *words):
         return [
