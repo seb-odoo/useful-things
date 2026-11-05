@@ -338,6 +338,11 @@ Host user settings apply to dev container windows too, so a setting like
 `~/.config/Code/User/settings.json`. Per-extension state (`data/User/globalStorage`) is per
 container and lost on rebuild, except Claude's (a per-bundle mount).
 
+The workspace settings every bundle shares, `WORKTREE_ROOT/.vscode`, are read-only in a
+container: a setting there can name a program (`ruff.path`, a terminal profile) that every other
+bundle window then runs (security check 11-03, C11). A workspace-scope setting is changed on the
+host, in that folder; a change made from a container window fails to save.
+
 **The container config.** The tools name it at `WORKTREE_ROOT/.devcontainer/devcontainer.json`
 (`get_devcontainer_config` in `scripts/commands.py`), never through the bundle folder: its
 `initializeCommand` and its mounts apply on the host at the next start, and a container writes its
@@ -413,12 +418,10 @@ What stays open, and what closes it:
   code too. A machine closes both with `HOST_BOX` in `config.env`: a command that runs its arguments
   with the bundle repos and nothing else of the machine. The bundle scripts run `enable.sh` through
   it, with no network, and the git of the host can be a wrapper that does the same for these repos;
-- the filestore and the databases, which the bundles share;
 - the gpg agent and the git credential helper of the host, which VS Code relays into the
   containers it attaches to like the SSH agent. A secret gpg key of the host signs from a
   container, behind its passphrase: mask `gpg-agent-extra.socket` on the host, the socket that is
   relayed. The helper relay has no switch (`gitCredentialHelperConfigLocation` only stops writing
   the git config): a helper of the host answers `git credential fill` there, so the host has none;
-- the bundles' shared `.vscode`, as its workspace settings are changed from the container windows;
 - a VS Code window trusts the container it is attached to: with the stores read-only no code of
   ours or of a bundle gets into an extension, the rest is VS Code's own remote protocol.

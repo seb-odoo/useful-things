@@ -403,6 +403,31 @@ def get_loaded():
     return []
 
 
+def get_records(home):
+    """A record of a bundle whose fields have the wrong types is left out: it raised in the loop
+    of the wrapper, which then died, and Pause, Back to queue and `bctl close` found no window
+    (security check 11-03, B21)."""
+    spec = importlib.util.spec_from_file_location("terminator", HERE / "agent-terminator.py")
+    terminator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(terminator)
+    sessions = home / "records" / BUNDLE / "sessions"
+    sessions.mkdir(parents=True)
+    terminator.CLAUDE_CONFIG = home / "records"
+    for name, record in (
+        ("1", {"name": BUNDLE, "sessionId": "s1", "startedAt": "late"}),
+        ("2", {"name": BUNDLE, "sessionId": ["s2"], "startedAt": 5}),
+        ("3", {"name": BUNDLE, "sessionId": "s3", "startedAt": 4}),
+    ):
+        (sessions / f"{name}.json").write_text(json.dumps(record))
+    try:
+        found = terminator.get_record(BUNDLE, 0)
+    except Exception as error:  # noqa: BLE001
+        return [f"agent-terminator.py: a record of the wrong types raised {error!r}"]
+    if (found or {}).get("sessionId") != "s3":
+        return [f"agent-terminator.py: record {found!r}, expected the one of s3"]
+    return []
+
+
 def get_followed(home):
     """The titles agent-terminator.py gives its window while the session of its claude works,
     then ends on a verdict, and when the run fails before its claude starts. A claude of the
@@ -620,6 +645,7 @@ def main():
         failures += get_configs(home)
         failures += get_running()
         failures += get_reloaded(home)
+        failures += get_records(home)
         titles, closed, taken = get_followed(home)
         for found, expected in zip(titles, FOLLOWED, strict=True):
             if found != expected:

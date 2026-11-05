@@ -34,11 +34,13 @@ STATE_FILE = STATE / "state.json"
 TAKEOVER = pathlib.Path(__file__).resolve().parent.parent / "bundle-ctl/client/agent-takeover.py"
 TOLD_SINCE = 1793359317
 VALUE_FORMS = {
+    "done": re.compile(r"[0-9]{1,3}|failed|interrupted"),
     "effort": re.compile("|".join(EFFORTS)),
     "model": re.compile("|".join(MODELS)),
     "parent": BUNDLE_NAME,
     "priority": re.compile(r"-?[0-9]{1,9}"),
     "queued": re.compile(r"[0-9]{1,12}(?:\.[0-9]{1,20})?"),
+    "retry": re.compile(r"auth failed, retry [0-9]/[0-9]"),
     "session": BUNDLE_NAME,
     "terminal": re.compile(r"[0-9]{1,10}"),
     "where": re.compile(r"auto|local|worker(?::[a-z][a-z0-9-]{0,39})?"),
@@ -197,25 +199,39 @@ def get_last_text(transcript):
     for entry in reversed(load_takeover().read_entries(transcript)):
         if entry.get("type") not in ("assistant", "user") or entry.get("isSidechain"):
             continue
-        content = entry.get("message", {}).get("content")
-        kinds = {block.get("type") for block in content} if isinstance(content, list) else set()
+        message = entry.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        content = content if isinstance(content, list) else []
+        blocks = [block for block in content if isinstance(block, dict)]
+        kinds = {block.get("type") for block in blocks}
         if kinds == {"thinking"}:
             continue
         if entry["type"] != "assistant" or kinds != {"text"}:
             return None
-        return "".join(block["text"] for block in content)
+        return "".join(block["text"] for block in blocks if isinstance(block.get("text"), str))
     return None
 
 
+def is_host_process(pid, proc="/proc"):
+    """Whether a process runs in the pid namespace of this one, the host's: a process of a
+    container shows in the /proc of the host too, with the command line it chose (security check
+    11-03, B20)."""
+    try:
+        return os.readlink(f"{proc}/{pid}/ns/pid") == os.readlink(f"{proc}/self/ns/pid")
+    except OSError:
+        return False
+
+
 def is_agent_running(bundle):
-    """Whether the agent of a bundle or an ops window runs: agent-terminal.py BUNDLE. The
-    agent-terminator.py of the window holds the same words as COMMAND, and does not count."""
+    """Whether the agent of a bundle or an ops window runs: agent-terminal.py BUNDLE, a process of
+    the host. The agent-terminator.py of the window holds the same words as COMMAND, and does not
+    count."""
     for path in pathlib.Path("/proc").glob("[0-9]*/cmdline"):
         try:
             args = path.read_bytes().split(b"\0")
         except OSError:
             continue
-        if bundle.encode() not in args:
+        if bundle.encode() not in args or not is_host_process(path.parent.name):
             continue
         if any(arg.endswith(b"agent-terminator.py") for arg in args):
             continue
@@ -241,7 +257,11 @@ def reads_told(bundle):
     for path in pathlib.Path("/proc").glob("[0-9]*/cmdline"):
         try:
             args = path.read_bytes().split(b"\0")
-            if args[1].endswith(b"/agent-terminal.py") and args[2] == bundle.encode():
+            if (
+                args[1].endswith(b"/agent-terminal.py")
+                and args[2] == bundle.encode()
+                and is_host_process(path.parent.name)
+            ):
                 return read_stat(int(path.parent.name))[1] >= TOLD_SINCE
         except (OSError, IndexError, ValueError):
             continue
@@ -249,14 +269,19 @@ def reads_told(bundle):
 
 
 def get_window_pids(bundle):
-    """The agent-terminator.py processes that hold an agent window of a bundle or an ops window."""
+    """The agent-terminator.py processes of the host that hold an agent window of a bundle or an
+    ops window."""
     pids = []
     for path in pathlib.Path("/proc").glob("[0-9]*/cmdline"):
         try:
             args = path.read_bytes().split(b"\0")
         except OSError:
             continue
-        if bundle.encode() in args and any(arg.endswith(b"agent-terminator.py") for arg in args):
+        if (
+            bundle.encode() in args
+            and any(arg.endswith(b"agent-terminator.py") for arg in args)
+            and is_host_process(path.parent.name)
+        ):
             pids.append(int(path.parent.name))
     return pids
 

@@ -3,7 +3,9 @@
 makes of such lines: python3 test_cpulog.py
 """
 
+import contextlib
 import importlib.util
+import io
 import json
 import pathlib
 import sys
@@ -102,6 +104,20 @@ def load_report():
     return module
 
 
+def read_escaped():
+    """A command line of a bundle, logged, and a row of cpu-report.py: no escape reaches the
+    journal nor the terminal (security check 11-03, B16)."""
+    with tempfile.TemporaryDirectory() as name:
+        proc = pathlib.Path(name)
+        (proc / "7").mkdir()
+        (proc / "7" / "cmdline").write_bytes(b"git\0log\0\x1b]0;x\0;\x07\x1b[2K\0")
+        logged = cpulog.read_args(7, proc)
+    printed = io.StringIO()
+    with contextlib.redirect_stdout(printed):
+        load_report().print_rows("t", [("a\x1b[2Kb", 1.0)], 1.0)
+    return logged, printed.getvalue().replace("\n", "").isprintable()
+
+
 def main():
     failures = []
     first, line = get_line()
@@ -133,6 +149,7 @@ def main():
         ("the report counts the minutes", totals["minutes"], 2),
         ("the report splits by kind and use", totals["kinds"].get(("mine", "test")), 3.0),
         ("the report names the gateways", totals["kinds"].get(("gateway", "")), 0.25),
+        ("no escape in a command line (B16)", read_escaped(), ("git log ]0;x ; [2K", True)),
     ]
     for name, found, expected in cases:
         if found != expected:

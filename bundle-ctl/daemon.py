@@ -61,6 +61,7 @@ from agents import (  # noqa: E402
     get_last_text,
     get_mtime,
     get_own_transcript,
+    get_projects,
     get_resume,
     get_session_records,
     get_session_status,
@@ -68,11 +69,13 @@ from agents import (  # noqa: E402
     get_window_pids,
     has_window,
     is_agent_running,
+    is_host_process,
     open_unlinked,
     read_stat,
     read_state,
     read_text,
     reads_told,
+    touch,
     write_text,
 )
 from branch_status import (  # noqa: E402
@@ -505,7 +508,11 @@ def branches(caller, query, body):
         raise Refused(f"branch_status.py took over {BRANCHES_TIMEOUT}s") from None
     if res.returncode:
         raise Refused(f"branch_status.py exited with {res.returncode}: {res.stderr[-500:].strip()}")
-    return 200, {"table": res.stdout} if table else json.loads(res.stdout)
+    if table:
+        return 200, {"table": res.stdout}
+    answer = json.loads(res.stdout)
+    answer["bundles"] = [hide_row(caller, row) for row in answer.get("bundles", [])]
+    return 200, answer
 
 
 def status(caller, query, body):
@@ -520,11 +527,38 @@ def status(caller, query, body):
         state = read_state()
     return 200, {
         "agents": count_agents(get_open_windows()),
-        "bundles": rows,
+        "bundles": [hide_row(caller, row) for row in rows],
         "max_agents": MAX_AGENTS,
-        "queue": describe_queue(state),
+        "queue": hide_queue(caller, describe_queue(state)),
         "runs": RUNS.describe(),
     }
+
+
+def may_read(caller, bundle, parent=None):
+    """Whether the caller reads the texts of a bundle's agent, its task and its report: the host,
+    that bundle, or the one that queued its task (security check 11-03, B18). `parent` is the
+    one a queued task names, else the note of the host (read_parent): a bundle writes its own
+    .agent/parent."""
+    if caller in (HOST, bundle):
+        return True
+    return caller == (parent if parent is not None else read_parent(bundle).get("parent"))
+
+
+def hide_row(caller, row):
+    """A row of GET /status as the caller may read it: no task and no report of another bundle."""
+    agent = row.get("agent")
+    if not agent or may_read(caller, row["bundle"]):
+        return row
+    agent = {key: value for key, value in agent.items() if key != "task"}
+    return {**row, "agent": {**agent, "result": ""}}
+
+
+def hide_queue(caller, queue):
+    """The queue as the caller may read it: no task text of another bundle."""
+    return [
+        item if may_read(caller, item["bundle"], item["parent"]) else {**item, "task": None}
+        for item in queue
+    ]
 
 
 def read_base_heads(repo, refs):
@@ -778,13 +812,20 @@ def get_queue(caller, query, body):
         "agents": count_agents(open_windows),
         "max_agents": MAX_AGENTS,
         "memory": describe_memory(open_windows),
-        "queue": describe_queue(state),
+        "queue": hide_queue(caller, describe_queue(state)),
         "remote": get_remote_agents(),
         "workers": WORKERS.names,
         "worker_states": {
             name: wait[0] for name in WORKERS.names if (wait := WORKERS.get_agent_wait(name))
         },
     }
+
+
+def get_bundle_path(bundle):
+    """The folder of a bundle by its name, ValueError for a name that is none."""
+    if not BUNDLE_NAME.fullmatch(bundle):
+        raise ValueError(f"{bundle!r} is no bundle name")
+    return pathlib.Path(get_worktree_bundle_folder(bundle))
 
 
 def get_remote_agents():
@@ -1777,7 +1818,7 @@ def launch_queued():
                 item["task"] = get_resumed(item)
                 write_task(item)
                 # The job waits for the lock of the bundle: meanwhile no pass starts another task.
-                (folder / "remote-starting").touch()
+                touch(folder / "remote-starting")
                 WORKERS.send_agent(worker[0], bundle)
                 start_job(
                     item["parent"],
@@ -2064,6 +2105,7 @@ def keep_remote_agents():
         users = [pathlib.Path(HOST_FOLDER)]
     if users:
         remote_agent.renew_login_soon(users[0])
+    remote_agent.take_left_notes(get_bundle_path)
     for found in remotes:
         folder = found.parent.parent
         bundle = folder.name
@@ -2372,11 +2414,11 @@ def restart_safely():
 
 
 def free_safely():
-    try:
-        free_done_terminals()
-        requeue_failed_terminals()
-    except Exception:
-        traceback.print_exc()
+    for free in (free_done_terminals, requeue_failed_terminals):
+        try:
+            free()
+        except Exception:
+            traceback.print_exc()
 
 
 def tell_safely():
@@ -2730,7 +2772,7 @@ def get_terminals():
             continue
         if len(args) > 2 and args[1].endswith(b"/agent-terminal.py"):
             bundle = args[2].decode(errors="replace")
-            if not bundle.startswith(OPS):
+            if not bundle.startswith(OPS) and is_host_process(path.parent.name):
                 terminals[bundle] = int(path.parent.name)
     return terminals
 
@@ -3569,9 +3611,9 @@ def find_cut():
     """The sessions a crash or a restart cut (cut.py), newest first: the last session of each
     bundle whose container is down, and each session of the ops container that no claude runs."""
     now = time.time()
-    live = cut.get_live_sessions(
-        [*pathlib.Path(CLAUDE_CONFIG_CONTAINER).glob("*/sessions"), PROJECTS.parent / "sessions"],
-    )
+    # A bundle writes its own records (security check 11-03, B20).
+    ops = pathlib.Path(CLAUDE_CONFIG_CONTAINER, os.path.basename(HOST_FOLDER or ""), "sessions")
+    live = cut.get_live_sessions([ops, PROJECTS.parent / "sessions"] if HOST_FOLDER else [])
     live |= {read_text(folder / ".agent" / "session") for folder in get_remote_folders()}
     # A bundle's session is the one of its .agent/session, in its own folder: a bundle writes the
     # title of any transcript it reaches (security check 11-03, B7).
@@ -3901,14 +3943,8 @@ def tell_parent(bundle, text):
 
 def get_noted_bundle(session):
     """The bundle with a parent note whose .agent/session is this session, once its terminal
-    closed too (a push Seb answered after the verdict). None when two claim it: a bundle writes
-    its .agent/session, and could take the line of another."""
-    found = [
-        path.name
-        for path in PARENTS_DIR.glob("[!.]*")
-        if read_text(get_agent_folder(path.name) / "session") == session
-    ]
-    return found[0] if len(found) == 1 else None
+    closed too (a push Seb answered after the verdict), as get_claimant takes it."""
+    return get_claimant(session, [path.name for path in PARENTS_DIR.glob("[!.]*")])
 
 
 def get_watcher(caller, body):
@@ -3956,6 +3992,38 @@ def is_told_by_hok(caller, agent, session, row, card):
     return asker == agent or read_parent(asker).get("parent") == agent
 
 
+def get_watched_line(agent, card, asker, text):
+    """The line of hok on a card that ended, for a window that watches it: a bundle watching a
+    card it did not ask, nor a bundle it started, is told it ended, not what came of it, which
+    may hold Seb's words or the exit of a command of the host (security check 11-03, B17)."""
+    if agent.startswith(OPS) or asker == agent:
+        return text
+    if isinstance(asker, str) and BUNDLE_NAME.fullmatch(asker) and is_parent(agent, asker):
+        return text
+    return (
+        f"hok event: Seb answered {card} in hok, a card you watch, asked by another conversation:"
+        " that conversation tells what came of it."
+    )
+
+
+def is_parent(agent, bundle):
+    return read_parent(bundle).get("parent") == agent
+
+
+def get_asker(card, kept):
+    """Who asked a card that ended: its watch kept it, else the last `hok waiting` read here."""
+    if isinstance(kept.get("caller"), str):
+        return kept["caller"]
+    with hok_lock:
+        rows = list(hok_read["listed"])
+    for row in rows:
+        names = str(row.get("name", "")).split("+")
+        parts = row.get("parts") or [[name, None] for name in names]
+        if any(part[0] == card for part in parts if isinstance(part, list) and part):
+            return row.get("caller")
+    return None
+
+
 def read_watch(card):
     try:
         kept = json.loads((WATCH_DIR / f"{card}.json").read_text())
@@ -3994,6 +4062,7 @@ def watch_card(caller, query, body):
             told = json.loads((WATCH_DIR / f"{card}.told").read_text())
         except (OSError, ValueError):
             return 404, {"error": f"no card {card} waits in hok, nor ended in the last hour"}
+        told["text"] = get_watched_line(agent, card, told.get("caller"), told["text"])
         leave_told(agent, session, told["text"])
         print(f"{agent}: told {told['text'][:100]}", flush=True)
         return 200, {"card": card, "state": "told"}
@@ -4008,7 +4077,8 @@ def watch_card(caller, query, body):
         if [agent, session] not in watchers:
             watchers.append([agent, session])
         fresh = WATCH_DIR / f".{card}.new"
-        fresh.write_text(json.dumps({"created": created, "watchers": watchers}))
+        kept = {"caller": row.get("caller"), "created": created, "watchers": watchers}
+        fresh.write_text(json.dumps(kept))
         fresh.replace(WATCH_DIR / f"{card}.json")
     print(f"{agent}: watches {card}", flush=True)
     return 200, answer
@@ -4065,20 +4135,23 @@ def tell_watchers(caller, query, body):
     with watch_lock:
         for name, created in cards:
             kept = read_watch(name)
+            asker = get_asker(name, kept)
             if kept.get("created") == created:
                 watchers += [
-                    watcher for watcher in kept.get("watchers", []) if watcher not in watchers
+                    (*watcher, name, asker)
+                    for watcher in kept.get("watchers", [])
+                    if watcher not in [found[:2] for found in watchers]
                 ]
                 (WATCH_DIR / f"{name}.json").unlink(missing_ok=True)
             fresh = WATCH_DIR / f".{name}.new"
-            fresh.write_text(json.dumps({"created": created, "text": text}))
+            fresh.write_text(json.dumps({"caller": asker, "created": created, "text": text}))
             fresh.replace(WATCH_DIR / f"{name}.told")
     told = []
-    for agent, session in watchers:
+    for agent, session, card, asker in watchers:
         if not is_window_running(agent):
             continue
         try:
-            leave_told(agent, session, text)
+            leave_told(agent, session, get_watched_line(agent, card, asker, text))
         except OSError as error:
             print(f"{agent}: the line on a card it watches was not left: {error}", flush=True)
             continue
@@ -4243,10 +4316,21 @@ def get_session_agent(session):
     ops = f"{OPS}{session}"
     if is_agent_running(ops) or get_agent_folder(ops).is_dir():
         return ops
-    for bundle in (*get_terminals(), *get_remote_agents()):
-        if read_text(get_agent_folder(bundle) / "session") == session:
-            return bundle
-    return None
+    return get_claimant(session, dict.fromkeys([*get_terminals(), *get_remote_agents()]))
+
+
+def get_claimant(session, bundles):
+    """The one of these bundles whose .agent/session is this session, None when none or two
+    claim it. A bundle writes its .agent/session: it takes no session of the ops container, nor
+    one another bundle holds in its own folder of transcripts (security check 11-03, B17)."""
+    claims = [
+        bundle for bundle in bundles if read_text(get_agent_folder(bundle) / "session") == session
+    ]
+    if any((folder / f"{session}.jsonl").exists() for folder in get_projects(OPS)):
+        return None
+    owners = {path.parent.name for path in TRANSCRIPTS.glob(f"*/{session}.jsonl")}
+    claims = [bundle for bundle in claims if owners <= {bundle}]
+    return claims[0] if len(claims) == 1 else None
 
 
 def leave_told(agent, session, text):
@@ -5271,7 +5355,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except ValueError:
                 body = {}
             body = body if type(body) is dict else {}
-            print(f"{self.caller} POST /run {body.get('kind', '')}".strip(), flush=True)
+            kind = body.get("kind", "") if body.get("kind") in runs.KINDS else "?"
+            print(f"{self.caller} POST /run {kind}".strip(), flush=True)
             router = WORKERS.choose if WORKERS.names and is_in_container(self.request) else None
             runs.serve(RUNS, self, self.caller, body, router)
             return
@@ -5287,10 +5372,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 code, answer = 400, {"error": str(error)}
             except Refused as error:
                 code, answer = 409, {"error": str(error)}
-        print(
-            f"{self.address_string()} {method} {url.path} {code} {answer.get('error', '')}".strip(),
-            flush=True,
-        )
+        error = clean(str(answer.get("error", "")))
+        line = f"{self.address_string()} {method} {clean(url.path)} {code} {error}"
+        print(line.strip(), flush=True)
         data = json.dumps(answer).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")

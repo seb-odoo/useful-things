@@ -53,8 +53,8 @@ the pager. `python3 test_node_modules.py` and `python3 test_delete.py` have the 
 | verb | answer |
 | --- | --- |
 | `GET /whoami` | the caller's bundle, base and parent |
-| `GET /branches` | `gbs --json` run on the host, which deletes the bundles left with merged PRs only; `?format=table&width=N`: its colored table |
-| `GET /status` | every local bundle branch, as read in the last 30 seconds (agents and the helper of firefox-gateway poll it; each git call of the host starts a host-box, so a read runs git again only on a branch whose commit or base commit moved): base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open, and its agent: state (`running`, `waiting`, `done`, or `stopped` when its terminal or its window closed before the verdict and it runs on no worker: nothing runs it any more, and a new task may replace it; a stopped agent carries its `task` text, to queue it again as it was), when it was queued, when its run started (none for a task no window took), when it ended, `stale` when a branch of the bundle got a commit, or its dev remote ref an update (the mtime of its reflog), after that end, retry, and the last write to a session titled with the bundle, its own or an earlier agent's tab Seb went on in (`active N min ago`, or `idle since HH:MM` after 15 minutes; a tab opened by hand has no title and does not count); the queue, each task with its priority, the bundle that queued it, when, and what it waits for |
+| `GET /branches` | `gbs --json` run on the host, which deletes the bundles left with merged PRs only; `?format=table&width=N`: its colored table; to a bundle, the report (`result`) and the task of an agent only when it is that bundle or queued its task (B18) |
+| `GET /status` | every local bundle branch, as read in the last 30 seconds (agents and the helper of firefox-gateway poll it; each git call of the host starts a host-box, so a read runs git again only on a branch whose commit or base commit moved): base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open, and its agent: state (`running`, `waiting`, `done`, or `stopped` when its terminal or its window closed before the verdict and it runs on no worker: nothing runs it any more, and a new task may replace it; a stopped agent carries its `task` text, to queue it again as it was), when it was queued, when its run started (none for a task no window took), when it ended, `stale` when a branch of the bundle got a commit, or its dev remote ref an update (the mtime of its reflog), after that end, retry, and the last write to a session titled with the bundle, its own or an earlier agent's tab Seb went on in (`active N min ago`, or `idle since HH:MM` after 15 minutes; a tab opened by hand has no title and does not count); the queue, each task with its priority, the bundle that queued it, when, and what it waits for; to a bundle, the task and the report (`result`) of an agent only when it is that bundle or queued its task (security check 11-03, B18) |
 | `POST /add-repo` | `add_repo.py`: the worktree of a repo the bundle was made without (`design-themes`, `documentation`); a container asks for its own only |
 | `POST /build` | the `gnb` or `pfb` a task was queued with, for the bundle whose agent started bare (see Bare start); the bundle itself or the host asks; when the disk is short, the session of the agent that asks it in its terminal goes back to the queue with that build (see Disk), and anyone else is refused; refused too when a branch of the bundle has a commit no remote has, which the script would reset |
 | `POST /create` | `gnb` with `--no-push`, then a window; with a task, only its queue entry, the bundle being made when its agent asks (see Bare start); refused when the bundle exists, a branch has unpushed commits or, with no task, the disk is short (see Disk) |
@@ -67,7 +67,7 @@ the pager. `python3 test_node_modules.py` and `python3 test_delete.py` have the 
 | `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt; a window or a terminal is asked by the host, the bundle itself or its parent only (B11 of the security check 11-03: it starts a container and a claude at once, past the cap and the memory check), and the terminal is taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle, but for `resume` or `terminal` in a bare folder or after its `bctl build` failed, whose session knows how to build it. With `terminal` from the host on a deleted bundle, the session kept at its deletion in its bare folder made again. A task from a bundle that is neither that bundle nor its parent waits for Seb's yes as `bN` (see A task for another bundle). On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window, and from a bundle a task alone, held as `bN` for Seb's yes in `hok`; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents). With `cut` and `resume` and no bundle, the resume of every cut session, held as `bN` for one yes of Seb (see Cut sessions) |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
 | `GET /proposal` | what `hok` holds of the caller's proposal (`?name=BUNDLE`, or `BUNDLE@memory`; the host any): it waits on a card, the note of Seb's answer (`refused`, `not-written`, `written`) with its text and time, or `none`. `hok-answer proposal` asks it, as the handoff folder of an agent on a worker is a copy (host-ctl README, "Handoff") |
-| `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, `stuck` once it waited on that past its limit (see Stuck tasks), its text, whether it resumes the session of its bundle and the session it names, where it starts (`where`: `auto`, `local`, `worker` or `worker:NAME`), the memory left on the host, `short` when a start would add to a host that already lacks it, the names of `BUNDLE_CTL_WORKERS`, and in `worker_states` the word of each one that takes no agent now (`no link`, `no answer`, `leaving`, `drained`, `full`), which deck shows beside it; this read asks no connection |
+| `GET /queue` | the queue of `GET /status` alone, at once: the agents at work in a terminal, the cap, each task with what it waits for, `stuck` once it waited on that past its limit (see Stuck tasks), its text, whether it resumes the session of its bundle and the session it names, where it starts (`where`: `auto`, `local`, `worker` or `worker:NAME`), the memory left on the host, `short` when a start would add to a host that already lacks it, the names of `BUNDLE_CTL_WORKERS`, and in `worker_states` the word of each one that takes no agent now (`no link`, `no answer`, `leaving`, `drained`, `full`), which deck shows beside it; this read asks no connection; to a bundle, the task and the report (`result`) of an agent only when it is that bundle or queued its task (security check 11-03, B18) |
 | `POST /free-disk` | the removal of the stopped containers of the bundles and of the podman images no tag names, held as `bN` for Seb's yes in `hok`, whose card lists them with the space left (see Disk) |
 | `POST /force-queue` | the tasks queued now may start over the cap, those that wait for their time (`--after`) or for a manual resume (`--paused`) aside, or with `bundle` the task of that bundle, its time and its pause too; then the answer of `GET /queue`, with the tasks it forced and the ones that started. Refused to a container |
 | `POST /move` | the queued task of `bundle` put at `place` (from 1), where it keeps its priority when that priority fits between the tasks around it, else takes the nearest of theirs; then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
@@ -192,6 +192,10 @@ the daemon, which gives each of them cores of its own.
   ones whose process still lives, and a client that waited asks again by itself for a minute.
 - When the daemon does not answer, or is older than the client, the command says so and runs
   without the queue.
+- A bundle has 3 runs waiting at most, as on a worker: the next one gets a 429 and runs without
+  the queue (`bctl run: no run queue (429 this bundle has 3 runs waiting already)`), so that the
+  runs of one bundle never hold back all the others (security check 11-03, B24). A label keeps
+  its printable characters only, as `bctl runs` prints it (B16).
 
 An agent does not call `bctl run`. `client/run-hook.py`, a PreToolUse hook of the shared bundle
 `.claude/settings.json`, writes it as a line in front of a Bash command that runs `odoo-bin` or
@@ -270,12 +274,20 @@ repo, which has its own README (the sandbox, the load, the sync). Agents change 
   `follow`, which takes nothing from the bundle, writes to the bundle's connection itself, from a
   `systemd-run --user --scope` of its own: a restart of the daemon cuts no job (2026-10-30: three
   restarts in 80 minutes each sent the runs of the worker back to the laptop).
+  A bundle holds 4 of these streams at once and follows 5 jobs (the 2 a worker runs and the 3 it
+  keeps waiting for one bundle), counted by their ssh, which outlive a restart of the daemon; an
+  upload that sends nothing for 5 minutes ends. The one connection has 64 sessions, which one
+  bundle would take from every other one (security check 11-03, B23).
 - No connection: the daemon writes `request/start` of the mux (once every 10 minutes at most),
   which asks Bitwarden while the screen is unlocked, and the run goes here meanwhile.
 - `bctl runs` also lists the jobs and agents of each worker that answered in the last minute,
   as `running BUNDLE odoo @sebpc 2 min`, and a worker that did not as `@sebpc: no answer since
   HH:MM`. The worker's `status`, which the daemon asks every 15 seconds as `host`, names every
-  bundle to the daemon alone; `bctl runs` then shows them to any bundle, as the laptop's runs.
+  bundle to the daemon alone, and is kept only when it holds 64 KB at most, read in 20 s, and its
+  counts (`gigabytes_free`, `agents_free`, `wait`) are numbers under 10^9: one count sent as a
+  text stopped every start of the laptop at each pass, and a poll that fails leaves the next one
+  to come (security check 11-03, G3); `bctl runs` then shows them to any bundle, as the
+  laptop's runs.
 - `bctl worker WORKER state|log|memory|disk [--lines N] [--since TIME] [--until TIME]`: a read of
   a worker, for any caller, with no card. The daemon asks it as `host` with fixed words, but the
   line count of the log and its window: `status` for the state, `look` for the rest (remote-runs
@@ -357,25 +369,32 @@ necessary. but if we have a good setup, full remote should offer the same possib
   commit and a paragraph the laptop got after (his yes of 2026-11-05 asked for the merge). The
   next start replaces it, and a start drops the copy of a bundle that is gone. TestWarden and
   DiscussModelParser are not in the part, so a proposal for them is written whole.
-- The memory notes the job sends are merged with that copy too (Seb's yes, 2026-11-05: a note
-  the job wrote whole overwrote what the laptop changed in it after the copy). The stand-in does
-  not mount the memory: `standin.py` leaves each note in its run folder
-  (`~/.local/state/bundle-ctl/standin/BUNDLE/memory/`), and each pass of the daemon, the end of
-  the job and its next start (`take_notes`) write it in the memory of the bundle as `git
-  merge-file` of the note there, the copy (`dev-memory/`) and the job's note. Where both changed
-  the same lines, both are kept (`--union`, as for an outside PR), and the journal says `BUNDLE:
-  the memory note NAME of its job is merged with what changed here, both kept where both changed
-  the same lines`. A note removed here after the copy and changed by the job comes back, and the
-  journal says so; a note the job sent unchanged writes nothing. The copy of a note then becomes
-  the job's note, as its next change starts from it. With no copy (a job started before
-  bundle-ctl kept one, on 2026-11-05), the note is written whole, as before. On an outside PR the note goes to the copy
-  of the bundle (see Outside PRs in `devcontainer/README.md`), which nothing else writes while
-  its agent is remote. A note reaches the memory at the next pass, 10 s to a minute after the job
-  wrote it. `python3 test_remote_agent.py`.
+- The memory notes the job sends reach the memory of the bundles only as a proposal, one card
+  `BUNDLE@memory` in `hok`, as for a bundle on an outside PR (Seb, 2026-11-05, security check
+  11-03, G5): a note of a remote agent is read by every bundle, and a taken-over Windows reaches
+  the worker VM with no prompt. The stand-in does not mount the memory: `standin.py` leaves each
+  note in its run folder (`~/.local/state/bundle-ctl/standin/BUNDLE/memory/`), and each pass of
+  the daemon, the end of the job and its next start (`take_notes`) write each note the job
+  changed as it wrote it in `~/.claude/handoff/BUNDLE@memory/dev-memory/`, with the copy the job
+  got of each one (`dev-memory/` above) in `handoff-base/BUNDLE@memory/`, its time the time of
+  that copy, and `WHY` last. `hok` then merges each note with what changed here since the copy
+  (host-ctl README, "Handoff"; Seb's yes of 2026-11-05: a note the job wrote whole overwrote
+  what the laptop changed in it after the copy). The copy of a note then becomes the job's note,
+  as its next change starts from it, and the journal says `BUNDLE: the memory notes NAME, ... of
+  its job wait for Seb's yes`. While a proposal waits, the notes of the job wait in the run
+  folder. With no copy (a job started before bundle-ctl kept one, on 2026-11-05), the notes go
+  whole. On an outside PR a note goes to the copy of the bundle (see Outside PRs in
+  `devcontainer/README.md`), merged there with `git merge-file` of the note, the copy and the
+  job's note (`--union` where both changed the same lines), and `outside.py` proposes that copy.
+  Notes the job sent while a proposal waited stay in the run folder, after its end too, and go
+  at the first pass after his answer. `python3 test_remote_agent.py`.
 - `MOUNTS` says, for each mount of a bundle (`devcontainer/base.jsonc`), how the remote agent gets
   it: sent in its config, served by the stand-in, in the runner image, made in the job, or of no
   use there. `python3 test_remote_agent.py` fails on a mount it does not name, and checks that the
-  config holds no login.
+  config holds no login. What the bundle writes in that config (the memory, its settings, gh,
+  ssh, its project files) takes 4 MB a file, 64 MB in all, headers counted, and 5000 entries at
+  most: past it the agent starts here, as a sparse file of 150 MB in its `~/.config/gh` made a
+  part of 157 MB on a copy (security check 11-03, B22).
 - Each pass of the daemon opens a tunnel that dropped again, with its stand-in when it is gone
   (and asks `worker-mux` when the connection is down: Bitwarden asks Seb once the screen is
   unlocked, `.agent/remote-down` says since when); stops the claude of an agent that gave its
@@ -907,6 +926,14 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   of the wrapper, its terminator), so that a process of the container cannot fill the clipboard
   behind Seb's back; a query of the clipboard gets no answer. claude sends the escape only while
   it finds no `xclip` in the container and no `VTE_VERSION` in its environment.
+- In a bundle window a link claude draws (OSC 8) stays a link only to github.com/odoo and
+  odoo-dev, runbot.odoo.com, odoo.com, the Odoo the bundle serves (`http://*.BUNDLE.localhost`,
+  a port at most) and the links of its band (`odoo-bundle://list/BUNDLE`, `tabs/BUNDLE`,
+  `hok/NAME`): a Ctrl+click opens it on the host, where `odoo-bundle://` runs `bundle_open.py`,
+  so another shows as its text alone (security check 11-03, B19). The C1 forms of the escapes
+  (U+0080 to U+009F) are dropped there, and the log of a claude that ended
+  (`client/stream-format.py`) prints its control characters as `?`. An ops window keeps every
+  link.
 - A claude that ends on an error leaves the terminal open on its exit code and on the tool calls
   and answers of the session (`client/stream-format.py` on its transcript): claude draws on the
   alternate screen, which empties when claude ends.
@@ -1342,6 +1369,10 @@ a prompt.
   even when no terminal runs the bundle. A line by session (a push, `gN`) finds its bundle by
   the `.agent/session` of the bundles with a parent, so after the verdict closed its terminal
   too, and goes to no parent when two of them claim that session.
+- A bundle writes its `.agent/session`: a line by session goes to the bundle that claims it, or
+  to the parent of that bundle, only when no other bundle claims it, the transcripts of the ops
+  container hold no such session, and no other bundle holds it in its own folder of transcripts
+  (security check 11-03, B17).
 - Once the agent ends the run of the task the daemon started last (a `.agent/done` newer than
   that start), the parent gets, within a minute, or before the folder of a bundle deleted at
   Seb's yes goes: `hok event: the agent of BUNDLE, a bundle you started, ended its run on its
@@ -1375,7 +1406,10 @@ a prompt.
   gone, so a watch holds to that card only. A bundle watches for its own terminal, the host for
   the ops window it names (`window`, as for a parent); a window that does not run is refused,
   as a tab keeps its background wait. A card hok tells that window of already (it asked it, or a
-  bundle it started did) answers `asked`, and no watch is kept.
+  bundle it started did) answers `asked`, and no watch is kept. A bundle that watches a card it
+  did not ask, nor a bundle it started, is told that it ended, not what came of it, which can hold
+  Seb's words or the exit of a command of the host (security check 11-03, B17): the watch keeps
+  the asker, else the last `hok waiting` read gives it.
 - Once a card ended, `hok` asks `POST /answered {cards, text}` (the host only): the requests of
   the card with when each was asked, and one line, ``hok event: Seb answered 658 in hok, a card
   you watch: 658 ran, exit 0. ...``. The daemon types it in each window that watches one of them
@@ -1506,7 +1540,11 @@ A session is cut (`cut.py`) when:
 - no claude runs it: no claude process of the host names it on its command line (`--resume`,
   `--session-id`), and no record of a live claude names it in the sessions folder of a container,
   whose pid and start are matched with the last `NSpid` and the start time of the processes of
-  the host. For a bundle, its container is down too;
+  the host, nor a claude of that container on its command line. The cut card reads the records
+  of the ops container and of the host only, and a process of a container names any session on
+  its command line: none counts by itself, as for the scans of `agent-terminal.py` and
+  `agent-terminator.py`, which take only a process of the host's pid namespace (security check
+  11-03, B20). For a bundle, its container is down too;
 - its transcript was written in the last 3 days;
 - its last turn had not ended: its last message is a tool call with no result, or a tool result
   or a prompt with no answer, or an API error that a new request may pass (`server_error`), or
@@ -1582,9 +1620,9 @@ remote connection ("Cannot reconnect"). A run that ends without a tool call open
 | `result.md` | `client/stream-format.py`, `client/agent-stop.py`, `agent-terminal.py` | the last answer of the run, or why no container could start |
 | `mode` | `client/agent-run.sh`, `client/stream-format.py`, `client/agent-takeover.py` | the permission mode of the run, which the tab resumes the session in; `auto` from the start of a terminal, so the tab does not fall back to plan after its claude ended |
 | `handoff` | `client/agent-run.sh`, `client/agent-takeover.py` | claude was stopped for the tab to go on: `claude -p` at its first tool call, or the claude of a terminal |
-| `retry` | `client/agent-run.sh` | `auth failed, retry n/3`: the run failed to authenticate and starts again |
+| `retry` | `client/agent-run.sh` | `auth failed, retry n/3`: the run failed to authenticate and starts again; read in that form only, as `bctl status` prints it (security check 11-03, B16) |
 | `waiting` | `client/agent-stop.py` | a turn of the terminal or of the tab ended without a verdict; its mtime is when |
-| `done` | `client/agent-run.sh`, `client/agent-stop.py`, `agent-terminal.py` | the exit code of `claude -p`, or `interrupted`; `0` when a turn of the terminal or of the tab ends on a verdict; `failed` when no container could start |
+| `done` | `client/agent-run.sh`, `client/agent-stop.py`, `agent-terminal.py` | the exit code of `claude -p`, or `interrupted`; `0` when a turn of the terminal or of the tab ends on a verdict; `failed` when no container could start; another text reads as none (B16) |
 | `tab-opened` | claude-autoopen | the tab was opened on the session once; removed by `agent-terminal.py` when it takes the session from the window, so that a later window opens its tab again |
 | `close-window` | `agent-terminal.py` | the terminal takes the session from the window: the window closes; removed when the wait ends, and ignored after 2 minutes |
 | `restarted` | claude-autoopen, `client/agent-takeover.py` | the window was reloaded once for the handoff, or needs no reload (the session was idle when taken over) |

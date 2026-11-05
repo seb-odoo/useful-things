@@ -30,6 +30,7 @@ OPS_ENDED = "00000000-0000-0000-0000-000000000004"
 OPS_LIVE = "00000000-0000-0000-0000-000000000002"
 OPS_OLD = "00000000-0000-0000-0000-000000000003"
 OPS_TAKEN = "00000000-0000-0000-0000-000000000005"
+SESSION_C1 = "00000000-0000-0000-0000-000000000006"
 REPORT = "Done\n\n- **Done**: all of it\n\nNothing left: the fix is pushed."
 
 
@@ -170,17 +171,26 @@ def check_cases(root):
 
 
 def check_live(root):
-    """A claude named on its command line, or by a record of its container whose pid and start
-    match a claude of the host; a record of a claude gone, or of another program, is not."""
+    """A claude of the host named on its command line, or by a record of its container whose pid
+    and start match a claude, then a claude of that container by its command line; a record of a
+    claude gone, or of another program, is not, nor a claude of another container that names a
+    session (security check 11-03, B20)."""
     proc = root / "proc"
+    (proc / "self" / "ns").mkdir(parents=True)
+    (proc / "self" / "ns" / "pid").symlink_to("pid:[1]")
     processes = {
-        "100": (b"/bin/claude\0--resume\0s-cmdline\0", "100", "7"),
-        "200": (b"/x/native-binary/claude\0--output-format\0stream-json\0", "200\t21", "555"),
-        "300": (b"python3\0s-other\0", "300\t22", "666"),
+        "100": (b"/bin/claude\0--resume\0s-cmdline\0", "100", "7", "1"),
+        "200": (b"/x/native-binary/claude\0--output-format\0stream-json\0", "200\t21", "555", "2"),
+        "300": (b"python3\0s-other\0", "300\t22", "666", "2"),
+        "400": (b"/bin/claude\0--resume\0s-c1-tab\0", "400\t30", "777", "2"),
+        "500": (b"/bin/claude\0--resume\0s-spoof\0", "500\t21", "888", "3"),
     }
-    for pid, (cmdline, nspid, start) in processes.items():
-        (proc / pid).mkdir(parents=True)
-        (proc / pid / "cmdline").write_bytes(cmdline.replace(b"s-cmdline", OPS_CUT.encode()))
+    for pid, (cmdline, nspid, start, space) in processes.items():
+        (proc / pid / "ns").mkdir(parents=True)
+        (proc / pid / "ns" / "pid").symlink_to(f"pid:[{space}]")
+        cmdline = cmdline.replace(b"s-cmdline", OPS_CUT.encode())
+        cmdline = cmdline.replace(b"s-spoof", OPS_LIVE.encode())
+        (proc / pid / "cmdline").write_bytes(cmdline.replace(b"s-c1-tab", SESSION_C1.encode()))
         (proc / pid / "status").write_text(f"Name:\tx\nNSpid:\t{nspid}\n")
         (proc / pid / "stat").write_text(f"{pid} (claude a) S {' '.join(['0'] * 18)} {start} 0\n")
     records = root / "config" / "c1" / "sessions"
@@ -190,7 +200,7 @@ def check_live(root):
         (records / f"{name}.json").write_text(json.dumps(record))
     (records / "broken.json").write_text("[1]")
     found = cut.get_live_sessions([records], str(proc))
-    expected = {OPS_CUT, "s-tab"}
+    expected = {OPS_CUT, "s-tab", SESSION_C1}
     return ([] if found == expected else [f"live sessions: {found}, expected {expected}"]), 1
 
 

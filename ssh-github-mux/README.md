@@ -25,7 +25,9 @@ each push of a container.
   `/etc/ssh/ssh_config.d` and as `~/.local/share/ssh-github-mux`, `sock/` read-only and `request/`
   read-write: a container uses the connection but cannot put a socket the host would trust. So
   `wait`, `on-unlock` and `here` write `request/` by renaming a file of `~/.local/state` over the
-  name: a link a container left there is replaced, never followed (`test_request.py`).
+  name: a link a container left there is replaced, never followed (`test_request.py`). The marks
+  of `sock/` (`up`, `stopped`) and the `request/held` of the unit are written the same way
+  (security check 11-03, the S4 leftovers).
 - ssh exits 255 both when GitHub closes the connection and when the key is refused (the gate
   holds no key, no agent). The service is started once the socket is there (`ExecStartPost`): an
   exit before is a failed start, and the unit shows as failed. An exit after, the normal end of

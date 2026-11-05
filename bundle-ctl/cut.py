@@ -202,11 +202,17 @@ def get_cut(session):
 
 
 def get_live_sessions(records, proc="/proc"):
-    """The sessions a claude runs now, on the host or in a container: named on its command line, or
-    by the record of a live claude in `records`, the sessions folders of the containers. A record
-    names the pid of its claude in the container and when it started, which the /proc of the host
-    shows as the last NSpid and the starttime."""
-    running, live = set(), set()
+    """The sessions a claude runs now: named on the command line of a claude of the host, or by
+    the record of a live claude in `records`, the sessions folders of the containers, then on the
+    command line of a claude of the container of such a record. A record names the pid of its
+    claude in the container and when it started, which the /proc of the host shows as the last
+    NSpid and the starttime. A claude of a container is no proof by itself: any process of a
+    bundle can name another session on its command line (security check 11-03, B20)."""
+    try:
+        host = os.readlink(f"{proc}/self/ns/pid")
+    except OSError:
+        host = None
+    running, named, spaces, live = {}, [], set(), set()
     for name in os.listdir(proc):
         if not name.isdigit():
             continue
@@ -219,19 +225,29 @@ def get_live_sessions(records, proc="/proc"):
                 nspid = re.search(r"^NSpid:(.*)$", file.read(), re.MULTILINE)[1].split()[-1]
             with open(f"{proc}/{name}/stat") as file:
                 start = file.read().rpartition(")")[2].split()[19]
+            space = os.readlink(f"{proc}/{name}/ns/pid")
         except (IndexError, OSError, TypeError):
             continue
-        running.add((nspid, start))
+        running[nspid, start] = space
         words = (arg.decode(errors="replace") for arg in args)
-        live.update(word for word in words if SESSION_ID.fullmatch(word))
+        sessions = {word for word in words if SESSION_ID.fullmatch(word)}
+        if space == host:
+            live |= sessions
+        else:
+            named.append((space, sessions))
     for folder in records:
         for path in folder.glob("*.json"):
             try:
                 record = json.loads(read_bytes(path, MAX_RECORD) or b"")
-                if (str(record["pid"]), str(record["procStart"])) in running:
+                space = running.get((str(record["pid"]), str(record["procStart"])))
+                if space is not None and isinstance(record["sessionId"], str):
                     live.add(record["sessionId"])
+                    spaces.add(space)
             except (KeyError, OSError, TypeError, ValueError):
                 continue
+    for space, sessions in named:
+        if space in spaces:
+            live |= sessions
     return live
 
 

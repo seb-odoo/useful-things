@@ -129,6 +129,45 @@ def check_config(root):
           kept)
     check("everything under home/ or workspace/",
           all(name.split("/")[0] in ("home", "workspace") for name in names), names)
+    gh = own / "gh" / "hosts.yml"
+    gh.parent.mkdir()
+    with open(gh, "wb") as file:
+        file.truncate(150 << 20)
+    refused = []
+    for name in ("gh", "memory", "project"):
+        try:
+            remote_agent.build_config(root / "b1")
+            refused.append(None)
+        except RuntimeError as error:
+            refused.append("over" in str(error))
+        gh.unlink(missing_ok=True)
+        if name == "gh":
+            memory = home / ".claude" / "projects" / "-workspace" / "memory"
+            memory.mkdir(parents=True)
+            for number in range(20):
+                with open(memory / f"note-{number}.md", "wb") as file:
+                    file.truncate(4 << 20)
+        elif name == "memory":
+            shutil.rmtree(home / ".claude" / "projects" / "-workspace" / "memory")
+            with open(own / "project" / "settings.local.json", "wb") as file:
+                file.truncate(150 << 20)
+    (own / "project" / "settings.local.json").write_text("{}\n")
+    many = own / "gh" / "many"
+    many.mkdir()
+    for number in range(remote_agent.MAX_CONFIG_ENTRIES + 1):
+        (many / f"{number:0>120}").touch()
+    try:
+        remote_agent.build_config(root / "b1")
+        refused.append(None)
+    except RuntimeError as error:
+        refused.append("entries" in str(error))
+    shutil.rmtree(many)
+    check(
+        "a file the bundle writes over 4 MB, 64 MB of them, or 5000 entries keep the agent here"
+        " (B22)",
+        refused == [True, True, True, True],
+        refused,
+    )
 
 
 def check_base(root):
@@ -589,8 +628,9 @@ def check_stop_again(root):
 
 
 def check_notes(root):
-    """A memory note the job sends is merged with what changed here after the copy it got, and
-    the stand-in no longer writes the memory itself (Seb, 2026-11-05)."""
+    """A memory note the job sends waits for Seb's yes in hok, with the copy the job got as the
+    base hok merges it from, and the stand-in no longer writes the memory itself (Seb,
+    2026-11-05, security check 11-03, G5)."""
     subprocess.run = RUN
     home = root / "notes-home"
     memory = home / ".claude" / "projects" / "-workspace" / "memory"
@@ -637,53 +677,81 @@ def check_notes(root):
         sys.stdout = stdout
         remote_agent.is_tunnel_up = saved
 
-    def read(name):
-        path = memory / name
+    def read(name, folder=memory):
+        path = folder / name
         return path.read_text() if path.is_file() and not path.is_symlink() else None
 
+    inbox = home / ".claude" / "handoff" / "n@memory"
+    proposed = inbox / "dev-memory"
+    base = remote_agent.HANDOFF_BASE / "n@memory" / "dev-memory"
     check("a pass on a remote agent takes the notes of its job", found == (None, False), found)
-    both = read("both.md")
-    check("the laptop changed a note after the copy, the job another part: both stay",
-          both == old.replace("first", "first, here").replace("fifth", "fifth, job"), both)
-    same = read("same.md")
-    check("both changed the same line: both kept",
-          same is not None and "third, here" in same and "third, job" in same
-          and "<<<<<<<" not in same, same)
-    check("a new note of the job is written", read("new.md") == "from the job\n")
-    check("a note the job did not change keeps what changed here",
-          read("kept.md") == old.replace("first", "first, here"))
-    check("a note removed here that the job changed comes back",
-          read("removed.md") == old.replace("fifth", "fifth, job"))
-    check("a note changed by the job only is the job's",
-          read("plain.md") == old.replace("second", "second, job"))
-    check("a link in the memory is not read, the note replaces it",
-          read("linked.md") == "from the job\n" and secret.read_text() == "a host file\n")
-    check("a link the stand-in left is not read", read("staged-link.md") is None)
-    check("a note a stopped pass took is taken again",
-          read("left.md") == "taken by a pass that stopped\n")
+    names = sorted(path.name for path in proposed.iterdir())
+    check(
+        "the notes the job changed wait for Seb's yes in hok, as on an outside PR (G5)",
+        names == ["both.md", "left.md", "linked.md", "new.md", "plain.md", "removed.md", "same.md"]
+        and (inbox / "WHY").is_file(),
+        names,
+    )
+    check(
+        "each as the job wrote it",
+        read("both.md", proposed) == old.replace("fifth", "fifth, job"),
+    )
+    check(
+        "with the copy the job got as its base, which hok merges with what changed here",
+        read("both.md", base) == old and read("new.md", base) is None
+        and (base.parent.stat().st_mtime == (remote_agent.HANDOFF_BASE / "n").stat().st_mtime),
+    )
+    check(
+        "no note of the memory changes before his yes",
+        read("both.md") == old.replace("first", "first, here") and read("new.md") is None
+        and read("removed.md") is None and secret.read_text() == "a host file\n",
+    )
+    check("a link the stand-in left is not read", read("staged-link.md", proposed) is None)
     left = sorted(path.name for path in sent.iterdir())
     check("and none waits", left == [], left)
     lines = printed.getvalue()
-    for name, said in (("same.md", "both kept"), ("both.md", "merged"), ("removed.md", "is back"),
-                       ("staged-link.md", "no plain file")):
-        check(f"the journal names {name}", f"n: the memory note {name}" in lines and said in lines,
-              lines)
-    check("and is quiet on a note changed on one side",
-          "plain.md" not in lines and "new.md" not in lines, lines)
+    check(
+        "the journal names them",
+        "n: the memory note staged-link.md of its job is no plain file" in lines
+        and "wait for Seb's yes" in lines,
+        lines,
+    )
     check("the copy of a note becomes the job's note",
           (copy / "both.md").read_text() == old.replace("fifth", "fifth, job"))
-    (memory / "both.md").write_text(both.replace("third", "third, here again"))
     (sent / "both.md").write_text(old.replace("fifth", "fifth, job, again"))
     remote_agent.take_notes("n", root / "n")
-    again = read("both.md")
-    check("so its next change keeps what changed here since, with no conflict",
-          again == old.replace("first", "first, here").replace("third", "third, here again")
-          .replace("fifth", "fifth, job, again"), again)
+    check(
+        "while the proposal waits, a new note of the job waits too",
+        (sent / "both.md").exists()
+        and read("both.md", proposed) == old.replace("fifth", "fifth, job"),
+    )
+    shutil.rmtree(proposed)
+    (inbox / "WHY").unlink()
+    remote_agent.take_notes("n", root / "n")
+    check(
+        "once he answered, it goes, from the job's last note",
+        read("both.md", proposed) == old.replace("fifth", "fifth, job, again")
+        and read("both.md", base) == old.replace("fifth", "fifth, job"),
+    )
+    (sent / "late.md").write_text("sent while the proposal waited\n")
+    (agent / "remote.json").unlink()
+    remote_agent.take_notes("n", root / "n")
+    shutil.rmtree(proposed)
+    (inbox / "WHY").unlink()
+    remote_agent.take_left_notes(lambda bundle: root / bundle)
+    check(
+        "a note the job left once its end came goes at the next pass after his answer",
+        read("late.md", proposed) == "sent while the proposal waited\n",
+    )
+    shutil.rmtree(proposed)
+    (inbox / "WHY").unlink()
     shutil.rmtree(copy)
-    (memory / "plain.md").write_text("changed here\n")
     (sent / "plain.md").write_text("the job's, whole\n")
     remote_agent.take_notes("n", root / "n")
-    check("with no copy, the note is written whole", read("plain.md") == "the job's, whole\n")
+    check(
+        "with no copy, the note goes whole, with no base",
+        read("plain.md", proposed) == "the job's, whole\n" and not base.parent.exists(),
+    )
     own = root / "notes-cache" / "devcontainer" / "claude-config" / "n"
     (own / "memory").mkdir(parents=True)
     (own / "outside").write_text("{}\n")

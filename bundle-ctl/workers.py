@@ -8,8 +8,11 @@ See README.md, "Remote runs".
 """
 
 import json
+import math
+import os
 import pathlib
 import re
+import select
 import socket
 import subprocess
 import threading
@@ -21,6 +24,13 @@ FRESH = 60
 ROUTE_MAX_WAIT = 120
 ASK_EVERY = 600
 AGENT_GIGABYTES = 1
+MAX_ANSWER = 64 * 1024
+MAX_COUNT = 10**9
+MAX_FOLLOWS = 5
+MAX_RELAYS = 4
+NUMBERS = ("agents_free", "gigabytes_free", "wait")
+STATUS_TIMEOUT = 20
+UPLOAD_IDLE = 300
 WORD = {
     "commit": re.compile(r"[0-9a-f]{40}"),
     "db": re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}"),
@@ -57,6 +67,43 @@ class Refused(Exception):
     pass
 
 
+def is_status(status):
+    """Whether a worker's status can be used: the fields the choice of a worker counts are
+    numbers, its reason to start no agent a short line. One that is not would stop every start
+    of the laptop at each pass (security check 11-03, G3)."""
+    if type(status) is not dict or "error" in status:
+        return False
+    for value in (status.get(key, 0) for key in NUMBERS):
+        if type(value) is float and not math.isfinite(value):
+            return False
+        if type(value) not in (int, float) or not -MAX_COUNT < value < MAX_COUNT:
+            return False
+    wait = status.get("agent_wait")
+    return not wait or (type(wait) is str and len(wait) <= 300 and wait.isprintable())
+
+
+def count_follows(bundle, proc=pathlib.Path("/proc")):
+    """The ssh of `follow` that run for a bundle, each one session of the connection: processes
+    of the host only, as a bundle names any bundle on a command line of its container."""
+    words = [b"worker", b"follow", bundle.encode()]
+    try:
+        host = os.readlink(proc / "self" / "ns" / "pid")
+    except OSError:
+        return 0
+    count = 0
+    for path in proc.glob("[0-9]*/cmdline"):
+        try:
+            args = path.read_bytes().split(b"\0")
+            if os.path.basename(args[0]) != b"ssh" or not any(
+                args[index : index + 3] == words for index in range(len(args))
+            ):
+                continue
+            count += os.readlink(path.parent / "ns" / "pid") == host
+        except OSError:
+            continue
+    return count
+
+
 def is_job(job):
     """Whether a job a worker lists is well formed: its words reach Seb's terminal."""
     return (
@@ -78,6 +125,8 @@ class Workers:
         self.status = {}
         self.asked = {}
         self.sent = {}
+        self.follows = {}
+        self.relays = {}
         self.lock = threading.Lock()
 
     def socket(self, name):
@@ -116,14 +165,33 @@ class Workers:
                 continue
             asked = time.time()
             try:
-                result = self.run(self.ssh(name, "status", "host"), capture_output=True,
-                                  timeout=20, check=False)
-                status = json.loads(result.stdout)
-            except (subprocess.TimeoutExpired, ValueError):
+                status = json.loads(self.read_answer(self.ssh(name, "status", "host")))
+            except (OSError, ValueError):
                 continue
-            if type(status) is dict and "error" not in status:
+            if is_status(status):
                 with self.lock:
                     self.status[name] = (asked, status)
+
+    def read_answer(self, argv):
+        """The output of a command, MAX_ANSWER bytes at most, in STATUS_TIMEOUT seconds: ValueError
+        past either, as the worker writes it."""
+        process = self.popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL)
+        data, deadline = b"", time.monotonic() + STATUS_TIMEOUT
+        try:
+            while len(data) <= MAX_ANSWER:
+                left = deadline - time.monotonic()
+                if left <= 0 or not select.select([process.stdout], [], [], left)[0]:
+                    raise ValueError(f"no whole answer in {STATUS_TIMEOUT} s")
+                chunk = os.read(process.stdout.fileno(), 65536)
+                if not chunk:
+                    return data
+                data += chunk
+            raise ValueError(f"an answer over {MAX_ANSWER} bytes")
+        finally:
+            process.kill()
+            process.wait()
+            process.stdout.close()
 
     def list_jobs(self):
         """For `bctl runs`: the jobs and agents of the workers that answered lately (worker,
@@ -188,8 +256,8 @@ class Workers:
         while True:
             try:
                 self.poll()
-            except OSError as error:
-                print(f"workers: {error}", flush=True)
+            except Exception as error:  # noqa: BLE001
+                print(f"workers: {error!r}", flush=True)
             time.sleep(POLL)
 
     def choose(self, kind, workers):
@@ -312,7 +380,11 @@ class Workers:
     def relay(self, handler, bundle, name, verb, args):
         """Pass the bundle's stream to the worker and back, at most the size the verb allows.
         A `follow` sends nothing: its ssh writes to the bundle's connection itself, from a scope
-        of its own, so that the job goes on through a restart of the daemon.
+        of its own, so that the job goes on through a restart of the daemon. A bundle follows
+        MAX_FOLLOWS jobs at once, the 5 a worker runs or keeps waiting for it, counted here and by
+        their ssh, which outlive a restart; the other verbs take MAX_RELAYS sessions of the one
+        connection per bundle at most, and an upload that sends nothing for UPLOAD_IDLE seconds
+        ends: else one bundle takes every session (security check 11-03, B23).
         """
         self.check(verb, args)
         if name not in self.names:
@@ -320,6 +392,32 @@ class Workers:
         if not self.is_up(name):
             self.ask(name)
             raise Refused(f"no connection to {name}")
+        if verb == "follow":
+            with self.lock:
+                if max(self.follows.get(bundle, 0), count_follows(bundle)) >= MAX_FOLLOWS:
+                    raise Refused(f"{bundle} follows {MAX_FOLLOWS} jobs on the workers already")
+                self.follows[bundle] = self.follows.get(bundle, 0) + 1
+            try:
+                return self.stream(handler, bundle, name, verb, args)
+            finally:
+                with self.lock:
+                    self.follows[bundle] -= 1
+                    if not self.follows[bundle]:
+                        del self.follows[bundle]
+        with self.lock:
+            if self.relays.get(bundle, 0) >= MAX_RELAYS:
+                raise Refused(f"{bundle} has {MAX_RELAYS} streams to the workers open already")
+            self.relays[bundle] = self.relays.get(bundle, 0) + 1
+        try:
+            handler.connection.settimeout(UPLOAD_IDLE)
+            return self.stream(handler, bundle, name, verb, args)
+        finally:
+            with self.lock:
+                self.relays[bundle] -= 1
+                if not self.relays[bundle]:
+                    del self.relays[bundle]
+
+    def stream(self, handler, bundle, name, verb, args):
         handler.send_response(200)
         handler.send_header("Content-Type", "application/octet-stream")
         handler.send_header("Connection", "close")

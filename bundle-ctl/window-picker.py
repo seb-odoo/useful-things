@@ -62,7 +62,7 @@ import unicodedata
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
-from agents import OPS, get_agent_folder, read_text  # noqa: E402
+from agents import OPS, get_agent_folder, is_host_process, read_text  # noqa: E402
 from commands import BUNDLE_NAME, get_worktree_bundle_folder  # noqa: E402
 from config import CLAUDE_CONFIG_CONTAINER, HOST_FOLDER  # noqa: E402
 
@@ -173,7 +173,7 @@ def get_agent_bundles():
                 continue
             ended[stat.rpartition(")")[2].split()[1]] = data.decode(errors="replace").split("\0")[3]
             continue
-        if b"agent-terminal.py" not in data:
+        if b"agent-terminal.py" not in data or not is_host_process(pid):
             continue
         args = data.decode(errors="replace").split("\0")
         scripts = [at for at, arg in enumerate(args) if arg.endswith("agent-terminal.py")]

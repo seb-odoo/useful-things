@@ -12,6 +12,13 @@ import sys
 INPUT_KEYS = ("command", "file_path", "pattern", "path", "url", "description", "prompt")
 
 
+def show(text, end="\n"):
+    """Print text of the run with its control characters as `?`: the run and its transcript are
+    the bundle's, and an escape there would reach the terminal of the host (security check 11-03,
+    B19)."""
+    print("".join(char if char.isprintable() or char in "\n\t" else "?" for char in text), end=end)
+
+
 def summary(tool_input):
     for key in INPUT_KEYS:
         if value := tool_input.get(key):
@@ -26,25 +33,25 @@ def main():
         try:
             event = json.loads(line)
         except ValueError:
-            print(line, end="")
+            show(line, end="")
             continue
         if event.get("type") == "system" and event.get("subtype") == "init":
-            print(f"session {event.get('session_id')}, model {event.get('model')}")
+            show(f"session {event.get('session_id')}, model {event.get('model')}")
             if mode := event.get("permissionMode"):
                 pathlib.Path(result_path).with_name("mode").write_text(mode)
         elif event.get("type") == "assistant":
             for block in event.get("message", {}).get("content", []):
                 if block.get("type") == "text":
-                    print(block["text"])
+                    show(str(block["text"]))
                 elif block.get("type") == "tool_use":
-                    print(f"> {block['name']} {summary(block.get('input') or {})}")
+                    show(f"> {block['name']} {summary(block.get('input') or {})}")
                     if until_tool_use:
                         return 0
         elif event.get("type") == "result":
             result = event.get("result") or ""
             with open(result_path, "w") as file:
                 file.write(result)
-            print(
+            show(
                 f"\n{event.get('subtype')}: {event.get('num_turns')} turns, "
                 f"{(event.get('duration_ms') or 0) // 60000} min, "
                 f"${event.get('total_cost_usd') or 0:.2f}",

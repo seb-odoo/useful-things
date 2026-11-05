@@ -58,10 +58,17 @@ def main():
 
         (request / "held").unlink()
         (request / "held").symlink_to(root / "made")
+        (sock / "stopped").unlink()
+        (sock / "stopped").symlink_to(root / "made-stopped")
         fake(root, "dbus-send", "boolean true")
         run(root, "here")
         found["here: no file where a link points"] = ((root / "made").exists(), False)
         found["here: request/held"] = ((request / "held").is_file(), True)
+        found["here: no file where a link at sock/stopped points"] = (
+            (root / "made-stopped").exists(),
+            False,
+        )
+        found["here: sock/stopped"] = ((sock / "stopped").is_symlink(), False)
         found["no temporary file left"] = (sorted(path.name for path in state.iterdir()), [
             "request",
             "sock",

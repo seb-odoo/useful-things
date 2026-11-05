@@ -10,6 +10,7 @@ import math
 import os
 import pathlib
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -197,6 +198,26 @@ def load_hook():
     return module
 
 
+LABELS = [
+    (
+        "odoo-bin \x1b]0;fake title\x07\x1b[2K\x1b[1Aqueued 1 master-x--seb",
+        "odoo-bin ]0;fake title [2K [1Aqueued 1 master-x--seb",
+    ),
+    ("a\nrun started master-y--seb hoot", "a run started master-y--seb hoot"),
+    ("./odoo-bin -d x \u200b\u202e--test-tags", "./odoo-bin -d x --test-tags"),
+]
+
+
+def check_labels(failures):
+    """A label keeps no control character: `bctl runs` prints it in a terminal, and the journal
+    names the bundle of each run on its lines (security check 11-03, B16)."""
+    for label, expected in LABELS:
+        found = runs.check({"label": label})[2]
+        if found != expected:
+            failures.append(f"label of {label!r}: {found!r}, expected {expected!r}")
+    return len(LABELS)
+
+
 def check_kinds(failures):
     hook = load_hook()
     with tempfile.TemporaryDirectory() as folder, mock.patch.dict(os.environ, HOME=folder):
@@ -329,6 +350,28 @@ def adopt_after_restart():
         return [run["pid"] for run in again.queue.running]
 
 
+def cap_per_bundle():
+    """The fourth waiting run of a bundle is refused, as on a worker: a bundle that keeps its runs
+    waiting holds the others back no longer (security check 11-03, B24). Another bundle still
+    waits, and the bundle queues again once one of its runs started."""
+    host = Host()
+    host.ask(1, "hoot", 2)
+    host.ask(2, "hoot", 2)
+    for pid in (3, 4, 5):
+        host.ask(pid, "odoo", bundle="many")
+    found = []
+    for pid, bundle in ((6, "many"), (7, "other")):
+        try:
+            host.ask(pid, "odoo", bundle=bundle)
+            found.append("queued")
+        except runs.Full as error:
+            found.append(str(error))
+    host.end(1)
+    host.ask(8, "odoo", bundle="many")
+    found.append([run["pid"] for run in host.queue.waiting])
+    return found
+
+
 QUEUE_CASES = [
     (
         order_by_cores,
@@ -364,6 +407,7 @@ QUEUE_CASES = [
     ),
     (share_cores_of_parent, (True, [0, 1, 2, 3], 1, 0)),
     (adopt_after_restart, [2]),
+    (cap_per_bundle, ["this bundle has 3 runs waiting already", "queued", [5, 7, 8]]),
 ]
 
 
@@ -404,6 +448,36 @@ def serve(queue, path):
     server = daemon.Server(str(path), daemon.Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
+
+
+def check_journal(failures):
+    """A bundle writes no line of its own in the journal: the kind of a run and the bundle of an
+    error went there raw, so `x\naddress 10.88.0.9 master-y--seb` named a bundle behind the
+    address of a gateway (security check 11-03, B16)."""
+    forged = "x\naddress 10.88.0.9 master-y--seb"
+    with tempfile.TemporaryDirectory() as folder:
+        path = pathlib.Path(folder) / "ctl.sock"
+        server = serve(runs.RunQueue([(0, 1)], 4, None, lambda: (20.0, 0.0, math.inf)), path)
+        printed = io.StringIO()
+        try:
+            with redirect_stdout(printed):
+                for verb, body in (("/run", {"kind": forged}), ("/unqueue", {"bundle": forged})):
+                    data = json.dumps(body).encode()
+                    with socket.socket(socket.AF_UNIX) as client:
+                        client.connect(str(path))
+                        client.sendall(
+                            f"POST {verb} HTTP/1.0\r\nContent-Length: {len(data)}\r\n\r\n".encode()
+                            + data
+                        )
+                        while client.recv(65536):
+                            pass
+        finally:
+            server.shutdown()
+            server.server_close()
+    lines = printed.getvalue().splitlines()
+    if any(line.startswith("address") for line in lines) or len(lines) != 2:
+        failures.append(f"journal: {lines}")
+    return 1
 
 
 def start_client(path, *args, shell=None):
@@ -504,6 +578,8 @@ def main():
         check_kinds(failures)
         + check_wraps(failures)
         + check_hook(failures)
+        + check_labels(failures)
+        + check_journal(failures)
         + check_queue(failures)
         + check_room(failures)
         + check_clients(failures)

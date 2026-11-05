@@ -138,6 +138,7 @@ def sum_up(entries, suffix):
 def print_rows(title, rows, busy):
     print(f"\n{title[:60]:<62}threads share")
     for label, threads in rows[:ROWS]:
+        label = "".join(char if char.isprintable() else "?" for char in label)
         print(f"  {label:<60} {threads:6.2f} {threads / busy if busy else 0:5.0%}")
 
 

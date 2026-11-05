@@ -24,13 +24,17 @@ ExecStart=/usr/bin/ssh -F none -N \
     -o ServerAliveCountMax=3 \
     -o ServerAliveInterval=10 \
     git@github.com
+# A new file renamed in place replaces a link left there (security check 11-03, S4 leftovers).
 ExecStartPost=/bin/sh -c 'until [ -S %h/.local/state/ssh-github-mux/sock/github ]; do \
     kill -0 $$MAINPID 2>/dev/null || exit 1; sleep 0.5; done; \
-    touch %h/.local/state/ssh-github-mux/sock/up'
+    f=$$(mktemp %h/.local/state/ssh-github-mux/up.XXXXXX) && \
+    mv -fT "$$f" %h/.local/state/ssh-github-mux/sock/up'
 SuccessExitStatus=255
 ExecStopPost=/usr/bin/rm -f %h/.local/state/ssh-github-mux/sock/github
-ExecStopPost=/usr/bin/touch %h/.local/state/ssh-github-mux/sock/stopped
+ExecStopPost=/bin/sh -c 'f=$$(mktemp %h/.local/state/ssh-github-mux/stopped.XXXXXX) && \
+    mv -fT "$$f" %h/.local/state/ssh-github-mux/sock/stopped'
 # No socket in this run: the hok card of the key was not answered in time, or was refused, so
 # hold the next one.
 ExecStopPost=/bin/sh -c '[ -e %h/.local/state/ssh-github-mux/sock/up ] || \
-    touch %h/.local/state/ssh-github-mux/request/held'
+    { f=$$(mktemp %h/.local/state/ssh-github-mux/held.XXXXXX) && \
+    mv -fT "$$f" %h/.local/state/ssh-github-mux/request/held; }'

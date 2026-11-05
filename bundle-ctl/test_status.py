@@ -4,12 +4,14 @@ a bundle whose agent runs on a worker:
 python3 test_status.py
 """
 
+import json
 import os
 import pathlib
 import subprocess
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
+from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parent / "scripts")]
@@ -130,10 +132,83 @@ def check_remote(root):
     return [name for name, passed in checks if not passed], len(checks)
 
 
+def check_texts(root):
+    """A bundle reads the task and the report of its own agent and of the agents it queued a task
+    for, never those of another bundle (security check 11-03, B18). The host reads them all."""
+    agent = {"state": "done", "result": "the report", "task": "the task", "parent": "b1"}
+    rows = [{"bundle": name, "agent": dict(agent)} for name in ("b1", "b2", "b3")]
+    queue = [
+        {"bundle": "b2", "parent": "b1", "task": "queued by b1"},
+        {"bundle": "b3", "parent": "host", "task": "queued by the host"},
+    ]
+    stubs = {
+        name: getattr(daemon, name)
+        for name in ("count_agents", "describe_queue", "get_open_windows", "read_state", "RUNS")
+    }
+    daemon.bundle_rows.update(rows=rows, read=float("inf"))
+    daemon.count_agents = lambda windows: 0
+    daemon.get_open_windows = set
+    daemon.describe_queue = lambda state: [dict(item) for item in queue]
+    daemon.read_state = lambda: {"launches": {}, "queue": []}
+    daemon.RUNS = type("Runs", (), {"describe": lambda self: {}})()
+    daemon.PARENTS_DIR = root / "parents"
+    daemon.keep_parent("b2", "b1")
+    checks = []
+    try:
+        seen = {}
+        for caller in (daemon.HOST, "b1", "b2"):
+            answer = daemon.status(caller, {}, {})[1]
+            seen[caller] = (
+                {row["bundle"]: row["agent"]["result"] for row in answer["bundles"]},
+                [item["task"] for item in answer["queue"]],
+            )
+        report, task = "the report", "queued by b1"
+        checks.append(
+            (
+                "the host reads every text",
+                seen[daemon.HOST]
+                == ({"b1": report, "b2": report, "b3": report}, [task, "queued by the host"]),
+            )
+        )
+        checks.append(
+            (
+                "a bundle its own and its child's",
+                seen["b1"] == ({"b1": report, "b2": report, "b3": ""}, [task, None]),
+            )
+        )
+        checks.append(
+            (
+                "and its own task, but no text of another bundle",
+                seen["b2"] == ({"b1": "", "b2": report, "b3": ""}, [task, None]),
+            )
+        )
+        gbs = json.dumps({"bundles": rows, "deleted": [], "errors": []})
+        ran = subprocess.CompletedProcess([], 0, stdout=gbs, stderr="")
+        with mock.patch.object(daemon.subprocess, "run", return_value=ran):
+            found = daemon.branches("b2", {}, {})[1]["bundles"]
+        checks.append((
+            "GET /branches the same",
+            [row["agent"]["result"] for row in found] == ["", "the report", ""],
+        ))
+        found = daemon.get_queue("b3", {}, {})[1]["queue"]
+        checks.append(
+            (
+                "GET /queue the same",
+                [item["task"] for item in found] == [None, "queued by the host"],
+            )
+        )
+    finally:
+        vars(daemon).update(stubs)
+        daemon.bundle_rows.update(rows=[], read=0)
+    return [name for name, passed in checks if not passed], len(checks)
+
+
 def main():
     with tempfile.TemporaryDirectory() as root:
         failures, total = check(pathlib.Path(root))
         more, count = check_remote(pathlib.Path(root))
+        failures, total = failures + more, total + count
+        more, count = check_texts(pathlib.Path(root))
         failures, total = failures + more, total + count
     for line in failures:
         print(line)

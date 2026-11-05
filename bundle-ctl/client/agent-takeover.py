@@ -81,9 +81,11 @@ def read_entries(transcript, tail=TAIL):
     entries = []
     for line in lines:
         try:
-            entries.append(json.loads(line))
+            entry = json.loads(line)
         except ValueError:
             continue
+        if isinstance(entry, dict):
+            entries.append(entry)
     return entries
 
 
@@ -92,8 +94,14 @@ def get_last_message(entries):
     for entry in reversed(entries):
         if entry.get("type") not in ("assistant", "user") or entry.get("isSidechain"):
             continue
-        content = entry.get("message", {}).get("content")
-        kinds = {block.get("type") for block in content} if isinstance(content, list) else set()
+        message = entry.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        blocks = (
+            [block for block in content if isinstance(block, dict)]
+            if isinstance(content, list)
+            else []
+        )
+        kinds = {block.get("type") for block in blocks}
         if kinds == {"thinking"}:
             continue
         return entry["type"], kinds

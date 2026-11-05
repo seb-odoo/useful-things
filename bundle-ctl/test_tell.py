@@ -128,6 +128,35 @@ def check_tell(root, check):
     check("a long line is refused", tell(BUNDLE_SESSION, "a" * 2001)[0] == "ValueError")
     check("a bad session is refused", tell("../b1")[0] == "ValueError")
 
+    projects, transcripts = root / "ops-projects", root / "transcripts"
+    daemon.get_projects = lambda bundle: [projects]
+    daemon.TRANSCRIPTS = transcripts
+    for folder in (projects, transcripts / "b1", transcripts / "b3"):
+        folder.mkdir(parents=True)
+    (projects / f"{OPS_SESSION}.jsonl").write_text("{}\n")
+    other = "77777777-7777-8888-9999-000000000000"
+    (transcripts / "b3" / f"{other}.jsonl").write_text("{}\n")
+    (transcripts / "b1" / f"{BUNDLE_SESSION}.jsonl").write_text("{}\n")
+    found = []
+    for session in (OPS_SESSION, other):
+        (agents["b1"] / "session").write_text(f"{session}\n")
+        found.append(tell(session)[0])
+    (agents["b1"] / "session").write_text(f"{BUNDLE_SESSION}\n")
+    found.append(tell(BUNDLE_SESSION)[0])
+    check(
+        "a bundle takes no line of an ops session, nor of a session of another bundle (B17)",
+        found == [404, 404, 200],
+        found,
+    )
+    daemon.get_terminals = lambda: {"b1": 1, "b2": 2}
+    (agents["b2"] / "session").write_text(f"{BUNDLE_SESSION}\n")
+    (transcripts / "b1" / f"{BUNDLE_SESSION}.jsonl").unlink()
+    found = tell(BUNDLE_SESSION)
+    check("nor of a session two bundles claim", found[0] == 404, found)
+    (agents["b2"] / "session").write_text(f"{STOPPED_SESSION}\n")
+    daemon.get_terminals = lambda: {"b1": 1}
+    shutil.rmtree(agents["b1"] / "pr-events", ignore_errors=True)
+
     elsewhere = root / "elsewhere"
     elsewhere.mkdir()
     (agents["b1"] / "pr-events").symlink_to(elsewhere)
@@ -197,6 +226,16 @@ def check_parent(root, check):
     check("a session two bundles claim is told to no parent",
           len(in_p1()) == 2 and len(get_lines(ops)) == 1, in_p1())
     (agents["c1"] / "session").write_text(f"{STOPPED_SESSION}\n")
+    projects = root / "parent" / "ops-projects"
+    projects.mkdir(parents=True)
+    daemon.get_projects = lambda bundle: [projects]
+    daemon.TRANSCRIPTS = root / "parent" / "transcripts"
+    tab = "88888888-7777-8888-9999-000000000000"
+    (projects / f"{tab}.jsonl").write_text("{}\n")
+    (agents["c2"] / "session").write_text(f"{tab}\n")
+    tell(tab, said)
+    check("nor a session of the ops container a bundle claims (B17)", len(in_p1()) == 2, in_p1())
+    (agents["c2"] / "session").write_text(f"{PUSHED_SESSION}\n")
     daemon.keep_parent("c2", daemon.HOST)
     tell_bundle("c2", said)
     check("a task of the host drops the note",
@@ -402,7 +441,12 @@ def check_watch(root, check):
         found == (200, {"told": [window, "b1"]}) and get_lines(agents[window]) == [TEXT],
         found,
     )
-    check("and in the bundle that watches it", prwatch_lines(told_b1) == [TEXT])
+    lines = prwatch_lines(told_b1)
+    check(
+        "and in the bundle that watches it, with no word of what came of a card of ops (B17)",
+        len(lines) == 1 and "659" in lines[0] and "959" not in lines[0],
+        lines,
+    )
     found = answered([["g4", 1.0]])
     check(
         "a card of the same name asked at another time tells nobody",
@@ -410,10 +454,13 @@ def check_watch(root, check):
         found,
     )
     found = answered([["g4", 8.0]])
+    lines = prwatch_lines(told_b1)
     check(
-        "a push tells the bundle that watches it",
-        found == (200, {"told": ["b1"]}) and prwatch_lines(told_b1) == [TEXT],
-        found,
+        "a push of another bundle tells the bundle that watches it, with no word of what came of"
+        " it (B17)",
+        found == (200, {"told": ["b1"]}) and len(lines) == 1 and "g4" in lines[0]
+        and "959" not in lines[0],
+        (found, lines),
     )
     check("the watch goes with the answer", answered([["g4", 8.0]]) == (200, {"told": []}))
     rows.pop(0)
@@ -423,6 +470,13 @@ def check_watch(root, check):
         found == (200, {"card": "659", "state": "told"})
         and get_lines(agents[window]) == [TEXT] * 2,
         found,
+    )
+    found = watch("b1", "659", BUNDLE_SESSION)
+    lines = prwatch_lines(told_b1)
+    check(
+        "a bundle gets it with no word of what came of it (B17)",
+        found[0] == 200 and len(lines) == 1 and "959" not in lines[0],
+        (found, lines),
     )
     (daemon.WATCH_DIR / "659.told").touch()
     os.utime(daemon.WATCH_DIR / "659.told", (time.time() - 4000,) * 2)
@@ -545,9 +599,10 @@ def check_window(root, check):
 
 
 def main():
-    failures = []
+    failures, count = [], [0]
 
     def check(name, ok, found=None):
+        count[0] += 1
         if not ok:
             failures.append(f"{name}{f': {found!r}' if found is not None else ''}")
 
@@ -568,7 +623,7 @@ def main():
         check("no podman ran", not (root / "podman.log").exists())
     for line in failures:
         print(line)
-    print(f"{87 - len(failures)}/87 cases as expected")
+    print(f"{count[0] - len(failures)}/{count[0]} cases as expected")
     sys.exit(1 if failures else 0)
 
 

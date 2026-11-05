@@ -20,7 +20,10 @@ of the networks of the proxy and its own addresses there, where its published po
 11-03, C7). It also refuses `/web/database/` and `/xmlrpc/db`, `/xmlrpc/2/db` in every server:
 a page of a bundle open in Firefox would post a database restore to the server of another
 bundle through the host. On devnet the drop-in of gateway-core pins it at 10.89.255.30, among
-the gateways, the only addresses the wall of devnet lets reach a bundle. The config is generated
+the gateways, the only addresses the wall of devnet lets reach a bundle. It keeps of the rights
+of root only what nginx needs (`CHOWN` for its temp folders, `NET_BIND_SERVICE` for :80, `SETGID`
+and `SETUID` to become the nginx user, `KILL` for the master to stop its workers), with
+`NoNewPrivileges` (security check 11-03, C13). The config is generated
 from the live container list by [`../scripts/proxy.py`](../scripts/proxy.py): each dev container
 is labelled `devcontainer.local_folder=<bundle path>`, so the subdomain is the bundle folder
 basename. A basename that is no bundle name (`BUNDLE_NAME` in `scripts/commands.py`) gets no route:

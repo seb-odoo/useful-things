@@ -1017,6 +1017,7 @@ def check_place(root):
 
     daemon.remote_agent = types.SimpleNamespace(
         get_recorded=lambda: [name for name in written_remotes() if name in remote],
+        take_left_notes=lambda get_folder: None,
         is_remote=lambda folder: (
             folder.name in remote or (folder / ".agent" / "remote-starting").exists()
         ),
@@ -2038,6 +2039,7 @@ def check_remote_type(root):
     daemon.get_transcript = lambda session, *_: root / "t"
     daemon.remote_agent = types.SimpleNamespace(
         get_recorded=written_remotes,
+        take_left_notes=lambda get_folder: None,
         is_remote=lambda folder: True,
         keep=lambda bundle, folder, workers: (None, False),
         read_remote=lambda folder: {"worker": "sebpc", "job": "1"},
@@ -2199,6 +2201,7 @@ def check_remote_told(root):
     daemon.get_transcript = lambda session, *_: texts.get("transcript", transcript)
     daemon.remote_agent = types.SimpleNamespace(
         get_recorded=written_remotes,
+        take_left_notes=lambda get_folder: None,
         read_remote=read_written(stubs["remote_agent"]),
         type_keys=type_keys,
     )
@@ -2351,6 +2354,7 @@ def check_remote_dialog(root):
     daemon.get_session_status = lambda bundle, session: statuses[bundle]
     daemon.remote_agent = types.SimpleNamespace(
         get_recorded=written_remotes,
+        take_left_notes=lambda get_folder: None,
         read_remote=read_written(stubs["remote_agent"]),
         type_keys=type_keys,
     )
@@ -2556,6 +2560,7 @@ def check_leaving(root):
     daemon.remote_agent = types.SimpleNamespace(
         end=module.end,
         get_recorded=written_remotes,
+        take_left_notes=lambda get_folder: None,
         is_remote=lambda folder: read_written(module)(folder) is not None
         or (folder / ".agent" / "remote-starting").exists(),
         keep=lambda bundle, folder, workers: (None, False),
@@ -2988,6 +2993,7 @@ def check_stale(root):
         drop_start=dropped.append,
         finish=finish,
         get_recorded=written_remotes,
+        take_left_notes=lambda get_folder: None,
         keep=lambda bundle, folder, workers: (None, False),
         read_remote=read_written(module),
         renew_login_soon=lambda folder: None,

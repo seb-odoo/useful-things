@@ -25,6 +25,7 @@ MAX_ANCESTORS = 32
 MAX_CORES = 2
 MAX_LABEL = 200
 MAX_STALL = 5
+MAX_WAITING = 3
 MAX_WORKERS = 32
 RAMP = 60
 SHARED = ("server", "shell")
@@ -168,6 +169,10 @@ def read_cpu_seconds(cgroup):
     return int(re.search(r"usage_usec (\d+)", stat)[1]) / 1e6
 
 
+class Full(Exception):
+    pass
+
+
 class RunQueue:
     def __init__(self, cores, min_free, path=None, read_memory=read_memory, get_birth=get_birth):
         self.changed = threading.Condition()
@@ -210,13 +215,16 @@ class RunQueue:
 
     def request(self, bundle, pid, kind, workers, label):
         """Queue a run for the process `pid`, or start it at once. A command of a run that already
-        holds cores gets the same ones.
+        holds cores gets the same ones. A bundle with MAX_WAITING runs waiting gets Full, as the
+        worker answers: the runs of one bundle never hold back all the others.
         """
         now = time.time()
         with self.changed:
             holder = self.find_holder(pid)
             if holder:
                 return dict(holder, nested=True)
+            if sum(other["bundle"] == bundle for other in self.waiting) >= MAX_WAITING:
+                raise Full(f"this bundle has {MAX_WAITING} runs waiting already")
             need, gigabytes = get_need(kind, workers)
             self.tickets = {key: at for key, at in self.tickets.items() if now - at < TICKET}
             run = {
@@ -375,7 +383,16 @@ def check(body):
         raise ValueError(f"workers: an integer from 1 to {MAX_WORKERS}")
     if type(label) is not str:
         raise ValueError("label: a text")
+    label = "".join(char if char.isprintable() else " " for char in label)
     return kind, workers, " ".join(label.split())[:MAX_LABEL]
+
+
+def refuse(handler, code, error):
+    data = json.dumps({"error": str(error)}).encode()
+    handler.send_response(code)
+    handler.send_header("Content-Length", str(len(data)))
+    handler.end_headers()
+    handler.wfile.write(data)
 
 
 def has_left(connection):
@@ -397,11 +414,7 @@ def serve(queue, handler, caller, body, router=None):
     try:
         kind, workers, label = check(body)
     except ValueError as error:
-        data = json.dumps({"error": str(error)}).encode()
-        handler.send_response(400)
-        handler.send_header("Content-Length", str(len(data)))
-        handler.end_headers()
-        handler.wfile.write(data)
+        refuse(handler, 400, error)
         return
     remote = router(kind, workers) if router and body.get("route") else None
     if remote:
@@ -415,7 +428,11 @@ def serve(queue, handler, caller, body, router=None):
         print(f"run kept {caller} {kind}: no worker starts it soon", flush=True)
     if body.get("shell"):
         pid = get_parent(pid)
-    run = queue.request(caller, pid, kind, workers, label)
+    try:
+        run = queue.request(caller, pid, kind, workers, label)
+    except Full as error:
+        refuse(handler, 429, error)
+        return
     handler.send_response(200)
     handler.send_header("Content-Type", "application/x-ndjson")
     handler.end_headers()

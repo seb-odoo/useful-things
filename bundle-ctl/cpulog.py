@@ -129,7 +129,8 @@ def read_args(pid, proc=PROC):
         args = (proc / str(pid) / "cmdline").read_bytes()
     except OSError:
         return ""
-    return " ".join(args.replace(b"\0", b" ").decode(errors="replace").split())[:ARGS]
+    text = args.replace(b"\0", b" ").decode(errors="replace")
+    return " ".join("".join(char if char.isprintable() else " " for char in text).split())[:ARGS]
 
 
 def read_comm(pid, proc=PROC):

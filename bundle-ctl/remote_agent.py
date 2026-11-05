@@ -56,6 +56,10 @@ STARTING = 1800
 STOP_AGAIN = 300
 MAX_CLAUDE_JSON = 16 << 20
 MAX_CONFIG_FILE = 64 << 20
+# A bundle writes these files of its config part (security check 11-03, B22).
+MAX_CONFIG_ENTRIES = 5000
+MAX_CONFIG_WRITTEN = 64 << 20
+MAX_WRITTEN_FILE = 4 << 20
 MAX_ENDED = 64 * 1024
 MAX_LOSSES = 3
 MAX_PART = 2 << 30
@@ -328,18 +332,41 @@ def sha256(path):
 
 
 def build_config(bundle_folder):
-    """The config part: what MOUNTS sends, at the paths the job unpacks (home/, workspace/)."""
+    """The config part: what MOUNTS sends, at the paths the job unpacks (home/, workspace/). What
+    the bundle writes there (the memory, its settings, gh, ssh, its project files) takes
+    MAX_WRITTEN_FILE a file, MAX_CONFIG_WRITTEN in all, headers counted, and MAX_CONFIG_ENTRIES
+    entries at most: past it RuntimeError, and the agent starts here."""
     values, own = get_paths(bundle_folder)
     claude = HOME / ".claude"
     repo_root = pathlib.Path(values["REPO_ROOT"])
     sent = {str(repo_root / "runbot-fix-agents"): "home/runbot-fix-agents"}
     out = io.BytesIO()
+    left = [MAX_CONFIG_WRITTEN, MAX_CONFIG_ENTRIES]
+
+    def count(name, size):
+        """Count an entry the bundle writes as the part holds it, its header and the blocks of a
+        long name with it: RuntimeError past a cap."""
+        long_name = -(-len(name) // 512) + 1 if len(name) > 100 else 0
+        left[0] -= 512 * (1 + long_name) + -(-size // 512) * 512
+        left[1] -= 1
+        if size > MAX_WRITTEN_FILE or min(left) < 0:
+            raise RuntimeError(
+                f"the config part: {name} is {size >> 20} MB, over {MAX_WRITTEN_FILE >> 20} MB a"
+                f" file, {MAX_CONFIG_WRITTEN >> 20} MB or {MAX_CONFIG_ENTRIES} entries in all of"
+                " what the bundle writes"
+            )
+
+    def keep(info, written):
+        if written:
+            count(info.name, info.size if info.isfile() else 0)
+        return keep_regular(info, sent)
+
     with tarfile.open(fileobj=out, mode="w") as tar:
 
-        def add(source, target):
+        def add(source, target, written=False):
             source = pathlib.Path(source)
             if source.exists():
-                tar.add(source, arcname=target, filter=lambda info: keep_regular(info, sent))
+                tar.add(source, arcname=target, filter=lambda info: keep(info, written))
 
         for name in (
             "CLAUDE.md",
@@ -362,14 +389,17 @@ def build_config(bundle_folder):
             claude / "projects" / host_project / "memory",
             f"home/.claude/projects/{host_project}/memory",
         )
-        add(get_memory(own), "home/.claude/projects/-workspace/memory")
-        add(own / "settings.json", "home/.claude/settings.json")
-        add(own / "policy-limits.json", "home/.claude/policy-limits.json")
+        add(get_memory(own), "home/.claude/projects/-workspace/memory", written=True)
+        add(own / "settings.json", "home/.claude/settings.json", written=True)
+        add(own / "policy-limits.json", "home/.claude/policy-limits.json", written=True)
         project = own / "project"
         shared = pathlib.Path(values["SHARED_CLAUDE"])
         for path in sorted(project.iterdir()) if project.is_dir() else ():
             source = shared / path.name if path.is_symlink() else path
-            data = read_bytes(source, MAX_CONFIG_FILE + 1)
+            limit = MAX_CONFIG_FILE if path.is_symlink() else MAX_WRITTEN_FILE
+            data = read_bytes(source, limit + 1)
+            if data is not None and not path.is_symlink():
+                count(f"workspace/.claude/{path.name}", len(data))
             if data is None or len(data) > MAX_CONFIG_FILE:
                 continue
             if path.name == "settings.json":
@@ -377,8 +407,8 @@ def build_config(bundle_folder):
             info = tarfile.TarInfo(f"workspace/.claude/{path.name}")
             info.size = len(data)
             tar.addfile(info, io.BytesIO(data))
-        add(own / "gh", "home/.config/gh")
-        add(own / "ssh", "home/.ssh")
+        add(own / "gh", "home/.config/gh", written=True)
+        add(own / "ssh", "home/.ssh", written=True)
         # install.sh makes ~/.gitconfig a link into useful-things, which keep_regular drops.
         add((HOME / ".gitconfig").resolve(), "home/.gitconfig")
         add(HOME / ".gitconfig.local", "home/.gitconfig.local")
@@ -456,8 +486,9 @@ def keep_base(bundle, bundle_folder, config, taken):
     fresh.rename(kept)
     shutil.rmtree(old, ignore_errors=True)
     for path in HANDOFF_BASE.iterdir():
-        gone = not (bundle_folder.parent / path.name).is_dir()
-        if path.name != bundle and not path.name.startswith(".") and gone:
+        name = path.name.removesuffix(outside.SUFFIX)
+        gone = not (bundle_folder.parent / name).is_dir()
+        if name != bundle and not name.startswith(".") and gone:
             shutil.rmtree(path, ignore_errors=True)
 
 
@@ -472,13 +503,19 @@ def get_proposed(name):
 
 
 def take_notes(bundle, bundle_folder):
-    """Write in the memory of the bundle the notes its job sent, which the stand-in leaves in
-    its run folder: each is the merge of the note here, the copy the job got (keep_base) and the
-    job's note, so that what changed here after the copy stays. Where both changed the same
-    lines, both are kept. The copy of a note then becomes the job's note, which its next change
-    starts from. With no copy, the note is written whole. Never raises: the notes wait for the
-    next call. Prints and returns the lines for the journal."""
+    """Hand Seb the memory notes the job sent, which the stand-in leaves in its run folder, as
+    one proposal `BUNDLE@memory` in hok: a note of a remote agent reaches the other bundles only
+    after his yes, as one of a bundle on an outside PR (Seb, 2026-11-05, security check 11-03,
+    G5). The proposal keeps as its base the copy the job got (keep_base), so that a yes merges
+    each note with what changed here since; the copy then becomes the job's note, which its next
+    change starts from. While a proposal waits, the notes wait for the next call. On an outside
+    PR they go to the copy of the bundle, which outside.py proposes (take_note). Never raises.
+    Prints and returns the lines for the journal."""
     lines = []
+    own = get_paths(bundle_folder)[1]
+    proposes = not (own / outside.MARK).is_file()
+    if proposes and os.path.lexists(get_inbox(bundle) / outside.WHY):
+        return lines
     try:
         sent_fd = outside.open_folder(run_folder(bundle) / "memory")
     except OSError:
@@ -487,12 +524,14 @@ def take_notes(bundle, bundle_folder):
     try:
         names = get_sent_notes(sent_fd)
         if names:
-            fds.append(outside.open_folder(get_memory(get_paths(bundle_folder)[1])))
+            fds.append(outside.open_folder(get_memory(own)))
             try:
                 fds.append(outside.open_folder(HANDOFF_BASE / bundle / "dev-memory"))
             except OSError:
                 fds.append(None)
-        for name in names:
+        if names and proposes:
+            lines += propose_notes(bundle, names, *fds)
+        for name in names if not proposes else ():
             if line := take_note(bundle, name, *fds):
                 lines.append(line)
     except OSError as error:
@@ -504,6 +543,77 @@ def take_notes(bundle, bundle_folder):
     for line in lines:
         print(line, flush=True)
     return lines
+
+
+def get_inbox(bundle):
+    """The proposal of the memory notes of a bundle: a folder of the host no container writes."""
+    return HOME / ".claude" / "handoff" / f"{bundle}{outside.SUFFIX}"
+
+
+def propose_notes(bundle, names, sent_fd, memory_fd, copy_fd):
+    """Write the notes of the job that change the memory in the proposal of the bundle, with
+    their copies as its base, WHY last: hok lists a proposal once it has its reason. The lines
+    for the journal."""
+    inbox, base = get_inbox(bundle), HANDOFF_BASE / f"{bundle}{outside.SUFFIX}"
+    for folder in (inbox, base):
+        shutil.rmtree(folder, ignore_errors=True)
+        (folder / outside.ROOT).mkdir(parents=True)
+    proposed, taken, lines = [], [], []
+    inbox_fd = outside.open_folder(inbox / outside.ROOT)
+    base_fd = outside.open_folder(base / outside.ROOT)
+    try:
+        for name in names:
+            mine = read_note(sent_fd, f".{name}.taking")
+            taken.append((name, mine))
+            if mine is None:
+                lines.append(
+                    f"{bundle}: the memory note {name} of its job is no plain file of 1 MB at most"
+                )
+                continue
+            copy = read_note(copy_fd, name) if copy_fd is not None else None
+            if mine not in (copy, read_note(memory_fd, name)):
+                outside.write_note(inbox_fd, name, mine)
+                if copy is not None:
+                    outside.write_note(base_fd, name, copy)
+                proposed.append(name)
+    finally:
+        os.close(inbox_fd)
+        os.close(base_fd)
+    if copy_fd is None:
+        shutil.rmtree(base, ignore_errors=True)
+    else:
+        made = (HANDOFF_BASE / bundle).stat().st_mtime
+        os.utime(base, (made, made))
+    if proposed:
+        (inbox / outside.WHY).write_text(
+            f"memory notes of {bundle}, written by its agent on a worker: no other bundle reads"
+            " them before your yes\n"
+        )
+        names = ", ".join(proposed)
+        lines.append(f"{bundle}: the memory notes {names} of its job wait for Seb's yes")
+    for name, mine in taken:
+        if mine is not None and copy_fd is not None:
+            outside.write_note(copy_fd, name, mine)
+        os.unlink(f".{name}.taking", dir_fd=sent_fd)
+    return lines
+
+
+def take_left_notes(get_folder):
+    """take_notes for each bundle whose job left notes in its run folder and that keep() no
+    longer takes: its job ended while a proposal of its notes waited. A bundle whose agent runs or
+    starts on a worker is keep()'s."""
+    for sent in sorted((STATE / "standin").glob("*/memory")):
+        bundle = sent.parent.name
+        try:
+            left = any(
+                outside.NOTE.fullmatch(name.removeprefix(".").removesuffix(".taking"))
+                for name in os.listdir(sent)
+            )
+            folder = get_folder(bundle) if left and not sent.is_symlink() else None
+        except (OSError, ValueError):
+            continue
+        if folder is not None and not is_remote(folder):
+            take_notes(bundle, folder)
 
 
 def get_sent_notes(sent_fd):

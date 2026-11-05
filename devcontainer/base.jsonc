@@ -105,7 +105,8 @@
     // resolves to, as the mount needs the real directory, not the link.
     "source=@CACHE_ROOT@/devcontainer/claude-config/${localWorkspaceFolderBasename}/project,target=@WORKTREE_ROOT@/.claude,type=bind,z",
     "source=@SHARED_CLAUDE@,target=/home/vscode/.claude-project,type=bind,readonly,z",
-    "source=@WORKTREE_ROOT@/.vscode,target=@WORKTREE_ROOT@/.vscode,type=bind,Z",
+    // A workspace setting names programs every bundle window runs (security check 11-03, C11).
+    "source=@WORKTREE_ROOT@/.vscode,target=@WORKTREE_ROOT@/.vscode,type=bind,readonly,Z",
     "source=@USEFUL_THINGS@/odools.toml,target=@USEFUL_THINGS@/odools.toml,type=bind,readonly,Z",
     // The store of node_modules, one tree per package.json, where odoo/ and enterprise/ link
     // (initialize.py). Read-only, as the ESLint of every bundle on that package.json loads it.

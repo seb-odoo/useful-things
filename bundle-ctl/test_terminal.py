@@ -5,6 +5,7 @@ systemctl, xprop and xclip and the wrapper in a pty: python3 test_terminal.py
 """
 
 import importlib.util
+import json
 import os
 import pathlib
 import pty
@@ -792,8 +793,131 @@ def check_ops_host_transcript():
     return [], 1
 
 
+def link(uri, text="text"):
+    return f"\x1b]8;;{uri}\x1b\\{text}\x1b]8;;\x1b\\".encode()
+
+
+LINKS = [
+    (link("https://github.com/odoo/odoo/pull/1"), link("https://github.com/odoo/odoo/pull/1")),
+    (link("https://github.com/odoo-dev/odoo/tree/x"),) * 2,
+    (link("https://runbot.odoo.com/odoo/error/1"), link("https://runbot.odoo.com/odoo/error/1")),
+    (link("https://www.odoo.com/odoo/project/1"), link("https://www.odoo.com/odoo/project/1")),
+    (link("http://admin.b1.localhost/odoo"), link("http://admin.b1.localhost/odoo")),
+    (link("odoo-bundle://agent/ops-s1"), b"text\x1b]8;;\x1b\\"),
+    (link("odoo-bundle://stranger:master-x"), b"text\x1b]8;;\x1b\\"),
+    (link("https://github.com/odoo-evil/x"), b"text\x1b]8;;\x1b\\"),
+    (link("https://runbot.odoo.com.evil.example/"), b"text\x1b]8;;\x1b\\"),
+    (link("http://admin.b2.localhost/odoo"), b"text\x1b]8;;\x1b\\"),
+    (link("http://admin.b1.localhost:8069/odoo"),) * 2,
+    (link("http://admin.b1.localhost:@evil.example/"), b"text\x1b]8;;\x1b\\"),
+    (link("odoo-bundle://list/b1"),) * 2,
+    (link("odoo-bundle://tabs/b1"),) * 2,
+    (link("odoo-bundle://hok/g12%2Bg13"),) * 2,
+    (link("odoo-bundle://list/b2"), b"text\x1b]8;;\x1b\\"),
+    ("\x9d8;;odoo-bundle://agent/ops-s1\x9ctext".encode(), b"8;;odoo-bundle://agent/ops-s1text"),
+    (b"\x1b]8;;odoo-bundle://agent/ops-s1\x1b[0mtext\x1b]8;;\x1b\\", b"\x1b[0mtext\x1b]8;;\x1b\\"),
+    (b"\x1b]8;;https://github.com/odoo/odoo\x1b[0mtext",) * 2,
+    (link("file:///etc/passwd"), b"text\x1b]8;;\x1b\\"),
+]
+
+
+def check_links():
+    """A bundle window keeps the links to Odoo pages and to its own Odoo, and the text alone of
+    another, even cut over two reads: a Ctrl+click on an odoo-bundle:// link runs bundle_open.py
+    on the host (security check 11-03, B19)."""
+    spec = importlib.util.spec_from_file_location("agent_terminal", HERE / "agent-terminal.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.links[:] = [module.get_links("b1")]
+    failures = []
+    for data, expected in LINKS:
+        for cut in (len(data), 3, 9, 20):
+            out, held = module.take_clipboard(b"a" + data[:cut])
+            more, held = module.take_clipboard(held + data[cut:] + b"z")
+            if out + more != b"a" + expected + b"z" or held:
+                failures.append(f"link {data!r} cut at {cut}: {out + more + held!r}")
+    return failures, len(LINKS)
+
+
+PAUSED = """
+import importlib.util, os, sys, threading, time
+spec = importlib.util.spec_from_file_location("at", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+module.links[:] = [module.get_links("b1")]
+read, write = os.pipe()
+chunks = [eval(chunk) for chunk in sys.argv[2:]]
+
+
+def feed():
+    for chunk in chunks:
+        os.write(write, chunk)
+        time.sleep(0.3)
+    os.close(write)
+
+
+threading.Thread(target=feed).start()
+module.copy_tty(read)
+"""
+
+
+def check_paused():
+    """A start of a link, or of its C1 form, that pauses before the rest never reaches the
+    terminal on its own in a bundle window: a process of the container writes to the pty too
+    (security check 11-03, B19). Nor does a start held at the end."""
+    cases = [
+        (b"text \x1b]8;", b";odoo-bundle://agent/ops-s1\x1b\\click\x1b]8;;\x1b\\\n"),
+        (b"text \xc2", b"\x9d8;;odoo-bundle://agent/ops-s1\x07click\n"),
+        (b"text \x1b", b"]8;;odoo-bundle://agent/ops-s1\x07click\n"),
+        (b"text\n\x1b]8;;odoo-bundle://agent/ops-s1",),
+    ]
+    failures = []
+    for chunks in cases:
+        ran = subprocess.run(
+            [sys.executable, "-c", PAUSED, str(HERE / "agent-terminal.py"), *map(repr, chunks)],
+            capture_output=True,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            timeout=20,
+        )
+        if b"odoo-bundle://" in ran.stdout and (b"\x1b]8" in ran.stdout or b"\x9d" in ran.stdout):
+            failures.append(f"paused link {chunks!r}: {ran.stdout!r}")
+        elif b"text" not in ran.stdout:
+            failures.append(f"paused link {chunks!r}: no text, {ran.stdout!r} {ran.stderr[-300:]!r}")
+    return failures, len(cases)
+
+
+def check_stream_format():
+    """The log of a claude that ended, printed from its transcript, which the bundle writes,
+    carries no escape to the terminal of the host (security check 11-03, B19)."""
+    link = "\x1b]8;;odoo-bundle://agent/ops-s1\x1b\\see\x1b]8;;\x07 \u009d8;;x\u009c"
+    lines = [
+        json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": link}]}}),
+        f"not json {link}",
+        json.dumps({"type": "result", "subtype": link, "num_turns": link}),
+    ]
+    with tempfile.TemporaryDirectory() as folder:
+        ran = subprocess.run(
+            [sys.executable, str(HERE / "client" / "stream-format.py"), f"{folder}/result"],
+            input="\n".join(lines) + "\n",
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+    shown = ran.stdout.replace("\n", "")
+    if not shown.isprintable() or "see" not in shown:
+        return [f"stream-format: {ran.stdout!r}"], 1
+    return [], 1
+
+
 def main():
     failures, total = check_takeover_container()
+    found, count = check_stream_format()
+    failures, total = failures + found, total + count
+    found, count = check_paused()
+    failures, total = failures + found, total + count
+    found, count = check_links()
+    failures, total = failures + found, total + count
     found, count = check_ops_host_transcript()
     failures, total = failures + found, total + count
     tabs = {

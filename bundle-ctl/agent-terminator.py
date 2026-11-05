@@ -180,9 +180,10 @@ def get_record(bundle, since):
             record = json.loads(data) if value.encode() in data else {}
         except ValueError:
             continue
-        if not isinstance(record, dict):
+        started = record.get("startedAt", 0) if isinstance(record, dict) else None
+        if type(started) not in (int, float) or not isinstance(record.get("sessionId"), str):
             continue
-        if record.get(key) == value and record.get("startedAt", 0) >= since:
+        if record.get(key) == value and started >= since:
             records.append(record)
     return max(records, key=lambda record: record["startedAt"], default=None)
 

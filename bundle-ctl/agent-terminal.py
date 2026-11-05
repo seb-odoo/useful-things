@@ -101,6 +101,13 @@ CLIPBOARD = re.compile(rb"\x1b\]52;([a-z0-9]*);([A-Za-z0-9+/=]*|\?)(?:\x07|\x1b\
 CLIPBOARD_LIMIT = 1 << 22
 CLIPBOARD_PART = re.compile(rb"\x1b\]52;[a-z0-9]*(?:;(?:[A-Za-z0-9+/=]*|\?)\x1b?)?")
 CLIPBOARD_START = b"\x1b]52;"
+# A link opens on the host, odoo-bundle:// in bundle_open.py (security check 11-03, B19).
+LINK = re.compile(rb"\x1b\]8;([^;\x07\x1b]*);([^\x07\x1b]*)(?:\x07|\x1b\\|(?=\x1b))")
+LINK_LIMIT = 8192
+LINKABLE = rb"https://(?:github\.com/odoo(?:-dev)?/|runbot\.odoo\.com/|(?:www\.)?odoo\.com/)"
+LINK_PART = re.compile(rb"\x1b\]8;[^;\x07\x1b]*(?:;[^\x07\x1b]*\x1b?)?")
+LINK_START = b"\x1b]8;"
+C1 = re.compile(rb"\xc2[\x80-\x9f]")
 CONFIG_ROOT = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
 CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 DECK = STATE / "deck"
@@ -213,6 +220,7 @@ def keep_open(ending, session=None, bundle=""):
     The claude of a terminal draws on the alternate screen, which empties when claude ends.
     """
     transcript = session and get_transcript(session, bundle)
+    ending = "".join(char if char.isprintable() else "?" for char in ending)
     try:
         sys.stdout.write(RESET)
         sys.stdout.flush()
@@ -268,14 +276,16 @@ def copy_tty(fd, waker=None):
     """Copy the keys to the pty and its output to this terminal, until the command ends. A tail
     that may start a clipboard escape waits for the next read; a lone start of one goes out after
     50 ms with no output. The Enter of a typed PR event goes ENTER_AFTER after its text: sent
-    together, claude takes them as a paste, where Enter is a new line."""
+    together, claude takes them as a paste, where Enter is a new line. In a bundle window a held
+    tail waits for the next read, never out on its own: a process of the container writes to the
+    pty too, and a pause after a start of a link would let it reach the terminal whole."""
     held = b""
     enter_at = None
     inputs = [0, fd]
     while True:
-        wait = 0.05 if held or enter_at else EVENTS_EVERY if waker else None
+        wait = 0.05 if held and not links or enter_at else EVENTS_EVERY if waker else None
         ready = select.select(inputs, [], [], wait)[0]
-        if not ready and len(held) < len(CLIPBOARD_START):
+        if not ready and len(held) < len(CLIPBOARD_START) and not links:
             write_terminal(held)
             held = b""
         if fd in ready:
@@ -284,7 +294,7 @@ def copy_tty(fd, waker=None):
             except OSError:
                 data = b""
             if not data:
-                write_terminal(held)
+                write_terminal(b"" if links else held)
                 return
             out, held = take_clipboard(held + data)
             write_terminal(out)
@@ -551,17 +561,49 @@ def write_all(fd, data):
 
 
 def take_clipboard(data):
-    """The output without its clipboard escapes, each set on the host, and the tail held for the
-    next read: an escape not ended yet, or what may start one. A tail that cannot be one goes out,
-    as a program may print the start of an escape (a cat of a binary file)."""
+    """The output without its clipboard escapes, each set on the host, and in a bundle window
+    without the links it may not keep (links), and the tail held for the next read: an escape not
+    ended yet, or what may start one. A tail that cannot be one goes out, as a program may print
+    the start of an escape (a cat of a binary file). A link is judged once its URI ended, on BEL,
+    ST or any other escape; one still open past LINK_LIMIT loses its start."""
     out = CLIPBOARD.sub(lambda match: set_clipboard(*match.groups()), data)
-    start = out.rfind(CLIPBOARD_START)
-    if start >= 0 and len(out) - start < CLIPBOARD_LIMIT and CLIPBOARD_PART.fullmatch(out, start):
-        return out[:start], out[start:]
+    escapes = [(CLIPBOARD_START, CLIPBOARD_PART)]
+    if links:
+        out = LINK.sub(keep_link, C1.sub(b"", out))
+        escapes.append((LINK_START, LINK_PART))
+    for begin, part in escapes:
+        start = out.rfind(begin)
+        if start < 0 or not part.fullmatch(out, start):
+            continue
+        if len(out) - start < (LINK_LIMIT if begin == LINK_START else CLIPBOARD_LIMIT):
+            return out[:start], out[start:]
+        if begin == LINK_START:
+            out = out[:start] + out[start + len(begin) :]
+    starts = [begin for begin, _ in escapes] + [b"\xc2\x80"] * bool(links)
     for size in range(len(CLIPBOARD_START) - 1, 0, -1):
-        if out.endswith(CLIPBOARD_START[:size]):
+        if any(len(begin) > size and out.endswith(begin[:size]) for begin in starts):
             return out[:-size], out[-size:]
     return out, b""
+
+
+links = []
+
+
+def get_links(bundle):
+    """What the links of a bundle window may open: a page of Odoo on GitHub, runbot and
+    odoo.com, the Odoo this bundle serves (serve-for-seb), and the links of its band (agentbar:
+    the agent list, its tab group, a card of hok)."""
+    name = re.escape(bundle.encode())
+    served = rb"http://(?:[a-z0-9-]+\.)?" + name + rb"\.localhost(?::[0-9]+)?(?:/|$)"
+    band = rb"odoo-bundle://(?:hok/[A-Za-z0-9%+._-]+|(?:list|tabs)/" + name + rb")$"
+    return re.compile(b"|".join((LINKABLE, served, band)))
+
+
+def keep_link(match):
+    """A link that opens what the window may open, or the end of a link (no URI), as it is;
+    nothing for another, whose text then shows as text."""
+    uri = match[2]
+    return match[0] if not uri or links[0].match(uri) else b""
 
 
 def set_clipboard(targets, payload):
@@ -823,6 +865,7 @@ def main():
     if bundle.startswith(OPS):
         run_ops(bundle)
         return
+    links[:] = [get_links(bundle)]
     agent = get_agent_folder(bundle)
     if not (agent / "task.md").is_file():
         keep_open(f"{bundle}: no task to start")
