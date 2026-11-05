@@ -1,6 +1,10 @@
 #!/bin/sh
 dir=~/.local/state/ssh-github-mux
-[ -S "$dir/sock/github" ] && exit 0
+up() {
+    [ -S "$dir/sock/github" ] &&
+        ssh -F none -o ControlPath="$dir/sock/github" -O check git@github.com 2>/dev/null
+}
+up && exit 0
 # The git command that asks, for the card of ssh-agent-gate: above ssh and the shell of Match exec.
 git=$PPID
 while case $(ps -o comm= -p "$git") in ssh | sh | bash | dash) true ;; *) false ;; esac; do
@@ -12,7 +16,7 @@ ps -o args= -p "$git" > "$now" && mv -fT "$now" "$dir/request/now" || exit 1
 i=0
 while [ $i -lt 120 ]; do
     sleep 0.5
-    [ -S "$dir/sock/github" ] && exit 0
+    up && exit 0
     # Stop waiting when the unit stops, as the key was refused or the network is down.
     [ "$dir/sock/stopped" -nt "$dir/request/now" ] && exit 1
     i=$((i + 1))

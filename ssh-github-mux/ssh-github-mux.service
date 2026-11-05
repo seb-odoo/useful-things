@@ -10,6 +10,9 @@ Wants=ssh-github-mux-probe.timer
 ExecCondition=%h/.local/share/ssh-github-mux/here
 ExecStartPre=/usr/bin/mkdir -p %h/.local/state/ssh-github-mux/sock
 ExecStartPre=/usr/bin/rm -f %h/.local/state/ssh-github-mux/sock/up
+# A crash of the host skips ExecStopPost. ssh runs with no socket when the file is there, and
+# ExecStartPost takes the old file for the new one.
+ExecStartPre=/usr/bin/rm -f %h/.local/state/ssh-github-mux/sock/github
 ExecStart=/usr/bin/ssh -F none -N \
     -o BatchMode=yes \
     -o ControlMaster=yes \

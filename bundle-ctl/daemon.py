@@ -1516,6 +1516,18 @@ def ask_github():
             write_text(start, f"{time.time()}\n")
 
 
+def is_github_up():
+    """Connect rather than test the file: a crash of the host leaves the socket file with
+    nothing listening."""
+    with socket.socket(socket.AF_UNIX) as client:
+        client.settimeout(5)
+        try:
+            client.connect(str(GITHUB_MUX / "sock" / "github"))
+        except OSError:
+            return False
+    return True
+
+
 def is_deleting(bundle):
     return any(
         job["verb"] == f"delete {bundle}" and job["state"] in ("waiting", "running")
@@ -1695,7 +1707,7 @@ def launch_queued():
                 continue
             elif (item.get("after") or 0) > now:
                 item["waits_for"] = f"its time, {format_time(item['after'])}"
-            elif item.get("github") and not (GITHUB_MUX / "sock" / "github").is_socket():
+            elif item.get("github") and not is_github_up():
                 item["waits_for"] = "the GitHub connection of the host"
                 ask_github()
             elif item.get("login") and not has_login():
@@ -1708,7 +1720,7 @@ def launch_queued():
             elif bundle in building_for_worker:
                 item["waits_for"] = "its build here, then a worker"
             elif item.get("build") and get_agent_worker({**item, "build": None}, folder, False)[0]:
-                if not (GITHUB_MUX / "sock" / "github").is_socket():
+                if not is_github_up():
                     item["waits_for"] = "the GitHub connection of the host"
                     ask_github()
                 elif building_for_worker:

@@ -4,6 +4,7 @@ python3 test_request.py"""
 
 import os
 import pathlib
+import socket
 import subprocess
 import sys
 import tempfile
@@ -36,7 +37,10 @@ def main():
         (request / "now").symlink_to(victim)
         (sock / "stopped").touch()
         os.utime(sock / "stopped", (time.time() + 60,) * 2)
+        with socket.socket(socket.AF_UNIX) as left:
+            left.bind(str(sock / "github"))
         run(root, "wait")
+        found["wait: asks over a dead socket"] = ((request / "now").is_symlink(), False)
         found["wait: the file a link names"] = (victim.read_text(), "kept\n")
         found["wait: request/now"] = ((request / "now").is_symlink(), False)
         found["wait: the git command in it"] = ("python3" in (request / "now").read_text(), True)

@@ -30,6 +30,12 @@ each push of a container.
   holds no key, no agent). The service is started once the socket is there (`ExecStartPost`): an
   exit before is a failed start, and the unit shows as failed. An exit after, the normal end of
   the connection, leaves it inactive (`SuccessExitStatus=255`), as `systemctl stop` does.
+- A crash of the host skips `ExecStopPost`, and `sock/github` stays on disk with no ssh behind it
+  (2026-11-05: the laptop crashed at 12:49, and the unit stayed inactive all afternoon, as every
+  fetch took the file for the connection). So the unit removes the file before ssh starts (ssh
+  disables multiplexing over a file that is there), and what reads the connection connects to
+  the socket rather than testing the file: `wait` with `ssh -O check`, the queue of bundle-ctl
+  and git-gate with a `connect`.
 - A connection can stay up and open no new session: on 2026-11-03 it kept its keepalives from
   10:51 to 12:11 while every git command through it hung, and nothing logged a line. So while it
   is up, `ssh-github-mux-probe.timer` runs `probe` every 2 minutes: a session through the socket

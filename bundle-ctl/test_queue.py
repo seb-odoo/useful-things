@@ -1250,8 +1250,15 @@ def check_github(root):
     found = victim.read_text(), start.is_symlink()
     checks.append(("a link left in request/ is replaced, not followed", found == ("kept\n", False)))
     (root / "mux" / "sock").mkdir()
+    with socket.socket(socket.AF_UNIX) as left:
+        left.bind(str(root / "mux" / "sock" / "github"))
+    daemon.launch_queued()
+    found = launched, [item.get("waits_for") for item in state["queue"]]
+    checks.append(("a socket file a crash left is down", found == ([], [waits[1]])))
+    (root / "mux" / "sock" / "github").unlink()
     with socket.socket(socket.AF_UNIX) as listener:
         listener.bind(str(root / "mux" / "sock" / "github"))
+        listener.listen()
         daemon.launch_queued()
     task = (daemon.get_agent_folder("offline") / "task.md").read_text()
     back = task.startswith(daemon.GO_ON) and "GitHub connection of the host is back" in task
@@ -1331,6 +1338,7 @@ def check_disk_worker(root):
     (root / "mux" / "sock").mkdir(parents=True)
     listener = socket.socket(socket.AF_UNIX)
     listener.bind(str(root / "mux" / "sock" / "github"))
+    listener.listen()
     daemon.REMOTE_AUTO = True
     daemon.WORKERS = types.SimpleNamespace(
         names=["sebpc"],

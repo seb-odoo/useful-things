@@ -1565,8 +1565,8 @@ cannot go on without GitHub: git-gate tells it to when the GitHub connection of 
 That connection comes back only on Seb's yes in Bitwarden: on 2026-10-19 it was down from 18:45
 to the next morning, and 13 agents ended "blocked" with their work ready and not pushed, until
 someone resumed them (Seb, 2026-10-20: "ok for resume"). The task waits for `the GitHub
-connection of the host`, its socket in `~/.local/state/ssh-github-mux/sock/`, and meanwhile the
-daemon asks for the connection every 10 minutes (`request/start`), so that Bitwarden asks Seb
+connection of the host`, its socket in `~/.local/state/ssh-github-mux/sock/` taking a client (a
+crash leaves the file with no ssh behind it, 2026-11-05), and meanwhile the daemon asks for the connection every 10 minutes (`request/start`), so that Bitwarden asks Seb
 again. Once it is up, the session goes on, told that it is back. `bctl schedule BUNDLE spot` and
 `bctl force-queue BUNDLE` let it go before; a force of the whole queue leaves it.
 The answer is the task's place (`queued`) and what it waits for
