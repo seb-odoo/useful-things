@@ -430,6 +430,50 @@ def check_ended(root):
     check("and no file a link names", host_file.exists())
 
 
+def check_stop_again(root):
+    """A stop sent while the tunnel was down is lost (2026-11-05: two closes of Seb never reached
+    sebpc): a pass sends it again once the tunnel is up, every STOP_AGAIN until the job ends."""
+    remote_agent.STATE = root / "stop-state"
+    orders = []
+    kept = {name: getattr(remote_agent, name) for name in ("in_standin", "is_tunnel_up")}
+    remote_agent.in_standin = lambda bundle, verb, data=b"", check=True: orders.append(
+        (bundle, verb, data)
+    )
+    agent = root / "s" / ".agent"
+    agent.mkdir(parents=True)
+    remote = {"worker": "sebpc", "job": "1", "tunnel": time.time()}
+    (agent / "remote.json").write_text(json.dumps(remote))
+    remote_agent.keep_record("s", remote)
+    remote_agent.is_tunnel_up = lambda bundle: True
+    found = remote_agent.keep("s", root / "s", None)
+    check(
+        "no stop is sent to an agent that is not ending",
+        (found, orders) == ((None, False), []),
+        orders,
+    )
+    (agent / "remote-ending").touch()
+    early = time.time() - remote_agent.STOP_AGAIN + 60
+    os.utime(agent / "remote-ending", (early, early))
+    remote_agent.keep("s", root / "s", None)
+    check("nor again within STOP_AGAIN of the last one", orders == [], orders)
+    late = time.time() - remote_agent.STOP_AGAIN - 60
+    os.utime(agent / "remote-ending", (late, late))
+    remote_agent.is_tunnel_up = lambda bundle: False
+    remote_agent.keep("s", root / "s", None)
+    check("nor while the tunnel is down", orders == [], orders)
+    remote_agent.is_tunnel_up = lambda bundle: True
+    found = remote_agent.keep("s", root / "s", None)
+    stop = [("s", "order", b'{"op": "stop"}\n')]
+    check(
+        "once it is up, the stop goes again",
+        (found, orders) == (("s: its stop goes again to sebpc", False), stop),
+        (found, orders),
+    )
+    remote_agent.keep("s", root / "s", None)
+    check("once per STOP_AGAIN", orders == stop, orders)
+    vars(remote_agent).update(kept)
+
+
 def main():
     check_mounts()
     with tempfile.TemporaryDirectory() as folder:
@@ -443,6 +487,7 @@ def main():
         check_type(root)
         check_record(root)
         check_ended(root)
+        check_stop_again(root)
         check_conflict(root)
     for line in failures:
         print(line)

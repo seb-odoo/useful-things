@@ -788,7 +788,10 @@ def keep(bundle, bundle_folder, workers):
     ended = read_ended(bundle)
     if ended is not None:
         return finish(bundle, bundle_folder, ended)
-    if is_tunnel_up(bundle) or time.time() - remote.get("tunnel", 0) < PAIR_RETRY:
+    up = is_tunnel_up(bundle)
+    if up and (agent / "remote-ending").exists() and end(bundle, bundle_folder):
+        return f"{bundle}: its stop goes again to {remote['worker']}", False
+    if up or time.time() - remote.get("tunnel", 0) < PAIR_RETRY:
         return None, False
     if not workers.is_up(remote["worker"]):
         workers.ask(remote["worker"])
@@ -874,7 +877,8 @@ def finish(bundle, bundle_folder, end):
 
 def end(bundle, bundle_folder):
     """An agent that gave its verdict: claude stops and its work tree comes back, as for a move
-    back, but its next task goes to the same worker. Asked once; keep() ends the rest.
+    back, but its next task goes to the same worker. keep() asks again every STOP_AGAIN while the
+    tunnel is up, until the job ends: an order sent while it was down is lost.
     """
     agent = get_agent(bundle_folder)
     if time.time() - get_mtime(agent / "remote-ending") < STOP_AGAIN:

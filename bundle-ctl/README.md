@@ -344,7 +344,9 @@ necessary. but if we have a good setup, full remote should offer the same possib
 - Each pass of the daemon opens a tunnel that dropped again, with its stand-in when it is gone
   (and asks `worker-mux` when the connection is down: Bitwarden asks Seb once the screen is
   unlocked, `.agent/remote-down` says since when); stops the claude of an agent that gave its
-  verdict 5 minutes ago and is not busy, as a terminal closes here; and once a job ended
+  verdict 5 minutes ago and is not busy, as a terminal closes here; sends that stop, or the one
+  of a closed terminal, again every 5 minutes while its tunnel is up, until its job ends (a stop
+  sent while the tunnel is down is lost: two closes of Seb on 2026-11-05); and once a job ended
   (`~/.local/state/bundle-ctl/standin/BUNDLE/ended`, which the worker answers the next tunnel
   however long the laptop was away), writes its work tree here and drops the stand-in, the dummy
   login and the tunnel. An exec in the stand-in writes that folder too: the daemon takes `ended`
