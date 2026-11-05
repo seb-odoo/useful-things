@@ -74,6 +74,14 @@ with pip inside. The rest follows from that choice.
     security review M12). Its old databases stay on the host's server, which no bundle reaches.
 - **Browser tests run inside.** Odoo starts Chrome with `--no-sandbox --disable-dev-shm-usage`,
   which is enough under `--cap-drop=ALL` and the small `/dev/shm`.
+- **A served Odoo sends its mails to Mailpit** (Seb, 2026-11-05). The Odoo that the `odoo-bin`
+  helper, `serve.sh` or `bug-fix.sh` of the serve-for-seb skill serves gets `--smtp-port=1025`,
+  and [`container-rw/mailpit.sh`](../container-rw/mailpit.sh) starts the Mailpit of the image at
+  the first such start: SMTP on `127.0.0.1:1025`, its page on 8025, which the proxy gives as
+  `http://mail.<bundle>.localhost`. The mails stay in a temporary database until the container
+  stops, the last 500. It takes 26 MB of memory, only in a container that served an Odoo. Tests
+  send no mail, so the flag changes nothing for them. Like 8069, port 8025 answers the other
+  bundles on devnet.
 - **Commits are not signed in a container.** The `.git/config` shared with the host asks for a
   signature with a key the container does not have. `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_0` and
   `GIT_CONFIG_VALUE_0` in `containerEnv` turn it off there only: the environment wins over every

@@ -3,7 +3,8 @@
 Each dev container is opened from a bundle folder under WORKTREE_CONTAINER and Podman labels
 it with ``devcontainer.local_folder=<bundle path>``. We route ``http://<bundle>.localhost``
 (and ``*.<bundle>.localhost``) to that container's bridge IP on port 8069, and
-``bug.<bundle>.localhost`` and ``fix.<bundle>.localhost`` to the ports of ``SIDES``.
+``bug.<bundle>.localhost`` and ``fix.<bundle>.localhost`` to the ports of ``SIDES``, and
+``mail.<bundle>.localhost`` to the Mailpit of the container (``container-rw/mailpit.sh``).
 
 Usage:
  $ python proxy.py regen     # rebuild the config once from `podman ps` and reload nginx
@@ -23,6 +24,7 @@ DEVCONTAINER_LABEL = "devcontainer.local_folder"
 HTTP_PORT = 8069
 # The ports bug-fix.sh of the serve-for-seb skill serves the two sides on.
 SIDES = {"bug": 8070, "fix": 8071}
+MAILPIT_PORT = 8025
 CONF_PATH = Path.home() / ".config" / "odoo-proxy" / "odoo-dev.conf"
 
 
@@ -73,7 +75,7 @@ def _running_dev_containers():
         yield name, ip
 
 
-def _render(server_name, ip, port=HTTP_PORT):
+def _render(server_name, ip, port=HTTP_PORT, websocket="/websocket"):
     # Dots in bundle names (e.g. 19.0) are valid in server_name, so no sanitizing is needed.
     # Directives follow Odoo's recommended nginx reverse-proxy config (deploy docs).
     return f"""server {{
@@ -88,7 +90,7 @@ def _render(server_name, ip, port=HTTP_PORT):
     gzip on;
     gzip_types text/css text/plain text/xml application/xml application/json application/javascript image/svg+xml;
 
-    location /websocket {{
+    location {websocket} {{
         # Threaded dev: websockets ride on {port}; under --workers>0 switch this to 8072.
         proxy_pass http://{ip}:{port};
         proxy_http_version 1.1;
@@ -120,6 +122,7 @@ def regen():
         blocks += [
             _render(f"{side}.{subdomain}.localhost", ip, port) for side, port in SIDES.items()
         ]
+        blocks.append(_render(f"mail.{subdomain}.localhost", ip, MAILPIT_PORT, "/api/events"))
     # Bundle names are long, so the default 64-byte server-name hash bucket overflows.
     header = "server_names_hash_bucket_size 128;\n\n"
     CONF_PATH.parent.mkdir(parents=True, exist_ok=True)

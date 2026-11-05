@@ -101,6 +101,13 @@ RUN mkdir -p /home/vscode/.vscode-server/extensions \
 RUN mkdir -p /home/vscode/.local/share /home/vscode/.local/state /home/vscode/.cache && \
     chown -R vscode:vscode /home/vscode/.local /home/vscode/.cache
 
+# Mailpit, which catches the mails of a served Odoo (container-rw/mailpit.sh).
+RUN curl -fsSL https://github.com/axllent/mailpit/releases/download/v1.33.0/mailpit-linux-amd64.tar.gz \
+        -o /tmp/mailpit.tar.gz && \
+    echo "d0ec50080cbf3e7c1fa2cda2ee68125d7894175811084b1f8f47c6cfc6f487c8  /tmp/mailpit.tar.gz" | sha256sum -c - && \
+    tar -xzf /tmp/mailpit.tar.gz -C /usr/local/bin mailpit && \
+    rm -f /tmp/mailpit.tar.gz
+
 # ~/.bash_aliases, so the container's ~/.bashrc, install-claude-path.sh and the Bash( ... )
 # permission rules keep reaching the shell helpers by that name while the mount itself is the
 # directory holding them. Built here rather than in postCreateCommand so it exists before the

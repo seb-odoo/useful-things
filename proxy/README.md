@@ -8,6 +8,8 @@ Run several Odoo dev containers in parallel and reach each from the host browser
   of the container instead: a bug fix shown side by side, the code before the fix and with it,
   each on its own server and database (`bug-fix.sh` of the serve-for-seb skill). Two host names
   also keep two sessions, so Seb never logs in again when he switches tab.
+- `http://mail.<bundle>.localhost` goes to port 8025 of the container: its Mailpit, with the mails
+  of the Odoo served there (`../container-rw/mailpit.sh`).
 
 A single rootless nginx container sits on the `podman` network, listens on `127.0.0.1:80`, and
 routes by `Host` header to each dev container's IP on port 8069, on a network the two share: when

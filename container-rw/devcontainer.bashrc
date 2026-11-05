@@ -124,6 +124,7 @@ function odoo-bin() {
 	# shell/populate editions (s/p) and --stop-after-init runs.
 	if [[ -n "${ODOO_PROXY_HOST}" && "${1}" != *[sp]* && "${RES}" != *"--stop-after-init"* ]]; then
 		echo "URL: http://admin.${ODOO_PROXY_HOST}.localhost/?debug=assets"
+		bash "$(dirname "${CONTAINER_BASHRC}")/mailpit.sh" && echo "Mails: http://mail.${ODOO_PROXY_HOST}.localhost"
 	fi
 	eval $RES
 }
@@ -156,8 +157,9 @@ function odoo-bin-params() {
 	iface=""
 	if [[ -n "${ODOO_PROXY_HOST}" && "${edition}" != *[sp]* ]]; then
 		# In-container only: bind the bridge IP so the nginx proxy can reach Odoo (master's
-		# default is now 127.0.0.1), trust the proxy's forwarded headers, and load demo and test
-		# data in new DBs. Placed before ${rest} so an explicit flag can override.
+		# default is now 127.0.0.1), trust the proxy's forwarded headers, send mails to the Mailpit
+		# of the container, and load demo and test data in new DBs. Placed before ${rest} so an
+		# explicit flag can override.
 		demo=""
 		if grep -q '"--with-demo"' ./odoo/tools/config.py 2>/dev/null; then
 			# The demo default flipped to none in saas-18.3, which added --with-demo;
@@ -168,7 +170,7 @@ function odoo-bin-params() {
 		if grep -q '"--with-test-data"' ./odoo/tools/config.py 2>/dev/null; then
 			demo="${demo}--with-test-data "
 		fi
-		iface="--http-interface=0.0.0.0 --proxy-mode ${demo}"
+		iface="--http-interface=0.0.0.0 --proxy-mode --smtp-port=1025 ${demo}"
 	fi
 	echo "${cli}-d ${d} --addons-path ${addons_path} --dev replica ${iface}${rest}"
 }
