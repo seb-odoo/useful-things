@@ -300,8 +300,10 @@ class UtilsRunner(Runner):
             raise RuntimeError(
                 "no HOST_BOX in config.env: enable.sh and npm of the branch would run unboxed"
             )
-        # enable.sh and what npm runs come from the fetched branch: boxed, with no network.
-        enable = [HOST_BOX, "--dir", get_worktree_bundle_folder(bundle_name), "--", "env", *npm]
+        # enable.sh comes from the fetched branch and runs `git config`: no network, and the box
+        # holds the bundle folder alone, not the .git/config of the base (security check 11-03, B4).
+        folder = os.path.realpath(get_worktree_bundle_folder(bundle_name))
+        enable = [HOST_BOX, "--only", folder, "--dir", folder, "--", "env", *npm]
         enable += ["bash", "./odoo/addons/web/tooling/enable.sh"]
         runner.run(enable, input="y\n" if has_enterprise else "n\n")
         try:

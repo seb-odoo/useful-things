@@ -84,8 +84,10 @@ pre-commit hook then reloads the tooling: `disable.sh` deletes the link and `ena
 to enterprise with `cp -a`. When the store has no tree for the key, the link waits for it and the
 commit fails with a line that names `bctl node-modules`.
 
-`_install_js_tooling` in `utils.py` runs `enable.sh` for its config files and its hooks, with npm in
-dry run: `npm install` would replace the link with a tree of its own, built from the branch. npm
+`_install_js_tooling` in `utils.py` runs `enable.sh` for its config files and its hooks, in a
+box that holds the bundle folder alone (`HOST_BOX --only`): `enable.sh` comes from the fetched
+branch and runs `git config`, which would write the `.git/config` every bundle and the host read
+(security check 11-03, B4). npm runs in dry run: `npm install` would replace the link with a tree of its own, built from the branch. npm
 is also offline: in the box, with no network, it retried the registry for 14 minutes before it gave
 up (2026-10-21), and offline it gives up at once; `enable.sh` goes on after npm fails. Do not
 patch `enable.sh` instead: it is tracked upstream (`odoo/addons/web/tooling/enable.sh`), so a hand
@@ -108,8 +110,9 @@ every file of Seb at the root of every worktree (`test_tooling_files.py`).
 
 `bctl node-modules` builds the tree of the `package.json` of the web tooling of a base's branch,
 when the store has none: npm installs that file in a box with the network (`HOST_BOX`, refused
-without it), in a folder of its own that then goes in the store under its key, with
-`--ignore-scripts`: no install script of a package runs (security check 11-03, B4). A tree never
+without it), which holds only a folder of its own that then goes in the store under its key
+(`--only`), with `--ignore-scripts`: no install script of a package runs, and npm reaches no
+bundle nor base repo (security check 11-03, B4). A tree never
 changes once there, and a bundle linked to its key loads it at once, even in a container that runs. A bundle asks it for its
 own base and waits for Seb's yes, which `hok` shows with the change from the `package.json` of the
 tree it links; the host asks it at once. The daemon also asks it itself, every minute, for each

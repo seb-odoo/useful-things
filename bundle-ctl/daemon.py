@@ -4395,7 +4395,9 @@ def refresh_node_modules(log, base, package):
     fresh = pathlib.Path(tempfile.mkdtemp(prefix=".node_modules.", dir=WORKTREE_CONTAINER))
     try:
         (fresh / "package.json").write_text(package)
-        install = [HOST_BOX, "--net", "--dir", str(fresh), "--"]
+        # The box holds the fresh folder alone, by its resolved path as host-box asks.
+        folder = os.path.realpath(fresh)
+        install = [HOST_BOX, "--net", "--only", folder, "--dir", folder, "--"]
         install += ["npm", "install", "--ignore-scripts", "--no-audit", "--no-fund"]
         log.write(f"$ {' '.join(install)}\n")
         log.flush()
