@@ -339,7 +339,7 @@ def check_queue(agent_list):
         path.write_text(json.dumps(TRANSCRIPTS["S9"][0], separators=(",", ":")) + "\n")
         if (found := agent_list.get_last_prompt(path)) != "Rebase on master":
             failures.append(f"prompt of a bundle not built yet: {found!r}")
-        answers = [agent_list.read_answer(session) for session in ("S9", "S8", "S0", None)]
+        answers = [agent_list.read_answer(session, "b") for session in ("S9", "S8", "S0", None)]
         if answers != ["Waiting for you: r+ on odoo#7", "pushed: abc", "", ""]:
             failures.append(f"answers {answers!r}: a close line, else the first line")
     return failures

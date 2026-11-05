@@ -341,7 +341,7 @@ def check_yes(root):
             threads[-1].start()
 
     cut.get_live_sessions = lambda records: {OPS_LIVE, OPS_CUT}
-    daemon.get_transcript = lambda session: True
+    daemon.get_transcript = lambda session, *_: True
     daemon.is_agent_running = lambda name: name == MAPPED
     daemon.get_window_pids = lambda name: [1] * (name in dead)
     daemon.close_window = close_window

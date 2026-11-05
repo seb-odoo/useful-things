@@ -37,6 +37,7 @@ import threading
 import time
 import traceback
 import urllib.parse
+import urllib.request
 import uuid
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -218,6 +219,8 @@ MAX_PRIORITY = 100
 MAX_RELAUNCHES = 3
 MAX_REPORT_LINE = 200
 MAX_TASK = 32 * 1024
+GITHUB_RAW = "https://raw.githubusercontent.com"
+MAX_PACKAGE = 256 * 1024
 MAX_TOLD = 2000
 MAX_WIDTH = 400
 NAME = re.compile(r"[a-z0-9](?:[a-z0-9.]|-(?!-)){0,79}")
@@ -231,6 +234,10 @@ NOT_BUILT = (
 )
 OPS_OPEN = "ops-window-open"
 OPS_TASK = "The agent of the bundle {bundle} sends this task, and Seb said yes to it in hok:\n\n"
+OUTSIDE_TASK = (
+    "The agent of the bundle {bundle}, on a PR of an author outside odoo, sends this task: this"
+    " bundle is marked outside too.\n\n"
+)
 PARENT_KEPT = 86400
 PASTE_END = "\x1b[201~"
 PASTE_START = "\x1b[200~"
@@ -994,7 +1001,7 @@ def stop_after_turn(bundle, session, why, drop_done=False):
             time.sleep(1)
             busy = get_session_status(container, session) == "busy"
         try:
-            transcript = get_transcript(session)
+            transcript = get_transcript(session, bundle)
             row = transcript and cut.read_session(transcript)
         except OSError:
             row = None
@@ -1582,7 +1589,8 @@ def launch_queued():
             if (task.parent / "session").exists():
                 relaunches.pop(bundle, None)
             elif (
-                str(task.parent.parent) not in open_windows
+                (text := read_text(task, MAX_TASK))
+                and str(task.parent.parent) not in open_windows
                 and bundle not in state["launches"]
                 and bundle not in queued
                 and relaunches.get(bundle, 0) < MAX_RELAUNCHES
@@ -1597,7 +1605,7 @@ def launch_queued():
                         "parent": parent,
                         "priority": get_task_priority(bundle),
                         "queued": float(read_text(task.parent / "queued") or now),
-                        "task": task.read_text(),
+                        "task": text,
                     },
                 )
         state["queue"][:0] = stranded
@@ -2154,7 +2162,7 @@ def leave_worker(bundle, folder, worker, done, session):
             set_place(bundle, "local")
             return f"{bundle}: its agent stops on {worker}, the worker is leaving"
         return None
-    if not get_transcript(session):
+    if not get_transcript(session, bundle):
         return None
     moving_back.add(bundle)
 
@@ -2236,7 +2244,7 @@ def place_agent(caller, query, body):
     )
     if goes_on and any(item["bundle"] == bundle and item.get("resume") for item in state["queue"]):
         raise Refused(f"the session of {bundle} is queued already")
-    if goes_on and not get_transcript(session):
+    if goes_on and not get_transcript(session, bundle):
         raise Refused(f"the claude of {bundle} has not started yet: move it once it runs")
     task = {"priority": get_task_priority(bundle), "resume": True, "task": GO_ON}
     if remote:
@@ -2615,7 +2623,7 @@ def get_report(bundle):
     window then shows nothing more to read."""
     agent = get_agent_folder(bundle)
     report, session = read_text(agent / "result.md"), read_text(agent / "session")
-    transcript = session and get_transcript(session)
+    transcript = session and get_transcript(session, bundle)
     if read_text(agent / "done") is None or not report or not transcript:
         return None
     return report if (get_last_text(transcript) or "").strip() == report else None
@@ -2714,7 +2722,7 @@ def restart_old_terminal():
             or (agent / "pause").exists()
             or is_deleting(bundle)
             or get_session_status(bundle, read_text(agent / "session")) != "idle"
-            or TITLE.is_resuming(read_text(agent / "session"))
+            or TITLE.is_resuming(read_text(agent / "session"), bundle)
         ):
             continue
         env = env or session_env()
@@ -2740,7 +2748,7 @@ def free_done_terminals():
     for bundle, pid in get_terminals().items():
         agent = get_agent_folder(bundle)
         session = read_text(agent / "session")
-        transcript = session and get_transcript(session)
+        transcript = session and get_transcript(session, bundle)
         if (
             bundle in queued
             or read_text(agent / "terminal") != str(pid)
@@ -2750,7 +2758,7 @@ def free_done_terminals():
             or not transcript
             or time.time() - (get_mtime(transcript) or 0) < FREE_AFTER
             or get_session_status(bundle, session) != "idle"
-            or TITLE.is_resuming(session)
+            or TITLE.is_resuming(session, bundle)
         ):
             continue
         lines = (get_last_text(transcript) or "").strip().splitlines()
@@ -2787,8 +2795,8 @@ def requeue_failed_terminals():
             or get_session_status(bundle, session) != "idle"
         ):
             continue
-        login = TITLE.is_login_wait(session)
-        errors = TITLE.count_api_errors(session, TITLE.RETRIES + len(REQUEUE_AFTER))
+        login = TITLE.is_login_wait(session, bundle)
+        errors = TITLE.count_api_errors(session, TITLE.RETRIES + len(REQUEUE_AFTER), bundle)
         if not login and errors <= TITLE.RETRIES:
             continue
         env = env or session_env()
@@ -2839,7 +2847,7 @@ def get_terminal_wait(item, now):
     if (
         (agent / "pause").exists()
         or get_session_status(item["bundle"], session) != "idle"
-        or TITLE.is_resuming(session)
+        or TITLE.is_resuming(session, item["bundle"])
     ):
         return "the previous agent of the bundle to be idle"
     return None
@@ -2936,7 +2944,7 @@ def type_remote(item):
     if (
         (agent / "pause").exists()
         or get_session_status(bundle, session) not in statuses
-        or TITLE.is_resuming(session)
+        or TITLE.is_resuming(session, bundle)
     ):
         return f"its agent on {worker} to be idle"
     if (agent / "remote-down").exists():
@@ -2995,7 +3003,7 @@ def is_remote_free(bundle, session):
         session and any(map(PRWATCH.has_lines, get_told_folders(bundle, session)))
     ):
         return False
-    transcript = session and get_transcript(session)
+    transcript = session and get_transcript(session, bundle)
     if not transcript:
         return True
     lines = (get_last_text(transcript) or "").strip().splitlines()
@@ -3026,7 +3034,7 @@ def tell_remote_agents(bundles):
                 for name in ("remote-down", "remote-ending", "remote-moving")
             )
             or get_session_status(bundle, session) not in ("idle", "busy", "shell")
-            or TITLE.is_resuming(session)
+            or TITLE.is_resuming(session, bundle)
         ):
             continue
 
@@ -3071,7 +3079,7 @@ def end_typed_turn(bundle, agent, session):
     it: in the job it writes the first verdict alone, as its own `.agent/done` stays. Once the
     session is idle again since the task was typed. A line for the journal on a verdict."""
     since = read_text(agent / "remote-typed") or ""
-    transcript = session and get_transcript(session)
+    transcript = session and get_transcript(session, bundle)
     if (
         not re.fullmatch(r"[0-9]{1,16}", since)
         or not transcript
@@ -3125,6 +3133,49 @@ def may_queue(caller, bundle):
     """Whether a task of the caller goes to the queue of a bundle with no yes: from the host, the
     bundle itself, or the one that queued its last task."""
     return caller in (HOST, bundle, read_text(get_agent_folder(bundle) / "parent"))
+
+
+def hold_fetch(caller, bundle, name, body, sender):
+    """Hold the fetch a bundle on an outside PR asks for Seb's yes in hok: the fetched bundle is
+    not marked, reads the shared memory, and pushes a branch of Seb by itself (security check
+    11-03, B6). The yes fetches it, with its task when it has one."""
+    if HELD is None:
+        raise Refused("no gateway-core beside useful-things: hok cannot list the fetch")
+    build = ["fetch_bundle.py", name, "--no-open"]
+    task = body.get("task")
+    if task:
+        body = {**body, "task": OPS_TASK.format(bundle=caller) + task}
+    item = {
+        "client": caller,
+        "key": f"fetch {caller} {bundle} {hashlib.sha256(json.dumps(body).encode()).hexdigest()}",
+        "lines": [
+            f"{caller} is on a PR of an author outside odoo: {sender.get('url')}",
+            *([f"its task for {bundle}:", *task.splitlines()] if task else []),
+        ],
+        "send": {"fetch": {"body": body, "build": build, "bundle": bundle}},
+        "title": f"fetch the bundle {bundle}, asked by a bundle on an outside PR",
+        "yes": f"{bundle} is fetched{', and the task below queued for it' if task else ''}",
+    }
+    return 200, {"bundle": bundle, "held": hold(item)}
+
+
+def send_fetch(item):
+    """Seb's yes to a fetch held by hold_fetch: queued as from the host, or built at once."""
+    fetched = item["send"]["fetch"]
+    bundle, body = fetched["bundle"], fetched["body"]
+    if "task" in body:
+        try:
+            check_task(bundle, body)
+        except Refused as error:
+            raise ValueError(str(error)) from None
+        enqueue(HOST, bundle, body, fetched["build"])
+        return f"{bundle} is fetched, then its agent runs the task of {item['client']}"
+
+    def work(log):
+        return build(log, HOST, bundle, body, *fetched["build"])
+
+    start_job(HOST, "fetch", work, bundle=bundle)
+    return f"{bundle} is being fetched"
 
 
 def hold_task(caller, bundle, body, build=None):
@@ -3939,7 +3990,7 @@ def keep_last_answer(bundle):
     removes: the last text of its session, else the report its Stop hook wrote."""
     agent = get_agent_folder(bundle)
     session = read_text(agent / "session")
-    transcript = session and get_transcript(session)
+    transcript = session and get_transcript(session, bundle)
     answer = (transcript and get_last_text(transcript)) or read_text(agent / "result.md")
     get_kept(bundle).parent.mkdir(parents=True, exist_ok=True)
     if answer:
@@ -4191,6 +4242,8 @@ def send_held(item):
         return resume_cut(item["send"]["resume"])
     if "queue" in item["send"]:
         return send_task(item)
+    if "fetch" in item["send"]:
+        return send_fetch(item)
     if "free_disk" in item["send"]:
         return send_free_disk(item)
     if "node_modules" in item["send"]:
@@ -4242,6 +4295,8 @@ def create(caller, query, body):
         raise Refused(f"{bundle} already exists")
     check_unpushed(bundle, "gnb")
     check_task(bundle, body)
+    if caller != HOST and outside.inherit(bundle, caller) and "task" in body:
+        body = {**body, "task": OUTSIDE_TASK.format(bundle=caller) + body["task"]}
     args = [base, name, "--no-push", "--no-open"]
     for repo in branch_repos:
         args += ["--branch-repo", repo]
@@ -4276,6 +4331,8 @@ def fetch(caller, query, body):
     check_unpushed(bundle, "pfb")
     check_task(bundle, body)
     outside.check_fetch(bundle, name)
+    if caller != HOST and (sender := outside.read_mark(caller)):
+        return hold_fetch(caller, bundle, name, body, sender)
     if "task" in body and get_agent_folder(bundle).is_dir() and not may_queue(caller, bundle):
         return hold_task(caller, bundle, body, ["fetch_bundle.py", name, "--no-open"])
     if "task" in body:
@@ -4301,6 +4358,19 @@ def read_package(base):
     return res.stdout
 
 
+def read_github_package(base):
+    """The package.json of the web tooling of odoo on the base branch, as GitHub has it: every
+    bundle moves the refs of the shared .git, and writes its objects (security check 11-03, B4).
+    None when GitHub does not answer."""
+    path = f"odoo/odoo/{urllib.parse.quote(base)}/addons/web/tooling/_package.json"
+    try:
+        with urllib.request.urlopen(f"{GITHUB_RAW}/{path}", timeout=10) as answer:
+            data = answer.read(MAX_PACKAGE + 1)
+    except OSError:
+        return None
+    return data.decode(errors="replace") if len(data) <= MAX_PACKAGE else None
+
+
 def node_modules_tree(package):
     """The folder of the store of node_modules (scripts/README.md) built from `package`."""
     return pathlib.Path(WORKTREE_CONTAINER) / ".node_modules" / node_modules_key(package.encode())
@@ -4321,7 +4391,7 @@ def refresh_node_modules(log, base, package):
     try:
         (fresh / "package.json").write_text(package)
         install = [HOST_BOX, "--net", "--dir", str(fresh), "--"]
-        install += ["npm", "install", "--no-audit", "--no-fund"]
+        install += ["npm", "install", "--ignore-scripts", "--no-audit", "--no-fund"]
         log.write(f"$ {' '.join(install)}\n")
         log.flush()
         res = subprocess.run(
@@ -4344,14 +4414,17 @@ def refresh_node_modules(log, base, package):
 def build_node_modules():
     """Build the tree of the package.json of each base whose odoo head moved, when the store has
     none: a bundle fetches the bases in the shared .git, and the host builds what `bctl
-    node-modules` would build for it (Seb, 2026-10-27)."""
+    node-modules` would build for it (Seb, 2026-10-27). The head is only a sign: the package.json
+    comes from GitHub."""
     refs = [get_remote_ref(base, "odoo") for base in STICKY_BUNDLES]
     heads = read_base_heads("odoo", refs)
     for base, ref in zip(STICKY_BUNDLES, refs):
         if ref not in heads or package_heads.get(base) == heads[ref]:
             continue
+        package = read_github_package(base)
+        if package is None:
+            continue
         package_heads[base] = heads[ref]
-        package = read_package(base)
         if not (node_modules_tree(package) / "node_modules" / ".bin").is_dir():
             start_job(
                 HOST,
@@ -4542,7 +4615,7 @@ def check_ops_session(bundle, body):
     bodies = ({"bundle": bundle}, {"bundle": bundle, "terminal": True})
     if not SESSION_ID.fullmatch(session) or body not in bodies:
         raise ValueError(f"{OPS}SESSION: a session id, alone or with terminal")
-    if not get_transcript(session):
+    if not get_transcript(session, bundle):
         raise Refused(f"{bundle}: no conversation to go on with")
     if body.get("terminal") and is_agent_running(bundle):
         raise Refused(f"{bundle}: already in a window")
@@ -4561,7 +4634,7 @@ def move_to_tab(log, bundle):
             raise Refused(f"{bundle}: its agent window still runs the session")
         time.sleep(0.5)
     session = bundle.removeprefix(OPS)
-    mode, cut = get_resume(get_transcript(session))
+    mode, cut = get_resume(get_transcript(session, bundle))
     storage = pathlib.Path(CLAUDE_CONFIG_CONTAINER) / os.path.basename(HOST_FOLDER)
     storage /= "extension-storage"
     if mode:
@@ -4620,7 +4693,7 @@ def open_deleted(caller, bundle, body):
     bare folder is made again, and `bctl build` fetches the bundle if the agent needs the code
     (Seb, 2026-10-28: the Agent button of a Firefox group whose bundle was gone)."""
     session = read_text(get_kept(bundle, ".session")) or ""
-    if caller != HOST or not SESSION_ID.fullmatch(session) or not get_transcript(session):
+    if caller != HOST or not SESSION_ID.fullmatch(session) or not get_transcript(session, bundle):
         raise ValueError(f"no bundle folder for {bundle}")
     if "task" in body or body.get("resume"):
         raise ValueError("terminal: only without a task")

@@ -69,7 +69,7 @@ def get_items(entry):
 def get_info(bundle):
     session = read_text(get_agent_folder(bundle) / "session")
     session = session if SESSION_ID.fullmatch(session or "") else None
-    transcript = session and get_transcript(session)
+    transcript = session and get_transcript(session, bundle)
     items = [item for entry in read_entries(transcript) for item in get_items(entry)] if transcript else []
     answers = [item for item in items if item["role"] == "assistant"]
     for item in items:

@@ -57,11 +57,15 @@ NEW = "new session"
 OPS = "ops-"
 PARTS = re.compile(r"^[#*_ ]*(Done|Decide|Your action)\b", re.MULTILINE)
 PROMPT = 50
+HOST_PROJECT = re.sub(
+    r"[^A-Za-z0-9]", "-", os.environ.get("REPO_ROOT") or str(pathlib.Path.home() / "repo")
+)
 PROJECTS = (
     pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or pathlib.Path.home() / ".claude")
     / "projects"
 )
 RESUMING = "continuing automatically at"
+SESSION_NAME = re.compile(r"[\w-]+")
 RESUMING_FOR = 5 * 3600
 RETRIES = 5
 SEPARATELY = re.compile(r"[*_\s]*Separately\s*:")
@@ -69,12 +73,24 @@ TAIL = 256 * 1024
 TITLES = {"ai-title": "aiTitle", "custom-title": "customTitle"}
 
 
-def get_transcript(session):
-    return next(PROJECTS.glob(f"*/{session}.jsonl"), None)
+def get_projects(bundle):
+    """The folders that hold the transcripts of a bundle, or of an ops window: never a folder of
+    the other kind, as every bundle writes `-workspace` (security check 11-03, B5). An ops
+    session is in the ops container's own folder, or in the host's for one of before."""
+    if bundle.startswith(OPS):
+        return [PROJECTS / f"ops{HOST_PROJECT}", PROJECTS / HOST_PROJECT]
+    return [PROJECTS / "-workspace"]
 
 
-def read_tail(session):
-    path = get_transcript(session)
+def get_transcript(session, bundle=""):
+    if not SESSION_NAME.fullmatch(session or ""):
+        return None
+    paths = [folder / f"{session}.jsonl" for folder in get_projects(bundle)]
+    return next((path for path in paths if path.is_file()), None)
+
+
+def read_tail(session, bundle=""):
+    path = get_transcript(session, bundle)
     try:
         with path.open("rb") as file:
             file.seek(max(0, file.seek(0, os.SEEK_END) - TAIL))
@@ -83,10 +99,10 @@ def read_tail(session):
         return []
 
 
-def get_first_prompt(session):
+def get_first_prompt(session, bundle=""):
     """The first line of the first prompt typed in a session, PROMPT characters at most."""
     try:
-        with get_transcript(session).open("rb") as file:
+        with get_transcript(session, bundle).open("rb") as file:
             lines = file.read(TAIL).splitlines()
     except (AttributeError, OSError):
         return None
@@ -116,22 +132,22 @@ def get_first_prompt(session):
     return None
 
 
-def get_topic(session):
+def get_topic(session, bundle=""):
     """The title Claude gave the conversation, or the one it was given by name, else its first
     prompt: Claude gives no title to a prompt of a word or two ("triage", on 2026-11-02)."""
     titles = {}
-    for line in read_tail(session):
+    for line in read_tail(session, bundle):
         try:
             entry = json.loads(line)
             key = TITLES[entry["type"]]
             titles[key] = " ".join(str(entry[key]).split())
         except (KeyError, TypeError, ValueError):
             continue
-    return titles.get("customTitle") or titles.get("aiTitle") or get_first_prompt(session) or NEW
+    return titles.get("customTitle") or titles.get("aiTitle") or get_first_prompt(session, bundle) or NEW
 
 
-def get_last_answer(session):
-    for line in reversed(read_tail(session)):
+def get_last_answer(session, bundle=""):
+    for line in reversed(read_tail(session, bundle)):
         try:
             entry = json.loads(line)
             content = entry["message"]["content"] if entry["type"] == "assistant" else []
@@ -143,13 +159,13 @@ def get_last_answer(session):
     return ""
 
 
-def is_resuming(session):
+def is_resuming(session, bundle=""):
     """Whether a session waits for the reset of the usage limit, that Claude then goes on with by
     itself: its last notice says so, and no message nor other notice came after it. Not past
     RESUMING_FOR, the longest wait of a session limit: a claude that ended while it waited leaves
     that notice last, and one started later on the session does not go on by itself."""
     since = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - RESUMING_FOR))
-    for line in reversed(read_tail(session)):
+    for line in reversed(read_tail(session, bundle)):
         try:
             entry = json.loads(line)
             if entry["type"] in ("user", "assistant") or entry.get("subtype") == "informational":
@@ -159,13 +175,13 @@ def is_resuming(session):
     return False
 
 
-def read_answers(session):
+def read_answers(session, bundle=""):
     """The answers of the main thread of a session, the last one first, read TAIL bytes at a time
     up its transcript: a turn that ends on an API error writes the blobs of its request first,
     77 KB a turn in a bundle on 2026-10-30, so that TAIL held 3 such turns, never the 6 of the
     requeue, and its terminal typed GO_ON 423 times."""
     try:
-        with get_transcript(session).open("rb") as file:
+        with get_transcript(session, bundle).open("rb") as file:
             end, rest = file.seek(0, os.SEEK_END), b""
             while end:
                 start = max(0, end - TAIL)
@@ -184,12 +200,12 @@ def read_answers(session):
         return
 
 
-def count_api_errors(session, most=RETRIES + 1):
+def count_api_errors(session, most=RETRIES + 1, bundle=""):
     """How many turns in a row of a session ended on an API error that a new request may pass: a
     5xx, the API out of reach, an answer cut; `most` at most. 0 when its last message is anything
     else. A usage limit is not one: Claude goes on with it at the reset."""
     count = 0
-    for entry in read_answers(session):
+    for entry in read_answers(session, bundle):
         if count == most or not entry.get("isApiErrorMessage"):
             return count
         if entry.get("error") != "server_error":
@@ -198,11 +214,11 @@ def count_api_errors(session, most=RETRIES + 1):
     return count
 
 
-def is_login_wait(session):
+def is_login_wait(session, bundle=""):
     """Whether the last turn of a session ended on the 529 claude-switch gives a dummy login while
     the main login expires: a new request passes once a laptop session or bundle-ctl renewed it,
     not before."""
-    for entry in read_answers(session):
+    for entry in read_answers(session, bundle):
         return bool(entry.get("isApiErrorMessage")) and LOGIN_WAIT in str(entry.get("message"))
     return False
 
@@ -213,12 +229,12 @@ def is_hok_wait(call, told):
     return bool(HOK_WAIT.search(str(command or ""))) and not (job and job[1] in told)
 
 
-def get_hok_wait(session):
+def get_hok_wait(session, bundle=""):
     """When a session began to wait for Seb's answer in hok, as epoch seconds: the start of the
     calls of hok-answer or `hctl job` it made in a row, the last one still running. None when no
     such call runs: answered, sent to the background, or another call runs. An `hctl job` of a
     request that hok told his yes to waits for its run, not for him."""
-    lines = read_tail(session)
+    lines = read_tail(session, bundle)
     told = {
         number
         for line in lines
@@ -278,16 +294,16 @@ def is_closed(answer, finished):
     return bool(LEFT.match(close)) if close else finished(answer)
 
 
-def get_mark(status_by_session, finished=is_finished):
+def get_mark(status_by_session, finished=is_finished, bundle=""):
     statuses = set(status_by_session.values())
     if not statuses:
         return ""
     busy = [session for session, status in status_by_session.items() if status == "busy"]
-    if "waiting" in statuses or any(map(get_hok_wait, busy)):
+    if "waiting" in statuses or any(get_hok_wait(session, bundle) for session in busy):
         return "✋"
-    if busy or any(map(is_resuming, status_by_session)):
+    if busy or any(is_resuming(session, bundle) for session in status_by_session):
         return "⏳"
-    answers = map(get_last_answer, status_by_session)
+    answers = [get_last_answer(session, bundle) for session in status_by_session]
     return "✅" if all(is_closed(answer, finished) for answer in answers) else "✋"
 
 
@@ -297,8 +313,8 @@ def get_title(bundle, status_by_session=None, flag=None, where=None):
     name = bundle.removesuffix(suffix)
     icon, kind = next((icon, kind) for icon, kind, matches in KINDS if matches(name, own))
     finished = is_reported if kind == "ops" else is_finished
-    mark = FLAGS[flag] if flag else get_mark(status_by_session or {}, finished)
-    label = get_topic(bundle.removeprefix(OPS)) if kind == "ops" else bundle
+    mark = FLAGS[flag] if flag else get_mark(status_by_session or {}, finished, bundle)
+    label = get_topic(bundle.removeprefix(OPS), bundle) if kind == "ops" else bundle
     label = f"{label} @{where}" if where else label
     return f"{mark} {icon} {label} ({kind})".lstrip()
 

@@ -14,10 +14,11 @@ import subprocess
 import time
 
 from commands import BUNDLE_NAME, get_worktree_bundle_folder
-from config import CLAUDE_CONFIG_CONTAINER, STATE_ROOT
+from config import CLAUDE_CONFIG_CONTAINER, HOST_PROJECT, STATE_ROOT
 
 EFFORTS = ("low", "medium", "high", "xhigh")
 HANDLED_FOR = 24 * 3600
+MAX_HANDLED = 64 * 1024
 IDLE_AFTER = 15 * 60
 LAUNCH_GRACE = 15 * 60
 MAX_VALUE = 128
@@ -95,9 +96,23 @@ def get_agent_folder(bundle):
     return pathlib.Path(get_worktree_bundle_folder(bundle)) / ".agent"
 
 
-def get_transcript(session):
-    """The transcript of a Claude session of any container, None when it has none."""
-    return next(PROJECTS.glob(f"*/{session}.jsonl"), None)
+def get_projects(bundle):
+    """The folders that hold the transcripts of a bundle, or of an ops window (ops-SESSION): the
+    ops container's own, then the host's of before (security check 11-03, K1). Never a folder of
+    the other kind: every bundle writes `-workspace`, and a transcript there named after an ops
+    session would become its resume prompt (security check 11-03, B5)."""
+    if bundle.startswith(OPS):
+        return [PROJECTS / f"ops{HOST_PROJECT}", PROJECTS / HOST_PROJECT]
+    return [PROJECTS / "-workspace"]
+
+
+def get_transcript(session, bundle=""):
+    """The transcript of a Claude session of a bundle, or of an ops window, None when it has
+    none."""
+    if not re.fullmatch(r"[\w-]+", session or ""):
+        return None
+    paths = [folder / f"{session}.jsonl" for folder in get_projects(bundle)]
+    return next((path for path in paths if path.is_file()), None)
 
 
 def get_session_records(container):
@@ -221,26 +236,33 @@ def is_handled(bundle, news, is_open=False):
     if opened <= (get_mtime(folder / "task.md") or 0):
         return False
     seen_open = folder / "handled.open"
-    if is_open:
-        seen_open.touch()
-    if time.time() - max(opened, get_mtime(seen_open) or 0) > HANDLED_FOR:
-        return False
-    seen = folder / "handled.json"
-    if (get_mtime(seen) or 0) < opened:
-        written = folder / f"handled.json.{os.getpid()}"
-        written.write_text(json.dumps(news))
-        written.replace(seen)
-        return True
     try:
-        return not set(news) - set(json.loads(seen.read_text()))
-    except (OSError, ValueError):
+        if is_open:
+            touch(seen_open)
+        if time.time() - max(opened, get_mtime(seen_open) or 0) > HANDLED_FOR:
+            return False
+        seen = folder / "handled.json"
+        if (get_mtime(seen) or 0) < opened:
+            write_text(seen, json.dumps(news))
+            return True
+        return not set(news) - set(json.loads(read_text(seen, MAX_HANDLED) or "null"))
+    except (OSError, TypeError, ValueError):
         return False
 
 
 def mark_handled(bundle):
     folder = get_agent_folder(bundle)
     folder.mkdir(exist_ok=True)
-    (folder / "handled").touch()
+    touch(folder / "handled")
+
+
+def touch(path):
+    """Set the time of a file of an `.agent/` folder to now, made when missing, a link replaced."""
+    fd = open_unlinked(path, os.O_WRONLY | os.O_CREAT)
+    try:
+        os.utime(fd)
+    finally:
+        os.close(fd)
 
 
 def get_bundle_container(bundle):

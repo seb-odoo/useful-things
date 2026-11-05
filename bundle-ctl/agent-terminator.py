@@ -239,7 +239,7 @@ def main():
     terminator += ["--title", get_title(bundle, "--starting")]
     agent = get_agent_folder(bundle)
     session = bundle.removeprefix(OPS) if bundle.startswith(OPS) else read_text(agent / "session")
-    fresh = not read_text(agent / "task.md") and not get_transcript(session)
+    fresh = not read_text(agent / "task.md") and not get_transcript(session, bundle)
     terminator += [] if fresh else ["--hidden"]
     since = time.time() * 1000
     code = follow(bundle, subprocess.Popen(terminator), since)

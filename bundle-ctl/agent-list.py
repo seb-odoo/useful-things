@@ -247,7 +247,11 @@ def read_agents():
         (
             row,
             (
-                *get_info(row, read_answer(found[row.key]), records.get(found[row.key])),
+                *get_info(
+                    row,
+                    read_answer(found[row.key], picker.get_owner(row, found[row.key])),
+                    records.get(found[row.key]),
+                ),
                 get_tabs(groups.get(row.key, [])),
                 found[row.key],
             ),
@@ -492,15 +496,15 @@ def get_stamp(path):
     return stat.st_mtime_ns, stat.st_size
 
 
-def read_answer(session):
+def read_answer(session, bundle):
     """The close line of the last answer of a session, else its first line, as an agent at work
     has none. Read again only once the transcript changed, as the rows are read every 2 seconds."""
     title = picker.load_title()
-    stamp = get_stamp(session and title.get_transcript(session))
+    stamp = get_stamp(session and title.get_transcript(session, bundle))
     if stamp is None:
         return ""
     if answers.get(session, (None,))[0] != stamp:
-        last = title.get_last_answer(session)
+        last = title.get_last_answer(session, bundle)
         first = next((line.strip() for line in last.splitlines() if line.strip()), "")
         answers[session] = (stamp, title.get_close_line(last) or first)
     return answers[session][1]
@@ -511,7 +515,7 @@ def read_session(bundle, session):
     session, and its answer (read_answer). Read again only once the transcript changed, as the
     queue is read every 10 seconds."""
     title = picker.load_title()
-    path = session and title.get_transcript(session)
+    path = session and title.get_transcript(session, bundle)
     stamp = get_stamp(path)
     if stamp is None:
         return title.get_title(bundle), "", ""
@@ -519,7 +523,7 @@ def read_session(bundle, session):
         found = (
             title.get_title(bundle, {session: "idle"}),
             get_last_prompt(path),
-            read_answer(session),
+            read_answer(session, bundle),
         )
         sessions[session] = (stamp, found)
     return sessions[session][1]

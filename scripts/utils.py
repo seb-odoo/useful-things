@@ -13,6 +13,7 @@ from agents import mark_handled
 from command_runner import Runner, ignore_error
 from commands import (
     BUNDLE_SUFFIX,
+    GIT,
     MADE,
     drop_stale_containers,
     get_devcontainer_config,
@@ -26,6 +27,7 @@ from commands import (
     get_worktree_bundle_folder,
     get_worktree_bundle_repo_folder,
     get_worktree_container_folder,
+    is_bundle_worktree,
 )
 from config import BUNDLE_DB_CONTAINER, HOST_BOX, WORKTREE_CONTAINER, node_modules_key
 
@@ -221,16 +223,20 @@ class UtilsRunner(Runner):
                 fields[key] = value
             if fields.get("branch") != f"refs/heads/{branch}":
                 continue
+            path = fields.get("worktree", "")
+            if os.path.lexists(path) and not is_bundle_worktree(path):
+                # The entry of a bundle names any folder: git runs nothing there.
+                continue
             if "prunable" in fields:
                 # Only this branch's registrations go: `git worktree prune` would also drop those of
                 # dev container worktrees still in use, whose path never exists on the host.
-                runner.run(["git", "worktree", "remove", "--force", fields["worktree"]])
+                runner.run([*GIT, "worktree", "remove", "--force", path])
             elif prunable_only:
                 continue
             else:
                 # Detached at the same commit, so the repos building against it see the same code.
-                runner.run(["git", "-C", fields["worktree"], "switch", "--detach"])
-            released.append(fields["worktree"])
+                runner.run([*GIT, "-C", path, "switch", "--detach"])
+            released.append(path)
         return released
 
     def _devcontainer_folder_uri(self, bundle_folder):
@@ -279,6 +285,9 @@ class UtilsRunner(Runner):
             return
         has_enterprise = os.path.isdir(enterprise_wt)
         repo_wts = [odoo_wt, enterprise_wt] if has_enterprise else [odoo_wt]
+        if not all(map(is_bundle_worktree, repo_wts)):
+            print(f"{bundle_name}: a repo folder is a link, no tooling there")
+            return
         for repo_wt in repo_wts:
             runner.run(["rm", "-rf", f"{repo_wt}/node_modules"])
         # npm installs nothing, and offline it gives up at once on a registry the box cannot reach:
@@ -350,9 +359,9 @@ class UtilsRunner(Runner):
                 # A name like `*` is a pattern to git, and would hide Seb's files.
                 if entries.get(name) != mtime and re.fullmatch(r"[A-Za-z0-9._-]+", name)
             ]
-            if not written:
+            if not written or not is_bundle_worktree(folder):
                 continue
-            res = runner.run(["git", "ls-files", "-o", "--directory", "--", *written], cwd=folder)
+            res = runner.run([*GIT, "ls-files", "-o", "--directory", "--", *written], cwd=folder)
             untracked = set(res.stdout.splitlines())
             if names := [name for name in written if {name, f"{name}/"} & untracked]:
                 self._exclude_at_root(repo, names)
@@ -483,6 +492,8 @@ class UtilsRunner(Runner):
 
     def switch_to_branch(self, *, repo, branch, target_ref: str = None):
         cwd = get_worktree_bundle_repo_folder(branch, repo)
+        if not is_bundle_worktree(cwd):
+            raise RuntimeError(f"{cwd}: not the worktree of a bundle, or a link")
         if not target_ref:
             target_ref = get_remote_dev_branch_name(branch, repo)
-        self.run(["git", "switch", "--no-track", "-C", branch, target_ref], cwd=cwd)
+        self.run([*GIT, "switch", "--no-track", "-C", branch, target_ref], cwd=cwd)

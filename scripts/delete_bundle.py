@@ -20,6 +20,7 @@ import argcomplete
 import tab_groups
 from command_runner import ignore_error
 from commands import (
+    GIT,
     clean_bundle_name,
     get_database_bundle_prefixes,
     get_remote_dev_repo,
@@ -27,6 +28,7 @@ from commands import (
     get_repos,
     get_worktree_bundle_folder,
     get_worktree_bundle_repo_folder,
+    is_bundle_worktree,
 )
 from config import (
     BUNDLE_DB_CONTAINER,
@@ -69,9 +71,9 @@ def get_unsaved_work(runner: UtilsRunner, bundle_name: str):
     def handle_repo(runner: UtilsRunner, repo: str):
         found = {}
         folder = get_worktree_bundle_repo_folder(bundle_name, repo)
-        if os.path.isdir(folder):
+        if is_bundle_worktree(folder):
             res = runner.run(
-                ["git", "status", "--porcelain"],
+                [*GIT, "status", "--porcelain"],
                 cwd=folder,
                 handle_exceptions={"fatal: not a git repository": ignore_error},
             )
@@ -237,25 +239,30 @@ def delete_bundle(
         with repo_locks[repo] if repo_locks else nullcontext():
             runner = runner.with_params(cwd=get_repo_folder(repo))
             wt_bundle_repo_folder = get_worktree_bundle_repo_folder(bundle_name, repo)
-            runner.run(
-                ["git", "worktree", "unlock", wt_bundle_repo_folder],
-                handle_exceptions={
-                    f"'{wt_bundle_repo_folder}' is not locked": ignore_error,
-                    f"'{wt_bundle_repo_folder}' is not a working tree": ignore_error,
-                },
-            )
-            runner.run(
-                [
-                    "git",
-                    "worktree",
-                    "remove",
-                    wt_bundle_repo_folder,
-                    *(["--force"] if force else []),
-                ],
-                handle_exceptions={
-                    f"fatal: '{wt_bundle_repo_folder}' is not a working tree": ignore_error,
-                },
-            )
+            # A link left there by the bundle names a worktree of its choice, which git would
+            # remove: the bundle folder then goes with the link alone.
+            if not os.path.lexists(wt_bundle_repo_folder) or is_bundle_worktree(
+                wt_bundle_repo_folder
+            ):
+                runner.run(
+                    [*GIT, "worktree", "unlock", wt_bundle_repo_folder],
+                    handle_exceptions={
+                        f"'{wt_bundle_repo_folder}' is not locked": ignore_error,
+                        f"'{wt_bundle_repo_folder}' is not a working tree": ignore_error,
+                    },
+                )
+                runner.run(
+                    [
+                        *GIT,
+                        "worktree",
+                        "remove",
+                        wt_bundle_repo_folder,
+                        *(["--force"] if force else []),
+                    ],
+                    handle_exceptions={
+                        f"fatal: '{wt_bundle_repo_folder}' is not a working tree": ignore_error,
+                    },
+                )
             runner.run(["rm", "-rf", f"{get_repo_folder(repo)}/.git/worktrees/{bundle_name}"])
             runner.delete_branch_and_remote_ref(
                 repo=repo,

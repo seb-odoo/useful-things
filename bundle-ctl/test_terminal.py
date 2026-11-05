@@ -89,7 +89,7 @@ def run_wrapper(root, bundle):
     module.tab_groups.ask = ask
     module.copy_gitconfig = lambda container: None
     module.get_container = lambda folder: None
-    module.get_transcript = lambda session: next(root.glob(f"{session}.jsonl"), None)
+    module.get_transcript = lambda session, *_: next(root.glob(f"{session}.jsonl"), None)
     module.space_start = lambda: None
     status = pathlib.Path(os.environ["STATE"]) / "status"
     started = pathlib.Path(os.environ["STATE"]) / "started"
@@ -100,7 +100,7 @@ def run_wrapper(root, bundle):
         return status.read_text() if status.exists() else "idle"
 
     module.get_session_status = get_session_status
-    module.TITLE.is_resuming = lambda session: False
+    module.TITLE.is_resuming = lambda session, *_: False
     module.TITLE.get_transcript = module.get_transcript
     module.RETRY_AFTER = 1
     module.HOST_FOLDER = str(root / "host-ctl")

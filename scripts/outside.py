@@ -105,6 +105,18 @@ def mark(bundle, prs):
     return found
 
 
+def inherit(bundle, sender):
+    """Mark a bundle that a marked bundle makes, with the PR of the sender: it reads the memory
+    from a copy of its own and runs the sender's text (security check 11-03, B6). The mark of
+    the sender, None when it has none."""
+    found = read_mark(sender)
+    if found and not read_mark(bundle):
+        (OWN / bundle).mkdir(parents=True, exist_ok=True)
+        inherited = {**found, "at": time.strftime("%Y-%m-%d %H:%M"), "via": sender}
+        (OWN / bundle / MARK).write_text(json.dumps(inherited) + "\n")
+    return found
+
+
 def check_fetch(bundle, name):
     """Mark a bundle fetched from a PR, or from a branch of a fork, by an author outside the
     org. Unknown counts as outside: Seb asked for this PR, and GitHub answered for it already."""

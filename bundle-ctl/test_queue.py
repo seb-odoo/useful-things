@@ -505,6 +505,62 @@ def check_links(root):
     return [f"links: {name}" for name, passed in checks if not passed], len(checks)
 
 
+def check_stranded_link(root):
+    """The pass that queues again a task whose agent never started reads task.md as a file of the
+    bundle: a link there to a host file queues nothing (security check 11-03, B1)."""
+    secret = root / "secret"
+    secret.write_text("the host's login\n")
+    state, _launched = prepare(root, {"stranded": NEVER_RAN_ANOTHER, "big": NEVER_RAN_ANOTHER}, 0)
+    state["queue"] = []
+    agent = root / "master" / "stranded" / ".agent"
+    (agent / "task.md").unlink()
+    (agent / "task.md").symlink_to(secret)
+    (root / "master" / "big" / ".agent" / "task.md").write_text("x" * (daemon.MAX_TASK + 1))
+    daemon.launch_queued()
+    texts = [item["task"] for item in state["queue"]]
+    checks = [
+        ("a link at task.md queues nothing", [item["bundle"] for item in state["queue"]] == []),
+        ("its target is read by no one", not any("login" in text for text in texts)),
+    ]
+    return [f"stranded: {name}" for name, passed in checks if not passed], len(checks)
+
+
+def check_outside(root):
+    """A bundle on a PR of an author outside odoo makes bundles that are marked too, and a fetch
+    it asks waits for Seb's yes, its card naming that PR (security check 11-03, B6)."""
+    state, launched = prepare(root, {}, 8)
+    daemon.HELD_DIR = root / "held"
+    daemon.prepare_folder = lambda bundle: os.makedirs(daemon.get_worktree_bundle_folder(bundle))
+    daemon.outside.OWN = root / "claude-config"
+    daemon.read_disk_free = lambda: 100
+    daemon.check_unpushed = lambda bundle, script: None
+    daemon.local_branches = lambda bundle: []
+    daemon.get_worktree_bundle_folder = lambda bundle: str(root / "master" / bundle)
+    daemon.get_agent_folder = lambda bundle: root / "master" / bundle / ".agent"
+    check_fetch, daemon.outside.check_fetch = daemon.outside.check_fetch, lambda *args: None
+    sender, pr = "master-x--seb", {"url": "https://github.com/odoo/odoo/pull/1", "author": "ext"}
+    (root / "claude-config" / sender).mkdir(parents=True)
+    (root / "claude-config" / sender / "outside").write_text(json.dumps(pr))
+    try:
+        daemon.create(sender, {}, {"base": "master", "name": "child", "task": TASK})
+        held = daemon.fetch(sender, {}, {"name": "master-mine--seb", "task": TASK})[1]
+        daemon.fetch(daemon.HOST, {}, {"name": "master-host--seb", "task": TASK})
+    finally:
+        daemon.outside.check_fetch = check_fetch
+    mark = daemon.outside.read_mark("master-child--seb") or {}
+    task = root / "master" / "master-child--seb" / ".agent" / "task.md"
+    card = json.loads((root / "held" / f"{held['held'][1:]}.json").read_text())
+    checks = [
+        ("a bundle it creates is marked", (mark.get("url"), mark.get("via")) == (pr["url"], sender)),
+        ("and its task names the sender", daemon.OUTSIDE_TASK.format(bundle=sender) in task.read_text()),
+        ("a fetch it asks is held", "master-mine--seb" not in launched and "held" in held),
+        ("its card names the PR", pr["url"] in card["lines"][0]),
+        ("a fetch of the host is not", "master-host--seb" in [
+            *launched, *(item["bundle"] for item in state["queue"])]),
+    ]
+    return [f"outside: {name}" for name, passed in checks if not passed], len(checks)
+
+
 def check_second_task(root):
     """A second task for a queued bundle is taken behind the first, even at a higher priority, and
     waits for it to start, then for the agent it started to end. A resume, or a task for a bundle
@@ -712,7 +768,7 @@ def check_requeue(root):
     sys.modules["agents"].CLAUDE_CONFIG_CONTAINER = daemon.CLAUDE_CONFIG_CONTAINER
     daemon.PAUSE_WAIT = 3
     daemon.close_window = windows.discard
-    daemon.get_transcript = lambda session: root / f"{session}.jsonl"
+    daemon.get_transcript = lambda session, *_: root / f"{session}.jsonl"
     daemon.get_window_pids = lambda bundle: [1] * (bundle in windows)
     spec = importlib.util.spec_from_file_location("run_hook", HERE / "client" / "run-hook.py")
     hook = importlib.util.module_from_spec(spec)
@@ -825,7 +881,7 @@ def check_ops_requeue(root):
     running, daemon.is_agent_running = daemon.is_agent_running, windows.__contains__
     daemon.PAUSE_WAIT = 3
     daemon.close_window = windows.discard
-    daemon.get_transcript = lambda name: next(root.glob(f"{name}.jsonl"), None)
+    daemon.get_transcript = lambda name, *_: next(root.glob(f"{name}.jsonl"), None)
     daemon.get_window_pids = lambda bundle: [1] * (bundle in windows)
     daemon.identify = lambda connection: daemon.HOST
     path = root / "ctl.sock"
@@ -963,7 +1019,7 @@ def check_place(root):
     )
     daemon.get_session_status = lambda bundle, session: "busy" if bundle == "answering" else "idle"
     daemon.get_window_pids = lambda bundle: [1] * (bundle in windows)
-    daemon.get_transcript = lambda session: session not in (None, "unborn") and root / "t"
+    daemon.get_transcript = lambda session, *_: session not in (None, "unborn") and root / "t"
     daemon.close_window = windows.discard
     daemon.REMOTE_AUTO = False
     drops = {}
@@ -1639,7 +1695,7 @@ def check_build_disk(root):
     daemon.check_unpushed = lambda bundle, script: None
     daemon.close_window = windows.discard
     daemon.get_session_status = lambda bundle, session: "idle"
-    daemon.get_transcript = lambda session: None
+    daemon.get_transcript = lambda session, *_: None
     daemon.get_window_pids = lambda bundle: [1] * (bundle in windows)
     daemon.identify = lambda connection: "bare"
     path = root / "ctl.sock"
@@ -1959,7 +2015,7 @@ def check_remote_type(root):
         "s": {"status": statuses.get(container, "idle"), "statusUpdatedAt": records["stamp"]}
     }
     daemon.get_session_status = lambda bundle, session: statuses.get(bundle, "idle")
-    daemon.get_transcript = lambda session: root / "t"
+    daemon.get_transcript = lambda session, *_: root / "t"
     daemon.remote_agent = types.SimpleNamespace(
         is_remote=lambda folder: True,
         keep=lambda bundle, folder, workers: (None, False),
@@ -2116,10 +2172,10 @@ def check_remote_told(root):
     )
     stubs = {name: getattr(daemon, name) for name in names}
     daemon.REMOTE_ENTER_AFTER = 0
-    daemon.TITLE = types.SimpleNamespace(is_resuming=lambda session: False)
+    daemon.TITLE = types.SimpleNamespace(is_resuming=lambda session, *_: False)
     daemon.get_last_text = lambda path: texts["last"]
     daemon.get_session_status = lambda bundle, session: statuses.get(bundle, "idle")
-    daemon.get_transcript = lambda session: texts.get("transcript", transcript)
+    daemon.get_transcript = lambda session, *_: texts.get("transcript", transcript)
     daemon.remote_agent = types.SimpleNamespace(
         read_remote=stubs["remote_agent"].read_remote,
         type_keys=type_keys,
@@ -2269,7 +2325,7 @@ def check_leaving(root):
         renew_login_soon=lambda folder: None,
     )
     daemon.get_session_status = lambda bundle, session: "busy" if bundle == "answering" else "idle"
-    daemon.get_transcript = lambda session: session != "unborn" and root / "t"
+    daemon.get_transcript = lambda session, *_: session != "unborn" and root / "t"
     daemon.start_job = lambda caller, verb, work, lock=None, bundle=None: jobs.append(
         (bundle, work)
     )
@@ -2684,7 +2740,7 @@ def check_stale(root):
     }
     daemon.WORKERS.sent = {"sebpc": {"sending": float("inf")}}
     daemon.enqueue = lambda caller, bundle, body: enqueued.append((bundle, body))
-    daemon.get_transcript = lambda session: None
+    daemon.get_transcript = lambda session, *_: None
     daemon.remote_agent = types.SimpleNamespace(
         STARTING=module.STARTING,
         drop_start=dropped.append,
@@ -2798,6 +2854,8 @@ def main():
         check_parked,
         check_priority,
         check_links,
+        check_stranded_link,
+        check_outside,
         check_label,
         check_second_task,
         check_hand_over,

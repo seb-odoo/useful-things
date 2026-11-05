@@ -105,28 +105,30 @@ def main():
         if mount.split(",")[1].endswith("/.git")
     ]
     check(
-        "the config and hooks of each base .git, read-only",
+        "each base .git read-only",
         [
-            path
+            git_dir
             for git_dir in git_dirs
-            for path in (f"{git_dir}/config", f"{git_dir}/hooks")
-            if f"source={path},target={path},type=bind,readonly,z" not in base_config["mounts"]
+            if f"source={git_dir},target={git_dir},type=bind,readonly,Z" not in base_config["mounts"]
         ],
         [],
     )
     check("eight base repos", len(git_dirs), 8)
     own = "${localWorkspaceFolderBasename}"
+    writable = ("objects", "refs", "logs", "rr-cache", "packed", f"worktrees/{own}")
     check(
-        "the worktrees of each base .git read-only, the bundle's own entry writable",
-        [
-            git_dir
+        "writable over it, folders git writes from a worktree, and nothing else of it",
+        sorted(
+            mount
+            for mount in base_config["mounts"]
             for git_dir in git_dirs
-            if f"source={git_dir}/worktrees,target={git_dir}/worktrees,type=bind,readonly,z"
-            not in base_config["mounts"]
-            or f"source={git_dir}/worktrees/{own},target={git_dir}/worktrees/{own},type=bind,z"
-            not in base_config["mounts"]
-        ],
-        [],
+            if mount.startswith(f"source={git_dir}/")
+        ),
+        sorted(
+            f"source={git_dir}/{name},target={git_dir}/{name},type=bind,z"
+            for git_dir in git_dirs
+            for name in writable
+        ),
     )
     spec = importlib.util.spec_from_file_location("worktree_admin", HERE / "worktree-admin.py")
     worktree_admin = importlib.util.module_from_spec(spec)

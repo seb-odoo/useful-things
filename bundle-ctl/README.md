@@ -929,7 +929,10 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   agent, by kind then by mark, as it waits for him (Seb, 2026-10-15): a ✋ fw comes after a ✅ fw,
   before a ✅ runbot. A
   bundle open in VS Code has no row (Seb, 2026-10-13): he works there, and its window is in the
-  task bar. Nor has a bundle or an ops agent whose terminal is not minimized (Seb, 2026-10-14): it
+  task bar. A title counts for a bundle only when its name is a bundle name whose folder exists
+  (`is_bundle`): a bundle sets the title of its own VS Code window, and with a path in place of
+  the name, the picker removed that file of the host every 2 seconds (security check 11-03, B3).
+  Any other title is one of the other windows. Nor has a bundle or an ops agent whose terminal is not minimized (Seb, 2026-10-14): it
   is in the task bar too, and the applet does not count it. A
   terminal keeps its last mark once its claude ends, so a ✅, ✋ or ⏳ shows only while an
   `agent-terminal.py BUNDLE` process runs. A claude that ends on an error leaves its window on
@@ -938,7 +941,11 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   finds the `sh` that waits in the pane, a child of the terminator of the window. After the title, a row shows the close line of the last
   answer of its session (Seb, 2026-10-16: he had asked "status?" 99 times and "can I close?" 147
   times), `Waiting for you: hok g12 for the 19.0 hop` say, cut by rofi to the width of its window:
-  the session in `.agent/session` for a bundle, the one in the name of an ops window. The window
+  the session in `.agent/session` for a bundle, the one in the name of an ops window. A session
+  is looked up in the folder of its kind only, `-workspace` for a bundle, the project of the ops
+  container (then the host's of before) for an ops window (`get_projects`): every bundle writes
+  `-workspace`, and a file there named after an ops session gave that window its title, its last
+  answer, its chat in the deck and its resume prompt (security check 11-03, B5). The window
   title does not hold it, as the close line often holds a link, and the picker and the list find
   the kind at the end of the title. The search also
   takes the mark in words (`finished`, `waiting`, `failed`, `running`, `starting`), the kind is
@@ -1480,7 +1487,7 @@ remote connection ("Cannot reconnect"). A run that ends without a tool call open
 | `task.md` | bundle-ctl | the prompt |
 | `model` | bundle-ctl | the model the task asked for, `haiku` or `sonnet`; no file for `opus` |
 | `effort` | bundle-ctl | the effort the task asked for, `low`, `high` or `xhigh`; no file for `medium` |
-| `queued` | bundle-ctl | when the task entered the queue (epoch seconds), kept when a task no window took is queued again |
+| `queued` | bundle-ctl | when the task entered the queue (epoch seconds), kept when a task no window took is queued again; that pass reads `task.md` as a file of the bundle (`agents.read_text`, no link, 32 KB at most), as a link there handed a host file to every bundle (security check 11-03, B1) |
 | `terminal` | `agent-terminal.py` | the agent runs in a terminal of the host; removed when it ends, or by `client/agent-takeover.py` when a window takes the session over |
 | `container` | `agent-terminal.py` | the id of the container the terminal's agent runs in, for the terminal that takes its session over; removed when it ends |
 | `session` | `agent-terminal.py`, claude-autoopen | the session id, chosen before the run |

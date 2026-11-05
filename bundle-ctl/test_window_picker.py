@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -162,6 +163,7 @@ def hide(picker, folder):
     """Give picker the windows of the file `shown` of folder as shown, the others as minimized."""
     shown = (folder / "shown").read_text().split()
     picker.get_hidden = lambda windows: {window for window in windows if window not in shown}
+    picker.get_worktree_bundle_folder = lambda name: str(folder / name)
 
 
 def start_agent(name):
@@ -255,11 +257,13 @@ def get_ops_agents():
 
 
 def write_answer(folder, session, answer, bundle=None):
-    """A transcript whose last answer is answer, and the .agent/session of bundle that names it."""
+    """A transcript whose last answer is answer, and the .agent/session of bundle that names it.
+    With no bundle, the transcript of an ops window, in the folder of the ops sessions."""
     if bundle:
         (folder / bundle / ".agent").mkdir(parents=True, exist_ok=True)
         (folder / bundle / ".agent" / "session").write_text(f"{session}\n")
-    path = folder / "projects" / "-workspace" / f"{session}.jsonl"
+    project = "-workspace" if bundle or session == "S-b" else "-home-seb-repo"
+    path = folder / "projects" / project / f"{session}.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     entry = {"type": "assistant", "message": {"content": [{"type": "text", "text": answer}]}}
     path.write_text(f"{json.dumps(entry)}\n")
@@ -273,6 +277,7 @@ def get_close_lines(folder):
     picker.get_agent_folder = lambda name: folder / name / ".agent"
     picker.get_terminator = lambda pid: (5, "ops-S-ops") if pid == "77" else None
     picker.load_title().PROJECTS = folder / "projects"
+    picker.load_title().HOST_PROJECT = "-home-seb-repo"
     picker.read_window_pids = lambda: {"0x0a": "77", "0x0b": "78"}
     rows = [
         picker.Row(None, 0, "", key, window, True)
@@ -290,6 +295,29 @@ def get_close_lines(folder):
     return found
 
 
+def get_named(folder, log):
+    """A window title that names no bundle, or a bundle with no folder, is no bundle: its VS Code
+    window removes no file of that name, and a pick of that name opens nothing (security check
+    11-03, B3)."""
+    victim = folder / "victim"
+    victim.write_text("kept\n")
+    (folder / "windows").write_text(
+        f"0x21 0 code.Code box 📝 {victim} (review)\n"
+        "0x22 0 code.Code box ⭐ ../../victim (mine)\n"
+        "0x23 0 code.Code box ⭐ master-gone--seb (mine)\n"
+    )
+    infos = [row.partition("\0info\x1f")[2].partition("\x1f")[0] for row in run(folder).splitlines()]
+    run(folder, "--counts")
+    log.write_text("")
+    run(folder, ROFI_RETV="1", ROFI_INFO=str(victim))
+    run(folder, ROFI_RETV="1", ROFI_INFO="master-gone--seb")
+    opening = folder / "bundle-ctl" / "opening" / "master-gone--seb"
+    rows = [info for info in infos if info and not info.startswith("0x") and info != "new-ops"]
+    found = (victim.read_text(), rows, log.read_text(), opening.exists())
+    expected = ("kept\n", [], "", False)
+    return [f"titles that name no bundle: {found}, expected {expected}"] if found != expected else []
+
+
 def write_fake(folder, name, script):
     path = folder / name
     path.write_text(f"#!/bin/sh\n{script}\n")
@@ -302,6 +330,8 @@ def main():
         folder = pathlib.Path(root)
         log = folder / "log"
         (folder / "windows").write_text(WINDOWS)
+        for name in re.findall(r"master-\S+(?=[ \n])", WAITING):
+            (folder / name).mkdir(exist_ok=True)
         for session, answer, bundle in ANSWERS:
             write_answer(folder, session, answer, bundle)
         (folder / "pids").write_text("")
@@ -412,6 +442,7 @@ def main():
         for found, expected in zip(get_close_lines(folder), CLOSE_LINES, strict=True):
             if found != expected:
                 failures.append(f"close lines {found!r}, expected {expected!r}")
+        failures += get_named(folder, log)
     new_ops = [str(HERE / "client" / "bctl.py"), "open", "ops", "--terminal"]
     if (started := get_new_ops()) != [new_ops]:
         failures.append(f"pick 1 new-ops: started {started!r}, expected {[new_ops]!r}")

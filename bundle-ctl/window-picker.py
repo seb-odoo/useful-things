@@ -62,6 +62,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
 from agents import OPS, get_agent_folder, read_text  # noqa: E402
+from commands import BUNDLE_NAME, get_worktree_bundle_folder  # noqa: E402
 from config import CLAUDE_CONFIG_CONTAINER, HOST_FOLDER  # noqa: E402
 
 from cut import get_live_sessions  # noqa: E402
@@ -201,7 +202,7 @@ def get_windows():
             ops.append((title, window))
             continue
         match = pattern.match(title)
-        if not match:
+        if not match or not is_bundle(match[1]):
             others.append((title, window))
             continue
         kind = "code" if wm_class.startswith("code.") else "terminal"
@@ -333,28 +334,46 @@ def get_session(row, pids):
     return terminator and terminator[1].removeprefix(OPS)
 
 
-def get_close_line(session):
+def get_owner(row, session):
+    """The bundle of a row, or the ops window (ops-SESSION) it is."""
+    return row.key if row.key != row.window else f"{OPS}{session}"
+
+
+def get_close_line(session, bundle):
     """The close line of the last answer of a session, read again only once its transcript
     changed, as agent-list.py asks every 2 seconds."""
     title = load_title()
-    path = session and title.get_transcript(session)
+    path = session and title.get_transcript(session, bundle)
     try:
         stat = path.stat()
     except (AttributeError, OSError):
         return ""
     stamp = (stat.st_mtime_ns, stat.st_size)
     if close_by_session.get(session, (None,))[0] != stamp:
-        close_by_session[session] = (stamp, title.get_close_line(title.get_last_answer(session)))
+        close_by_session[session] = (stamp, title.get_close_line(title.get_last_answer(session, bundle)))
     return close_by_session[session][1]
 
 
 def get_close_lines(rows):
     """The close line of the session of each row, by key, "" when it has none."""
     pids = read_window_pids() if any(row.key == row.window for row in rows) else {}
-    return {row.key: get_close_line(get_session(row, pids)) for row in rows}
+    sessions = {row: get_session(row, pids) for row in rows}
+    return {row.key: get_close_line(session, get_owner(row, session)) for row, session in sessions.items()}
+
+
+def is_bundle(name):
+    """Whether the name a window title gives is a bundle: a bundle name whose folder exists. A
+    bundle sets the title of its VS Code window, and the picker removes, touches and opens what
+    the name names (security check 11-03, B3)."""
+    if not BUNDLE_NAME.fullmatch(name):
+        return False
+    folder = pathlib.Path(get_worktree_bundle_folder(name))
+    return folder.is_dir() and not folder.is_symlink()
 
 
 def pick(name, terminal):
+    if not is_bundle(name):
+        return
     windows = get_windows()[0].get(name, {})
     window = (terminal and windows.get("terminal")) or windows.get("code")
     if window:

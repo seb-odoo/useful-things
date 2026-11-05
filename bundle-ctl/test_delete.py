@@ -173,7 +173,7 @@ def prepare(root):
     daemon.get_bundle_container = lambda bundle: (
         bundle if str(root / "master" / bundle) in world["running"] else None
     )
-    daemon.get_transcript = lambda session: root / "transcripts" / f"{session}.jsonl"
+    daemon.get_transcript = lambda session, *_: root / "transcripts" / f"{session}.jsonl"
     daemon.get_window_pids = lambda bundle: [1] if bundle in world["windows"] else []
     daemon.has_window = lambda container: container in world["vscode"]
     daemon.is_in_turn = lambda bundle: bundle in world["busy"]
@@ -853,7 +853,7 @@ def check_gone(root):
     daemon.get_agent_folder = lambda name: root / "master" / name / ".agent"
     daemon.get_closed_windows = lambda: {str(folder): old}
     daemon.get_open_windows = set
-    daemon.get_transcript = lambda name: transcript if name == session else None
+    daemon.get_transcript = lambda name, *_: transcript if name == session else None
     daemon.get_worktree_bundle_folder = lambda name: str(root / "master" / name)
     daemon.get_worktree_container_folder = lambda: str(root)
     daemon.local_branches = lambda name: []

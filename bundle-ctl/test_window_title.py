@@ -181,7 +181,11 @@ FOLLOWED = [
 
 
 def write_transcripts(home):
+    """Each transcript in the folder of the bundles and in the one of the ops sessions, as a case
+    names it for a bundle or an ops window."""
     folder = home / ".claude" / "projects" / "-workspace"
+    ops = home / ".claude" / "projects" / "-home-seb-repo"
+    ops.mkdir(parents=True)
     folder.mkdir(parents=True)
     for session, answers in ANSWERS.items():
         entries = []
@@ -200,7 +204,8 @@ def write_transcripts(home):
         for kind, key, topic in TOPICS.get(session, []):
             entries.append({"type": kind, key: topic, "sessionId": session})
         lines = "".join(f"{json.dumps(entry)}\n" for entry in entries)
-        (folder / f"{session}.jsonl").write_text(lines)
+        for kind in (folder, ops):
+            (kind / f"{session}.jsonl").write_text(lines)
     for session, calls in CALLS.items():
         entries = [{"type": "user", "message": {"content": "go"}}]
         for index, (command, result) in enumerate(calls):
@@ -220,7 +225,39 @@ def write_transcripts(home):
                 thinking = {"type": "thinking", "thinking": ""}
                 entries.append({"type": "assistant", "message": {"content": [thinking]}})
         lines = "".join(f"{json.dumps(entry)}\n" for entry in entries)
-        (folder / f"{session}.jsonl").write_text(lines)
+        for kind in (folder, ops):
+            (kind / f"{session}.jsonl").write_text(lines)
+
+
+def get_shadowed(home):
+    """A transcript that a bundle writes in -workspace under the name of an ops session is not
+    the conversation of that ops window (security check 11-03, B5), and an ops transcript is not
+    a bundle's; the ops container's own folder goes before the host's (K1)."""
+    projects = home / ".claude" / "projects"
+    topic = {"type": "custom-title", "customTitle": "a bundle's words", "sessionId": "shadow"}
+    (projects / "-workspace" / "shadow.jsonl").write_text(f"{json.dumps(topic)}\n")
+    topic = {"type": "custom-title", "customTitle": "ops words", "sessionId": "opsonly"}
+    (projects / "-home-seb-repo" / "opsonly.jsonl").write_text(f"{json.dumps(topic)}\n")
+    (projects / "ops-home-seb-repo").mkdir()
+    topic = {"type": "custom-title", "customTitle": "own words", "sessionId": "both"}
+    (projects / "ops-home-seb-repo" / "both.jsonl").write_text(f"{json.dumps(topic)}\n")
+    (projects / "-home-seb-repo" / "both.jsonl").write_text("")
+    found = [
+        subprocess.run(
+            [sys.executable, str(HERE / "client" / "window-title.py"), name],
+            capture_output=True,
+            check=True,
+            text=True,
+        ).stdout.strip()
+        for name in ("ops-shadow", "ops-opsonly", "ops-both")
+    ]
+    expected = ["🔧 new session (ops)", "🔧 ops words (ops)", "🔧 own words (ops)"]
+    spec = importlib.util.spec_from_file_location("title", HERE / "client" / "window-title.py")
+    title = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(title)
+    found.append(title.get_transcript("opsonly", BUNDLE))
+    expected.append(None)
+    return [f"ops transcript lookup: {found}, expected {expected}"] if found != expected else []
 
 
 def get_hok_waits():
@@ -430,7 +467,7 @@ def get_followed(home):
         (ops_sessions / "15.json").write_text(json.dumps({**record, "status": "busy"}))
         time.sleep(0.2)
         topic = {"type": "ai-title", "aiTitle": "Ops agent windows", "sessionId": "report"}
-        with (home / ".claude" / "projects" / "-workspace" / "report.jsonl").open("a") as file:
+        with (home / ".claude" / "projects" / "-home-seb-repo" / "report.jsonl").open("a") as file:
             file.write(f"{json.dumps(topic)}\n")
         time.sleep(0.8)
         running[0] = False
@@ -571,9 +608,10 @@ def main():
     with tempfile.TemporaryDirectory() as root:
         home = pathlib.Path(root)
         os.environ.pop("CLAUDE_CONFIG_DIR", None)
-        os.environ.update(HOME=root, USER="seb")
+        os.environ.update(HOME=root, USER="seb", REPO_ROOT="/home/seb/repo")
         write_transcripts(home)
         failures += get_marks()
+        failures += get_shadowed(home)
         failures += get_hok_waits()
         failures += get_api_errors(home)
         failures += get_first_prompts(home)
@@ -594,7 +632,7 @@ def main():
         print(line)
     cases = len(MARKS) + len(OPS_MARKS) + len(HOK_WAITS) + len(CLOSE_LINES) + len(CONFIGS)
     cases += len(API_ERRORS) + len(LOGIN_WAITS) + len(PROMPTS) + 1
-    cases += len(FOLLOWED) + 6
+    cases += len(FOLLOWED) + 7
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

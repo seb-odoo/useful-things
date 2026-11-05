@@ -104,7 +104,7 @@ def restart(root, terminals):
     daemon.get_terminals = lambda: pids
     daemon.read_stat = lambda pid: (pid, by_pid[pid]["started"])
     daemon.get_session_status = lambda bundle, session: terminals[bundle]["status"]
-    daemon.TITLE.is_resuming = lambda session: any(
+    daemon.TITLE.is_resuming = lambda session, *_: any(
         case["resuming"] for case in terminals.values()
     )
     daemon.is_minimized = lambda pid, env: by_pid[pid]["minimized"]
@@ -157,16 +157,16 @@ def free(root, bundle, case):
     daemon.read_state = lambda: {"queue": queue}
     daemon.get_agent_folder = lambda bundle: root / bundle / ".agent"
     daemon.get_terminals = lambda: {bundle: 1000}
-    daemon.get_transcript = lambda session: transcript
+    daemon.get_transcript = lambda session, *_: transcript
     daemon.get_last_text = lambda transcript: case["answer"]
     daemon.get_session_status = lambda bundle, session: case["status"]
-    daemon.TITLE.is_resuming = lambda session: case["resuming"]
+    daemon.TITLE.is_resuming = lambda session, *_: case["resuming"]
     daemon.read_stat = lambda pid: (pid, 0)
     daemon.is_minimized = lambda pid, env: case["minimized"]
     daemon.session_env = dict
     daemon.close_freed = closed.append
-    daemon.TITLE.count_api_errors = lambda session, most: min(case.get("errors", 0), most)
-    daemon.TITLE.is_login_wait = lambda session: case.get("login", False)
+    daemon.TITLE.count_api_errors = lambda session, most, *_: min(case.get("errors", 0), most)
+    daemon.TITLE.is_login_wait = lambda session, *_: case.get("login", False)
 
     def requeue_agent(caller, query, body, **kwargs):
         closed.append((caller, body["bundle"], kwargs))

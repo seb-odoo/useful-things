@@ -394,7 +394,7 @@ class Waker:
         has_task = (self.agent / "task.md").is_file() and not (self.agent / "run.lock").exists()
         retry = not (has_task or has_events) and self.is_retry_due()
         status = get_session_status(self.bundle, self.session, self.started)
-        resuming = TITLE.is_resuming(self.session)
+        resuming = TITLE.is_resuming(self.session, self.bundle)
         ready = status == "idle" or status in ("busy", "shell") and has_events
         if not (has_task or has_events or retry) or not ready or resuming:
             self.hold(has_events and f"the session is {'resuming' if resuming else status}")
@@ -507,14 +507,14 @@ class Waker:
     def is_retry_due(self):
         """The transcript is read once it has not changed for RETRY_AFTER, and once per change: a
         retry it did not take waits for the next one."""
-        transcript = get_transcript(self.session)
+        transcript = get_transcript(self.session, self.bundle)
         stamp = transcript and get_mtime(transcript)
         if not stamp or time.time() - stamp < RETRY_AFTER:
             return False
         if stamp != self.checked:
             self.checked = stamp
-            self.due = 0 < TITLE.count_api_errors(self.session) <= TITLE.RETRIES
-            self.due = self.due and not TITLE.is_login_wait(self.session)
+            self.due = 0 < TITLE.count_api_errors(self.session, bundle=self.bundle) <= TITLE.RETRIES
+            self.due = self.due and not TITLE.is_login_wait(self.session, self.bundle)
         return self.due
 
     def take_task(self):
@@ -704,7 +704,7 @@ def get_ops_start(session, task):
     """The claude options of an ops window: a new session on its task, or the session of a tab
     moved here, in the mode of the tab, told to go on when its turn was cut, or a cut session on
     the task that resumes it."""
-    transcript = get_transcript(session)
+    transcript = get_transcript(session, OPS + session)
     if not transcript:
         start = ["--session-id", session, "--permission-mode", "auto"]
         return start + (["--", task] if task else [])

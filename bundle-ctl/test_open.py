@@ -100,7 +100,7 @@ def open_ops(root, caller, body):
 
     daemon.HOST_FOLDER = "/ops"
     daemon.read_state = lambda: {"queue": []}
-    daemon.get_transcript = lambda session: "ops-" + session in (MOVED, RUNNING) or None
+    daemon.get_transcript = lambda session, *_: "ops-" + session in (MOVED, RUNNING) or None
     daemon.is_agent_running = lambda bundle: bundle == RUNNING
     daemon.get_agent_folder = lambda name: root / name
     daemon.move_to_tab = lambda log, name: opened.append(f"tab {name}")
@@ -234,7 +234,7 @@ def get_moved(root):
     terminator = subprocess.Popen([sys.executable, "-c", window, "agent-terminator.py", MOVED])
     daemon.CLAUDE_CONFIG_CONTAINER = str(root / "config")
     daemon.HOST_FOLDER = "/repo/host-ctl"
-    daemon.get_transcript = lambda session: transcript
+    daemon.get_transcript = lambda session, *_: transcript
     daemon.is_agent_running = lambda bundle: terminator.poll() is None
     try:
         daemon.move_to_tab(io.StringIO(), MOVED)

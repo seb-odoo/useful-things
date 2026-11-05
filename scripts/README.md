@@ -108,13 +108,16 @@ every file of Seb at the root of every worktree (`test_tooling_files.py`).
 
 `bctl node-modules` builds the tree of the `package.json` of the web tooling of a base's branch,
 when the store has none: npm installs that file in a box with the network (`HOST_BOX`, refused
-without it), in a folder of its own that then goes in the store under its key. A tree never
+without it), in a folder of its own that then goes in the store under its key, with
+`--ignore-scripts`: no install script of a package runs (security check 11-03, B4). A tree never
 changes once there, and a bundle linked to its key loads it at once, even in a container that runs. A bundle asks it for its
 own base and waits for Seb's yes, which `hok` shows with the change from the `package.json` of the
 tree it links; the host asks it at once. The daemon also asks it itself, every minute, for each
 base whose odoo head moved since it last looked and whose `package.json` has no tree: the bundles
 fetch the bases in the shared `.git`, so the tree is there before their first commit on it (Seb,
-2026-10-27). Nothing deletes a tree yet: one that no bundle links can go by hand.
+2026-10-27). That head is only a sign: the daemon reads the `package.json` from GitHub
+(raw.githubusercontent.com), as every bundle moves the refs of the shared `.git` and writes its
+objects (security check 11-03, B4). Nothing deletes a tree yet: one that no bundle links can go by hand.
 
 Before 2026-10-27 each base had its own tree, `WORKTREE_ROOT/<base>/node_modules` (and
 `.node_modules.old`). A container started before then still mounts it, and it can go once none
@@ -285,7 +288,14 @@ than its packs plus 10 GB, as the new pack is written before the old ones go.
 
 Removes a bundle from the local system (worktrees, branches, filestore, databases, images).
 
-- Deletes git worktrees and local branches for each repo, and its `.git/worktrees/<bundle>`
+- Deletes git worktrees and local branches for each repo, and its `.git/worktrees/<bundle>`.
+  git runs only in a folder whose real path is `WORKTREE_ROOT/<base>/<bundle>/<repo>`, with no
+  link on the way (`commands.is_bundle_worktree`), and with the `-c` options that turn off the
+  fsmonitor, the hooks and the pager. A bundle writes its folder and its entry in
+  `.git/worktrees`: through a link there, or an entry that names another repo, a branch deletion
+  ran git, and its hooks, in a repo of the bundle's choice (security check 11-03, C4,
+  `test_worktree_paths.py`). The same check comes before the `git switch`, `ls-files`, `rm` and
+  `ln` of `utils.py` in a bundle's repo folder
 - Removes `~/.local/share/bundle-db/<bundle>`: the postgres server and the filestore of the
   bundle (devcontainer/README.md, "How it runs Odoo")
 - Removes `~/.cache/devcontainer/claude-config/<bundle>`, under `podman unshare` when `rm` is
@@ -684,7 +694,10 @@ agent with no prompt on a bundle that has none. A bundle that is not local is fe
 ### bundle_open.py
 
 Opens an `odoo-bundle://<bundle>` link: in its dev container when the worktree exists, like
-`ocode`, otherwise through `pfb` in a terminal, which opens the dev container at the end.
+`ocode`, otherwise through `pfb` in a terminal, which opens the dev container at the end. A name
+that is no bundle name (`commands.BUNDLE_NAME`) opens nothing, and `get_worktree_bundle_folder`
+refuses a folder out of the worktree root: an agent prints the link, and a name with `../` named
+any folder whose dev container config VS Code then ran (security check 11-03, C5).
 `odoo-bundle://terminal/<bundle>`, the icon of gbs, runs `window-picker.py --agent` (bundle-ctl
 README): the terminal of its agent, else its VS Code window, which then holds the session (a VS
 Code window that opens closes the terminal), else a terminal on its last session or a new agent.

@@ -30,7 +30,7 @@ import urllib.parse
 import requests
 from agents import OPS, mark_handled
 from branch_status import get_bundles
-from commands import clean_bundle_name, get_worktree_bundle_folder
+from commands import BUNDLE_NAME, clean_bundle_name, get_worktree_bundle_folder
 from config import HOST_FOLDER, REPO_ROOT
 from utils import UtilsRunner
 
@@ -103,6 +103,10 @@ def open_tabs(bundle):
 
 if link.startswith(HOK) and not HOK_NAME.fullmatch(link.removeprefix(HOK)):
     notify("not the name of a request of hok")
+elif not link.startswith(HOK) and not BUNDLE_NAME.fullmatch(bundle_name):
+    # A link comes from any text an agent prints: a name with a slash or a dot first reaches
+    # another folder, whose dev container config VS Code runs (security check 11-03, C5).
+    notify("not the name of a bundle")
 elif link.startswith(HOK):
     start([sys.executable, AGENT_LIST, "--select", f"hok:{link.removeprefix(HOK)}"])
 elif link.startswith(LIST):

@@ -42,6 +42,17 @@ def main():
         found["closed since"] = agents.is_handled(bundle, OTHER)
         os.utime(folder / "handled.open", (two_days_ago, two_days_ago))
         found["closed two days ago"] = agents.is_handled(bundle, OTHER)
+        # The marks are files of the bundle: a link there is replaced, never followed (11-03, B2).
+        host = pathlib.Path(root) / "authorized_keys"
+        host.write_text("key\n")
+        (folder / "handled.json").unlink()
+        for name in ("handled", "handled.open", f"handled.json.{os.getpid()}"):
+            (folder / name).unlink(missing_ok=True)
+            (folder / name).symlink_to(host)
+        agents.mark_handled(bundle)
+        found["handled.json through a link, after a click"] = agents.is_handled(bundle, NEWS, True)
+        found["the file the links name"] = host.read_text()
+        found["the links"] = sorted(path.name for path in folder.iterdir() if path.is_symlink())
     pr = {"mergebot": None, "pending": False, "state": "open"}
     found["no PR goes to"] = branch_status.get_waiting_group(None)
     found["CI running goes to"] = branch_status.get_waiting_group({**pr, "pending": True})
@@ -129,6 +140,9 @@ def main():
         "opened two days ago, window open": True,
         "closed since": True,
         "closed two days ago": False,
+        "handled.json through a link, after a click": True,
+        "the file the links name": "key\n",
+        "the links": [f"handled.json.{os.getpid()}"],
         "no PR goes to": "drafts",
         "CI running goes to": "ci",
         "a draft goes to": "drafts",

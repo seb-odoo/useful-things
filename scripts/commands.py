@@ -20,6 +20,8 @@ from config import (
 
 # A bundle name goes unquoted into the mount options of its container and the config of nginx.
 BUNDLE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
+# A bundle writes the .git/config of these repos: git runs none of the programs it may name there.
+GIT = ("git", "-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null", "-c", "core.pager=cat")
 MADE = ".made"
 
 
@@ -114,8 +116,27 @@ def get_worktree_base_repo(base, repo):
 
 
 def get_worktree_bundle_folder(bundle_name):
-    """Get the worktree folder name from the bundle name."""
-    return f"{get_worktree_base_folder(get_base_from_bundle_name(bundle_name))}/{bundle_name}"
+    """Get the worktree folder name from the bundle name. A ValueError when it leads out of the
+    worktree root: the host opens, deletes and runs what is in that folder."""
+    folder = f"{get_worktree_base_folder(get_base_from_bundle_name(bundle_name))}/{bundle_name}"
+    if not os.path.realpath(folder).startswith(f"{os.path.realpath(WORKTREE_CONTAINER)}/"):
+        raise ValueError(f"{bundle_name}: no bundle folder of that name")
+    return folder
+
+
+def is_bundle_worktree(path):
+    """Whether `path` is the worktree of a repo of a bundle, WORKTREE_ROOT/<base>/<bundle>/<repo>,
+    with no link on the way. A bundle writes its folder: through a link there, the git, rm and ln
+    of the host act on a folder the bundle chose (security check 11-03, C4)."""
+    logical = os.path.relpath(os.path.abspath(path), os.path.abspath(WORKTREE_CONTAINER))
+    real = os.path.relpath(os.path.realpath(path), os.path.realpath(WORKTREE_CONTAINER))
+    parts = real.split(os.sep)
+    return (
+        logical == real
+        and len(parts) == 3
+        and all(BUNDLE_NAME.fullmatch(part) for part in parts)
+        and os.path.isdir(path)
+    )
 
 
 def get_worktree_bundle_repo_folder(bundle_name, repo):

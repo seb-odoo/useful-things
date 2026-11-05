@@ -41,7 +41,7 @@ def check(what, got, expected):
 
 def run(folder, transcript, any_session=False):
     info.get_agent_folder = lambda bundle: folder
-    info.get_transcript = lambda session: transcript if any_session or session == SESSION else None
+    info.get_transcript = lambda session, *_: transcript if any_session or session == SESSION else None
     return info.get_info("master-x--seb")
 
 
