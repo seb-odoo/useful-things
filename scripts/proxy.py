@@ -124,15 +124,18 @@ def _render(server_name, ip, port=HTTP_PORT, websocket="/websocket"):
 
 
 def _clients(networks):
-    """The lines that let the host alone use the proxy: its published port comes from loopback or
-    from the gateway of a network of the proxy, and any other client is refused, as a dev
-    container would reach the server of another bundle by its Host (security check 11-03, C7)."""
+    """The lines that let the host alone use the proxy: its published port comes from loopback,
+    from the gateway of a network of the proxy, or from the address of the proxy itself there
+    (podman's port forwarder connects from inside the container: 10.89.255.30 on 2026-11-05), and
+    any other client is refused, as a dev container would reach the server of another bundle by
+    its Host (security check 11-03, C7)."""
     allowed = ["127.0.0.1", "::1"]
     for network in networks.values():
-        try:
-            allowed.append(str(ipaddress.ip_address(network["Gateway"])))
-        except (KeyError, TypeError, ValueError):
-            continue
+        for key in ("Gateway", "IPAddress"):
+            try:
+                allowed.append(str(ipaddress.ip_address(network[key])))
+            except (KeyError, TypeError, ValueError):
+                continue
     return "".join(f"allow {address};\n" for address in dict.fromkeys(allowed)) + "deny all;\n"
 
 

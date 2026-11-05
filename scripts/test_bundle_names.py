@@ -71,7 +71,10 @@ def fake_podman(command, **kwargs):
     if command[:2] == ["podman", "ps"]:
         out = "\n".join(CONTAINERS)
     elif command[:2] == ["podman", "inspect"] and "--format" in command:
-        out = json.dumps({"devnet": {"Gateway": "10.89.0.1"}, "podman": {"Gateway": "10.88.0.1"}})
+        out = json.dumps({
+            "devnet": {"Gateway": "10.89.0.1", "IPAddress": "10.89.255.30"},
+            "podman": {"Gateway": "10.88.0.1", "IPAddress": "10.88.0.12"},
+        })
     elif command[:2] == ["podman", "inspect"]:
         out = json.dumps([
             {
@@ -123,7 +126,9 @@ def main():
         "allow 127.0.0.1;",
         "allow ::1;",
         "allow 10.89.0.1;",
+        "allow 10.89.255.30;",
         "allow 10.88.0.1;",
+        "allow 10.88.0.12;",
         "deny all;",
     ]
     if clients != expected:

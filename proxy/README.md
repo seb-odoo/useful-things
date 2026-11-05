@@ -14,9 +14,9 @@ Run several Odoo dev containers in parallel and reach each from the host browser
 A single rootless nginx container sits on the `podman` network, listens on `127.0.0.1:80`, and
 routes by `Host` header to each dev container's IP on port 8069, on a network the two share: when
 the dev containers live on another network, the proxy joins it by a quadlet drop-in
-(`odoo-proxy.container.d/`). It serves the host only: the config allows loopback and the
-gateways of the networks of the proxy, where its published port comes from, and refuses (403)
-any other client, as a bundle would reach the Odoo of another one by its `Host` (security check
+(`odoo-proxy.container.d/`). It serves the host only: the config allows loopback, the gateways
+of the networks of the proxy and its own addresses there, where its published port comes from
+(podman's port forwarder connects from inside the container), and refuses (403) any other client, as a bundle would reach the Odoo of another one by its `Host` (security check
 11-03, C7). It also refuses `/web/database/` and `/xmlrpc/db`, `/xmlrpc/2/db` in every server:
 a page of a bundle open in Firefox would post a database restore to the server of another
 bundle through the host. On devnet the drop-in of gateway-core pins it at 10.89.255.30, among
