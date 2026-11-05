@@ -5,6 +5,8 @@ The run is either in a terminal (agent-terminal.py) or handed over to the Claude
 stops `claude -p` at its first tool call and the tab reruns that turn. A turn that ends without a
 verdict line (a background job still running) leaves .agent/waiting instead. A turn that ends
 before the terminal typed the task the daemon left for it (no .agent/run.lock) writes nothing.
+Once the run gave its verdict, a later turn of the session (a PR event, a hok answer, Seb) writes
+again only on a verdict of its own, which replaces the first.
 
 A PR event that waits (client/prwatch.py) keeps any session of the bundle from ending its turn:
 the turn goes on with it.
@@ -41,14 +43,16 @@ def main():
     if (
         hook.get("session_id") != read("session")
         or (read("handoff") is None and read("terminal") is None)
-        or read("done") is not None
         or not (AGENT / "run.lock").exists()
     ):
         return
     message = hook.get("last_assistant_message") or ""
-    (AGENT / "result.md").write_text(message)
     first = next((line for line in message.splitlines() if line.strip()), "")
-    if not VERDICT.match(first.strip().lstrip("#*_` ")):
+    verdict = VERDICT.match(first.strip().lstrip("#*_` "))
+    if not verdict and read("done") is not None:
+        return
+    (AGENT / "result.md").write_text(message)
+    if not verdict:
         (AGENT / "waiting").touch()
         return
     (AGENT / "done.tmp").write_text("0\n")

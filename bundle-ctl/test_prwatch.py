@@ -243,6 +243,12 @@ def test_hooks(folder):
     check("a turn before the terminal typed its task writes no verdict", stopped(), ("", False))
     (prwatch.AGENT / "run.lock").mkdir()
     check("then the turn ends on its verdict", stopped(), ("", True))
+    stopped("Approved, I go on with the rebase")
+    check("a later turn with no verdict leaves the report",
+          (prwatch.AGENT / "result.md").read_text(), "Pushed: x")
+    stopped("Nothing to do: Seb approved, mergebot has it")
+    check("a later verdict replaces it", (prwatch.AGENT / "result.md").read_text(),
+          "Nothing to do: Seb approved, mergebot has it")
     (prwatch.AGENT / "done").unlink()
     check("a draft left on Seb's word is a verdict too",
           stopped("**Stays a draft:** Seb reads it at abc"), ("", True))

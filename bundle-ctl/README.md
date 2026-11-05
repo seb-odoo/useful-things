@@ -438,7 +438,7 @@ necessary. but if we have a good setup, full remote should offer the same possib
   the text keeps the task waiting for `the link to NAME`. The files go to `.agent/history/` as for
   a terminal, `run.lock` and the `remote*` files stay, and `.agent/remote-typed` keeps when the
   session took its status (`statusUpdatedAt` of its record, on the clock of the worker). In the
-  job, `client/agent-stop.py` writes the first verdict alone, as its own `.agent/done` stays, so
+  job, `client/agent-stop.py` writes no `waiting` once its own `.agent/done` is there, so
   the daemon writes the end of a typed turn here once the session is idle again since then: its
   last text in `result.md`, then `done` on a verdict line, else `waiting`. The 5 minutes after
   the verdict then count from it. One gap with a terminal here: the daemon does not see what Seb
@@ -835,7 +835,10 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   anything else `waiting`. A `waiting` agent keeps its slot of the cap, its container, and its
   session open in its terminal, for Seb to read what ran and to type in. A `done` agent leaves its
   slot, and the daemon closes its terminal a few minutes later (below), so that its container
-  gives its memory back.
+  gives its memory back. A later turn of the same session (a PR event, a hok answer, a prompt of
+  Seb) writes again only on a verdict, which replaces `result.md` and `done`: on 2026-11-05 the
+  `nothing to do:` an agent gave after Seb's r+ stayed behind its `needs Seb:`, and the bundle
+  read as waiting for him.
 - A turn that ends on an API error that a new request may pass (`server_error` in the transcript:
   a 5xx, the API out of reach, an answer cut) writes neither, as no Stop hook runs then. Claude
   has tried again for 4 minutes by then: on 2026-10-21 the network of the host was down 15

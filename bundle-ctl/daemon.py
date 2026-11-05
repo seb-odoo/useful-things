@@ -3480,7 +3480,7 @@ def get_status_since(bundle, session):
 
 def end_typed_turn(bundle, agent, session):
     """The end of the turn of a task typed on a worker, written here as client/agent-stop.py writes
-    it: in the job it writes the first verdict alone, as its own `.agent/done` stays. Once the
+    it: in the job it writes no `waiting` once its own `.agent/done` is there. Once the
     session is idle again since the task was typed. A line for the journal on a verdict."""
     since = read_text(agent / "remote-typed") or ""
     transcript = session and get_transcript(session, bundle)
