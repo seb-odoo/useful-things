@@ -186,6 +186,16 @@ GO_ON = "Continue from where you left off."
 HELD = load_held()
 HELD_DIR = STATE / "held"
 DECK_DIR = STATE / "deck"
+DIALOGS_DIR = STATE / "dialogs"
+DIALOG_ESCAPE_AGAIN = 60
+DIALOG_EVERY = 5
+DIALOG_SIZES = {"header": 60, "question": 2000, "label": 200, "description": 600}
+DIALOG_TAIL = 256 * 1024
+ESCAPE = "\x1b"
+MAX_DIALOG_OPTIONS = 4
+MAX_DIALOG_QUESTIONS = 4
+MAX_PICK = 1000
+PICK = re.compile(r"([0-9]+(?:\s*,\s*[0-9]+)*)(?:\s+(.*))?", re.DOTALL)
 TOLD_DIR = STATE / "told"
 PARENTS_DIR = STATE / "parents"
 WATCH_DIR = STATE / "watch"
@@ -356,6 +366,7 @@ WINDOW_CLOSE_WAIT = 30
 bundle_locks = {}
 moving_back = set()
 building_for_worker = set()
+dialogs_missing = {}
 missing_agents = {}
 orphans = {}
 stale_starts = set()
@@ -1878,12 +1889,15 @@ def keep_launching():
             time.sleep(START_CHECK if launch_safely() else 60)
 
     def on_told():
-        remotes, listed = [], float("-inf")
+        remotes, listed, asked = {}, float("-inf"), float("-inf")
         while True:
             try:
                 if time.monotonic() - listed > REMOTE_LIST_EVERY:
-                    remotes, listed = list(get_remote_agents()), time.monotonic()
+                    remotes, listed = get_remote_agents(), time.monotonic()
                 tell_remote_agents(remotes)
+                if time.monotonic() - asked > DIALOG_EVERY:
+                    asked = time.monotonic()
+                    ask_dialogs(get_remote_agents())
             except Exception:
                 traceback.print_exc()
             time.sleep(REMOTE_TOLD_EVERY)
@@ -3089,6 +3103,307 @@ def tell_remote_agents(bundles):
         )
 
 
+def ask_dialogs(remotes):
+    """A card in hok for the question the claude of each remote agent waits on, one question at a
+    time, and no card once its dialog closed (README.md, "Remote agents"). remotes: the worker of
+    each bundle whose agent runs on one."""
+    if HELD is None:
+        return
+    noted = {path.stem for path in DIALOGS_DIR.glob("*.json")} if DIALOGS_DIR.is_dir() else set()
+    for bundle in sorted({*remotes, *noted}):
+        if not BUNDLE_NAME.fullmatch(bundle):
+            continue
+        if line := ask_dialog(bundle, remotes.get(bundle)):
+            print(line, flush=True)
+
+
+def ask_dialog(bundle, worker):
+    """Hold the card of the next question of the dialog of a remote agent, drop the one of a
+    dialog that closed, or send the Escape of an answer again. A line for the journal or None."""
+    dialog = get_dialog(bundle) if worker else None
+    note = read_dialog_note(bundle)
+    if note and not is_same_dialog(note, dialog):
+        missed = dialogs_missing.setdefault(bundle, time.monotonic())
+        if worker and dialog is None and time.monotonic() - missed < DIALOG_EVERY:
+            return None
+        return drop_dialog(bundle)
+    dialogs_missing.pop(bundle, None)
+    if not dialog:
+        return None
+    if note and note["state"] == "answered":
+        if time.time() - note["sent"] < DIALOG_ESCAPE_AGAIN:
+            return None
+        note["sent"] = time.time()
+        write_dialog_note(bundle, note)
+        if error := remote_agent.type_keys(bundle, ESCAPE):
+            return f"{bundle}: the Escape of its answered dialog did not reach {worker}: {error}"
+        return f"{bundle}: its answered dialog still waits on {worker}, Escape sent again"
+    card = note and note["card"]
+    if card and not (HELD_DIR / f"{card[1:]}.json").exists():
+        note["card"] = None
+    if note and (note["state"] != "asked" or note["card"]):
+        return None
+    note = note or {"session": dialog["session"], "tool": dialog["tool"], "index": 0, "answers": []}
+    card = hold(get_dialog_item(bundle, worker, dialog, note["index"]))
+    write_dialog_note(bundle, {**note, "card": card, "state": "asked"})
+    return f"{bundle}: its agent on {worker} asks a question: hok {card}"
+
+
+def drop_dialog(bundle):
+    """Drop the card of a dialog that closed, or of an agent no longer on a worker, with no answer
+    of it running: the lock of take() in held.py."""
+    with HELD.lock:
+        note = read_dialog_note(bundle)
+        worker = (remote_agent.read_remote(get_agent_folder(bundle).parent) or {}).get("worker")
+        if not note or is_same_dialog(note, worker and get_dialog(bundle)):
+            return None
+        (DIALOGS_DIR / f"{bundle}.json").unlink(missing_ok=True)
+        dialogs_missing.pop(bundle, None)
+        card = note["card"]
+        path = HELD_DIR / f"{(card or ' ')[1:]}.json"
+        if not card or (HELD.read_json(path) or {}).get("key") != f"dialog {bundle}":
+            return None
+        path.unlink(missing_ok=True)
+        path.with_suffix(".pick").unlink(missing_ok=True)
+    return f"{bundle}: its dialog closed, hok {card} goes"
+
+
+def get_dialog(bundle):
+    """The question the claude of a remote agent waits on: its session, the id of its
+    AskUserQuestion call and its questions, in the words of the agent, each text on one line and
+    sized. None when its claude waits on nothing, or on another dialog. The transcript comes from
+    the job: read as data."""
+    session = read_text(get_agent_folder(bundle) / "session")
+    if not SESSION_ID.fullmatch(session or "") or get_session_status(bundle, session) != "waiting":
+        return None
+    transcript = get_own_transcript(session, bundle)
+    for entry in reversed(read_entries(transcript, DIALOG_TAIL) if transcript else []):
+        if entry.get("type") not in ("assistant", "user") or entry.get("isSidechain"):
+            continue
+        message = entry.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        blocks = (
+            [block for block in content if isinstance(block, dict)]
+            if isinstance(content, list)
+            else []
+        )
+        kinds = {str(block.get("type")) for block in blocks}
+        if entry["type"] == "assistant" and kinds == {"thinking"}:
+            continue
+        calls = [block for block in blocks if block.get("type") == "tool_use"]
+        if entry["type"] != "assistant" or len(calls) != 1:
+            return None
+        if calls[0].get("name") != "AskUserQuestion" or not isinstance(calls[0].get("id"), str):
+            return None
+        questions = get_questions(calls[0].get("input"))
+        tool = calls[0]["id"][:200]
+        return questions and {"session": session, "tool": tool, "questions": questions}
+    return None
+
+
+def get_questions(data):
+    """The questions of an AskUserQuestion call, or None when they do not have its shape."""
+    questions = data.get("questions") if isinstance(data, dict) else None
+    if not isinstance(questions, list) or not 1 <= len(questions) <= MAX_DIALOG_QUESTIONS:
+        return None
+    found = []
+    for question in questions:
+        options = question.get("options") if isinstance(question, dict) else None
+        if not isinstance(options, list) or not 1 <= len(options) <= MAX_DIALOG_OPTIONS:
+            return None
+        if not all(isinstance(option, dict) for option in options):
+            return None
+        labels = [size_text(option.get("label"), "label") for option in options]
+        if not all(labels):
+            return None
+        found.append(
+            {
+                "header": size_text(question.get("header"), "header"),
+                "question": size_text(question.get("question"), "question"),
+                "several": question.get("multiSelect") is True,
+                "options": [
+                    [label, size_text(option.get("description"), "description")]
+                    for label, option in zip(labels, options, strict=True)
+                ],
+            },
+        )
+    return found
+
+
+def size_text(text, kind):
+    """A text of the agent on one line, its control characters dropped, cut to DIALOG_SIZES."""
+    if not isinstance(text, str):
+        return ""
+    text = " ".join("".join(char if char.isprintable() else " " for char in text).split())
+    most = DIALOG_SIZES[kind]
+    return text if len(text) <= most else f"{text[: most - 3]}..."
+
+
+def read_entries(path, size):
+    """The entries of the last size bytes of a transcript, no link followed."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return []
+    with os.fdopen(fd, "rb") as file:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            return []
+        file.seek(max(0, info.st_size - size))
+        lines = file.read(size).split(b"\n")
+    entries = []
+    for line in lines[1:] if info.st_size > size else lines:
+        with contextlib.suppress(ValueError, RecursionError):
+            entry = json.loads(line)
+            if isinstance(entry, dict):
+                entries.append(entry)
+    return entries
+
+
+def get_dialog_item(bundle, worker, dialog, index):
+    """The card of one question of a dialog: its words go in the part of what the agent says."""
+    question = dialog["questions"][index]
+    count = len(dialog["questions"])
+    which = f"question {index + 1} of {count}" if count > 1 else "the question"
+    if index + 1 < count:
+        yes = (
+            "keeps the option you typed by its number, or your words, and the next question of the"
+            f" dialog comes as a card: the dialog closes once all {count} are answered"
+        )
+    else:
+        yes = (
+            f"closes its dialog on {worker} (Escape), and the option you typed by its number, or"
+            " your words, goes to its claude as its next prompt"
+        )
+    labels = [label for label, _description in question["options"]]
+    return {
+        "client": bundle,
+        "key": f"dialog {bundle}",
+        "lines": [
+            {"label": "header", "text": question["header"]},
+            {"label": "question", "text": question["question"]},
+            *(
+                {"label": str(number), "text": f"{label}: {description}" if description else label}
+                for number, (label, description) in enumerate(question["options"], 1)
+            ),
+        ],
+        "options": len(labels),
+        "send": {
+            "dialog": {
+                "bundle": bundle,
+                "header": question["header"] or f"question {index + 1}",
+                "index": index,
+                "labels": labels,
+                "session": dialog["session"],
+                "several": question["several"],
+                "tool": dialog["tool"],
+                "worker": worker,
+            },
+        },
+        "session": dialog["session"],
+        "several": question["several"],
+        "title": f"answer {which} of {bundle}, its agent on {worker}",
+        "yes": yes,
+    }
+
+
+def is_same_dialog(note, dialog):
+    return bool(dialog) and [note["session"], note["tool"]] == [dialog["session"], dialog["tool"]]
+
+
+def read_dialog_note(bundle):
+    """What the daemon keeps of the dialog of a remote agent: its session and call, the question
+    its card asks, the answers so far, and its state: asked, refused, or answered (its Escape
+    sent at `sent`). Only the daemon writes the folder."""
+    try:
+        note = json.loads((DIALOGS_DIR / f"{bundle}.json").read_text())
+    except (OSError, ValueError):
+        return None
+    keys = {"answers", "card", "index", "session", "state", "tool"}
+    return note if isinstance(note, dict) and keys <= note.keys() else None
+
+
+def write_dialog_note(bundle, note):
+    DIALOGS_DIR.mkdir(parents=True, exist_ok=True)
+    fresh = DIALOGS_DIR / f".{bundle}.json"
+    fresh.write_text(json.dumps(note))
+    fresh.replace(DIALOGS_DIR / f"{bundle}.json")
+
+
+def send_dialog(item):
+    """Seb's answer to a question of a remote agent, typed in hok as the number of an option, with
+    words after it or not, or as his own words: kept for the next question of the dialog, or, at
+    the last one, Escape to its claude and one line with every answer, typed as the lines of the
+    host once the dialog closed. Runs in take() of held.py, under its lock."""
+    sent = item["send"]["dialog"]
+    bundle, worker = sent["bundle"], sent["worker"]
+    note = read_dialog_note(bundle)
+    dialog = get_dialog(bundle)
+    if (
+        not note
+        or note["state"] != "asked"
+        or not note["card"]
+        or [note[key] for key in ("session", "tool", "index")]
+        != [sent[key] for key in ("session", "tool", "index")]
+        or not is_same_dialog(note, dialog)
+    ):
+        raise ValueError("its dialog closed or changed meanwhile: nothing was typed")
+    pick = HELD_DIR / f"{note['card'][1:]}.pick"
+    said = read_text(pick, MAX_PICK * 4) or ""
+    pick.unlink(missing_ok=True)
+    answer = get_dialog_answer(said, sent)
+    answers = [*note["answers"], answer]
+    if sent["index"] + 1 < len(dialog["questions"]):
+        write_dialog_note(
+            bundle, {**note, "answers": answers, "card": None, "index": sent["index"] + 1}
+        )
+        return f"kept: question {sent['index'] + 2} of the dialog of {bundle} comes as a card"
+    agent = get_agent_folder(bundle)
+    if any((agent / name).exists() for name in ("remote-down", "remote-ending", "remote-moving")):
+        raise OSError(f"its link to {worker} is down, or its job ends")
+    if error := remote_agent.type_keys(bundle, ESCAPE):
+        raise OSError(f"the link to {worker}: {error}")
+    text = f"Seb answered your question in hok, which closed its dialog: {'; '.join(answers)}."
+    (TOLD_DIR / bundle).mkdir(parents=True, exist_ok=True)
+    leave_event(TOLD_DIR / bundle, text, note["session"])
+    note = {**note, "answers": answers, "card": None, "sent": time.time(), "state": "answered"}
+    write_dialog_note(bundle, note)
+    print(f"{bundle}: Seb answered its question in hok, Escape sent to {worker}", flush=True)
+    return f"its dialog on {worker} closes, and your answer goes to its claude as its next prompt"
+
+
+def get_dialog_answer(said, sent):
+    """One answer of the line typed to the agent, from what Seb typed: the labels of the options
+    he gave by number, as the card showed them, and his words. OSError, which keeps the card,
+    when it names no option and has no words, or an option the question does not have."""
+    said = " ".join("".join(char if char.isprintable() else " " for char in said).split())
+    if not said:
+        raise OSError("a yes to a question needs the number of an option, or your own words")
+    labels, words = [], said[:MAX_PICK]
+    if match := PICK.fullmatch(said):
+        numbers = list(dict.fromkeys(int(number) for number in re.findall(r"[0-9]+", match[1])))
+        if wrong := [number for number in numbers if not 1 <= number <= len(sent["labels"])]:
+            raise OSError(f"no option {wrong[0]} in this question")
+        if numbers[1:] and not sent["several"]:
+            raise OSError("this question takes one option")
+        labels = [sent["labels"][number - 1] for number in numbers]
+        words = (match[2] or "")[:MAX_PICK]
+    if labels and words:
+        return f"{sent['header']}: {', '.join(labels)}, and in his words: {words}"
+    if labels:
+        return f"{sent['header']}: {', '.join(labels)}"
+    return f"{sent['header']}: in his own words: {words}"
+
+
+def refuse_held(item):
+    """Seb's no to what was held: a no to a question of a remote agent leaves its dialog as it is,
+    and no card asks it again. Runs in take() of held.py, under its lock."""
+    sent = item.get("send", {}).get("dialog")
+    note = sent and read_dialog_note(sent["bundle"])
+    if note and [note["session"], note["tool"]] == [sent["session"], sent["tool"]]:
+        write_dialog_note(sent["bundle"], {**note, "card": None, "state": "refused"})
+
+
 def get_status_since(bundle, session):
     """When the claude of a bundle's session took its status, in ms of the clock of its machine, 0
     when its newest record does not say."""
@@ -3130,7 +3445,11 @@ def clean(text):
 
 def hold(item):
     """Hold a request for Seb's yes in hok, the text of its caller cleaned: the id hok lists."""
-    item = {**item, "lines": [clean(line) for line in item["lines"]]}
+    lines = [
+        clean(line) if isinstance(line, str) else {key: clean(text) for key, text in line.items()}
+        for line in item["lines"]
+    ]
+    item = {**item, "lines": lines}
     if "reason" in item:
         item["reason"] = clean(item["reason"])
     return f"{HELD_LETTER}{HELD.add(HELD_DIR, item)}"
@@ -4254,7 +4573,10 @@ def send_task(item):
 
 def send_held(item):
     """Seb's yes to what was held: the deletion of a bundle, the task a bundle sends to a new ops
-    agent or to another bundle, the resume of the cut sessions, or what frees the disk."""
+    agent or to another bundle, the resume of the cut sessions, what frees the disk, or the answer
+    to a question of a remote agent."""
+    if "dialog" in item["send"]:
+        return send_dialog(item)
     if "resume" in item["send"]:
         return resume_cut(item["send"]["resume"])
     if "queue" in item["send"]:
@@ -4973,7 +5295,7 @@ def main():
     if HELD:
         threading.Thread(
             target=HELD.serve,
-            args=(HELD_DIR, send_held),
+            args=(HELD_DIR, send_held, refuse_held),
             daemon=True,
         ).start()
     keep_launching()

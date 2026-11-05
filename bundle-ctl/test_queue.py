@@ -2265,6 +2265,221 @@ def check_remote_told(root):
     return [f"remote told: {name}: {found}" for name, passed in checks if not passed], len(checks)
 
 
+def write_dialog(path, questions, tool="toolu_1", name="AskUserQuestion"):
+    """A transcript whose last call is name, with these questions, as claude writes it."""
+    call = {"type": "tool_use", "id": tool, "name": name, "input": {"questions": questions}}
+    entries = [
+        {"type": "user", "message": {"role": "user", "content": "go"}},
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "Done: x"}]}},
+        {"type": "assistant", "message": {"content": [call]}},
+        {"type": "user", "isSidechain": True, "message": {"content": "a subagent"}},
+        {"type": "system", "subtype": "turn_duration"},
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(entry) + "\n" for entry in entries))
+
+
+def answer_card(card, said, yes=True):
+    """Answer a card of bundle-ctl as hok does: the pick first, then the yes or the no."""
+    path = daemon.HELD_DIR / f"{card[1:]}.json"
+    item = daemon.HELD.read_json(path)
+    if yes:
+        path.with_suffix(".pick").write_text(said)
+    answer = f"yes {item['digest']}" if yes else f"no {said}"
+    path.with_suffix(".answer").write_text(f"{answer}\n")
+    daemon.HELD.take(path.with_suffix(".answer"), daemon.send_held, daemon.refuse_held)
+    return daemon.HELD.read_json(path.with_suffix(".result"))
+
+
+def check_remote_dialog(root):
+    """The question a remote agent waits on becomes a card of hok, one question at a time; Seb's
+    pick closes its dialog with Escape and goes to it as one line of the host; a no leaves it; the
+    card goes once the dialog closes otherwise; an Escape not taken is sent again."""
+    session = "11111111-2222-3333-4444-555555555555"
+    on_worker = {"remote.json": '{"worker": "sebpc", "job": "1"}', "session": f"{session}\n"}
+    names = ("one", "two", "no", "closes", "glitch", "permission", "bad", "garbled")
+    bundles = {name: on_worker for name in names}
+    bundles["here"] = {"session": f"{session}\n"}
+    prepare(root, bundles, 8)
+    way = {
+        "question": "Which way?\nSay.",
+        "header": "Way",
+        "multiSelect": False,
+        "options": [
+            {"label": "Left (Recommended)", "description": "Mine: yes."},
+            {"label": "Right", "description": "\x1b[31mred"},
+        ],
+    }
+    tools = {
+        **way,
+        "header": "Tools",
+        "multiSelect": True,
+        "options": [*way["options"], {"label": "Up"}],
+    }
+    transcripts = root / "transcripts"
+    for name in (*names, "here"):
+        questions = [way, tools] if name == "two" else [way]
+        tool = "Bash" if name == "permission" else "AskUserQuestion"
+        write_dialog(transcripts / name / f"{session}.jsonl", questions, name=tool)
+    with (transcripts / "garbled" / f"{session}.jsonl").open("a") as file:
+        file.write('not json\n{"type": "assistant", "message": "x"}\n')
+    statuses = dict.fromkeys(bundles, "waiting")
+    typed = []
+
+    def type_keys(bundle, keys):
+        typed.append((bundle, keys))
+
+    stubs = {
+        name: getattr(daemon, name)
+        for name in (
+            "DIALOGS_DIR",
+            "DIALOG_EVERY",
+            "REMOTE_ENTER_AFTER",
+            "TITLE",
+            "TOLD_DIR",
+            "get_own_transcript",
+            "get_session_status",
+            "remote_agent",
+        )
+    }
+    daemon.DIALOGS_DIR = root / "dialogs"
+    daemon.DIALOG_EVERY = 0
+    daemon.REMOTE_ENTER_AFTER = 0
+    daemon.TITLE = types.SimpleNamespace(is_resuming=lambda session, *_: False)
+    daemon.TOLD_DIR = root / "told"
+    daemon.get_own_transcript = lambda session, bundle: transcripts / bundle / f"{session}.jsonl"
+    daemon.get_session_status = lambda bundle, session: statuses[bundle]
+    daemon.remote_agent = types.SimpleNamespace(
+        get_recorded=written_remotes,
+        read_remote=read_written(stubs["remote_agent"]),
+        type_keys=type_keys,
+    )
+
+    def ask():
+        daemon.ask_dialogs(daemon.get_remote_agents())
+
+    def get_told(bundle):
+        return [path.read_text() for path in sorted((daemon.TOLD_DIR / bundle).glob("*/*.txt"))]
+
+    journal = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(journal):
+            ask()
+            ask()
+            cards = {
+                line.split(": ")[0]: line.split()[-1] for line in journal.getvalue().splitlines()
+            }
+            first = daemon.HELD.read_json(daemon.HELD_DIR / f"{cards['one'][1:]}.json")
+            answered = answer_card(cards["one"], "2 go on")
+            note = daemon.read_dialog_note("one")
+            told_one = get_told("one")
+            kept = answer_card(cards["two"], "1")
+            escaped = list(typed)
+            ask()
+            second = journal.getvalue().splitlines()[-1].split()[-1]
+            answer_card(second, "1, 3 both")
+            refused = answer_card(cards["no"], "not now", yes=False)
+            told_two = get_told("two")
+            empty = answer_card(cards["bad"], "")
+            wrong = answer_card(cards["bad"], "3")
+            several = answer_card(cards["bad"], "1,2")
+            statuses["closes"] = "idle"
+            ask()
+            statuses["glitch"] = None
+            daemon.DIALOG_EVERY = 100
+            ask()
+            glitch_kept = (daemon.HELD_DIR / f"{cards['glitch'][1:]}.json").exists()
+            daemon.dialogs_missing["glitch"] -= 200
+            ask()
+            daemon.DIALOG_EVERY = 0
+            note_one = daemon.read_dialog_note("one")
+            daemon.write_dialog_note("one", {**note_one, "sent": 0})
+            typed.clear()
+            ask()
+            again = list(typed)
+            statuses["one"] = "idle"
+            typed.clear()
+            daemon.tell_remote_agents(daemon.get_remote_agents())
+            told = list(typed)
+            ask()
+            notes = {name: daemon.read_dialog_note(name) for name in ("no", "one")}
+            told_no = get_told("no")
+    finally:
+        vars(daemon).update(stubs)
+        daemon.dialogs_missing.clear()
+    lines = journal.getvalue().splitlines()
+    paste = daemon.PASTE_START + "{}" + daemon.PASTE_END
+    one = "Seb answered your question in hok, which closed its dialog: Way: Right, and in his words: go on."
+    checks = [
+        (
+            "a card for each question asked on a worker, once: none for a permission, a garbled"
+            " transcript, or here",
+            sorted(cards) == ["bad", "closes", "glitch", "no", "one", "two"],
+        ),
+        (
+            "the card holds the words of the agent on one line, and what to pick",
+            first["lines"][1:]
+            == [
+                {"label": "question", "text": "Which way? Say."},
+                {"label": "1", "text": "Left (Recommended): Mine: yes."},
+                {"label": "2", "text": "Right: [31mred"},
+            ]
+            and first["options"] == 2
+            and first["title"] == "answer the question of one, its agent on sebpc"
+            and first["session"] == session,
+        ),
+        (
+            "a pick closes the dialog with Escape, then its line waits for the end of the dialog",
+            answered["code"] == 0
+            and ("one", "\x1b") in escaped
+            and note["state"] == "answered"
+            and told_one == [one],
+        ),
+        (
+            "the first of two questions keeps its answer and asks the next on a card",
+            kept["code"] == 0
+            and ("two", "\x1b") not in escaped
+            and f"two: its agent on sebpc asks a question: hok {second}" in lines,
+        ),
+        (
+            "the last one sends every answer, several options too",
+            told_two
+            == [
+                "Seb answered your question in hok, which closed its dialog: Way: Left"
+                " (Recommended); Tools: Left (Recommended), Up, and in his words: both."
+            ],
+        ),
+        (
+            "a no leaves the dialog and asks no more",
+            refused["said"] == "no"
+            and notes["no"]["state"] == "refused"
+            and not told_no
+            and not any(line.startswith("no: its agent") for line in lines[len(cards) :]),
+        ),
+        (
+            "a yes with no pick, an option it does not have, several on one: the card waits",
+            [result["code"] for result in (empty, wrong, several)] == [75] * 3
+            and "no option 3 in this question" in wrong["text"]
+            and "takes one option" in several["text"]
+            and (daemon.HELD_DIR / f"{cards['bad'][1:]}.json").exists(),
+        ),
+        (
+            "a dialog that closed drops its card; a record missing once keeps it",
+            f"closes: its dialog closed, hok {cards['closes']} goes" in lines
+            and not (daemon.HELD_DIR / f"{cards['closes'][1:]}.json").exists()
+            and glitch_kept
+            and f"glitch: its dialog closed, hok {cards['glitch']} goes" in lines,
+        ),
+        ("an Escape the dialog did not take goes again", again == [("one", "\x1b")]),
+        (
+            "once the dialog closed, the line goes as one of the host, and the note goes",
+            told == [("one", paste.format(one)), ("one", "\r")] and notes["one"] is None,
+        ),
+    ]
+    found = lines, typed, refused
+    return [f"remote dialog: {name}: {found}" for name, passed in checks if not passed], len(checks)
+
+
 def check_ramp(root):
     """Only an agent that began its run in the last AGENT_RAMP seconds and gave no verdict counts
     for the memory it takes soon.
@@ -2890,6 +3105,7 @@ def main():
         check_tell,
         check_remote_type,
         check_remote_told,
+        check_remote_dialog,
         check_ramp,
         check_renew,
         check_leaving,

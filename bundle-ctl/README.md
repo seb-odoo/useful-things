@@ -409,6 +409,24 @@ necessary. but if we have a good setup, full remote should offer the same possib
   don't receive firefox github events?", as his review of enterprise#138246 and two hok answers
   waited in `told/` until the claude of their bundle stopped). The journal says `BUNDLE: N lines
   of the host typed on its worker`, or that they wait for the link. `python3 test_queue.py`.
+- A question its claude waits on (`waiting` in the mirrored record, and the last call of its
+  transcript an `AskUserQuestion` with no result) becomes a card in hok, `bN`, within 5 s
+  (`DIALOG_EVERY`), one question at a time (Seb's pick, 2026-11-05: that day the agents of
+  19.0-today-relative-hours-tz--seb and master-channel-member-server-resubscribe--seb waited
+  hours on a question only their terminal showed, and his yes to g426 and g427 waited in `told/`
+  behind it). Its header, question and options are the words of the agent, each on one line and
+  cut (`DIALOG_SIZES`), in the part of the card the agent speaks in (host-ctl README, "A question
+  of an agent"). Seb answers with the number of an option, words after it or not, or with his
+  own words, which `hok` leaves beside the request (`N.pick`). A yes to the last question sends
+  Escape to that claude, as deck's Stop does, and leaves one line in `told/`, typed once the
+  dialog closed, with the lines that waited behind it: `Seb answered your question in hok, which
+  closed its dialog: HEADER: LABEL, and in his words: ...`. A no leaves the dialog, and no card
+  asks it again. A yes with no pick, or a number the question does not have, keeps the card. The
+  card goes 5 s after the dialog closed otherwise (answered in its terminal, the job ended, the
+  agent brought back), and an Escape the dialog did not take goes again after a minute
+  (`DIALOG_ESCAPE_AGAIN`), as a key sent while the tunnel is down is lost.
+  `~/.local/state/bundle-ctl/dialogs/BUNDLE.json` keeps where each dialog is. An agent here has
+  its window on his screen: no card. `python3 test_queue.py`.
 - Its PR events (see PR events) come after them, the same way. Its stand-in runs
   `client/prwatch.py`, started again a minute after it ends, as the bundle (`devnet`, the names of
   the gateways and their CA, `ODOO_PROXY_HOST`), on the `.agent/` of the bundle here. The daemon
