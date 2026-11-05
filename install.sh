@@ -28,7 +28,6 @@ postgresql python3-dev libxml2-dev libxslt1-dev libldap2-dev libsasl2-dev \
 build-essential libsasl2-dev libldap2-dev libssl-dev python3-pypdf2 \
 python3-venv python3-flake8 meld gimp flake8
 
-git clone https://github.com/magicmonty/bash-git-prompt.git ~/.bash-git-prompt --depth=1
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 

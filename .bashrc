@@ -1,5 +1,4 @@
 export PATH=$PATH:$HOME/repo/odoo-ops-tools
-export GIT_PROMPT_FETCH_REMOTE_STATUS=0
 
 # Odoo-dev aliases/functions shared with the dev container (single source of truth)
 source ~/repo/useful-things/container-rw/devcontainer.bashrc
@@ -216,32 +215,48 @@ function ocoverage() {
 	fi
 }
 
-GIT_PROMPT_ONLY_IN_REPO=1
-GIT_PROMPT_THEME=Single_line_Ubuntu
+# The prompt in a git repo: git's own (git-sh-prompt of the git package), drawn as bash-git-prompt
+# drew it here with its Single_line_Ubuntu theme, but for the number of files of each state. It
+# runs git and reads nothing of the repo: bash-git-prompt sourced the .bash-git-rc at its top,
+# which a bundle writes (security check 11-03, C6).
+if [ -f /usr/lib/git-core/git-sh-prompt ]; then
+	source /usr/lib/git-core/git-sh-prompt
+	GIT_PS1_SHOWDIRTYSTATE=1
+	GIT_PS1_SHOWUNTRACKEDFILES=1
+	GIT_PS1_SHOWUPSTREAM=verbose
+	__prompt_plain=$PS1
 
-GIT_PROMPT_PREFIX="["
-GIT_PROMPT_SUFFIX="]"
-GIT_PROMPT_SEPARATOR="|"
-GIT_PROMPT_STAGED="${Red}●${ResetColor}"
-GIT_PROMPT_CONFLICTS="${Red}✖${ResetColor}"
-GIT_PROMPT_CHANGED="${Blue}✚${ResetColor}"
-GIT_PROMPT_UNTRACKED="${Cyan}…${ResetColor}"
-GIT_PROMPT_STASHED="${BoldBlue}⚑${ResetColor}"
-GIT_PROMPT_CLEAN="${BoldGreen}✔${ResetColor}"
-
-GIT_PROMPT_COMMAND_OK="${Green}✔"
-GIT_PROMPT_COMMAND_FAIL="${Red}✘"
-
-GIT_PROMPT_END_USER="${ResetColor} $ "
-GIT_PROMPT_START_USER="${Cyan}${PathShort}${ResetColor}"
-GIT_PROMPT_END_ROOT="${BoldRed} # "
-
-GIT_PROMPT_IGNORE_STASH="1"
-GIT_PROMPT_BRANCH="${BoldBlue}"
-GIT_PROMPT_SYMBOLS_AHEAD="${BoldGreen}↑ "
-GIT_PROMPT_SYMBOLS_BEHIND="${BoldRed}↓ "
-
-source ~/.bash-git-prompt/gitprompt.sh
+	__prompt_git() {
+		local code=$? found words word remote="" state="" mark reset='\[\e[0;0m\]'
+		found=$(__git_ps1 "%s")
+		if [ -z "$found" ]; then
+			PS1=$__prompt_plain
+			return
+		fi
+		read -ra words <<<"$found"
+		for word in "${words[@]:1}"; do
+			case $word in
+			u=) ;;
+			u*)
+				[[ $word =~ -([0-9]+) ]] && remote+=$'\xe2\x86\x93\xc2\xb7'"${BASH_REMATCH[1]}"
+				[[ $word =~ \+([0-9]+) ]] && remote+=$'\xe2\x86\x91\xc2\xb7'"${BASH_REMATCH[1]}"
+				;;
+			*)
+				[[ $word == *+* ]] && state+=" \[\e[0;31m\]"$'\xe2\x97\x8f'"$reset"
+				[[ $word == *\** ]] && state+=" \[\e[0;34m\]"$'\xe2\x9c\x9a'"$reset"
+				[[ $word == *%* ]] && state+=" \[\e[0;36m\]"$'\xe2\x80\xa6'"$reset"
+				;;
+			esac
+		done
+		state=${state:-" \[\e[1;32m\]"$'\xe2\x9c\x94'" $reset"}
+		mark="\[\e[0;32m\]"$'\xe2\x9c\x94'" $reset"
+		[ "$code" -eq 0 ] || mark="\[\e[0;31m\]"$'\xe2\x9c\x98'" $reset"
+		# A name, never code: bash expands what PS1 holds at each prompt.
+		__prompt_branch=${words[0]}
+		PS1="$mark \[\e[0;37m\]\$(date +%H:%M)$reset \[\e[0;36m\]\w$reset [ \[\e[0;35m\]\${__prompt_branch}$reset${remote:+ $remote$reset} |$state$reset ]$reset \$ "
+	}
+	PROMPT_COMMAND="__prompt_git${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+fi
 
 
 function usbkeyopen() {
