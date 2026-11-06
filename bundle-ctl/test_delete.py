@@ -30,6 +30,8 @@ MERGED = "master-merged--seb"
 MINE = "master-mine--seb"
 MOVED = "master-moved--seb"
 OPENED = "master-opened-aku"
+PICKED = "master-picked--seb"
+MESSAGE = "picked to 19.0"
 PUSHED = "master-pushed--seb"
 QUEUED = "master-queued--seb"
 REBASED = "master-rebased-aku"
@@ -39,6 +41,7 @@ REPORT = "blocked: needs opus\n\n- measured"
 REPORTED = "master-reported--seb"
 STOPPED = "master-stopped--seb"
 TYPED = "master-typed--seb"
+NO_PR = "is pushed in odoo, a PR may use it: --drop names each commit no PR needs"
 PENDING = (
     "is deleted once its agent ended its turn: its window closes and its container stops then"
 )
@@ -89,6 +92,7 @@ def prepare(root):
         MINE,
         MOVED,
         OPENED,
+        PICKED,
         PUSHED,
         QUEUED,
         REBASED,
@@ -144,6 +148,11 @@ def prepare(root):
     git(repo, "push", "--quiet", str(remote), "--delete", MOVED)
     git(repo, "checkout", "--quiet", COMMITTED)
     git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-qm", "own")
+    git(repo, "checkout", "--quiet", PICKED)
+    (repo / "picked.txt").write_text("picked\n")
+    git(repo, "add", "picked.txt")
+    git(repo, "-c", "user.name=t", "commit", "-qm", MESSAGE)
+    git(repo, "push", "--quiet", "odoo-dev", PICKED)
     git(repo, "checkout", "--quiet", DROPPED)
     git(repo, "-c", "user.name=t", "commit", "--allow-empty", "-qm", "fw conflict fix")
     git(repo, "worktree", "add", "--quiet", str(root / "master" / DIRTY / "odoo"), DIRTY)
@@ -312,7 +321,7 @@ def check(root):
     checks.append(
         (
             "a pushed branch is kept",
-            (code, lines) == (1, [f"bctl: 409 {PUSHED} is pushed in odoo, a PR may use it"]),
+            (code, lines) == (1, [f"bctl: 409 {PUSHED} {NO_PR}"]),
         ),
     )
     code, lines = run_client(path, "delete", MOVED, "--reason", "r")
@@ -446,6 +455,29 @@ def check(root):
                 == (f"the branch in odoo: {line}", f"{bundle} deleted", call),
             ),
         )
+    picked = sha(root / "odoo", PICKED)
+    code, lines = run_client(path, "delete", PICKED, "--reason", "r")
+    refused = (code, lines) == (1, [f"bctl: 409 {PICKED} {NO_PR}"])
+    code, lines = run_client(path, "delete", PICKED, "--reason", "r", "--drop", picked[:12])
+    number = int(lines[0].partition("hok b")[2].partition(".")[0])
+    item = daemon.HELD.read_json(daemon.HELD_DIR / f"{number}.json")
+    result = answer_yes(number)
+    checks.append(
+        (
+            "a pushed commit with no PR goes once named, kept on the dev remote, with no --force",
+            refused
+            and (item["lines"][1:3], item["send"], result["text"], world["calls"][-1])
+            == (
+                [
+                    "the branch in odoo: on odoo-dev with no PR, where it stays",
+                    f"its commit in odoo with no PR, kept on a remote: {picked[:12]} {MESSAGE}",
+                ],
+                {"bundle": PICKED, "drop": [picked]},
+                f"{PICKED} deleted",
+                ("delete_bundle.py", PICKED),
+            ),
+        ),
+    )
     code, lines = run_client(path, "delete", "master-gone--seb", "--reason", "r")
     checks.append(
         (
@@ -563,8 +595,8 @@ def check(root):
     code, lines = run_client(path, "delete", DROPPED, "--reason", "r", "--drop", base)
     checks.append(
         (
-            "a commit a remote has is no commit to drop",
-            (code, lines) == (1, [f"bctl: 400 no commit of {DROPPED} that no remote has: {base}"]),
+            "a commit of the base is no commit to drop",
+            (code, lines) == (1, [f"bctl: 400 no commit of {DROPPED} over its base: {base}"]),
         ),
     )
     world["running"].add(str(root / "master" / DROPPED))

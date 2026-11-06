@@ -749,8 +749,8 @@ cherry-pick, as all the bundles share the base repos' `.git`.
 own to go, where it would hand Seb a `delete_bundle` line to type. A bundle asks it too for its
 children, the bundles whose last task it queued (their `.agent/parent`): the ones it started for a
 measure, say. It is refused while a branch of
-the bundle holds work: a commit of Seb no remote has, a branch on the dev remote that no PR uses
-yet, or an open PR. A branch whose PRs are all closed or merged goes, even with commits of others
+the bundle holds work: an open PR, or a commit `--drop` does not name, of Seb when no remote has
+it, else on a branch of the dev remote that no PR uses yet. A branch whose PRs are all closed or merged goes, even with commits of others
 no remote has: in a review bundle, the older head of a PR its author rebased since. A commit whose
 change the base of the bundle already has under another sha (`git cherry`, same patch-id) is no
 work: a branch never pushed whose commits are all in its base goes too, with no PR, as the copy
@@ -758,10 +758,14 @@ of a fix that reached master by a forward-port. A branch the dev remote no longe
 git-gate sends a deletion from the gate at Seb's yes and leaves the dev remote ref in the base
 repo, so the request first drops that ref when `git ls-remote` no longer finds the branch.
 
-`--drop COMMIT` (7 characters of its sha or more, once per commit) names a commit of Seb no remote
-has that the deletion may lose: the request lists it with its subject, and his yes loses it. A
-commit named that the branch does not hold, or one a remote has, is refused. The yes checks the
-branches again with the same commits, so a commit made after the request still keeps the bundle.
+`--drop COMMIT` (7 characters of its sha or more, once per commit) names a commit of the branch
+that no PR needs: the request lists it with its subject. His yes loses a commit no remote has,
+and leaves on the dev remote one of a push no PR uses: delete_bundle never deletes a remote
+branch. That is the old bundle of a move to another version, whose commits went to the new one by
+a cherry-pick (on 2026-11-06, master-skills-first-affected-version--seb, whose push waited for no
+PR once its commit was on 20.0). A commit named that the branch does not hold over its base is
+refused. The yes checks the branches again with the same commits, so a commit made after the
+request still keeps the bundle.
 
 - The daemon holds the request in `held/` beside `state.json`, in the format of
   `gateway-core/held.py`, and `hok` lists it as `bN` (the `config.py` of host-ctl names the

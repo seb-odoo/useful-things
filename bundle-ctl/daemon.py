@@ -2607,34 +2607,39 @@ def check_uncommitted(bundle):
 
 
 def get_dropped(bundle, commits):
-    """The commits a deletion may lose, as full sha and subject by repo: each one named must be a
-    commit of the branch that no remote has.
+    """The commits no PR needs, as full sha, subject and whether no remote has them by repo: each
+    one named must be a commit of the branch over its base.
     """
     if bad := [commit for commit in commits if not re.fullmatch(r"[0-9a-f]{7,40}", commit)]:
         raise ValueError(f"not a commit sha of 7 characters or more: {', '.join(bad)}")
     dropped, left = {}, set(commits)
     for repo in local_branches(bundle):
-        for line in subprocess.run(
-            [*GIT, "log", "--format=%H %s", f"refs/heads/{bundle}", "--not", "--remotes"],
-            capture_output=True,
-            check=False,
-            cwd=get_repo_folder(repo),
-            text=True,
-        ).stdout.splitlines():
+        base = get_remote_ref(get_base_for_repo(get_base_from_bundle_name(bundle), repo), repo)
+        over_base, unpushed = (
+            subprocess.run(
+                [*GIT, "log", "--format=%H %s", f"refs/heads/{bundle}", "--not", *others],
+                capture_output=True,
+                check=False,
+                cwd=get_repo_folder(repo),
+                text=True,
+            ).stdout.splitlines()
+            for others in ([base], ["--remotes"])
+        )
+        for line in over_base:
             sha, _, subject = line.partition(" ")
             if named := {commit for commit in commits if sha.startswith(commit)}:
-                dropped.setdefault(repo, []).append((sha, subject))
+                dropped.setdefault(repo, []).append((sha, subject, line in unpushed))
                 left -= named
     if left:
-        raise ValueError(f"no commit of {bundle} that no remote has: {', '.join(sorted(left))}")
+        raise ValueError(f"no commit of {bundle} over its base: {', '.join(sorted(left))}")
     return dropped
 
 
 def check_deletion(bundle, drop=()):
     """What the deletion drops, a line by repo where the bundle has its branch, and whether
-    delete_bundle needs --force. Refused while a repo holds work: a commit of Seb no remote has
-    whose change its base does not have and that `drop` does not name, a push no PR uses yet, or
-    an open PR.
+    delete_bundle needs --force. Refused while a repo holds work: a commit whose change its base
+    does not have and that `drop` does not name, of Seb when no remote has it, else on a push no
+    PR uses yet, or an open PR.
     """
     lines, force = {}, False
     for repo in local_branches(bundle):
@@ -2649,12 +2654,13 @@ def check_deletion(bundle, drop=()):
             lines[repo] = f"no commit of its own, not on {get_remote_dev_repo(repo)}"
             continue
         prs = get_branch_prs(repo, bundle)
-        cherry = get_cherry(bundle, repo) if pushed.returncode and not prs else {}
+        cherry = get_cherry(bundle, repo) if not prs else {}
         if not prs and not (cherry and all(cherry[sha] or sha in drop for sha in cherry)):
             raise Refused(
                 f"{bundle} has commits in {repo} that no remote has"
                 if pushed.returncode
-                else f"{bundle} is pushed in {repo}, a PR may use it",
+                else f"{bundle} is pushed in {repo}, a PR may use it:"
+                " --drop names each commit no PR needs",
             )
         if opened := [pr for pr, state in prs.items() if state == "open"]:
             raise Refused(f"{bundle} has an open PR in {repo}: {', '.join(opened)}")
@@ -2663,6 +2669,8 @@ def check_deletion(bundle, drop=()):
             f"its commits are in {base}"
             if all(cherry.values())
             else f"not on {get_remote_dev_repo(repo)}"
+            if pushed.returncode
+            else f"on {get_remote_dev_repo(repo)} with no PR, where it stays"
         )
         if committers:
             force = True
@@ -2713,7 +2721,7 @@ def delete(caller, query, body):
     for repo in local_branches(bundle):
         prune_dev_branch(bundle, repo)
     dropped = get_dropped(bundle, body.get("drop") or [])
-    drop = [sha for commits in dropped.values() for sha, _subject in commits]
+    drop = [sha for commits in dropped.values() for sha, _subject, _lost in commits]
     branches, _force = check_deletion(bundle, drop)
     folders = [folder] if os.path.isdir(folder) else get_leftovers(bundle)
     if not branches and not folders:
@@ -2730,8 +2738,10 @@ def delete(caller, query, body):
             *([f"the branch in {repo}: {line}" for repo, line in branches.items()] or ["no branch"]),
             *(
                 f"its commit in {repo} that no remote has, lost: {sha[:12]} {subject}"
+                if lost
+                else f"its commit in {repo} with no PR, kept on a remote: {sha[:12]} {subject}"
                 for repo, commits in dropped.items()
-                for sha, subject in commits
+                for sha, subject, lost in commits
             ),
             "its container, and the databases named after it",
             *([f"its queued task, from {queued['parent']}"] if queued else []),

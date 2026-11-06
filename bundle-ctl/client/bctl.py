@@ -113,8 +113,9 @@ branches is gbs run on the host: the table, or with --json the data agents read.
 
 delete asks Seb in hok to delete a bundle, the bundle of this container when none is named (a
 container asks for its own, or for a bundle whose last task it queued). It is refused when a
-branch of the bundle has a commit no remote has, or is pushed. --drop COMMIT names a commit of Seb
-no remote has that the deletion may lose: hok lists it, and his yes loses it. Once his yes came
+branch of the bundle has a commit no remote has, or is pushed with no PR. --drop COMMIT names a
+commit of the branch that no PR needs: hok lists it, and his yes loses it when no remote has it,
+else leaves it on the dev remote. Once his yes came
 and the agent ended its turn, its window closes, its container stops, delete_bundle runs, and the
 last answer of the agent is kept on the host. With --wait, bctl waits that
 long for his answer and prints it: exit 0 on his yes, 126 when he refused, 75 when it still waits.
@@ -737,7 +738,7 @@ def main():
         "--drop",
         action="append",
         default=[],
-        help="a commit of Seb no remote has that the deletion may lose, listed in hok",
+        help="a commit no PR needs, listed in hok: lost when no remote has it",
         metavar="COMMIT",
     )
     delete.add_argument("--reason", required=True, help="the line Seb reads before his yes")
