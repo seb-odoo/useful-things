@@ -267,12 +267,12 @@ def print_queued(queue):
         asked += f", on {item['model']}" if item.get("model") else ""
         asked += f", effort {item['effort']}" if item.get("effort") else ""
         asked += ", not built yet" if not item.get("built", True) else ""
+        asked += f", from {item['parent']}" if item.get("parent") else ""
         since = f", since {item['queued']}" if item.get("queued") else ""
         since += f", stuck since {item['stuck']}" if item.get("stuck") else ""
         since += f", waits for {item['waits_for']}" if item.get("waits_for") else ""
         print(
-            f"queued {position}: {item['bundle']} (priority {item['priority']}{asked},"
-            f" from {item['parent']}{since})",
+            f"queued {position}: {item['bundle']} (priority {item['priority']}{asked}{since})",
         )
 
 

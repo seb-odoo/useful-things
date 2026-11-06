@@ -368,6 +368,11 @@ def check_start_keeps(root):
     ca.parent.mkdir(parents=True, exist_ok=True)
     ca.write_text("ca\n")
     (root / "b1" / ".agent").mkdir(parents=True, exist_ok=True)
+    (root / "b1" / "odoo" / ".git").mkdir(parents=True, exist_ok=True)
+    remote_agent.upstream.HEADS = root / "heads"
+    remote_agent.upstream.HEADS.mkdir(exist_ok=True)
+    (root / "heads" / "odoo.json").write_text('{"18.0": "a1", "master": "b2"}')
+    orders = []
     packed = io.BytesIO()
     with tarfile.open(fileobj=packed, mode="w") as tar:
         info = tarfile.TarInfo("spec.json")
@@ -390,8 +395,9 @@ def check_start_keeps(root):
         "DUMMIES": root / "dummies",
         "get_values": lambda: values,
         "start_standin": lambda *args: None,
-        "in_standin": lambda *args, **kwargs: types.SimpleNamespace(
-            returncode=0, stdout=packed.getvalue(), stderr=b""
+        "in_standin": lambda bundle, verb, data=b"", **kwargs: (
+            (orders.append(json.loads(data)) if verb == "pack" else None)
+            or types.SimpleNamespace(returncode=0, stdout=packed.getvalue(), stderr=b"")
         ),
         "find_claude": lambda folder: ca,
         "find_binary": lambda folder, pattern: None,
@@ -402,34 +408,49 @@ def check_start_keeps(root):
     subprocess.run = lambda argv, **kwargs: None
     for name, value in fakes.items():
         setattr(remote_agent, name, value)
+    fetches = []
+    fetch_base = remote_agent.upstream.fetch_base
+    remote_agent.upstream.fetch_base = lambda *args: fetches.append(args)
     try:
-        remote_agent.start(io.StringIO(), "b1", root / "b1", "w", None, "18.0", "s1", False)
+        remote_agent.start(
+            io.StringIO(), "b1", root / "b1", "w", None, "18.0", "s1", False, env={"E": "1"}
+        )
     except RuntimeError:
         pass
     finally:
         subprocess.run = run
+        remote_agent.upstream.fetch_base = fetch_base
         for name, value in saved.items():
             setattr(remote_agent, name, value)
     check("a start keeps its copy before the job", copies == [b"rules the job gets\n"], copies)
+    check("its base is fetched here first", fetches == [("odoo", "18.0", {"E": "1"})], fetches)
+    found = [order.get("heads") for order in orders]
+    check("the base the host fetched goes with the pack (G102)", found == [{"odoo": "a1"}], found)
 
 
 def check_binary(root):
-    """A binary of the extension stores: the bundle's own, else the newest of any, else none."""
+    """A binary of the extension stores: the bundle's own, else the ops one, else none, never the
+    store of another bundle (G101)."""
     remote_agent.get_values = lambda: {"CACHE_ROOT": str(root / "cache"), "SHARE_ROOT": str(root / "share")}
     store = root / "cache" / "devcontainer" / "vscode-extensions"
+    ops = root / "cache" / "host-ctl" / "vscode-server-extensions"
     pattern = "charliermarsh.ruff-*/bundled/libs/bin/ruff"
     found = remote_agent.find_binary(root / "b1", pattern)
     check("no ruff in the stores, none goes", found is None, found)
     paths = {}
-    for bundle, mtime in (("b2", 100), ("b3", 200), ("b1", 50)):
-        path = store / bundle / "charliermarsh.ruff-2026.92.0-linux-x64/bundled/libs/bin/ruff"
+    for bundle, mtime in (("b2", 300), ("ops", 100), ("b1", 50)):
+        folder = ops if bundle == "ops" else store / bundle
+        path = folder / "charliermarsh.ruff-2026.92.0-linux-x64/bundled/libs/bin/ruff"
         path.parent.mkdir(parents=True)
         path.write_text("ruff\n")
         os.utime(path, (mtime, mtime))
         paths[bundle] = path
-        if bundle == "b3":
+        if bundle == "b2":
             found = remote_agent.find_binary(root / "b1", pattern)
-            check("no ruff in its store, the newest of another", found == path, found)
+            check("no ruff in its store nor ops, none of another bundle", found is None, found)
+        if bundle == "ops":
+            found = remote_agent.find_binary(root / "b1", pattern)
+            check("no ruff in its store, the ops one", found == path, found)
     found = remote_agent.find_binary(root / "b1", pattern)
     check("the ruff of its own store first", found == paths["b1"], found)
 

@@ -94,6 +94,13 @@ def main():
         except Exception as error:  # noqa: BLE001
             found = type(error).__name__
         check("lines of a transcript that are no message (B21)", found, ("ok", (None, False)))
+        with transcript.open("a") as file:
+            file.write('{"type": "assistant", "message": {"content": [{"type": {"a": 1}}]}}\n')
+        try:
+            found = agents.get_last_text(transcript), agents.get_resume(transcript)
+        except Exception as error:  # noqa: BLE001
+            found = type(error).__name__
+        check("a block whose type is no text (11-05)", found, (None, (None, False)))
         proc = root / "proc"
         for pid, space in (("self", "1"), ("10", "1"), ("20", "2")):
             (proc / pid / "ns").mkdir(parents=True)

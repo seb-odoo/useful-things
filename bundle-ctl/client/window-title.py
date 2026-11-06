@@ -134,7 +134,7 @@ def get_first_prompt(session, bundle=""):
         try:
             entry = json.loads(line)
             content = entry["message"]["content"] if entry["type"] == "user" else None
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, RecursionError, TypeError, ValueError):
             continue
         origin = entry.get("origin") if isinstance(entry.get("origin"), dict) else {}
         if (
@@ -165,7 +165,7 @@ def get_topic(session, bundle=""):
             entry = json.loads(line)
             key = TITLES[entry["type"]]
             titles[key] = " ".join(str(entry[key]).split())
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, RecursionError, TypeError, ValueError):
             continue
     return titles.get("customTitle") or titles.get("aiTitle") or get_first_prompt(session, bundle) or NEW
 
@@ -176,9 +176,9 @@ def get_last_answer(session, bundle=""):
             entry = json.loads(line)
             content = entry["message"]["content"] if entry["type"] == "assistant" else []
             texts = [block["text"] for block in content if block["type"] == "text"]
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, RecursionError, TypeError, ValueError):
             continue
-        if texts:
+        if texts := [text for text in texts if isinstance(text, str)]:
             return texts[-1]
     return ""
 
@@ -194,7 +194,7 @@ def is_resuming(session, bundle=""):
             entry = json.loads(line)
             if entry["type"] in ("user", "assistant") or entry.get("subtype") == "informational":
                 return RESUMING in str(entry.get("content")) and entry["timestamp"] > since
-        except (AttributeError, KeyError, TypeError, ValueError):
+        except (AttributeError, KeyError, RecursionError, TypeError, ValueError):
             continue
     return False
 
@@ -220,7 +220,7 @@ def read_answers(session, bundle=""):
                         entry = json.loads(line)
                         if entry["type"] == "assistant" and not entry.get("isSidechain"):
                             yield entry
-                    except (KeyError, TypeError, ValueError):
+                    except (KeyError, RecursionError, TypeError, ValueError):
                         continue
                 end = start
     except (AttributeError, OSError, TypeError):
@@ -251,7 +251,8 @@ def is_login_wait(session, bundle=""):
 
 
 def is_hok_wait(call, told):
-    command = (call.get("input") or {}).get("command") if call.get("name") == "Bash" else None
+    given = call.get("input") if call.get("name") == "Bash" else None
+    command = given.get("command") if isinstance(given, dict) else None
     job = JOB.search(str(command or ""))
     return bool(HOK_WAIT.search(str(command or ""))) and not (job and job[1] in told)
 
@@ -274,20 +275,25 @@ def get_hok_wait(session, bundle=""):
         try:
             entry = json.loads(line)
             content = entry["message"]["content"] if entry["type"] in ("user", "assistant") else None
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, RecursionError, TypeError, ValueError):
             continue
-        blocks = [block for block in content if isinstance(block, dict)] if content else []
+        content = content if isinstance(content, list) else []
+        blocks = [block for block in content if isinstance(block, dict)]
         if entry["type"] == "user":
             if not blocks or any(block.get("type") != "tool_result" for block in blocks):
                 break
-            answered.update(block.get("tool_use_id") for block in blocks)
+            answered.update(str(block.get("tool_use_id")) for block in blocks)
             continue
         calls = [block for block in blocks if block.get("type") == "tool_use"]
         if not all(is_hok_wait(call, told) for call in calls):
             break
         if calls:
-            start = calendar.timegm(time.strptime(entry["timestamp"][:19], "%Y-%m-%dT%H:%M:%S"))
-            running = running or any(call.get("id") not in answered for call in calls)
+            try:
+                stamp = time.strptime(entry["timestamp"][:19], "%Y-%m-%dT%H:%M:%S")
+            except (KeyError, TypeError, ValueError):
+                break
+            start = calendar.timegm(stamp)
+            running = running or any(str(call.get("id")) not in answered for call in calls)
     return start if running else None
 
 

@@ -203,7 +203,7 @@ def get_last_text(transcript):
         content = message.get("content") if isinstance(message, dict) else None
         content = content if isinstance(content, list) else []
         blocks = [block for block in content if isinstance(block, dict)]
-        kinds = {block.get("type") for block in blocks}
+        kinds = {str(block.get("type")) for block in blocks}
         if kinds == {"thinking"}:
             continue
         if entry["type"] != "assistant" or kinds != {"text"}:

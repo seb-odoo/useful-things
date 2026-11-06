@@ -477,9 +477,9 @@ def get_last_prompt(path):
             if isinstance(content, list):
                 content = "\n".join(part["text"] for part in content if part["type"] == "text")
             origin = (entry.get("origin") or {}).get("kind", "human")
-        except (KeyError, TypeError, ValueError):
+            text = content.strip()
+        except (AttributeError, KeyError, RecursionError, TypeError, ValueError):
             continue
-        text = content.strip()
         if entry.get("isMeta") or origin != "human" or not text:
             continue
         if text.startswith((bctl.GO_ON, "<", "[Request interrupted")):

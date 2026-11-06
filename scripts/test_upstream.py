@@ -89,6 +89,33 @@ def main():
             (upstream.set_upstream(REPO, "master-none--me"), upstream_of("master-none--me")),
             (False, ""),
         )
+        upstream.HEADS = pathlib.Path(root, "heads")
+        for remote in REMOTES:
+            os.makedirs(f"{root}/gh/{remote}")
+            os.rename(f"{root}/{remote}.git", f"{root}/gh/{remote}/odoo.git")
+            git(repo, "remote", "set-url", remote, f"{root}/gh/{remote}/odoo.git")
+        fetched = git(repo, "rev-parse", "odoo/master")
+        runner.git_fetch(repo=REPO, dev=False, ref=["master"])
+        found["a fetch of the host keeps the commit of each upstream branch (G102)"] = (
+            upstream.read_heads(REPO),
+            {"master": fetched},
+        )
+        forged = git(repo, "commit-tree", f"{fetched}^{{tree}}", "-p", fetched, "-m", "forged")
+        git(repo, "update-ref", "refs/remotes/odoo/master", forged)
+        runner.git_fetch(repo=REPO, dev=True, ref=[FETCHED])
+        found["a ref a bundle moved, then a fetch of the dev remote, change none"] = (
+            upstream.read_heads(REPO),
+            {"master": fetched},
+        )
+        git(repo, "push", "-q", "-f", "odoo", f"{forged}:refs/heads/master")
+        found["the fetch of a base before a remote start keeps its commit"] = (
+            (upstream.fetch_base(REPO, "master"), upstream.read_heads(REPO)),
+            (None, {"master": forged}),
+        )
+        found["and the error of a base the upstream lacks"] = (
+            bool(upstream.fetch_base(REPO, "17.0")),
+            True,
+        )
     failures = [
         f"{case}: {got!r}, expected {expected!r}"
         for case, (got, expected) in found.items()

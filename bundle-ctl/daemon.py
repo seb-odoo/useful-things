@@ -545,18 +545,21 @@ def may_read(caller, bundle, parent=None):
 
 
 def hide_row(caller, row):
-    """A row of GET /status as the caller may read it: no task and no report of another bundle."""
+    """A row of GET /status as the caller may read it: no task, no report and no parent of another
+    bundle (security check 11-05, B102)."""
     agent = row.get("agent")
     if not agent or may_read(caller, row["bundle"]):
         return row
     agent = {key: value for key, value in agent.items() if key != "task"}
-    return {**row, "agent": {**agent, "result": ""}}
+    return {**row, "agent": {**agent, "result": "", "parent": None}}
 
 
 def hide_queue(caller, queue):
-    """The queue as the caller may read it: no task text of another bundle."""
+    """The queue as the caller may read it: no task text, session or parent of another bundle."""
     return [
-        item if may_read(caller, item["bundle"], item["parent"]) else {**item, "task": None}
+        item
+        if may_read(caller, item["bundle"], item["parent"])
+        else {**item, "task": None, "session": None, "parent": None}
         for item in queue
     ]
 
@@ -2059,7 +2062,7 @@ def start_remote(log, bundle, worker):
     try:
         remote_agent.start(
             log, bundle, folder, worker, WORKERS, get_base_from_bundle_name(bundle), session,
-            transcript is not None,
+            transcript is not None, env=session_env() if is_github_up() else None,
         )
     except Exception as error:
         log.write(traceback.format_exc())

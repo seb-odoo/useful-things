@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Each host reader of a file a bundle writes, given a FIFO, a link to /dev/zero and a sparse file
 of 8 GB in its place, a file of the scratch folder `root` of READERS: it must give up at once with
-nothing, in a process capped at 2 GB of memory and 10 seconds (security check 11-03, B13):
-python3 test_bundle_files.py"""
+nothing, in a process capped at 2 GB of memory and 10 seconds (security check 11-03, B13, and
+11-05, B101): python3 test_bundle_files.py"""
 
 import os
 import pathlib
@@ -17,6 +17,8 @@ SPARSE = 8 << 30
 READERS = {
     "agents.read_text": ("result.md", "agents.read_text(path)"),
     "agents.get_session_title": ("S.jsonl", "agents.get_session_title(path)"),
+    "agents.get_last_text": ("S.jsonl", "agents.get_last_text(path)"),
+    "agents.get_resume": ("S.jsonl", "agents.get_resume(path)"),
     "agents.get_session_records": (
         "c/sessions/1.json",
         "agents.CLAUDE_CONFIG_CONTAINER = str(root); agents.get_session_records('c')",

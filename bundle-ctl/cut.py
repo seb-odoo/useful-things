@@ -101,7 +101,7 @@ def parse(lines):
     for line in lines:
         try:
             entry = json.loads(line)
-        except ValueError:
+        except (RecursionError, ValueError):
             continue
         if not isinstance(entry, dict):
             continue
@@ -115,7 +115,7 @@ def parse(lines):
         content = message.get("content")
         blocks = content if isinstance(content, list) else []
         blocks = [block for block in blocks if isinstance(block, dict)]
-        kinds = {block.get("type") for block in blocks}
+        kinds = {str(block.get("type")) for block in blocks}
         text = get_text(content)
         if (
             kinds == {"thinking"}

@@ -2821,7 +2821,7 @@ def check_fallback(root):
     state["queue"].clear()
     ended = []
 
-    def start(*args):
+    def start(*args, **kwargs):
         raise RuntimeError("no memory left for an agent")
 
     daemon.REMOTE_AUTO = True
@@ -2859,7 +2859,7 @@ def check_refused_once(root):
     state["queue"][0].update(priority=-15, effort="high")
     sent = []
 
-    def refuse(log, bundle, folder, *args):
+    def refuse(log, bundle, folder, *args, **kwargs):
         (folder / ".agent" / "remote-starting").unlink()
         raise RuntimeError("the disk is short")
 

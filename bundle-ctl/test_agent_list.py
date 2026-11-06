@@ -339,6 +339,15 @@ def check_queue(agent_list):
         path.write_text(json.dumps(TRANSCRIPTS["S9"][0], separators=(",", ":")) + "\n")
         if (found := agent_list.get_last_prompt(path)) != "Rebase on master":
             failures.append(f"prompt of a bundle not built yet: {found!r}")
+        with path.open("a") as file:
+            file.write('{"type":"user","message":' + "[" * 100000 + "]" * 100000 + "}\n")
+            file.write('{"type":"user","message":{"content":7}}\n')
+        try:
+            found = agent_list.get_last_prompt(path)
+        except Exception as error:  # noqa: BLE001
+            found = type(error).__name__
+        if found != "Rebase on master":
+            failures.append(f"prompt after a line nested too deep and a bad content: {found!r}")
         answers = [agent_list.read_answer(session, "b") for session in ("S9", "S8", "S0", None)]
         if answers != ["Waiting for you: r+ on odoo#7", "pushed: abc", "", ""]:
             failures.append(f"answers {answers!r}: a close line, else the first line")

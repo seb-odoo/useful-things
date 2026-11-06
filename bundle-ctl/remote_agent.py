@@ -34,7 +34,9 @@ spec.loader.exec_module(devconfig)
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
 import outside
+import upstream
 from agents import read_bytes, read_text, touch, write_text
+from commands import get_base_for_repo
 
 HOME = pathlib.Path.home()
 STATE = pathlib.Path("~/.local/state/bundle-ctl").expanduser()
@@ -707,16 +709,13 @@ def read_note(fd, name):
 
 
 def find_binary(bundle_folder, pattern):
-    """The newest PATTERN of the bundle's extension store, else of any store of a bundle, else of
-    the store of the ops container, else None."""
+    """The newest PATTERN of the bundle's extension store, else of the store of the ops container,
+    else None: never of the store of another bundle, as its binary runs in this bundle's job
+    (security check 11-05, G101)."""
     values, _own = get_paths(bundle_folder)
     store = pathlib.Path(values["CACHE_ROOT"]) / "devcontainer" / "vscode-extensions"
     ops = pathlib.Path(values["CACHE_ROOT"]) / "host-ctl" / "vscode-server-extensions"
-    for found in (
-        store.glob(f"{bundle_folder.name}/{pattern}"),
-        store.glob(f"*/{pattern}"),
-        ops.glob(pattern),
-    ):
+    for found in (store.glob(f"{bundle_folder.name}/{pattern}"), ops.glob(pattern)):
         found = sorted(found, key=lambda path: path.stat().st_mtime)
         if found:
             return found[-1]
@@ -865,10 +864,12 @@ def type_keys(bundle, keys):
     return (lines or [f"exit {done.returncode}"])[-1][:200]
 
 
-def start(log, bundle, bundle_folder, worker, workers, base, session, resume):
+def start(log, bundle, bundle_folder, worker, workers, base, session, resume, env=None):
     """Start the agent of the bundle on WORKER, its task in `.agent/task.md`. Raise on a failure
     before the job started: the queue then starts it here. After a job that was lost, the agent
-    goes on from the worker's tree (`.agent/remote-lost`), which the laptop never got back.
+    goes on from the worker's tree (`.agent/remote-lost`), which the laptop never got back. ENV
+    is that of the fetch of its base here, with the SSH agent of the session, None for no fetch
+    (GitHub out of reach: each fetch would wait on git-gate a minute).
     """
     agent = get_agent(bundle_folder)
     log.write(f"starting the agent of {bundle} on {worker}\n")
@@ -884,7 +885,13 @@ def start(log, bundle, bundle_folder, worker, workers, base, session, resume):
             for repo in REPOS
             if (bundle_folder / repo / ".git").exists()
         }
-        order = {"repos": haves, "base": base, "session": session, "resume": resume}
+        for repo in haves if env is not None else ():
+            if get_base_for_repo(base, repo) == base and (
+                error := upstream.fetch_base(repo, base, env)
+            ):
+                log.write(f"{repo}: no fetch of {base} here, the worker may refuse it: {error}\n")
+        heads = {repo: upstream.read_heads(repo).get(base) for repo in haves}
+        order = {"repos": haves, "base": base, "session": session, "resume": resume, "heads": heads}
         packed = in_standin(bundle, "pack", json.dumps(order).encode(), check=False)
         if packed.returncode:
             raise RuntimeError(packed.stderr.decode().strip()[-500:])

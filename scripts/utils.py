@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 
+import upstream
 from agents import mark_handled, read_bytes
 from command_runner import Runner, ignore_error
 from commands import (
@@ -412,13 +413,17 @@ class UtilsRunner(Runner):
                 )
                 return gone_ref
 
+        def on_success():
+            if not dev:
+                upstream.keep_heads(repo)
+            for r in ref if remote_ref_manager else ():
+                remote_ref_manager.add_valid(repo, r)
+
         self.run(
             ["git", "fetch", fetch_remote, *ref, "-p"],
             cwd=get_repo_folder(repo),
             handle_exceptions=handle_fetch_exception,
-            on_success=lambda: [
-                remote_ref_manager.add_valid(repo, r) if remote_ref_manager else None for r in ref
-            ],
+            on_success=on_success,
         )
 
     def open_devcontainer(self, *, bundle_name):

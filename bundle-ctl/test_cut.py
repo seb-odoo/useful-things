@@ -167,7 +167,22 @@ def check_cases(root):
     session = cut.read_session(write(root / "case.jsonl", tail))
     if cut.get_cut(session) != "a tool call ran":
         failures.append(f"a last line longer than the tail: {cut.get_cut(session)!r}")
-    return failures, len(CASES) + 2
+    path = write(root / "case.jsonl", [*ASKED, result()])
+    with path.open("a") as file:
+        file.write("[" * 100000 + "]" * 100000 + "\n")
+    try:
+        found = cut.get_cut(cut.read_session(path))
+    except RecursionError:
+        found = "RecursionError"
+    if found != "a tool result had no answer":
+        failures.append(f"a line nested too deep after a tool result: {found!r}")
+    with path.open("a") as file:
+        file.write(json.dumps(message("assistant", [{"type": {"a": 1}}])) + "\n")
+    try:
+        cut.get_cut(cut.read_session(path))
+    except TypeError as error:
+        failures.append(f"a block whose type is no text: {error}")
+    return failures, len(CASES) + 4
 
 
 def check_live(root):

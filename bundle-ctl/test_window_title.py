@@ -384,6 +384,56 @@ def get_close_lines():
     return failures
 
 
+def get_deep_lines(home):
+    """A line nested too deep, or a call with a bad timestamp, in a bundle's transcript: each read
+    of the session skips it, so one transcript never stops the rows of the agent list (security
+    check 11-05, part J)."""
+    spec = importlib.util.spec_from_file_location("title", HERE / "client" / "window-title.py")
+    title = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(title)
+    path = home / "deep.jsonl"
+    answer = {"type": "assistant", "message": {"content": [{"type": "text", "text": "Done."}]}}
+    call = {"type": "tool_use", "id": "c1", "name": "Bash", "input": {"command": "hok-answer g3"}}
+    lines = [
+        json.dumps(answer),
+        json.dumps({"type": "assistant", "timestamp": 7, "message": {"content": [call]}}),
+        '{"type":"user","message":' + "[" * 100000 + "]" * 100000 + "}",
+    ]
+    path.write_text("\n".join(lines) + "\n")
+    title.get_transcript = lambda *_: path
+    found = []
+    for read in (
+        title.get_topic,
+        title.get_last_answer,
+        title.is_resuming,
+        title.count_api_errors,
+        title.get_hok_wait,
+    ):
+        try:
+            found.append(read("S"))
+        except Exception as error:  # noqa: BLE001
+            found.append(type(error).__name__)
+    failures = []
+    if found != [title.NEW, "Done.", False, 0, None]:
+        failures.append(f"reads of a transcript with a deep line: {found!r}")
+    bash = {"type": "tool_use", "id": "c1", "name": "Bash", "input": "x"}
+    result = {"type": "tool_result", "tool_use_id": []}
+    stamp = "2026-11-05T10:00:00Z"
+    for status, line in (
+        ("idle", {"type": "assistant", "message": {"content": [{"type": "text", "text": 7}]}}),
+        ("busy", {"type": "user", "message": {"content": 7}}),
+        ("busy", {"type": "assistant", "timestamp": stamp, "message": {"content": [bash]}}),
+        ("busy", {"type": "user", "message": {"content": [result]}}),
+    ):
+        path.write_text(json.dumps(line) + "\n")
+        try:
+            title.get_mark({"S": status})
+            title.get_close_line(title.get_last_answer("S"))
+        except Exception as error:  # noqa: BLE001
+            failures.append(f"a row of {json.dumps(line)}: {type(error).__name__}")
+    return failures
+
+
 def get_loaded():
     """agent-terminator.py loads with the standard library alone, as its python3 is the system one."""
     path = HERE / "agent-terminator.py"
@@ -641,6 +691,7 @@ def main():
         failures += get_api_errors(home)
         failures += get_first_prompts(home)
         failures += get_close_lines()
+        failures += get_deep_lines(home)
         failures += get_loaded()
         failures += get_configs(home)
         failures += get_running()
@@ -658,7 +709,7 @@ def main():
         print(line)
     cases = len(MARKS) + len(OPS_MARKS) + len(HOK_WAITS) + len(CLOSE_LINES) + len(CONFIGS)
     cases += len(API_ERRORS) + len(LOGIN_WAITS) + len(PROMPTS) + 1
-    cases += len(FOLLOWED) + 7
+    cases += len(FOLLOWED) + 12
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

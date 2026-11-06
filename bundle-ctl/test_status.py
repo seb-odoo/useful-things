@@ -21,6 +21,7 @@ import branch_status  # noqa: E402
 import daemon  # noqa: E402
 
 BASE = "refs/remotes/odoo/master"
+SESSION = "8b9b2f6e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
 ENV = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
 # Set by the ops container, where git with no config read trusts no repo.
 ENV.pop("GIT_TEST_ASSUME_DIFFERENT_OWNER", None)
@@ -138,8 +139,8 @@ def check_texts(root):
     agent = {"state": "done", "result": "the report", "task": "the task", "parent": "b1"}
     rows = [{"bundle": name, "agent": dict(agent)} for name in ("b1", "b2", "b3")]
     queue = [
-        {"bundle": "b2", "parent": "b1", "task": "queued by b1"},
-        {"bundle": "b3", "parent": "host", "task": "queued by the host"},
+        {"bundle": "b2", "parent": "b1", "session": SESSION, "task": "queued by b1"},
+        {"bundle": "b3", "parent": "host", "session": SESSION, "task": "queued by the host"},
     ]
     stubs = {
         name: getattr(daemon, name)
@@ -197,6 +198,17 @@ def check_texts(root):
                 [item["task"] for item in found] == [None, "queued by the host"],
             )
         )
+        found = [
+            (item["session"], item["parent"]) for item in daemon.get_queue("b3", {}, {})[1]["queue"]
+        ]
+        checks.append(
+            (
+                "nor the session or parent of another bundle's task (B102)",
+                found == [(None, None), (SESSION, "host")],
+            )
+        )
+        found = [row["agent"]["parent"] for row in daemon.status("b3", {}, {})[1]["bundles"]]
+        checks.append(("nor the parent of another bundle's agent", found == [None, None, "b1"]))
     finally:
         vars(daemon).update(stubs)
         daemon.bundle_rows.update(rows=[], read=0)

@@ -20,10 +20,12 @@ import json
 import os
 import pathlib
 import signal
+import stat
 import time
 
 AGENT = pathlib.Path("/workspace/.agent")
 CONFIG = pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or pathlib.Path.home() / ".claude")
+MAX_TRANSCRIPT = 64 << 20
 QUIET = 120
 START_WAIT = 90
 STOP_WAIT = 10
@@ -68,21 +70,33 @@ def get_status(session, pid):
     return None
 
 
-def read_entries(transcript, tail=TAIL):
+def read_tail(transcript, tail):
+    """The last `tail` bytes of a transcript, its first line dropped when cut. The host reads a
+    bundle's transcript with it too, which the bundle may swap for a link or a FIFO after the
+    host looked at it: no link followed, no wait on a FIFO, a regular file only (security check
+    11-05, B101)."""
     try:
-        with transcript.open("rb") as file:
-            size = file.seek(0, os.SEEK_END)
-            file.seek(max(0, size - tail) if tail else 0)
-            lines = file.read().split(b"\n")
+        fd = os.open(transcript, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError:
-        return []
-    if tail and size > tail:
-        lines = lines[1:]
+        return b""
+    with os.fdopen(fd, "rb") as file:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            return b""
+        try:
+            file.seek(max(0, info.st_size - tail))
+            data = file.read(tail)
+        except OSError:
+            return b""
+    return data.partition(b"\n")[2] if info.st_size > tail else data
+
+
+def read_entries(transcript, tail=TAIL):
     entries = []
-    for line in lines:
+    for line in read_tail(transcript, tail).split(b"\n"):
         try:
             entry = json.loads(line)
-        except ValueError:
+        except (ValueError, RecursionError):
             continue
         if isinstance(entry, dict):
             entries.append(entry)
@@ -101,7 +115,7 @@ def get_last_message(entries):
             if isinstance(content, list)
             else []
         )
-        kinds = {block.get("type") for block in blocks}
+        kinds = {str(block.get("type")) for block in blocks}
         if kinds == {"thinking"}:
             continue
         return entry["type"], kinds
@@ -120,9 +134,19 @@ def is_at_rest(transcript, author):
 
 
 def get_mode(transcript):
-    for tail in (TAIL, 0):
-        for entry in reversed(read_entries(transcript, tail)):
-            if mode := entry.get("permissionMode"):
+    """The last permission mode of a transcript, in its last TAIL bytes, else its last
+    MAX_TRANSCRIPT ones: only the lines that name a mode are parsed, newest first."""
+    for tail in (TAIL, MAX_TRANSCRIPT):
+        data = read_tail(transcript, tail)
+        end = len(data)
+        while (found := data.rfind(b'"permissionMode"', 0, end)) >= 0:
+            end = data.rfind(b"\n", 0, found) + 1
+            stop = data.find(b"\n", found)
+            try:
+                entry = json.loads(data[end : stop if stop >= 0 else len(data)])
+            except (ValueError, RecursionError):
+                continue
+            if isinstance(entry, dict) and isinstance(mode := entry.get("permissionMode"), str):
                 return mode
     return None
 
