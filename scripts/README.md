@@ -396,6 +396,11 @@ Syncs git remotes: fetches locally checked-out branches + sticky bundles; prunes
   container writes it, where every bundle writes the refs of the shared `.git`. The start of a
   remote agent and `admin seed` of remote-runs send a base at that commit only (security check
   11-05, G102), so a seed after a fetch made by a bundle alone needs a gfa first
+- Copies the `.md` files of the skills named in `SKILLS` (`odoo_skills.py`) from `odoo/master`
+  into `<WORKTREE_ROOT>/.claude/skills/`, which bundles see as `/workspace/.claude/skills/`;
+  `create_bundle.py` does the same. Read from git, swapped in by rename, skipped when
+  `.odoo-master-sha` holds the sha of the ref. A new skill at master prints its name until it is
+  added to the list; other files are skipped with a line (`test_odoo_skills.py`)
 - Asks before deleting a gone bundle of mine (`--seb`); `--keep-gone` keeps them all without
   asking, for a run with no keyboard (`hctl`) and for `gbs`
 - Creates the local branch of each open PR of mine and of each forward-port waiting on me

@@ -24,6 +24,7 @@ import time
 from rich import print
 from rich.tree import Tree
 
+import odoo_skills
 from utils import RemoteRefManager, UtilsRunner
 
 from agents import read_state
@@ -256,3 +257,4 @@ for ref in remote_ref_manager.refs_to_prompt_for_deletion:
     elif input(f"Gone ref: {ref}. Delete it? (Y/n)").lower() in ["", "y"]:
         delete_bundle(runner=runner, bundle_name=ref, force=True, also_remote=False)
 drop_unpushed_branches(runner)
+odoo_skills.sync()

@@ -19,6 +19,7 @@ from commands import (
 from config import OPTIONAL_REPOS, STICKY_BUNDLES
 from rich import print
 from rich.tree import Tree
+import odoo_skills
 from utils import UtilsRunner
 
 runner = UtilsRunner()
@@ -84,3 +85,4 @@ runner.prepare_worktree_bundle_folder(bundle_name=bundle_name)
 runner.parallel_run(Tree("Repositories"), get_repos(), handle_repo)
 runner.finish_worktree_bundle_folder(bundle_name=bundle_name, open_window=not args.no_open)
 print("[green]Done[/green]")
+odoo_skills.sync()
