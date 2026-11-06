@@ -6,7 +6,7 @@
 
 A bundle, and the ops container, have a folder of their own there (home), where what they share of
 the host's is mounted (base.jsonc, and host-ctl's devcontainer.base.jsonc), with a dummy login
-that the Claude switch sends with the main one (gateway-core README, "The Claude switch"): their
+that the Claude switch sends with the main one (its README): their
 claude has no credential to give away, and loads no claude.ai connector. Never give a container a
 copy or a link of the host's .credentials.json: Claude saves a refreshed token there, and the next
 refresh revokes every other copy. The dummy is kept out

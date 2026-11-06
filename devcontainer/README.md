@@ -143,9 +143,9 @@ the bundle. The host's Claude reads the shared files, so what a session takes as
 read-only there: a hook a bundle could write would run on the host.
 
 Its login is a dummy one, made by [`claude-config.py`](claude-config.py) at each start and named
-for the Claude switch of gateway-core, which sends its requests with the main login in its place
-(gateway-core README, "The Claude switch"): no credential of the host is in a bundle, so code in a
-bundle has no login to send away or swap. The bundle's Claude cannot renew it, and needs not: the
+for the Claude switch, which sends its requests with the main login in its place (its README):
+no credential of the host is in a bundle, so code in a bundle has no login to send away or swap.
+The bundle's Claude cannot renew it, and needs not: the
 switch takes the access token of the host's login, which bundle-ctl renews while a bundle, a remote
 agent or the ops container runs, and the host sessions. What it costs (Seb, 2026-10-28): Remote
 Control and the claude.ai connectors of the account, which the settings of a bundle do not load
