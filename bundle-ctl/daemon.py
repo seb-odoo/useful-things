@@ -3429,6 +3429,13 @@ def send_dialog(item):
             bundle, {**note, "answers": answers, "card": None, "index": sent["index"] + 1}
         )
         return f"kept: question {sent['index'] + 2} of the dialog of {bundle} comes as a card"
+    close_dialog(bundle, worker, note, answers)
+    return f"its dialog on {worker} closes, and your answer goes to its claude as its next prompt"
+
+
+def close_dialog(bundle, worker, note, answers):
+    """Escape to the claude of a remote agent, then one line with every answer of its dialog,
+    typed as the lines of the host once the dialog closed."""
     agent = get_agent_folder(bundle)
     if any((agent / name).exists() for name in ("remote-down", "remote-ending", "remote-moving")):
         raise OSError(f"its link to {worker} is down, or its job ends")
@@ -3440,7 +3447,6 @@ def send_dialog(item):
     note = {**note, "answers": answers, "card": None, "sent": time.time(), "state": "answered"}
     write_dialog_note(bundle, note)
     print(f"{bundle}: Seb answered its question in hok, Escape sent to {worker}", flush=True)
-    return f"its dialog on {worker} closes, and your answer goes to its claude as its next prompt"
 
 
 def get_dialog_answer(said, sent):
@@ -3468,11 +3474,20 @@ def get_dialog_answer(said, sent):
 
 def refuse_held(item):
     """Seb's no to what was held: a no to a question of a remote agent leaves its dialog as it is,
-    and no card asks it again. Runs in take() of held.py, under its lock."""
+    and no card asks it again. With his words, it closes the dialog and they go to the agent as
+    his answer, as a pick does (Seb, 2026-11-06). Runs in take() of held.py, under its lock."""
     sent = item.get("send", {}).get("dialog")
     note = sent and read_dialog_note(sent["bundle"])
-    if note and [note["session"], note["tool"]] == [sent["session"], sent["tool"]]:
-        write_dialog_note(sent["bundle"], {**note, "card": None, "state": "refused"})
+    if not note or [note["session"], note["tool"]] != [sent["session"], sent["tool"]]:
+        return None
+    write_dialog_note(sent["bundle"], {**note, "card": None, "state": "refused"})
+    words = "".join(char if char.isprintable() else " " for char in item.get("words", ""))
+    words = " ".join(words.split())
+    if not words or not is_same_dialog(note, get_dialog(sent["bundle"])):
+        return None
+    answer = f"{sent['header']}: none of the options, in his words: {words[:MAX_PICK]}"
+    close_dialog(sent["bundle"], sent["worker"], note, [*note["answers"], answer])
+    return f"Its dialog on {sent['worker']} closes, and your words go to its claude as your answer."
 
 
 def get_status_since(bundle, session):

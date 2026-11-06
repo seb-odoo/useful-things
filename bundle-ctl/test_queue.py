@@ -2300,7 +2300,7 @@ def check_remote_dialog(root):
     card goes once the dialog closes otherwise; an Escape not taken is sent again."""
     session = "11111111-2222-3333-4444-555555555555"
     on_worker = {"remote.json": '{"worker": "sebpc", "job": "1"}', "session": f"{session}\n"}
-    names = ("one", "two", "no", "closes", "glitch", "permission", "bad", "garbled")
+    names = ("one", "two", "no", "words", "closes", "glitch", "permission", "bad", "garbled")
     bundles = {name: on_worker for name in names}
     bundles["here"] = {"session": f"{session}\n"}
     prepare(root, bundles, 8)
@@ -2382,7 +2382,9 @@ def check_remote_dialog(root):
             ask()
             second = journal.getvalue().splitlines()[-1].split()[-1]
             answer_card(second, "1, 3 both")
-            refused = answer_card(cards["no"], "not now", yes=False)
+            refused = answer_card(cards["no"], "", yes=False)
+            worded = answer_card(cards["words"], "not  now,\x1bwait", yes=False)
+            told_words, escaped_words = get_told("words"), list(typed)
             told_two = get_told("two")
             empty = answer_card(cards["bad"], "")
             wrong = answer_card(cards["bad"], "3")
@@ -2418,7 +2420,7 @@ def check_remote_dialog(root):
         (
             "a card for each question asked on a worker, once: none for a permission, a garbled"
             " transcript, or here",
-            sorted(cards) == ["bad", "closes", "glitch", "no", "one", "two"],
+            sorted(cards) == ["bad", "closes", "glitch", "no", "one", "two", "words"],
         ),
         (
             "the card holds the words of the agent on one line, and what to pick",
@@ -2454,11 +2456,21 @@ def check_remote_dialog(root):
             ],
         ),
         (
-            "a no leaves the dialog and asks no more",
+            "a no with no words leaves the dialog and asks no more",
             refused["said"] == "no"
             and notes["no"]["state"] == "refused"
             and not told_no
             and not any(line.startswith("no: its agent") for line in lines[len(cards) :]),
+        ),
+        (
+            "a no with words closes the dialog, and they go to the agent as his answer",
+            worded["text"].startswith("Seb refused it. Its dialog on sebpc closes")
+            and ("words", "\x1b") in escaped_words
+            and told_words
+            == [
+                "Seb answered your question in hok, which closed its dialog: Way: none of the"
+                " options, in his words: not now, wait."
+            ],
         ),
         (
             "a yes with no pick, an option it does not have, several on one: the card waits",

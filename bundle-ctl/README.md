@@ -471,8 +471,10 @@ necessary. but if we have a good setup, full remote should offer the same possib
   own words, which `hok` leaves beside the request (`N.pick`). A yes to the last question sends
   Escape to that claude, as deck's Stop does, and leaves one line in `told/`, typed once the
   dialog closed, with the lines that waited behind it: `Seb answered your question in hok, which
-  closed its dialog: HEADER: LABEL, and in his words: ...`. A no leaves the dialog, and no card
-  asks it again. A yes with no pick, or a number the question does not have, keeps the card. The
+  closed its dialog: HEADER: LABEL, and in his words: ...`. A no with no words leaves the dialog,
+  and no card asks it again. A no with words closes it the same way, with `HEADER: none of the
+  options, in his words: ...` (Seb, 2026-11-06: his no with words on a question of a sebpc
+  agent reached nothing, and gateway-core now hands them to `refuse_held`). A yes with no pick, or a number the question does not have, keeps the card. The
   card goes 5 s after the dialog closed otherwise (answered in its terminal, the job ended, the
   agent brought back), and an Escape the dialog did not take goes again after a minute
   (`DIALOG_ESCAPE_AGAIN`), as a key sent while the tunnel is down is lost.
