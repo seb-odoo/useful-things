@@ -372,6 +372,7 @@ def check_start_keeps(root):
     remote_agent.upstream.HEADS = root / "heads"
     remote_agent.upstream.HEADS.mkdir(exist_ok=True)
     (root / "heads" / "odoo.json").write_text('{"18.0": "a1", "master": "b2"}')
+    (root / "b1" / ".agent" / "task.md").write_text("cherry-pick 80d658f1a188\n")
     orders = []
     packed = io.BytesIO()
     with tarfile.open(fileobj=packed, mode="w") as tar:
@@ -426,6 +427,9 @@ def check_start_keeps(root):
     check("its base is fetched here first", fetches == [("odoo", "18.0", {"E": "1"})], fetches)
     found = [order.get("heads") for order in orders]
     check("the base the host fetched goes with the pack (G102)", found == [{"odoo": "a1"}], found)
+    tasks = [order.get("task") for order in orders]
+    named = tasks == ["cherry-pick 80d658f1a188"]
+    check("the task goes with the pack: the commits it names", named, tasks)
 
 
 def check_binary(root):

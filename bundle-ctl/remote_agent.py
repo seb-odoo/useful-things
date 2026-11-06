@@ -892,7 +892,15 @@ def start(log, bundle, bundle_folder, worker, workers, base, session, resume, en
             ):
                 log.write(f"{repo}: no fetch of {base} here, the worker may refuse it: {error}\n")
         heads = {repo: upstream.read_heads(repo).get(base) for repo in haves}
-        order = {"repos": haves, "base": base, "session": session, "resume": resume, "heads": heads}
+        task = read(agent / "task.md")[:65536]
+        order = {
+            "repos": haves,
+            "base": base,
+            "session": session,
+            "resume": resume,
+            "heads": heads,
+            "task": task,
+        }
         packed = in_standin(bundle, "pack", json.dumps(order).encode(), check=False)
         if packed.returncode:
             raise RuntimeError(packed.stderr.decode().strip()[-500:])
@@ -922,7 +930,7 @@ def start(log, bundle, bundle_folder, worker, workers, base, session, resume, en
             "session": session,
             "resume": resume,
             "keep": (agent / "remote-lost").exists(),
-            "task": read(agent / "task.md")[:65536],
+            "task": task,
             "model": read(agent / "model") or "opus",
             "effort": read(agent / "effort") or "medium",
             "mode": read(agent / "mode") or "auto",
