@@ -557,6 +557,28 @@ def check_prompt(root, check):
     )
     found = ask(daemon.prompt_window, STOPPED_SESSION, agent="b7", text="go on there")
     check("but not on another session", found[0] == 404, found)
+    typed, statuses = [], {}
+    daemon.remote_agent.type_keys = lambda bundle, keys: typed.append((bundle, keys))
+    daemon.get_session_status = lambda bundle, session: statuses.get((bundle, session))
+    found = ask(daemon.stop_window, BUNDLE_SESSION, agent="b7")
+    check("a stop of an idle agent on a worker types nothing", found[0] == 200 and not typed, found)
+    statuses[("b7", BUNDLE_SESSION)] = "waiting"
+    found = (
+        ask(daemon.stop_window, BUNDLE_SESSION, agent="b7"),
+        ask(daemon.stop_window, BUNDLE_SESSION, agent="b7"),
+    )
+    check(
+        "a stop of an agent on a dialog on a worker types one Escape there, not a second at once",
+        [answer[0] for answer in found] == [200, 200] and typed == [("b7", daemon.ESCAPE)],
+        found,
+    )
+    check("and leaves no stop here", not (root / "deck" / "b7").exists())
+    daemon.remote_stops.clear()
+    found = ask(daemon.stop_window, STOPPED_SESSION, agent="b7")
+    check("nor on another session", found[0] == 404 and len(typed) == 1, found)
+    (agents["b7"] / "remote-down").write_text("")
+    found = ask(daemon.stop_window, BUNDLE_SESSION, agent="b7")
+    check("nor while its link is down", found[0] == "Refused" and len(typed) == 1, found)
     daemon.get_remote_agents = dict
     found = ask(daemon.prompt_window, BUNDLE_SESSION, agent="b4", text=" /model opus")
     check("a slash command is refused", found[0] == "Refused", found)

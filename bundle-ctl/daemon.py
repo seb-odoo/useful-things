@@ -263,6 +263,7 @@ RECONNECTED = (
 REMOTE_ENTER_AFTER = 2
 REMOTE_GONE_AFTER = 120
 REMOTE_LIST_EVERY = 10
+REMOTE_STOP_GAP = 5
 REMOTE_TOLD_EVERY = 1
 REPORT_HEAD = 4096
 REQUEUE_AFTER = (15, 30, 60, 120, 240)
@@ -382,6 +383,7 @@ bundle_locks = {}
 moving_back = set()
 building_for_worker = set()
 dialogs_missing = {}
+remote_stops = {}
 missing_agents = {}
 orphans = {}
 stale_starts = set()
@@ -4298,9 +4300,11 @@ def get_remote_worker(agent, session):
 
 def stop_window(caller, query, body):
     """`POST /stop {agent, session}`: Escape in the agent window that runs that session, while a
-    turn runs or a dialog waits (README.md, "Prompts from deck"). Only the host asks
-    (HOST_ONLY)."""
+    turn runs or a dialog waits, or in its claude on its worker for an agent that runs there with
+    no terminal here (README.md, "Prompts from deck"). Only the host asks (HOST_ONLY)."""
     folder, why = get_deck_window(body)
+    if folder is None and (worker := get_remote_worker(body["agent"], body["session"])):
+        return stop_remote(body["agent"], body["session"], worker)
     if folder is None:
         return 404, {"error": why}
     try:
@@ -4310,6 +4314,27 @@ def stop_window(caller, query, body):
         raise Refused(f"{body['agent']}: the stop was not left: {error}") from error
     print(f"{body['agent']}: a stop from deck", flush=True)
     return 200, {"bundle": body["agent"]}
+
+
+def stop_remote(bundle, session, worker):
+    """Escape to the claude of an agent on a worker, as its terminal here sends it (take_stop of
+    agent-terminal.py): while a turn runs or a dialog waits, once in REMOTE_STOP_GAP at most, as a
+    second Escape opens the rewind of claude. The prompt deck sends after it waits in told/ until
+    the dialog closed, as the answer of a question card does (send_dialog)."""
+    agent = get_agent_folder(bundle)
+    if any((agent / name).exists() for name in ("remote-down", "remote-ending", "remote-moving")):
+        raise Refused(f"{bundle}: its link to {worker} is down, or its job ends")
+    last = remote_stops.get(bundle)
+    if get_session_status(bundle, session) not in ("busy", "waiting") or (
+        last is not None and time.monotonic() - last < REMOTE_STOP_GAP
+    ):
+        print(f"{bundle}: a stop from deck, with nothing to stop on {worker}", flush=True)
+        return 200, {"bundle": bundle}
+    remote_stops[bundle] = time.monotonic()
+    if error := remote_agent.type_keys(bundle, ESCAPE):
+        raise Refused(f"{bundle}: the Escape did not reach {worker}: {error}")
+    print(f"{bundle}: a stop from deck, Escape sent to {worker}", flush=True)
+    return 200, {"bundle": bundle}
 
 
 def get_session_agent(session):

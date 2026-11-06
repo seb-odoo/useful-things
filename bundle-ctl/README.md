@@ -76,7 +76,7 @@ the pager. `python3 test_node_modules.py` and `python3 test_delete.py` have the 
 | `POST /requeue` | the session of the agent of `bundle`, or of an ops agent window with `ops-SESSION` (see Ops agents), queued again, last, paused with `paused`, and its agent window closed once its turn ended, 2 minutes at most: meanwhile `client/run-hook.py` refuses the Bash calls of a bundle, on a reason that tells it to end its turn, and a turn still running at the end goes on told it was cut (see Cut sessions). With `github`, it waits for the GitHub connection of the host. The host or the ops container asks, or with `github` the bundle itself |
 | `POST /close` | the agent window of `bundle` closed with no yes, as after its verdict: its claude and its container stop, its session stays; refused while a claude of the bundle is in a turn or waits for an answer, or while its agent starts (see Agents in a terminal). An agent on a worker stops there as after its verdict and its work tree comes back: its turn is read in the session record the worker mirrors back, and it is refused while it moves (see Remote agents); with `force` (deck's Close), a turn there does not refuse it: its claude stops at its next tool call or at the end of the turn, a dialog at once. Refused to a container |
 | `POST /prompt` | a prompt Seb sent from deck, typed as his own in the window of `agent` (a bundle, or `ops-SESSION`) while it runs `session`, or on its worker for an agent that runs there with no terminal here; 404 otherwise (see Prompts from deck). Refused to a container |
-| `POST /stop` | Escape in the window of `agent` while it runs `session`, in a turn or a dialog (see Prompts from deck). Refused to a container |
+| `POST /stop` | Escape in the window of `agent` while it runs `session`, in a turn or a dialog, or on its worker for an agent that runs there with no terminal here (see Prompts from deck). Refused to a container |
 | `POST /schedule` | when the queued task of `bundle` may start: `when` is `spot` (once a slot, the memory and the CPU let it), `manual` (it waits for a manual resume, until it is scheduled again) or `HH:MM` (that time of the host, today or tomorrow); it no longer goes over the cap. Then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
 | `POST /unqueue` | the queued task of a bundle dropped; the host, that bundle or the one that queued the task asks |
 | `POST /run` | a heavy command waits for cores: one JSON line each time its place changes, then the CPUs it got (see Runs) |
@@ -1468,6 +1468,11 @@ the agents of sebpc waited too).
 - A stop leaves `stop` in that folder. The terminal takes it within 0.2 s and sends Escape while a
   turn runs or a dialog waits (the dialog closes, as with his key), once in 5 s at most, as a second
   Escape opens the rewind of claude. A stop left with no turn, or older than 5 s, is dropped.
+- For an agent on a worker with no terminal here, the daemon sends that Escape itself, through
+  the stand-in, on the same rules, and refuses it while the link is down or the job ends. The
+  answer deck types after it waits in `told/` until the dialog closed, as the answer of a question
+  card does (Seb, 2026-11-06: his answer from deck to a question of a sebpc agent waited 55
+  minutes, since its dialog never closed, until he closed it in its terminal).
 
 `python3 test_tell.py` runs both verbs on fake agent folders, `test_terminal.py` the typing.
 
