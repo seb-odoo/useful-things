@@ -10,8 +10,8 @@ import sys
 from config import (
     BUNDLE_SUFFIX,
     HOST_FOLDER,
-    MASTER_ONLY_REPOS,
     STICKY_BUNDLES,
+    fixed_base_by_repo,
     folder_by_repo,
     remote_by_repo,
     remote_dev_by_repo,
@@ -26,8 +26,9 @@ MADE = ".made"
 
 
 def get_base_for_repo(base, repo):
-    """Get the base a given repo builds against: repos without version branches live on master."""
-    return "master" if repo in MASTER_ONLY_REPOS else base
+    """Get the base a given repo builds against: a repo without a branch per Odoo version has one
+    base, whatever the bundle."""
+    return fixed_base_by_repo.get(repo, base)
 
 
 def get_base_from_bundle_name(bundle_name):
@@ -100,8 +101,8 @@ def get_repos():
 
 def get_sticky_bundles(repo):
     """Get the list of sticky bundles."""
-    if repo in MASTER_ONLY_REPOS:
-        return ["master"]
+    if repo in fixed_base_by_repo:
+        return [fixed_base_by_repo[repo]]
     return STICKY_BUNDLES
 
 

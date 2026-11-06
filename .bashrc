@@ -50,7 +50,7 @@ alias gnb="python ~/repo/useful-things/scripts/create_bundle.py"
 function goto()
 {
 	REPO=$(basename "$PWD")
-	[[ "$REPO" =~ ^(odoo|enterprise|owl|sfu|design-themes|upgrade|documentation|upgrade-util)$ ]] || REPO=odoo
+	[[ "$REPO" =~ ^(odoo|enterprise|owl|sfu|design-themes|upgrade|documentation|upgrade-util|runbot)$ ]] || REPO=odoo
 	FULL_NAME=${1#*:}
 	BASE=$(python ~/repo/useful-things/scripts/commands.py get_base_from_bundle_name ${FULL_NAME})
 	FOLDER=~/src/odoo/$BASE/${FULL_NAME}/${REPO}
@@ -67,7 +67,7 @@ function opencode()
 function gotorepo()
 {
 	REPO=$(basename "$PWD")
-	[[ "$REPO" =~ ^(odoo|enterprise|owl|sfu|design-themes|upgrade|documentation|upgrade-util)$ ]] || { echo "Invalid repo ${REPO}"; return 1; }
+	[[ "$REPO" =~ ^(odoo|enterprise|owl|sfu|design-themes|upgrade|documentation|upgrade-util|runbot)$ ]] || { echo "Invalid repo ${REPO}"; return 1; }
 	FOLDER=~/repo/${REPO}
 	cd $FOLDER
 }

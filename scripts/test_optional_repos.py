@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""A new bundle without design-themes and documentation, and add_repo.py bringing one back, on
-scratch repos, a create killed in its tooling, and which bundles get their own postgres folders:
-python3 test_optional_repos.py
+"""A new bundle without the optional repos, and add_repo.py bringing one back, on its own base for
+runbot, on scratch repos, a create killed in its tooling, and which bundles get their own postgres
+folders: python3 test_optional_repos.py
 """
 
 import os
@@ -10,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 
-from config import MASTER_ONLY_REPOS, folder_by_repo, remote_by_repo
+from config import OPTIONAL_REPOS, fixed_base_by_repo, folder_by_repo, remote_by_repo
 
 GIT = ["git", "-c", "user.name=me", "-c", "user.email=me@localhost", "-c", "commit.gpgsign=false"]
 HERE = pathlib.Path(__file__).resolve().parent
@@ -24,22 +24,24 @@ def git(cwd, *args):
 
 
 def prepare(root):
-    """One repo per bundle repo, its master on a bare remote; odoo with a no-op enable.sh."""
+    """One repo per bundle repo, its base on a bare remote; odoo with a no-op enable.sh."""
     for repo in folder_by_repo:
         folder = root / "repo" / repo
         folder.mkdir(parents=True)
-        git(folder, "init", "--quiet", "--initial-branch=master")
+        base = fixed_base_by_repo.get(repo, "master")
+        git(folder, "init", "--quiet", f"--initial-branch={base}")
         if repo == "odoo":
             tooling = folder / "addons" / "web" / "tooling"
             tooling.mkdir(parents=True)
             (tooling / "enable.sh").write_text("exit 0\n")
             git(folder, "add", ".")
         git(folder, "commit", "--quiet", "--allow-empty", "-m", "base")
-        for remote in {remote_by_repo[repo], "origin" if repo in MASTER_ONLY_REPOS else "odoo-dev"}:
+        dev = "odoo-dev" if remote_by_repo[repo] == "odoo" else "origin"
+        for remote in {remote_by_repo[repo], dev}:
             bare = root / "remotes" / f"{repo}-{remote}.git"
             git(root, "init", "--quiet", "--bare", str(bare))
             git(folder, "remote", "add", remote, str(bare))
-        git(folder, "push", "--quiet", remote_by_repo[repo], "master")
+        git(folder, "push", "--quiet", remote_by_repo[repo], base)
     box = root / "box"
     box.write_text('#!/bin/sh\nwhile [ "$1" != -- ]; do shift; done\nshift\nexec "$@"\n')
     box.chmod(0o755)
@@ -81,14 +83,14 @@ def head_of(root, bundle, repo):
 def check(root):
     env = prepare(root)
     base = git(root / "repo" / "documentation", "rev-parse", "master")
-    others = sorted(set(folder_by_repo) - {"design-themes", "documentation"})
+    others = sorted(set(folder_by_repo) - set(OPTIONAL_REPOS))
     checks = []
     for name, branch_repo in (("a", "odoo"), ("b", "documentation"), ("c", "odoo")):
         code, out = run(env, "create_bundle.py", "master", name, "--no-push", "--no-open",
                         "--branch-repo", branch_repo)
         if code:
             return [f"create_bundle.py master {name}: {out}"], 1
-    checks.append(("a new bundle has neither design-themes nor documentation",
+    checks.append(("a new bundle has none of the optional repos",
                    repos_of(root, "master-a--me") == others))
     checks.append(("a bundle with its branch in documentation has it",
                    repos_of(root, "master-b--me") == sorted([*others, "documentation"])
@@ -97,6 +99,10 @@ def check(root):
     checks.append(("a repo with no branch comes on its base branch",
                    (code, head_of(root, "master-a--me", "design-themes"))
                    == (0, ("HEAD", git(root / "repo" / "design-themes", "rev-parse", "master")))))
+    code, out = run(env, "add_repo.py", "master-a--me", "runbot")
+    checks.append(("runbot comes on 19.0, whatever the base of the bundle",
+                   (code, head_of(root, "master-a--me", "runbot"))
+                   == (0, ("HEAD", git(root / "repo" / "runbot", "rev-parse", "19.0")))))
     git(root / "repo" / "documentation", "branch", "master-a--me")
     code, out = run(env, "add_repo.py", "master-a--me", "documentation")
     checks.append(("a repo with a local branch comes on it",

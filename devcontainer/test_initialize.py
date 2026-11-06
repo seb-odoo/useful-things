@@ -113,7 +113,7 @@ def main():
         ],
         [],
     )
-    check("eight base repos", len(git_dirs), 8)
+    check("nine base repos", len(git_dirs), 9)
     own = "${localWorkspaceFolderBasename}"
     writable = ("objects", "refs", "logs", "rr-cache", "packed", f"worktrees/{own}")
     check(

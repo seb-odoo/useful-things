@@ -24,8 +24,8 @@ than the PR target (or with none), its folder sits under the target, which is th
 
 ### The repos of a bundle
 
-A bundle gets a worktree of each repo of `folder_by_repo` in `config.py` (`design-themes` and
-`documentation` only when they have the branch), its folder in the base `.git/worktrees` named
+A bundle gets a worktree of each repo of `folder_by_repo` in `config.py` (`design-themes`,
+`documentation` and `runbot` only when they have the branch), its folder in the base `.git/worktrees` named
 after the bundle (`devcontainer/worktree-admin.py`, devcontainer/README.md, "What stays open").
 owl and sfu differ from the Odoo repos:
 
@@ -51,6 +51,10 @@ owl and sfu differ from the Odoo repos:
   `npm approve-scripts mediasoup` before the server will start. Tests run without it
   (`tests/rtc.test.ts` asserts a CPU-count-dependent `NUM_WORKERS` and fails on some machines,
   upstream, not a local breakage).
+- runbot has no branch per Odoo version: its worktree is on `19.0`, its default branch, whatever
+  the base of the bundle (`fixed_base_by_repo`, which also puts owl, sfu, upgrade and upgrade-util
+  on `master`). Its PR targets `odoo/runbot` from `odoo-dev/runbot`. Change the value there when
+  runbot moves its default branch.
 
 A build killed in `git worktree add` (a restart of bundle-ctl, see its README) leaves a worktree
 whose checkout never ended: its `.git` names no gitdir, or one with no index, so git sees its
@@ -133,8 +137,8 @@ branch, and the node_modules step skips a repo that has no worktree at all.
 ### create_bundle.py
 
 Creates a new bundle locally for a given base branch across all configured repos, but
-`design-themes` and `documentation` (`OPTIONAL_REPOS` in `config.py`) only when they get the branch
-(`--branch-repo`): 0.7 GB less per bundle. `add_repo.py` adds one later.
+`design-themes`, `documentation` and `runbot` (`OPTIONAL_REPOS` in `config.py`) only when they get
+the branch (`--branch-repo`): 0.7 GB less per bundle. `add_repo.py` adds one later.
 Fetches the base branch, creates worktrees, and (if run from inside a repo dir) pushes a local branch to the dev remote.
 The base is never the upstream of the new branch. With `--no-push` the branch has no upstream until
 its container starts: `upstream.py`, run by `devcontainer/initialize.py` before each start, sets it
@@ -179,7 +183,7 @@ Done
 
 Fetches bundle metadata from runbot and creates/updates local worktrees.
 
-Queries the runbot API, checks out each repo at the matching commit, runs web tooling setup, and opens the bundle in VS Code. `design-themes` and `documentation` get a worktree only when the bundle has a branch there.
+Queries the runbot API, checks out each repo at the matching commit, runs web tooling setup, and opens the bundle in VS Code. `design-themes`, `documentation` and `runbot` get a worktree only when the bundle has a branch there.
 
 `pfb -t BUNDLE` opens the terminator window of its agent instead, as `ocode -t` does, for a bundle
 that is not local yet or was deleted: a deleted bundle lost its `.agent`, so its agent is a new one
@@ -265,8 +269,8 @@ Done
 
 ### add_repo.py
 
-Adds to a bundle the worktree of a repo it was made without, `design-themes` or `documentation`: on
-the bundle branch when the repo has one, here or on the dev remote, else on the base branch. The
+Adds to a bundle the worktree of a repo it was made without, `design-themes`, `documentation` or
+`runbot`: on the bundle branch when the repo has one, here or on the dev remote, else on the base branch. The
 folder shows at once in the container of the bundle, which mounts the bundle folder; the terminal
 of the repo comes at the next window reload. From a container: `bctl add-repo documentation`.
 `test_optional_repos.py` runs it, and `create_bundle.py`, on scratch repos.

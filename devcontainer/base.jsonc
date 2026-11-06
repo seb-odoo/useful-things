@@ -94,6 +94,13 @@
     "source=@REPO_ROOT@/sfu/.git/rr-cache,target=@REPO_ROOT@/sfu/.git/rr-cache,type=bind,z",
     "source=@REPO_ROOT@/sfu/.git/packed,target=@REPO_ROOT@/sfu/.git/packed,type=bind,z",
     "source=@REPO_ROOT@/sfu/.git/worktrees/${localWorkspaceFolderBasename},target=@REPO_ROOT@/sfu/.git/worktrees/${localWorkspaceFolderBasename},type=bind,z",
+    "source=@REPO_ROOT@/runbot/.git,target=@REPO_ROOT@/runbot/.git,type=bind,readonly,Z",
+    "source=@REPO_ROOT@/runbot/.git/objects,target=@REPO_ROOT@/runbot/.git/objects,type=bind,z",
+    "source=@REPO_ROOT@/runbot/.git/refs,target=@REPO_ROOT@/runbot/.git/refs,type=bind,z",
+    "source=@REPO_ROOT@/runbot/.git/logs,target=@REPO_ROOT@/runbot/.git/logs,type=bind,z",
+    "source=@REPO_ROOT@/runbot/.git/rr-cache,target=@REPO_ROOT@/runbot/.git/rr-cache,type=bind,z",
+    "source=@REPO_ROOT@/runbot/.git/packed,target=@REPO_ROOT@/runbot/.git/packed,type=bind,z",
+    "source=@REPO_ROOT@/runbot/.git/worktrees/${localWorkspaceFolderBasename},target=@REPO_ROOT@/runbot/.git/worktrees/${localWorkspaceFolderBasename},type=bind,z",
     // Workspace .claude, .vscode and odools.toml are symlinks in each bundle pointing at these
     // absolute host paths; bind them at the same path (like the .git mounts above) so the symlinks
     // resolve in the container. Without this the workspace settings.json never loads, so

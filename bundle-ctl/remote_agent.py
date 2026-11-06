@@ -82,6 +82,7 @@ REPOS = (
     "upgrade-util",
     "owl",
     "sfu",
+    "runbot",
 )
 # The folders of a base .git a bundle writes (devcontainer/base.jsonc).
 GIT_WRITABLE = ("objects", "refs", "logs", "rr-cache", "packed")

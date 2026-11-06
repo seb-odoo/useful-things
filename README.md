@@ -13,6 +13,7 @@ The dev environment I work on Odoo with, and the odds and ends that come with it
 | `.bashrc`, `install.sh`, `terminator-config` | the host side of all of it |
 | `wifi-watchdog.sh` | installs with sudo a root timer that reloads the wifi driver when the wifi is on and the laptop had no default route at 3 checks 5 minutes apart, then every 30 minutes while it lasts: the mt7921e of my laptop once saw no network for 63 hours, until a reboot. It logs in `journalctl -u wifi-watchdog`. The install copies `wifi-watchdog-check.sh` to `/usr/local/sbin`: run it again after a change. Run with no terminal, it opens one for the password |
 | `reclaim-swap.sh` | moves the swap back to RAM when it fits, with sudo: the alias `reclaim-swap`. Run with no terminal, it opens one for the password |
+| `zswap.sh` | keeps the swapped pages compressed in RAM (zswap, lz4, 25% of the RAM at most), now and at each boot through `/etc/tmpfiles.d/zswap.conf`, with sudo. Run with no terminal, it opens one for the password |
 | `odoo_*.py`, `populate.sql`, `discuss_populate/`, `compare_logs.py` | helper scripts for odoo work, no setup needed |
 
 Nothing here holds a credential. The scripts, the container and bundle-ctl take their per-machine
@@ -23,8 +24,8 @@ as it is: copy and adapt it rather than linking it.
 ## Setup on another machine
 
 1. Clone this repo and the ones a bundle is made of under `REPO_ROOT` (default `~/repo`): `odoo`,
-   `enterprise`, `design-themes`, `documentation`, `upgrade` and `upgrade-util` with the remotes
-   `odoo` and `odoo-dev`, `owl` with `origin` and your fork (`OWL_DEV_REMOTE`), and `sfu`. The
+   `enterprise`, `design-themes`, `documentation`, `upgrade`, `upgrade-util` and `runbot` with the
+   remotes `odoo` and `odoo-dev`, `owl` with `origin` and your fork (`OWL_DEV_REMOTE`), and `sfu`. The
    container also mounts [TestWarden](https://github.com/tsm-odoo/TestWarden),
    [DiscussModelParser](https://github.com/tsm-odoo/DiscussModelParser), `runbot-fix-agents` (the
    team's fix skills, rules and lessons, which the skills of `~/.claude` link into) and

@@ -89,6 +89,7 @@ MAIN_CHECK_BY_REPO = {
     "documentation": "ci/documentation",
     "enterprise": "ci/runbot",
     "odoo": "ci/runbot",
+    "runbot": "ci/runbot",
     "sfu": "ci/sfu",
     "upgrade": "ci/runbot",
     "upgrade-util": "ci/runbot",
