@@ -25,8 +25,16 @@ than the PR target (or with none), its folder sits under the target, which is th
 ### The repos of a bundle
 
 A bundle gets a worktree of each repo of `folder_by_repo` in `config.py` (`design-themes`,
-`documentation` and `runbot` only when they have the branch), its folder in the base `.git/worktrees` named
-after the bundle (`devcontainer/worktree-admin.py`, devcontainer/README.md, "What stays open").
+`documentation` and `runbot` only when they have the branch), its folder in the base
+`.git/worktrees` named after the bundle (`devcontainer/worktree-admin.py`, devcontainer/README.md,
+"What stays open").
+
+The scripts run git in each repo of `folder_by_repo`, a bundle having a worktree there or not. So
+a new repo goes there only once its clone has both remotes and host-ctl knows it (`BUNDLE_REPOS`,
+then its `install.sh`, so that host-box binds it): on 2026-11-06 every `fetch_bundle.py` and
+`delete_bundle.py` failed for an hour at `~/repo/runbot`, which had no `odoo-dev` remote and was
+not in host-box yet.
+
 owl and sfu differ from the Odoo repos:
 
 - owl's dev remote is a fork, `OWL_DEV_REMOTE` in `config.env`. Its worktrees start with no

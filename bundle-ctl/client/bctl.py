@@ -728,7 +728,8 @@ def main():
     commands.add_parser("build", help="make the bundle of this container, started bare")
     add_repo = commands.add_parser(
         "add-repo",
-        help="the worktree of a repo the bundle was made without (design-themes, documentation)",
+        help="the worktree of a repo the bundle was made without (design-themes, documentation,"
+        " runbot)",
     )
     add_repo.add_argument("repo")
     add_repo.add_argument("bundle", nargs="?", help="default: the bundle of this container")
