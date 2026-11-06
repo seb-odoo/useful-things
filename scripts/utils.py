@@ -422,9 +422,19 @@ class UtilsRunner(Runner):
         )
 
     def open_devcontainer(self, *, bundle_name):
-        """Open VS Code attached to an existing bundle's dev container (no worktree/npm setup)."""
+        """Open VS Code attached to an existing bundle's dev container (no worktree/npm setup), or
+        the terminal of its agent when that agent runs on a worker: a Claude tab would start a
+        second claude on its session."""
+        folder = get_worktree_bundle_folder(bundle_name)
+        if any(
+            os.path.exists(os.path.join(folder, ".agent", name))
+            for name in ("remote.json", "remote-starting")
+        ):
+            print(f"{bundle_name}: its agent runs on a worker, its terminal opens instead")
+            self.open_agent_terminal(bundle_name=bundle_name)
+            return
         mark_handled(bundle_name)
-        self.open_devcontainer_folder(folder=get_worktree_bundle_folder(bundle_name))
+        self.open_devcontainer_folder(folder=folder)
 
     def open_agent_terminal(self, *, bundle_name):
         """Bring up the terminator window of a bundle's agent, opened through bctl when it has none,

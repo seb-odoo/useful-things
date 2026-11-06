@@ -698,6 +698,9 @@ Opens a local bundle in VS Code, in its dev container, and marks it handled (gbs
 or not, else opens it on its last session with `bctl open BUNDLE --terminal`, which starts a new
 agent with no prompt on a bundle that has none. A bundle that is not local is fetched first with
 `pfb --no-open`, then opened the same way; a pfb that fails stops it.
+A bundle whose agent runs on a worker opens that terminal too, with `ocode` or a bundle link
+(`open_devcontainer`): its VS Code window would start a second claude on the session (Seb,
+2026-11-05, a window opened twice on the same agent).
 
 ### bundle_open.py
 

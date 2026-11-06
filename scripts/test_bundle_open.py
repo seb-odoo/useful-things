@@ -68,9 +68,28 @@ def main():
         )
         if res.returncode == 0:
             failures.append(f"a folder out of the worktree root: {res.stdout.strip()}")
+        bundle = root / "src" / "master" / "master-remote--seb"
+        (bundle / ".agent").mkdir(parents=True)
+        (bundle / ".agent" / "remote.json").write_text("{}\n")
+        code = (
+            "import sys; sys.path.insert(0, sys.argv[1]); import utils;"
+            " runner = utils.UtilsRunner();"
+            " runner.open_agent_terminal = lambda **kw: print('terminal');"
+            " runner.open_devcontainer_folder = lambda **kw: print('window');"
+            " runner.open_devcontainer(bundle_name=sys.argv[2])"
+        )
+        res = subprocess.run(
+            [sys.executable, "-c", code, str(HERE), bundle.name],
+            capture_output=True,
+            check=False,
+            env=env,
+            text=True,
+        )
+        if res.stdout.split()[-1:] != ["terminal"]:
+            failures.append(f"a bundle whose agent runs on a worker: {res.stdout}{res.stderr}")
     for line in failures:
         print(line)
-    print(f"{4 - len(failures)}/4 cases as expected")
+    print(f"{5 - len(failures)}/5 cases as expected")
     return 1 if failures else 0
 
 

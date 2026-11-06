@@ -529,7 +529,9 @@ necessary. but if we have a good setup, full remote should offer the same possib
   is written in the worktrees when they are what was sent (else nothing is overwritten, and the
   commits stay in `refs/remote-runs/BUNDLE/`), the job is cancelled 11 minutes after at most,
   then the session goes on in a terminal here. A VS Code window on a remote bundle is refused
-  until then, as its tab would start a second claude on the session.
+  until then, as its tab would start a second claude on the session: `ocode` and the bundle
+  links open its terminal instead, and a window opened another way leaves the session on the
+  worker (`claude-autoopen/README.md`).
 - `bctl place BUNDLE auto` gives the next tasks of a bundle back to `auto` and moves nothing.
 - `bctl place BUNDLE local|WORKER` (deck's Move to) moves an agent whatever it does, and
   `.agent/where` keeps the place for the next tasks of the bundle. An agent at work, or busy

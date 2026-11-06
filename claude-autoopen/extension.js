@@ -134,6 +134,26 @@ async function readAgentFile(root, name) {
   }
 }
 
+async function isRemote(root) {
+  for (const name of ["remote.json", "remote-starting"]) {
+    if ((await readAgentFile(root, name)) !== undefined) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function openAgentTerminal(client, bundle, then = () => {}) {
+  const args = [`${client}/bctl.py`, "open", bundle, "--terminal"];
+  childProcess.execFile("python3", args, (error, stdout, stderr) => {
+    if (error) {
+      vscode.window.showErrorMessage((stderr || stdout).trim() || error.message);
+    } else {
+      then();
+    }
+  });
+}
+
 async function writeAgentFile(root, name, text) {
   const uri = vscode.Uri.joinPath(root, AGENT_FOLDER, name);
   await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(text));
@@ -148,6 +168,18 @@ async function moveToTerminal(root) {
   if (busy.length > 1) {
     vscode.window.showWarningMessage(
       "Two Claude sessions of this window work: closing the window would cut one.",
+    );
+    return;
+  }
+  if (client && bundle && root && (await isRemote(root))) {
+    if (busy.length) {
+      vscode.window.showWarningMessage(
+        "The agent runs on a worker: closing the window would cut the session at work here.",
+      );
+      return;
+    }
+    openAgentTerminal(client, bundle, () =>
+      vscode.commands.executeCommand("workbench.action.closeWindow"),
     );
     return;
   }
@@ -167,12 +199,7 @@ async function moveToTerminal(root) {
     await writeAgentFile(root, "task.md", "");
   }
   vscode.window.setStatusBarMessage("Moving the agent to a terminal...", 30000);
-  const args = [`${client}/bctl.py`, "open", bundle, "--terminal"];
-  childProcess.execFile("python3", args, (error, stdout, stderr) => {
-    if (error) {
-      vscode.window.showErrorMessage((stderr || stdout).trim() || error.message);
-    }
-  });
+  openAgentTerminal(client, bundle);
 }
 
 async function runAgent(root) {
@@ -334,7 +361,12 @@ async function activate(context) {
     context.subscriptions.push({ dispose: () => clearInterval(timer) });
   }
   try {
-    if (!root || !(await runAgent(root))) {
+    if (root && (await isRemote(root))) {
+      vscode.window.showWarningMessage(
+        "The agent runs on a worker: its session stays there until `bctl bring-back`.",
+      );
+      await showClaudeTab(context, undefined);
+    } else if (!root || !(await runAgent(root))) {
       await showClaudeTab(context, root);
     }
   } finally {
@@ -351,6 +383,9 @@ async function pollAgent(context, root) {
       await vscode.commands.executeCommand("workbench.action.closeWindow");
       return;
     }
+  }
+  if (await isRemote(root)) {
+    return;
   }
   const hasSession = (await readAgentFile(root, "session")) !== undefined;
   if (!hasSession) {

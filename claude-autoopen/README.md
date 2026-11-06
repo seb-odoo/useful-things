@@ -36,6 +36,13 @@ terminal, and opens the tab on the session of that agent once the run is done or
 pinned Claude tab that is already there is reused, unless a session of the window is busy:
 closing a tab stops its turn. The rest is in [`bundle-ctl/`](../bundle-ctl/).
 
+While the agent runs on a worker (`.agent/remote.json` or `.agent/remote-starting`), the window
+leaves its session there: no run, no tab on that session, an empty tab and a warning instead.
+A tab here would start a second claude on the session, and its run would write a false end
+(`.agent/done` at `interrupted`) that bundle-ctl takes as the end of the remote agent (Seb,
+2026-11-05). `ocode` and the bundle links open its terminal instead of such a window
+(`scripts/README.md`).
+
 The terminal icon of the Claude tab ("Move the agent to a terminal", also in the command palette)
 sends a session of the window to a terminal of the host: the one that works, else the only one,
 else the agent's. A session that is not the agent's becomes it (`.agent/session`), as a new
@@ -43,7 +50,9 @@ conversation in the tab is what Seb wants to move. The extension then asks `bctl
 --terminal`, and closes the window when the terminal writes `.agent/close-window`. It shows in
 every bundle window: in a window bundle-ctl did not open, the moved session becomes an agent with
 an empty task, as the one `ocode -t` starts. It refuses while two sessions of the window work: the
-closing would cut one.
+closing would cut one. While the agent runs on a worker, the window holds none of its session:
+the icon asks the same terminal, which shows the claude of the worker, and closes the window as
+soon as bctl answers, refused only while a session of the window works.
 
 ## Install
 
