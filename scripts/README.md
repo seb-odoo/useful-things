@@ -61,8 +61,10 @@ owl and sfu differ from the Odoo repos:
   upstream, not a local breakage).
 - runbot has no branch per Odoo version: its worktree is on `19.0`, its default branch, whatever
   the base of the bundle (`fixed_base_by_repo`, which also puts owl, sfu, upgrade and upgrade-util
-  on `master`). Its PR targets `odoo/runbot` from `odoo-dev/runbot`. Change the value there when
-  runbot moves its default branch.
+  on `master`). Change the value there when runbot moves its default branch. Its PR targets
+  `odoo/runbot` from a personal fork, as for owl: the remote `odoo-dev` of the clone points at that
+  fork (`seb-odoo/runbot` here, the `PUSH` of git-gate), since the odoo-dev org has no runbot fork
+  and the API token cannot make one.
 
 A build killed in `git worktree add` (a restart of bundle-ctl, see its README) leaves a worktree
 whose checkout never ended: its `.git` names no gitdir, or one with no index, so git sees its
