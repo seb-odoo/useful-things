@@ -9,6 +9,8 @@ shopt -s expand_aliases
 
 # Outside the container env, the tool repos sit beside useful-things.
 : "${REPO_ROOT:=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)}"
+# The image gets CONTAINER_BASHRC as a build arg only, unset at run time.
+: "${CONTAINER_BASHRC:=$(readlink -f "${BASH_SOURCE[0]}")}"
 
 # --- git workflow aliases ---
 alias gbd="git branch -D"
