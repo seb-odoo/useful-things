@@ -4266,6 +4266,8 @@ def prompt_window(caller, query, body):
         raise ValueError("text: no control character but new lines and tabs")
     if text.lstrip().startswith("/"):
         raise Refused("a slash command may open a menu deck does not show: type it in the terminal")
+    if any(line.lstrip().startswith("!") for line in text.splitlines()):
+        raise Refused("a line that starts with ! may run in a shell: type it in the terminal")
     folder, why = get_deck_window(body)
     worker = folder is None and get_remote_worker(body["agent"], body["session"])
     if worker:

@@ -1461,7 +1461,10 @@ the agents of sebpc waited too).
 - A prompt holds any text but control characters (new lines and tabs pass), 32 KB at most: an
   escape would end the paste and type keys. The terminal drops one that has one all the same, and
   one older than an hour, as its session may resume days later. A slash command is refused: it may
-  open a menu that deck does not show, where the next prompt would land.
+  open a menu that deck does not show, where the next prompt would land. So is a prompt with a
+  line that starts with `!`: pasted in an empty input, claude runs it as a shell command in the
+  agent's container, with no model and no permission check, and its paste may drop the lines
+  before it that name an image (security check 11-05, J103).
 - A stop leaves `stop` in that folder. The terminal takes it within 0.2 s and sends Escape while a
   turn runs or a dialog waits (the dialog closes, as with his key), once in 5 s at most, as a second
   Escape opens the rewind of claude. A stop left with no turn, or older than 5 s, is dropped.

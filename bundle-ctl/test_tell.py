@@ -560,6 +560,9 @@ def check_prompt(root, check):
     daemon.get_remote_agents = dict
     found = ask(daemon.prompt_window, BUNDLE_SESSION, agent="b4", text=" /model opus")
     check("a slash command is refused", found[0] == "Refused", found)
+    for bang in ("!true", " !true", "~/a.png\n!true"):
+        found = ask(daemon.prompt_window, BUNDLE_SESSION, agent="b4", text=bang)
+        check(f"a shell command {bang!r} is refused", found[0] == "Refused", found)
     for bad in ("a\x1b[201~b", "a\rb", "  \n", "a" * (daemon.MAX_TASK + 1)):
         found = ask(daemon.prompt_window, BUNDLE_SESSION, agent="b4", text=bad)
         check(f"a prompt {bad[:8]!r} is refused", found[0] == "ValueError", found)
