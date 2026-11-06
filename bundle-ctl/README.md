@@ -754,7 +754,9 @@ yet, or an open PR. A branch whose PRs are all closed or merged goes, even with 
 no remote has: in a review bundle, the older head of a PR its author rebased since. A commit whose
 change the base of the bundle already has under another sha (`git cherry`, same patch-id) is no
 work: a branch never pushed whose commits are all in its base goes too, with no PR, as the copy
-of a fix that reached master by a forward-port.
+of a fix that reached master by a forward-port. A branch the dev remote no longer has is no push:
+git-gate sends a deletion from the gate at Seb's yes and leaves the dev remote ref in the base
+repo, so the request first drops that ref when `git ls-remote` no longer finds the branch.
 
 `--drop COMMIT` (7 characters of its sha or more, once per commit) names a commit of Seb no remote
 has that the deletion may lose: the request lists it with its subject, and his yes loses it. A

@@ -28,6 +28,7 @@ DROPPED = "master-dropped--seb"
 LEFT = "master-left--seb"
 MERGED = "master-merged--seb"
 MINE = "master-mine--seb"
+MOVED = "master-moved--seb"
 OPENED = "master-opened-aku"
 PUSHED = "master-pushed--seb"
 QUEUED = "master-queued--seb"
@@ -86,6 +87,7 @@ def prepare(root):
         DROPPED,
         MERGED,
         MINE,
+        MOVED,
         OPENED,
         PUSHED,
         QUEUED,
@@ -136,6 +138,10 @@ def prepare(root):
         git(repo, "-c", "user.name=t", "commit", "-qm", message)
     git(repo, "push", "--quiet", "odoo", "master")
     git(repo, "fetch", "--quiet", "--all")
+    git(repo, "checkout", "--quiet", "--detach", "master")
+    git(repo, "-c", "user.name=t", "commit", "--allow-empty", "-qm", "moved to 19.0")
+    git(repo, "push", "--quiet", "odoo-dev", f"HEAD:refs/heads/{MOVED}")
+    git(repo, "push", "--quiet", str(remote), "--delete", MOVED)
     git(repo, "checkout", "--quiet", COMMITTED)
     git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-qm", "own")
     git(repo, "checkout", "--quiet", DROPPED)
@@ -194,6 +200,7 @@ def prepare(root):
     daemon.is_in_container = lambda connection: world["caller"] != daemon.HOST
     daemon.read_state = lambda: world["state"]
     daemon.run_script = lambda log, script, *args: world["calls"].append((script, *args))
+    daemon.session_env = lambda: dict(os.environ)
     daemon.tell_verdict = lambda bundle, gone=False: world["verdicts"].append(
         (bundle, len(world["calls"]), gone),
     )
@@ -262,7 +269,7 @@ def check(root):
             == (
                 f"delete the bundle {CLEAN}",
                 [
-                    "the branch in odoo: no commit of its own, never pushed",
+                    "the branch in odoo: no commit of its own, not on odoo-dev",
                     "its container, and the databases named after it",
                 ],
                 "moved to 19.0",
@@ -306,6 +313,22 @@ def check(root):
         (
             "a pushed branch is kept",
             (code, lines) == (1, [f"bctl: 409 {PUSHED} is pushed in odoo, a PR may use it"]),
+        ),
+    )
+    code, lines = run_client(path, "delete", MOVED, "--reason", "r")
+    held = [daemon.HELD.read_json(path) for path in daemon.HELD_DIR.glob("*.json")]
+    stale = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"refs/remotes/odoo-dev/{MOVED}"],
+        capture_output=True,
+        check=False,
+        cwd=root / "odoo",
+    )
+    checks.append(
+        (
+            "a branch the dev remote deleted since its fetch is no push, and its ref goes",
+            (code, [item["lines"][1] for item in held if item["send"] == {"bundle": MOVED}])
+            == (0, ["the branch in odoo: no commit of its own, not on odoo-dev"])
+            and stale.returncode,
         ),
     )
     code, lines = run_client(path, "delete", OPENED, "--reason", "r")
@@ -554,7 +577,7 @@ def check(root):
             (item["lines"][1:3], item["send"])
             == (
                 [
-                    "the branch in odoo: never pushed, commits of t@t that no remote has",
+                    "the branch in odoo: not on odoo-dev, commits of t@t that no remote has",
                     f"its commit in odoo that no remote has, lost: {first[:12]} fw conflict fix",
                 ],
                 {"bundle": DROPPED, "drop": [first]},

@@ -2496,6 +2496,35 @@ def fetch_dev_branch(bundle, repo):
         return False
 
 
+def prune_dev_branch(bundle, repo):
+    """Drop the dev remote ref of the branch when the dev remote has the branch no more: git-gate
+    sends a deletion from the gate at Seb's yes, which leaves that ref in the base repo. A remote
+    that does not answer keeps it."""
+    folder, ref = get_repo_folder(repo), get_remote_dev_ref(bundle, repo)
+    if subprocess.run(
+        [*GIT, "rev-parse", "--verify", "--quiet", ref],
+        capture_output=True,
+        check=False,
+        cwd=folder,
+    ).returncode:
+        return
+    try:
+        listed = subprocess.run(
+            [*GIT, "ls-remote", "--exit-code", get_remote_dev_repo(repo), f"refs/heads/{bundle}"],
+            capture_output=True,
+            check=False,
+            cwd=folder,
+            env=session_env(),
+            timeout=FETCH_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return
+    if listed.returncode == 2:
+        subprocess.run(
+            [*GIT, "update-ref", "-d", ref], capture_output=True, check=False, cwd=folder
+        )
+
+
 def check_unpushed(bundle, script):
     for repo in local_branches(bundle):
         if get_unpushed(bundle, repo) and (
@@ -2617,7 +2646,7 @@ def check_deletion(bundle, drop=()):
         )
         committers = get_others_commits(bundle, repo, drop)
         if pushed.returncode and not committers:
-            lines[repo] = "no commit of its own, never pushed"
+            lines[repo] = f"no commit of its own, not on {get_remote_dev_repo(repo)}"
             continue
         prs = get_branch_prs(repo, bundle)
         cherry = get_cherry(bundle, repo) if pushed.returncode and not prs else {}
@@ -2631,7 +2660,9 @@ def check_deletion(bundle, drop=()):
             raise Refused(f"{bundle} has an open PR in {repo}: {', '.join(opened)}")
         base = get_base_for_repo(get_base_from_bundle_name(bundle), repo)
         lines[repo] = ", ".join(f"{pr} {state}" for pr, state in prs.items()) or (
-            f"its commits are in {base}" if all(cherry.values()) else "never pushed"
+            f"its commits are in {base}"
+            if all(cherry.values())
+            else f"not on {get_remote_dev_repo(repo)}"
         )
         if committers:
             force = True
@@ -2679,6 +2710,8 @@ def delete(caller, query, body):
     if HELD is None:
         raise Refused("no gateway-core beside useful-things: hok cannot list the deletion")
     folder = get_worktree_bundle_folder(bundle)
+    for repo in local_branches(bundle):
+        prune_dev_branch(bundle, repo)
     dropped = get_dropped(bundle, body.get("drop") or [])
     drop = [sha for commits in dropped.values() for sha, _subject in commits]
     branches, _force = check_deletion(bundle, drop)
