@@ -110,6 +110,7 @@ PR_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
 PRS_PER_QUERY = 5
 R_PLUS_STATES = ("approved", "merged", "ready", "staged")
 REVIEW_TAGS = {"APPROVED": "approved", "CHANGES_REQUESTED": "[red]changes[/red]"}
+VERSION_NAME = re.compile(r"master|\d+\.\d+|saas-\d+\.\d+")
 
 
 def git(repo, *args):
@@ -152,7 +153,8 @@ def has_write_tree():
 def get_local_branches(repo):
     """The branches of a base repo that are bundle names: every bundle writes the refs of the
     shared `.git`, and a name with a `/` would make the deletion of a merged bundle follow a link
-    it put on the way (security check 11-03, C8)."""
+    it put on the way (security check 11-03, C8). A version name is no bundle: `master` is
+    checked out in Seb's own clone of runbot, which a delete must never touch (2026-11-09)."""
     out = git(
         repo,
         "for-each-ref",
@@ -162,7 +164,7 @@ def get_local_branches(repo):
     return [
         (name, int(date), head, any(path))
         for name, date, head, *path in (line.split(" ", 3) for line in out.splitlines())
-        if BUNDLE_NAME.fullmatch(name)
+        if BUNDLE_NAME.fullmatch(name) and not VERSION_NAME.fullmatch(name)
     ]
 
 

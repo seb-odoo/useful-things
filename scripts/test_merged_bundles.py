@@ -174,10 +174,15 @@ def main():
             )
         odoo = commands.get_repo_folder("odoo")
         git(odoo, "branch", "master-x/link")
+        git(odoo, "branch", "saas-19.2")
         names = [branch[0] for branch in branch_status.get_local_branches("odoo")]
         found["a ref that is no bundle name is no branch (C8)"] = (
             ("master-x/link" in names, "master-closed" in names),
             (False, True),
+        )
+        found["a version branch is no bundle: Seb's runbot clone has master checked out"] = (
+            "saas-19.2" in names,
+            False,
         )
         victim = f"{root}/src/victim"
         os.makedirs(f"{root}/src/master/master-x")

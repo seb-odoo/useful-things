@@ -545,7 +545,9 @@ sources that file too). Two things that bite:
 
 ### branch_status.py (`gbs`)
 
-Lists the local branches of every repo like `git branch`, newest first: what is not pushed, how far
+Lists the local branches of every repo like `git branch`, newest first, but a version branch
+(`master`, `19.0`, `saas-19.2`): Seb's own clone of runbot has `master` checked out, and listed as
+a bundle it was a delete candidate (2026-11-09). For each one: what is not pushed, how far
 behind their base they are, whether a rebase conflicts, and their PR with its mergebot, review and
 CI state. Reads local refs only, so the host alias `gbs` runs `gfa --keep-gone` first: a gone
 bundle stays, deleted next by gbs when its PRs are merged, listed when they are closed.
