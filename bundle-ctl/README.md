@@ -55,7 +55,7 @@ the pager. `python3 test_node_modules.py` and `python3 test_delete.py` have the 
 | `GET /whoami` | the caller's bundle, base and parent |
 | `GET /branches` | `gbs --json` run on the host, which deletes the bundles left with merged PRs only; `?format=table&width=N`: its colored table; to a bundle, the report (`result`) and the task of an agent only when it is that bundle or queued its task (B18) |
 | `GET /status` | every local bundle branch, as read in the last 30 seconds (agents and the helper of firefox-gateway poll it; each git call of the host starts a host-box, so a read runs git again only on a branch whose commit or base commit moved): base, behind and conflict per repo, folder, opening (launched in the last 15 minutes, container not up yet), open, and its agent: state (`running`, `waiting`, `done`, or `stopped` when its terminal or its window closed before the verdict and it runs on no worker: nothing runs it any more, and a new task may replace it; a stopped agent carries its `task` text, to queue it again as it was), when it was queued, when its run started (none for a task no window took), when it ended, `stale` when a branch of the bundle got a commit, or its dev remote ref an update (the mtime of its reflog), after that end, retry, and the last write to a session titled with the bundle, its own or an earlier agent's tab Seb went on in (`active N min ago`, or `idle since HH:MM` after 15 minutes; a tab opened by hand has no title and does not count); the queue, each task with its priority, the bundle that queued it, when, and what it waits for; to a bundle, the task, the report (`result`) and the parent of an agent, and the text, the session and the parent of a queued task, only when it is that bundle or queued its task (security check 11-03, B18; 11-05, B102) |
-| `POST /add-repo` | `add_repo.py`: the worktree of a repo the bundle was made without (`design-themes`, `documentation`, `runbot` on `19.0`); a container asks for its own only |
+| `POST /add-repo` | `add_repo.py`: the worktree of a repo the bundle was made without (`design-themes`, `documentation`, `runbot` on `19.0`, `o-sfu`); a container asks for its own only |
 | `POST /build` | the `gnb` or `pfb` a task was queued with, for the bundle whose agent started bare (see Bare start); the bundle itself or the host asks; when the disk is short, the session of the agent that asks it in its terminal goes back to the queue with that build (see Disk), and anyone else is refused; refused too when a branch of the bundle has a commit no remote has, which the script would reset |
 | `POST /create` | `gnb` with `--no-push`, then a window; with a task, only its queue entry, the bundle being made when its agent asks (see Bare start); refused when the bundle exists, a branch has unpushed commits or, with no task, the disk is short (see Disk) |
 | `POST /delete` | the deletion of a bundle, held for Seb's yes in `hok` (see Deletion); a container asks for its own, or for the one of a child |
@@ -174,6 +174,7 @@ the daemon, which gives each of them cores of its own.
 
 | kind | what | cores | memory counted |
 | --- | --- | --- | --- |
+| `cargo` | a cargo that compiles or tests (o-sfu): `build`, `test`, `nextest`, `check`, `clippy`, `run`... | 2 | 4 GB |
 | `hoot` | test-warden | one per worker, 2 at most | 1 GB, plus 1.3 GB per worker |
 | `odoo` | an `odoo-bin` that tests or installs | 1 | 2 GB |
 | `other` | any other command | 1 | 1 GB |
@@ -198,9 +199,10 @@ the daemon, which gives each of them cores of its own.
   its printable characters only, as `bctl runs` prints it (B16).
 
 An agent does not call `bctl run`. `client/run-hook.py`, a PreToolUse hook of the shared bundle
-`.claude/settings.json`, writes it as a line in front of a Bash command that runs `odoo-bin` or
-test-warden (`engine-linux-*`, `test-warden.cjs`, and the helpers `twc`, `ott`, `otf`, `obet`),
-whether directly, behind `nice` or `timeout`, from a variable, in `bash -c` or in a script file.
+`.claude/settings.json`, writes it as a line in front of a Bash command that runs `odoo-bin`,
+test-warden (`engine-linux-*`, `test-warden.cjs`, and the helpers `twc`, `ott`, `otf`, `obet`), or
+cargo to compile (cargo takes as many jobs as the CPUs it is pinned to, so a build of o-sfu would
+take every core of the laptop otherwise), whether directly, behind `nice` or `timeout`, from a variable, in `bash -c` or in a script file.
 It reads the kind in the flags (`--stop-after-init`, `--test-tags`, `-i`, `shell`, `--workers N`).
 The body of a heredoc is data: `cat > x.sh <<'EOF'` with `odoo-bin` in it waits for nothing. It
 counts when a shell reads it (`bash <<'EOF'`, `cat <<'EOF' | sh`), or when the same command then

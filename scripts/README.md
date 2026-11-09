@@ -20,12 +20,14 @@ Worktrees land in `WORKTREE_ROOT/<base>/<bundle_name>/<repo>/`. Both come from
 from a machine where they are `--seb` and `/home/seb/src/odoo`.
 
 A PR fetched by `fetch_bundle.py` keeps its branch name. When that name starts with another version
-than the PR target (or with none), its folder sits under the target, which is then its base.
+than the PR target (or with none), its folder sits under the target, which is then its base. A
+bundle whose agent started bare keeps the folder its name gave (`c/c-33` for the o-sfu branch
+`c-33`): its container is open on it.
 
 ### The repos of a bundle
 
 A bundle gets a worktree of each repo of `folder_by_repo` in `config.py` (`design-themes`,
-`documentation` and `runbot` only when they have the branch), its folder in the base
+`documentation`, `runbot` and `o-sfu` only when they have the branch), its folder in the base
 `.git/worktrees` named after the bundle (`devcontainer/worktree-admin.py`, devcontainer/README.md,
 "What stays open").
 
@@ -45,7 +47,7 @@ owl and sfu differ from the Odoo repos:
   `addons/web/static/lib/owl/owl.js`.
 - sfu has one remote for both roles. `remote_by_repo["sfu"]` and `remote_dev_by_repo["sfu"]` are
   both `origin` (`odoo/sfu`): the team pushes dev branches to the upstream repo itself, and there
-  is no fork. sfu is the only repo shaped this way, which is why `fetch_all.handle_repo`
+  is no fork. o-sfu is shaped the same, which is why `fetch_all.handle_repo`
   deduplicates its remote loop with `dict.fromkeys`; without it the same namespace is fetched and
   pruned twice.
 - A bundle named after a colleague's sfu branch is his branch: `pfb <his branch>` puts the
@@ -65,6 +67,10 @@ owl and sfu differ from the Odoo repos:
   `odoo/runbot` from a personal fork, as for owl: the remote `odoo-dev` of the clone points at that
   fork (`seb-odoo/runbot` here, the `PUSH` of git-gate), since the odoo-dev org has no runbot fork
   and the API token cannot make one.
+- o-sfu, the Rust SFU, is shaped as sfu: one remote, `origin` (`odoo/o-sfu`), for both roles, as
+  its team pushes its branches there, on `master`. Its branch names give no base (`c-33`), so the
+  bundle of its PR sits under `c/` when its agent started bare. Cargo builds it offline from the
+  store of crates below.
 
 A build killed in `git worktree add` (a restart of bundle-ctl, see its README) leaves a worktree
 whose checkout never ended: its `.git` names no gitdir, or one with no index, so git sees its
@@ -97,6 +103,27 @@ pre-commit hook then reloads the tooling: `disable.sh` deletes the link and `ena
 `npm install` in an odoo worktree and makes the link to the new key instead; `enable.sh` copies it
 to enterprise with `cp -a`. When the store has no tree for the key, the link waits for it and the
 commit fails with a line that names `bctl node-modules`.
+
+### Crates of o-sfu
+
+A bundle has no network, so the cargo of its o-sfu reads the crates of crates.io from a store only
+the host writes, `WORKTREE_ROOT/.cargo-crates/<name>-<version>/`, which every container mounts
+read-only at `/opt/cargo-crates`: a directory source, as `cargo vendor` makes, that
+`~/.cargo/config.toml` of the image puts in place of crates.io, with `net.offline`. Each time
+`add_worktree` adds or moves an o-sfu worktree (a create, a fetch, a build, an add-repo),
+`cargo_crates.py` reads its `Cargo.lock` and downloads from static.crates.io each crate the store
+misses, checks it against the sha256 of the lock, and unpacks it with the `.cargo-checksum.json`
+cargo asks there, which holds that sha256: cargo refuses a crate whose sum differs from its lock.
+The lock is the bundle's, so it is only data: no cargo and no build script run on the host, a name
+or a version out of form is left out, as is any source other than crates.io (a git dependency
+fails offline in the bundle), and an archive is unpacked file by file, regular files and folders
+under its own folder only. The lock of o-sfu on 2026-11-09 took 395 crates, 522 MB, in 15 s.
+A crate stays once there; one that no lock names any more can go by hand.
+
+A `Cargo.lock` that changes after the build (a rebase, the A/B on the parent of a PR that moves
+crates) needs crates the store may miss: cargo then names the one it cannot find. A made bundle
+asks no build again, so the host adds them: `python3 scripts/cargo_crates.py <bundle>` (from the
+ops container, a `hctl run` request). `test_cargo_crates.py` has the cases, crates.io faked.
 
 `_install_js_tooling` in `utils.py` runs `enable.sh` for its config files and its hooks, in a
 box that holds the bundle folder alone (`HOST_BOX --only`): `enable.sh` comes from the fetched
@@ -193,7 +220,7 @@ Done
 
 Fetches bundle metadata from runbot and creates/updates local worktrees.
 
-Queries the runbot API, checks out each repo at the matching commit, runs web tooling setup, and opens the bundle in VS Code. `design-themes`, `documentation` and `runbot` get a worktree only when the bundle has a branch there.
+Queries the runbot API, checks out each repo at the matching commit, runs web tooling setup, and opens the bundle in VS Code. `design-themes`, `documentation`, `runbot` and `o-sfu` get a worktree only when the bundle has a branch there.
 
 `pfb -t BUNDLE` opens the terminator window of its agent instead, as `ocode -t` does, for a bundle
 that is not local yet or was deleted: a deleted bundle lost its `.agent`, so its agent is a new one
@@ -205,10 +232,10 @@ Runbot names the bundle of a fork PR with the full label `<owner>:<head>`, while
 bundle has no prefix. Asked without the prefix, the API answers `"id": false` and pfb falls back
 to the base tip for the other repos.
 
-Runbot watches neither owl nor sfu, so a bundle's API answer never names them. For any repo runbot
+Runbot watches neither owl, sfu nor o-sfu, so a bundle's API answer never names them. For any repo runbot
 said nothing about, it asks the dev remote for a branch of the bundle's name. A bundle named after
 a base branch is excluded: the base clone has that branch checked out, so `worktree add -B` would
-fail against it. A branch pushed only to the owl fork or to `origin/sfu` has no runbot bundle at
+fail against it. A branch pushed only to the owl fork, to `origin/sfu` or to `origin/o-sfu` has no runbot bundle at
 all: an answer with no id is read as an empty bundle, and the run only stops when neither runbot,
 a dev remote nor a local branch has the name, or when runbot does not answer.
 
@@ -279,8 +306,8 @@ Done
 
 ### add_repo.py
 
-Adds to a bundle the worktree of a repo it was made without, `design-themes`, `documentation` or
-`runbot`: on the bundle branch when the repo has one, here or on the dev remote, else on the base branch. The
+Adds to a bundle the worktree of a repo it was made without, `design-themes`, `documentation`,
+`runbot` or `o-sfu`: on the bundle branch when the repo has one, here or on the dev remote, else on the base branch. The
 folder shows at once in the container of the bundle, which mounts the bundle folder; the terminal
 of the repo comes at the next window reload. From a container: `bctl add-repo documentation`.
 `test_optional_repos.py` runs it, and `create_bundle.py`, on scratch repos.

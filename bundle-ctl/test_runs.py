@@ -29,6 +29,14 @@ ENGINE = "./dist/engine-linux-amd64 --server http://localhost:8471"
 ODOO = "/home/seb/virtualenvs/odoo20/bin/python odoo-bin -d x"
 
 KINDS = [
+    ("cd /workspace/o-sfu && cargo nextest run -p o-sfu-core route_table", ("cargo", 1)),
+    ("cargo +1.95.0 test --locked -p o-sfu-core 2>&1 | tail -20", ("cargo", 1)),
+    ("cargo --color never -C crates/core t", ("cargo", 1)),
+    ("ls; cargo build --release && ./odoo-bin -d x --test-tags /mail", ("cargo", 1)),
+    ("cargo metadata --format-version 1 | jq .", None),
+    ("cargo tree -p o-sfu-core; cargo fmt --check", None),
+    ("cargo nextest run --help", None),
+    ("cargo --config build.jobs=2 --version", None),
     (f"cd /workspace/odoo && nice -n 19 {ODOO} --test-tags /mail", ("odoo", 1)),
     (f'db="$(git branch --show-current)-claude" && {ODOO} -i mail', ("odoo", 1)),
     ("timeout 590 python3 odoo-bin -d $(testdb) --test-enable --stop-after-init", ("odoo", 1)),

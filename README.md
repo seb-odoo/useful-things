@@ -25,7 +25,8 @@ as it is: copy and adapt it rather than linking it.
 
 1. Clone this repo and the ones a bundle is made of under `REPO_ROOT` (default `~/repo`): `odoo`,
    `enterprise`, `design-themes`, `documentation`, `upgrade`, `upgrade-util` and `runbot` with the
-   remotes `odoo` and `odoo-dev`, `owl` with `origin` and your fork (`OWL_DEV_REMOTE`), and `sfu`. The
+   remotes `odoo` and `odoo-dev`, `owl` with `origin` and your fork (`OWL_DEV_REMOTE`), `sfu`, and
+   `o-sfu` with `origin` alone. The
    container also mounts [TestWarden](https://github.com/tsm-odoo/TestWarden),
    [DiscussModelParser](https://github.com/tsm-odoo/DiscussModelParser), `runbot-fix-agents` (the
    team's fix skills, rules and lessons, which the skills of `~/.claude` link into) and

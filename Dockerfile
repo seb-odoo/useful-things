@@ -108,6 +108,34 @@ RUN curl -fsSL https://github.com/axllent/mailpit/releases/download/v1.33.0/mail
     tar -xzf /tmp/mailpit.tar.gz -C /usr/local/bin mailpit && \
     rm -f /tmp/mailpit.tar.gz
 
+# Rust for o-sfu: the toolchain its rust-toolchain.toml names, and cargo-nextest, its test runner.
+# A bundle has no network, so cargo reads the crates from the store the host fills
+# (/opt/cargo-crates, "Crates of o-sfu" in scripts/README.md) and never goes online. When o-sfu
+# moves to another toolchain, set RUST_TOOLCHAIN to it: rustup cannot download it in a bundle.
+ARG RUST_TOOLCHAIN=1.95.0
+ENV RUSTUP_HOME=/opt/rustup
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends cmake pkg-config && \
+    rm -rf /var/lib/apt/lists/* && \
+    curl -fsSL https://static.rust-lang.org/rustup/archive/1.29.3/x86_64-unknown-linux-gnu/rustup-init \
+        -o /tmp/rustup-init && \
+    echo "b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55  /tmp/rustup-init" | sha256sum -c - && \
+    chmod +x /tmp/rustup-init && \
+    CARGO_HOME=/opt/cargo /tmp/rustup-init -y --no-modify-path --profile minimal \
+        --component clippy,rustfmt --default-toolchain "$RUST_TOOLCHAIN" && \
+    rm -f /tmp/rustup-init && \
+    curl -fsSL https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.149/cargo-nextest-0.9.149-x86_64-unknown-linux-gnu.tar.gz \
+        -o /tmp/nextest.tar.gz && \
+    echo "32d1d8c0567b7a80bee2bad8bb09125c846da96bc009b2de11ec08557290c770  /tmp/nextest.tar.gz" | sha256sum -c - && \
+    tar -xzf /tmp/nextest.tar.gz -C /opt/cargo/bin cargo-nextest && \
+    rm -f /tmp/nextest.tar.gz && \
+    chmod -R a+rX /opt/rustup /opt/cargo && \
+    install -d -o vscode -g vscode /home/vscode/.cargo && \
+    printf '%s\n' '[source.crates-io]' 'replace-with = "store"' '' '[source.store]' \
+        'directory = "/opt/cargo-crates"' '' '[net]' 'offline = true' \
+        > /home/vscode/.cargo/config.toml && \
+    chown vscode:vscode /home/vscode/.cargo/config.toml
+
 # ~/.bash_aliases, so the container's ~/.bashrc, install-claude-path.sh and the Bash( ... )
 # permission rules keep reaching the shell helpers by that name while the mount itself is the
 # directory holding them. Built here rather than in postCreateCommand so it exists before the

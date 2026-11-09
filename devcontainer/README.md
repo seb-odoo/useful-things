@@ -40,9 +40,14 @@ with pip inside. The rest follows from that choice.
   and SASL libraries, the postgres client and the server of the bundle (below), fonts,
   wkhtmltopdf 0.12.6.1 with patched qt from wkhtmltopdf/packaging, the one of Odoo's own image
   (Jammy's has no header nor footer, and the PDF report tests fail with it), Chrome from Google's
-  own package (Jammy's `chromium` is a snap stub that does not run in a container) and Node 22
-  (Jammy's is too old for Odoo's JS tooling). The container runs with `no-new-privileges` as a
-  non-root user, so nothing can be installed once it is up.
+  own package (Jammy's `chromium` is a snap stub that does not run in a container), Node 22
+  (Jammy's is too old for Odoo's JS tooling), and for o-sfu the Rust toolchain of its
+  `rust-toolchain.toml` (`RUST_TOOLCHAIN`, read-only in `/opt/rustup`, with clippy and rustfmt as
+  its CI), `cargo-nextest`, `cmake`
+  and `pkg-config`, with a `~/.cargo/config.toml` that sends cargo to the crates the host keeps
+  (read-only at `/opt/cargo-crates`, "Crates of o-sfu" in `scripts/README.md`), never online. The
+  container runs with `no-new-privileges` as a non-root user, so nothing can be installed once it
+  is up.
 - **The venv is first in `PATH` for every process**, through `containerEnv`, with the standard
   directories written out: `${containerEnv:PATH}` is not expanded there and would replace the whole
   `PATH`. The `python3` of the image is 3.10, and `odoo-bin` or a test started outside an
@@ -126,7 +131,8 @@ write. So these are read-only in a bundle: the shell helpers (`container-rw/`), 
 Code user settings, TestWarden, DiscussModelParser and runbot-fix-agents (the cache of the
 test-warden engine comes back writable over it), the store of `node_modules`, whose trees every
 bundle on the same `package.json` loads (`/opt/node_modules`, see "Shared node_modules" in
-`scripts/README.md`), the browser of the Hoot runs, and what the next paragraphs name. The
+`scripts/README.md`), the store of the crates of o-sfu, which every bundle on o-sfu builds
+(`/opt/cargo-crates`, "Crates of o-sfu" there), the browser of the Hoot runs, and what the next paragraphs name. The
 `.agent` folder of the bundle is mounted on itself: bundle-ctl reads and writes its files by name,
 and the container cannot put a link in the place of the folder.
 

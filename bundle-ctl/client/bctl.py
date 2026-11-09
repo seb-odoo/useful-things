@@ -729,7 +729,7 @@ def main():
     add_repo = commands.add_parser(
         "add-repo",
         help="the worktree of a repo the bundle was made without (design-themes, documentation,"
-        " runbot)",
+        " runbot, o-sfu)",
     )
     add_repo.add_argument("repo")
     add_repo.add_argument("bundle", nargs="?", help="default: the bundle of this container")
@@ -757,7 +757,7 @@ def main():
     run_ = commands.add_parser("run", help="a heavy command, once the host has cores for it")
     run_.add_argument(
         "--kind",
-        choices=("hoot", "odoo", "other", "server", "shell"),
+        choices=("cargo", "hoot", "odoo", "other", "server", "shell"),
         default="other",
         help="what runs: a server and a shell share the cores and never wait (default other)",
     )

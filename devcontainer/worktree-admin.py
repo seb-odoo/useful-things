@@ -43,6 +43,7 @@ REPOS = (
     "owl",
     "sfu",
     "runbot",
+    "o-sfu",
 )
 EMPTY = "no worktree of the bundle: the source of its mount (devcontainer/worktree-admin.py)\n"
 WRITABLE = ("objects", "refs", "logs", "rr-cache", "packed")

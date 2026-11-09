@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """PreToolUse hook (Bash) of the bundles: start a heavy command through the run queue of the host.
 
-A command that runs Odoo (a test run, an install, a server, a shell) or test-warden gets one line
-in front of it, `bctl.py run`, which waits for cores and pins the shell of the call to them. The
+A command that runs Odoo (a test run, an install, a server, a shell), test-warden, or cargo to
+build or test (o-sfu) gets one line in front of it, `bctl.py run`, which waits for cores and pins the shell of the call to them. The
 agent writes its command as before, and bundle-ctl decides when it runs (README.md, "Runs"). The
 line lets the command go on when the daemon does not answer.
 
@@ -21,10 +21,32 @@ import sys
 import time
 
 ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*", re.DOTALL)
+CARGO_BUILDS = {
+    "b",
+    "bench",
+    "build",
+    "c",
+    "check",
+    "clippy",
+    "d",
+    "doc",
+    "fuzz",
+    "install",
+    "llvm-cov",
+    "miri",
+    "nextest",
+    "r",
+    "run",
+    "rustc",
+    "t",
+    "test",
+}
+CARGO_VALUED = {"--color", "--config", "-C", "-Z"}
 CLIENT = pathlib.Path(__file__).resolve().parent / "bctl.py"
 DEFAULT_WORKERS = 4
 DESCRIPTOR = re.compile(r"(?<=\s)\d(?=>)")
 FALLBACK = (
+    ("cargo", r"\bcargo\s+(?:\+\S+\s+)?(?:b|bench|build|c|check|clippy|nextest|r|run|t|test)\b"),
     ("hoot", r"engine-linux-\w+\s+-|test-warden\.cjs\s"),
     ("odoo", r"odoo-bin\s[^\n;|&]*--(?:stop-after-init|test-file|test-tags)"),
     ("server", r"odoo-bin\s+-"),
@@ -57,7 +79,7 @@ PUNCTUATION = "();<>|&\n"
 PYTHON = re.compile(r"python[\d.]*")
 QUOTES = ("", "'", '"')
 SAFE_WORD = re.compile(r"[\w./-]+")
-RANK = ("shell", "server", "odoo", "hoot")
+RANK = ("shell", "server", "odoo", "hoot", "cargo")
 SHELLS = {"bash", "eval", "sh"}
 SOCKET = "/run/bundle-ctl/ctl.sock"
 TEST_HELPERS = {"otf", "ott", "otta", "ottb"}
@@ -219,6 +241,20 @@ def get_hoot(args):
     return "hoot", min(max(int(asked[1]), 1), MAX_WORKERS) if asked else DEFAULT_WORKERS
 
 
+def get_cargo(args):
+    """A cargo call that compiles: its subcommand is the first word that is no option, nor the
+    value of one, nor a `+toolchain`."""
+    if HELP.intersection(args):
+        return None
+    words = iter(args)
+    for word in words:
+        if word in CARGO_VALUED:
+            next(words, None)
+        elif not word.startswith(("-", "+")):
+            return ("cargo", 1) if word in CARGO_BUILDS else None
+    return None
+
+
 def get_odoo(args, letters=None):
     """The kind of an odoo-bin call. `letters` are the editions the shell helper takes first."""
     flags = {arg.partition("=")[0] for arg in args}
@@ -260,6 +296,8 @@ def get_kind(words, folder, depth, stdin, written):
         return get_odoo(args, "et")
     if program in TEST_HELPERS:
         return "odoo", 1
+    if name == "cargo":
+        return get_cargo(args)
     if PYTHON.fullmatch(name) or name == "node":
         program, args = get_script(args)
         name = os.path.basename(program or "")

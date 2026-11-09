@@ -33,6 +33,7 @@ const REPOS = [
   "upgrade-util",
   "sfu",
   "runbot",
+  "o-sfu",
 ];
 
 function getClaudeTab(predicate = () => true) {

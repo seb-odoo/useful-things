@@ -110,7 +110,8 @@ cross_base = bool(pr_base) and not bundle_name.startswith(f"{pr_base}-")
 
 runbot_bundle = bool(response.get("id"))
 if not runbot_bundle:
-    # runbot watches neither owl nor sfu: a branch pushed only there shows on the dev remotes alone.
+    # runbot watches neither owl, sfu nor o-sfu: a branch pushed only there shows on the dev remotes
+    # alone.
     response = {"branches": [], "commits": []}
 
 local_branch_by_repo = defaultdict(lambda: False)

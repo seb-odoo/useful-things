@@ -83,6 +83,7 @@ REPOS = (
     "owl",
     "sfu",
     "runbot",
+    "o-sfu",
 )
 # The folders of a base .git a bundle writes (devcontainer/base.jsonc).
 GIT_WRITABLE = ("objects", "refs", "logs", "rr-cache", "packed")
@@ -129,6 +130,7 @@ MOUNTS = {
     "@WORKTREE_ROOT@/.vscode": ("drop", "VS Code only"),
     "@USEFUL_THINGS@/odools.toml": ("drop", "the Odoo language server, off"),
     "/opt/node_modules": ("drop", "lint tooling: a remote agent runs no lint of the web tooling"),
+    "/opt/cargo-crates": ("drop", "the crates of o-sfu: its builds run on the laptop alone"),
     "/home/vscode/.claude": ("job", "its own claude folder, with what is sent"),
     "/home/vscode/.claude/CLAUDE.md": ("send", "rules"),
     "/home/vscode/.claude/agents": ("send", "agent types"),

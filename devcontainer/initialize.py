@@ -70,7 +70,8 @@ def main():
         pathlib.Path(values["STATE_ROOT"]) / "ssh-github-mux" / "sock",
     ):
         path.mkdir(parents=True, exist_ok=True)
-    (pathlib.Path(values["WORKTREE_ROOT"]) / ".node_modules").mkdir(exist_ok=True)
+    for store in (".node_modules", ".cargo-crates"):
+        (pathlib.Path(values["WORKTREE_ROOT"]) / store).mkdir(exist_ok=True)
     agent = pathlib.Path(folder) / ".agent"
     if agent.is_symlink():
         agent.unlink()

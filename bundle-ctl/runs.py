@@ -30,7 +30,7 @@ MAX_WORKERS = 32
 RAMP = 60
 SHARED = ("server", "shell")
 TICKET = 15 * 60
-KINDS = ("hoot", "odoo", "other", *SHARED)
+KINDS = ("cargo", "hoot", "odoo", "other", *SHARED)
 
 
 def parse_cpus(text):
@@ -72,6 +72,8 @@ def get_need(kind, workers):
     """The cores a run holds and the gigabytes it is expected to take."""
     if kind == "hoot":
         return min(workers, MAX_CORES), 1 + 1.3 * workers
+    if kind == "cargo":
+        return MAX_CORES, 4
     if kind in SHARED:
         return 0, 0.6
     return 1, 2 if kind == "odoo" else 1

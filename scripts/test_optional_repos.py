@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """A new bundle without the optional repos, and add_repo.py bringing one back, on its own base for
-runbot, on scratch repos, a create killed in its tooling, and which bundles get their own postgres
-folders: python3 test_optional_repos.py
+runbot, o-sfu with its store of crates, on scratch repos, a create killed in its tooling, which
+bundles get their own postgres folders, and the folder of a PR fetched on another base:
+python3 test_optional_repos.py
 """
 
 import os
@@ -15,6 +16,7 @@ from config import OPTIONAL_REPOS, fixed_base_by_repo, folder_by_repo, remote_by
 GIT = ["git", "-c", "user.name=me", "-c", "user.email=me@localhost", "-c", "commit.gpgsign=false"]
 HERE = pathlib.Path(__file__).resolve().parent
 PREPARE = "import sys, utils; utils.UtilsRunner().prepare_worktree_bundle_folder(bundle_name=sys.argv[1])"
+WORKSPACE_LOCK = 'version = 4\n\n[[package]]\nname = "o-sfu"\nversion = "0.12.0"\n'
 
 
 def git(cwd, *args):
@@ -155,6 +157,23 @@ def check(root):
     checks.append(("a new bundle gets its own postgres folders", (db / "master-a--me" / "pg" / "16").is_dir()))
     checks.append(("a bare one too, before its worktrees", (db / "master-d--me" / "pg" / "16").is_dir()))
     checks.append(("a bundle made before gets none", not (db / "master-e--me").exists()))
+    (root / "src" / "c" / "c-33").mkdir(parents=True)
+    run(env, "-c", PREPARE.replace("sys.argv[1])", 'sys.argv[1], base="master")'), "c-33")
+    run(env, "-c", PREPARE.replace("sys.argv[1])", 'sys.argv[1], base="master")'), "d-34")
+    checks.append(("a PR fetched on master keeps the bare folder its name gave, or goes under master",
+                   ((root / "src" / "master" / "c-33").exists(), (root / "src" / "master" / "d-34").is_dir())
+                   == (False, True)))
+    osfu = root / "repo" / "o-sfu"
+    (osfu / "Cargo.lock").write_text(WORKSPACE_LOCK)
+    git(osfu, "add", "Cargo.lock")
+    git(osfu, "commit", "--quiet", "-m", "lock")
+    git(osfu, "push", "--quiet", "origin", "master")
+    code, out = run(env, "add_repo.py", "master-a--me", "o-sfu")
+    checks.append(("o-sfu comes on master, and its lock goes through the store of crates",
+                   (code, head_of(root, "master-a--me", "o-sfu"),
+                    "o-sfu: 0 crates added to the store, 0 in its Cargo.lock" in out,
+                    (root / "src" / ".cargo-crates").is_dir())
+                   == (0, ("HEAD", git(osfu, "rev-parse", "master")), True, True)))
     return [name for name, passed in checks if not passed], len(checks)
 
 

@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 
+import cargo_crates
 import upstream
 from agents import mark_handled, read_bytes
 from command_runner import Runner, ignore_error
@@ -120,6 +121,8 @@ class UtilsRunner(Runner):
         )
         admin = f"{_USEFUL_THINGS_FOLDER}/devcontainer/worktree-admin.py"
         self.run([sys.executable, admin, os.path.dirname(target_folder), repo, repo_folder])
+        if repo == "o-sfu":
+            cargo_crates.fill_bundle(bundle_name)
 
     def _drop_cut_checkout(self, *, repo_folder, target_folder):
         """Remove a worktree whose checkout a kill cut, which a build asked again cannot reuse: its
@@ -457,11 +460,11 @@ class UtilsRunner(Runner):
         self.run(["code", "--folder-uri", self._devcontainer_folder_uri(folder)])
 
     def prepare_worktree_bundle_folder(self, *, bundle_name, base=None):
-        worktree_bundle_folder = (
-            f"{get_worktree_base_folder(base)}/{bundle_name}"
-            if base
-            else get_worktree_bundle_folder(bundle_name)
-        )
+        """Make the folder of the bundle, under `base` when given and the bundle has none yet: a
+        bare one keeps its folder, under the base its name gives."""
+        worktree_bundle_folder = get_worktree_bundle_folder(bundle_name)
+        if base and not os.path.isdir(worktree_bundle_folder):
+            worktree_bundle_folder = f"{get_worktree_base_folder(base)}/{bundle_name}"
         db_folder = f"{BUNDLE_DB_CONTAINER}/{bundle_name}"
         # A bundle made before its own postgres server keeps the host's (devcontainer/bundle-db.py).
         if not os.path.exists(worktree_bundle_folder) and not os.path.exists(db_folder):

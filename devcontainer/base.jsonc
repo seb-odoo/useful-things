@@ -101,6 +101,13 @@
     "source=@REPO_ROOT@/runbot/.git/rr-cache,target=@REPO_ROOT@/runbot/.git/rr-cache,type=bind,z",
     "source=@REPO_ROOT@/runbot/.git/packed,target=@REPO_ROOT@/runbot/.git/packed,type=bind,z",
     "source=@REPO_ROOT@/runbot/.git/worktrees/${localWorkspaceFolderBasename},target=@REPO_ROOT@/runbot/.git/worktrees/${localWorkspaceFolderBasename},type=bind,z",
+    "source=@REPO_ROOT@/o-sfu/.git,target=@REPO_ROOT@/o-sfu/.git,type=bind,readonly,Z",
+    "source=@REPO_ROOT@/o-sfu/.git/objects,target=@REPO_ROOT@/o-sfu/.git/objects,type=bind,z",
+    "source=@REPO_ROOT@/o-sfu/.git/refs,target=@REPO_ROOT@/o-sfu/.git/refs,type=bind,z",
+    "source=@REPO_ROOT@/o-sfu/.git/logs,target=@REPO_ROOT@/o-sfu/.git/logs,type=bind,z",
+    "source=@REPO_ROOT@/o-sfu/.git/rr-cache,target=@REPO_ROOT@/o-sfu/.git/rr-cache,type=bind,z",
+    "source=@REPO_ROOT@/o-sfu/.git/packed,target=@REPO_ROOT@/o-sfu/.git/packed,type=bind,z",
+    "source=@REPO_ROOT@/o-sfu/.git/worktrees/${localWorkspaceFolderBasename},target=@REPO_ROOT@/o-sfu/.git/worktrees/${localWorkspaceFolderBasename},type=bind,z",
     // Workspace .claude, .vscode and odools.toml are symlinks in each bundle pointing at these
     // absolute host paths; bind them at the same path (like the .git mounts above) so the symlinks
     // resolve in the container. Without this the workspace settings.json never loads, so
@@ -118,6 +125,9 @@
     // The store of node_modules, one tree per package.json, where odoo/ and enterprise/ link
     // (initialize.py). Read-only, as the ESLint of every bundle on that package.json loads it.
     "source=@WORKTREE_ROOT@/.node_modules,target=/opt/node_modules,type=bind,readonly,z",
+    // The crates o-sfu builds with, which cargo reads offline (scripts/cargo_crates.py). Read-only,
+    // as every bundle on o-sfu builds them.
+    "source=@WORKTREE_ROOT@/.cargo-crates,target=/opt/cargo-crates,type=bind,readonly,z",
     // The Claude config of the bundle is a folder of its own, with a dummy login (claude-config.py):
     // no credential of the host is in a bundle. What it shares of the host's ~/.claude is mounted
     // in it: read-only what a session takes as orders or runs, as the host's Claude reads the same
@@ -334,8 +344,9 @@
     // Make the reused 3.12 venv the default interpreter for every process (not just interactive
     // shells), so odoo-bin (#!/usr/bin/env python3) doesn't fall back to the base image's 3.10.
     // Hardcoded: ${containerEnv:PATH} is NOT resolved inside containerEnv (only in remoteEnv) and
-    // would clobber PATH literally. Trailing dirs mirror the base image PATH.
-    "PATH": "@VENV@/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    // would clobber PATH literally. Trailing dirs mirror the base image PATH, /opt/cargo/bin holds
+    // cargo and cargo-nextest (Dockerfile).
+    "PATH": "@VENV@/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/cargo/bin",
     "PGHOST": "@PG_HOST@",
     "PGUSER": "@PG_USER@",
     "REPO_ROOT": "@REPO_ROOT@",

@@ -25,6 +25,7 @@ folder_by_repo = {
     "design-themes": f"{_ROOT}/design-themes",
     "documentation": f"{_ROOT}/documentation",
     "enterprise": f"{_ROOT}/enterprise",
+    "o-sfu": f"{_ROOT}/o-sfu",
     "odoo": f"{_ROOT}/odoo",
     "owl": f"{_ROOT}/owl",
     "runbot": f"{_ROOT}/runbot",
@@ -36,6 +37,7 @@ remote_by_repo = {
     "design-themes": "odoo",
     "documentation": "odoo",
     "enterprise": "odoo",
+    "o-sfu": "origin",
     "odoo": "odoo",
     "owl": "origin",
     "runbot": "odoo",
@@ -47,6 +49,7 @@ remote_dev_by_repo = {
     "design-themes": "odoo-dev",
     "documentation": "odoo-dev",
     "enterprise": "odoo-dev",
+    "o-sfu": "origin",
     "odoo": "odoo-dev",
     "owl": _CONFIG["OWL_DEV_REMOTE"],
     "runbot": "odoo-dev",
@@ -55,6 +58,7 @@ remote_dev_by_repo = {
     "upgrade": "odoo-dev",
 }
 fixed_base_by_repo = {
+    "o-sfu": "master",
     "owl": "master",
     "runbot": "19.0",
     "sfu": "master",
@@ -67,7 +71,7 @@ CLAUDE_CONFIG_CONTAINER = f"{_CONFIG['CACHE_ROOT']}/devcontainer/claude-config"
 TRANSCRIPTS_CONTAINER = f"{_CONFIG['SHARE_ROOT']}/claude-transcripts"
 EXTENSIONS_CONTAINER = f"{_CONFIG['CACHE_ROOT']}/devcontainer/vscode-extensions"
 FILESTORE_CONTAINER = f"{_CONFIG['SHARE_ROOT']}/Odoo/filestore"
-OPTIONAL_REPOS = ("design-themes", "documentation", "runbot")
+OPTIONAL_REPOS = ("design-themes", "documentation", "o-sfu", "runbot")
 STATE_ROOT = _CONFIG["STATE_ROOT"]
 WORKTREE_CONTAINER = _CONFIG["WORKTREE_ROOT"]
 STICKY_BUNDLES = [

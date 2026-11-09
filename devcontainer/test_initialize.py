@@ -113,7 +113,9 @@ def main():
         ],
         [],
     )
-    check("nine base repos", len(git_dirs), 9)
+    mount = "source=@WORKTREE_ROOT@/.cargo-crates,target=/opt/cargo-crates,type=bind,readonly,z"
+    check("crates mount", mount in base_config["mounts"], True)
+    check("ten base repos", len(git_dirs), 10)
     own = "${localWorkspaceFolderBasename}"
     writable = ("objects", "refs", "logs", "rr-cache", "packed", f"worktrees/{own}")
     check(
