@@ -674,8 +674,12 @@ with the space left, a yes removes them, containers first, and says what it free
 container that runs again since the card, and an image a container still uses. The 409 of the
 guard names it. Before, a bundle sent an ops task for this, 6 times from 10-19 to 10-30, each an
 agent and several cards (Seb, 2026-10-30: "dedicated cards for common requests"). An ops agent
-is still needed when the answer says the disk stays under the floor. `python3 test_free_disk.py`
-has the cases.
+is still needed when the answer says the disk stays under the floor. An agent on a worker has its
+/workspace on that worker, where nothing of the laptop frees it: its free-disk holds no card and
+answers, with a 409, what is left on the disk of the worker's checkouts (`checkouts` of `bctl
+worker NAME disk`) and the floor under which the worker drops the checkouts of ended agents
+(remote-runs README, "Load"). On 2026-11-09 Seb's yes freed 6 GB of the laptop for such an
+agent, whose /workspace stayed at 2 GB free. `python3 test_free_disk.py` has the cases.
 
 A bundle of someone else's PR (no `BUNDLE_SUFFIX` in its name) goes by itself once nobody used it
 for `BUNDLE_CTL_REVIEW_CLOSED_MINUTES` since its container stopped (default 10, Seb's choice on

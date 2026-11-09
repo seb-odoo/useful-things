@@ -5070,7 +5070,11 @@ def read_podman(*args):
 def free_disk(caller, query, body):
     """Hold for Seb's yes the removal of what takes disk space for nothing: the stopped containers
     of the bundles, which the next open of each makes again, as their databases and filestore are
-    folders of the host, and the podman images no tag names."""
+    folders of the host, and the podman images no tag names. The /workspace of an agent on a
+    worker is on that worker: it gets what is left there, and no card."""
+    folder = BUNDLE_NAME.fullmatch(caller) and get_bundle_path(caller)
+    if folder and (remote := remote_agent.read_remote(folder)):
+        raise Refused(describe_worker_disk(remote["worker"]))
     if HELD is None:
         raise Refused("no gateway-core beside useful-things: hok cannot list the request")
     containers = read_podman(
@@ -5111,6 +5115,23 @@ def free_disk(caller, query, body):
         ),
     }
     return 200, {"held": hold(item)}
+
+
+def describe_worker_disk(worker):
+    """What is left on the disk of the checkouts of WORKER, which the worker frees itself
+    (remote-runs README, "Load")."""
+    try:
+        disk = WORKERS.look(worker, "disk", 1)
+        system = next(each for each in disk["file_systems"] if each["path"] == disk["checkouts"])
+        free, size = float(system["free_gb"]), float(system["size_gb"])
+        floor = float(disk["fast_floor_gb"] or disk["floor_gb"])
+    except (workers.Refused, KeyError, TypeError, ValueError, StopIteration) as error:
+        return f"this agent runs on {worker}, its /workspace there: no read of its disk ({error})"
+    return (
+        f"this agent runs on {worker}, its /workspace there: {free:.1f} of {size:.0f} GB free."
+        f" {worker} drops the checkouts of the agents that ended once under {floor:.0f} GB,"
+        " and no space of the laptop frees it: no card"
+    )
 
 
 def send_free_disk(item):

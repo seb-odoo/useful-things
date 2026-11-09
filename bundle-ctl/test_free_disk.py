@@ -30,6 +30,26 @@ LINES = [
 ]
 
 
+REMOTE = (
+    "this agent runs on sebpc, its /workspace there: 2.0 of 59 GB free. sebpc drops the checkouts"
+    " of the agents that ended once under 6 GB, and no space of the laptop frees it: no card"
+)
+DISK = {
+    "file_systems": [
+        {"path": "/var/lib/remote-runs", "size_gb": 195.8, "free_gb": 31.29},
+        {"path": "/var/lib/remote-runs-fast", "size_gb": 58.76, "free_gb": 2.01},
+    ],
+    "checkouts": "/var/lib/remote-runs-fast",
+    "floor_gb": 30.0,
+    "fast_floor_gb": 6.0,
+}
+
+
+class FakeWorkers:
+    def look(self, name, what, lines):
+        return DISK if (name, what) == ("sebpc", "disk") else {}
+
+
 def fake_podman(calls, disk, listed):
     def run(command, **kwargs):
         calls.append(command[1:])
@@ -44,6 +64,10 @@ def main():
     failures = []
     with tempfile.TemporaryDirectory() as name:
         daemon.HELD_DIR = pathlib.Path(name) / "held"
+        daemon.WORKERS = FakeWorkers()
+        daemon.remote_agent.read_remote = lambda folder: (
+            {"worker": "sebpc"} if folder.name == "master-remote--seb" else None
+        )
         daemon.DISK_STOP = 30
         for free, ps, images, expected in CASES:
             calls, disk = [], [free]
@@ -73,9 +97,17 @@ def main():
             found = str(error)
         if found != "20 GB left, and nothing to remove here: an ops agent frees space":
             failures.append(f"nothing to remove: {found}")
+        held = sorted(daemon.HELD_DIR.iterdir())
+        try:
+            daemon.free_disk("master-remote--seb", {}, {})
+            found = "held"
+        except daemon.Refused as error:
+            found = str(error)
+        if found != REMOTE or sorted(daemon.HELD_DIR.iterdir()) != held:
+            failures.append(f"an agent on a worker: {found}")
     for line in failures:
         print(line)
-    cases = len(CASES) * 2 + 2
+    cases = len(CASES) * 2 + 3
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 
