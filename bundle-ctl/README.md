@@ -484,7 +484,11 @@ necessary. but if we have a good setup, full remote should offer the same possib
   asked on the threads of odoo#301422 in its terminal only): its Escape is the `stop` its
   terminal takes (see Prompts from deck), its line goes with the other lines of the host, and the
   card goes once its terminal closed. One in a VS Code tab gets none: nothing here types in it.
-  `python3 test_queue.py`.
+  An ops window gets it too (his pick the same day, over bundles alone): its session is in its
+  name, its status in the records of the ops container and its transcript in the folders of ops
+  alone (`get_projects`); its card is asked by `ops` for that session, as a card of hctl, so hok
+  and deck link it to that window, and its line goes to its `pr-events/` (`leave_told`). hok
+  tells nobody of a card with options: that line is the only one. `python3 test_queue.py`.
 - Its PR events (see PR events) come after them, the same way. Its stand-in runs
   `client/prwatch.py`, started again a minute after it ends, as the bundle (`devnet`, the names of
   the gateways and their CA, `ODOO_PROXY_HOST`), on the `.agent/` of the bundle here. The daemon

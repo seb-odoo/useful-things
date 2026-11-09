@@ -2811,8 +2811,8 @@ def is_told_bundle(bundle):
     return bundle in get_terminals() or remote_agent.read_remote(folder) is not None
 
 
-def get_terminals():
-    """The agent-terminal.py process of each bundle, ops windows aside."""
+def get_terminals(ops=False):
+    """The agent-terminal.py process of each bundle, and of each ops window with ops."""
     terminals = {}
     for path in pathlib.Path("/proc").glob("[0-9]*/cmdline"):
         try:
@@ -2821,7 +2821,7 @@ def get_terminals():
             continue
         if len(args) > 2 and args[1].endswith(b"/agent-terminal.py"):
             bundle = args[2].decode(errors="replace")
-            if not bundle.startswith(OPS) and is_host_process(path.parent.name):
+            if (ops or not bundle.startswith(OPS)) and is_host_process(path.parent.name):
                 terminals[bundle] = int(path.parent.name)
     return terminals
 
@@ -3219,9 +3219,14 @@ def tell_remote_agents(bundles):
 
 
 def get_dialog_places():
-    """The bundles whose questions come as cards: the worker of each one whose agent runs on one,
-    None for one whose agent runs in an agent terminal here."""
-    return {**dict.fromkeys(get_terminals()), **get_remote_agents()}
+    """The bundles and ops windows whose questions come as cards: the worker of each bundle whose
+    agent runs on one, None for one whose agent runs in an agent terminal here and for each ops
+    window."""
+    return {**dict.fromkeys(get_terminals(ops=True)), **get_remote_agents()}
+
+
+def is_ops_window(name):
+    return name.startswith(OPS) and bool(SESSION_ID.fullmatch(name.removeprefix(OPS)))
 
 
 def ask_dialogs(places):
@@ -3232,7 +3237,7 @@ def ask_dialogs(places):
         return
     noted = {path.stem for path in DIALOGS_DIR.glob("*.json")} if DIALOGS_DIR.is_dir() else set()
     for bundle in sorted({*places, *noted}):
-        if not BUNDLE_NAME.fullmatch(bundle):
+        if not BUNDLE_NAME.fullmatch(bundle) and not is_ops_window(bundle):
             continue
         if line := ask_dialog(bundle, bundle in places, places.get(bundle)):
             print(line, flush=True)
@@ -3277,8 +3282,9 @@ def drop_dialog(bundle):
     terminal here, with no answer of it running: the lock of take() in held.py."""
     with HELD.lock:
         note = read_dialog_note(bundle)
-        worker = (remote_agent.read_remote(get_agent_folder(bundle).parent) or {}).get("worker")
-        runs = worker or bundle in get_terminals()
+        folder = get_agent_folder(bundle)
+        remote = None if bundle.startswith(OPS) else remote_agent.read_remote(folder.parent)
+        runs = (remote or {}).get("worker") or bundle in get_terminals(ops=True)
         if not note or is_same_dialog(note, runs and get_dialog(bundle)):
             return None
         (DIALOGS_DIR / f"{bundle}.json").unlink(missing_ok=True)
@@ -3296,11 +3302,17 @@ def get_dialog(bundle):
     """The question the claude of an agent waits on: its session, the id of its
     AskUserQuestion call and its questions, in the words of the agent, each text on one line and
     sized. None when its claude waits on nothing, or on another dialog. The transcript comes from
-    the job: read as data."""
-    session = read_text(get_agent_folder(bundle) / "session")
-    if not SESSION_ID.fullmatch(session or "") or get_session_status(bundle, session) != "waiting":
+    the agent: read as data. An ops window has its session in its name, its record in the ops
+    container, and its transcript in the folders of ops alone."""
+    ops = bundle.startswith(OPS)
+    session = bundle.removeprefix(OPS) if ops else read_text(get_agent_folder(bundle) / "session")
+    container = os.path.basename(HOST_FOLDER or "") if ops else bundle
+    if (
+        not SESSION_ID.fullmatch(session or "")
+        or get_session_status(container, session) != "waiting"
+    ):
         return None
-    transcript = get_own_transcript(session, bundle)
+    transcript = get_transcript(session, bundle) if ops else get_own_transcript(session, bundle)
     for entry in reversed(read_entries(transcript, DIALOG_TAIL) if transcript else []):
         if entry.get("type") not in ("assistant", "user") or entry.get("isSidechain"):
             continue
@@ -3400,8 +3412,10 @@ def get_dialog_item(bundle, worker, dialog, index):
             " number, or your words, goes to its claude as its next prompt"
         )
     labels = [label for label, _description in question["options"]]
+    ops = bundle.startswith(OPS)
+    who = f"the ops window {dialog['session'][:8]}" if ops else f"{bundle}, its agent"
     return {
-        "client": bundle,
+        "client": "ops" if ops else bundle,
         "key": f"dialog {bundle}",
         "lines": [
             {"label": "header", "text": question["header"]},
@@ -3426,7 +3440,7 @@ def get_dialog_item(bundle, worker, dialog, index):
         },
         "session": dialog["session"],
         "several": question["several"],
-        "title": f"answer {which} of {bundle}, its agent on {worker or LAPTOP}",
+        "title": f"answer {which} of {who} on {worker or LAPTOP}",
         "yes": yes,
     }
 
@@ -3491,12 +3505,16 @@ def send_dialog(item):
 
 def close_dialog(bundle, worker, note, answers):
     """Escape to the claude of an agent, then one line with every answer of its dialog, typed as
-    the lines of the host once the dialog closed."""
+    the lines of the host once the dialog closed: from told/ by the stand-in of a remote agent,
+    as leave_told() leaves it for a terminal here."""
     if error := type_escape(bundle, worker, note["session"]):
         raise OSError(error)
     text = f"Seb answered your question in hok, which closed its dialog: {'; '.join(answers)}."
-    (TOLD_DIR / bundle).mkdir(parents=True, exist_ok=True)
-    leave_event(TOLD_DIR / bundle, text, note["session"])
+    if worker:
+        (TOLD_DIR / bundle).mkdir(parents=True, exist_ok=True)
+        leave_event(TOLD_DIR / bundle, text, note["session"])
+    else:
+        leave_told(bundle, note["session"], text)
     note = {**note, "answers": answers, "card": None, "sent": time.time(), "state": "answered"}
     write_dialog_note(bundle, note)
     print(

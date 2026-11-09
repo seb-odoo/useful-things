@@ -2295,17 +2295,18 @@ def answer_card(card, said, yes=True):
 
 
 def check_remote_dialog(root):
-    """The question a remote agent, or one in an agent terminal here, waits on becomes a card of
-    hok, one question at a time; Seb's pick closes its dialog with Escape and goes to it as one
-    line of the host; a no leaves it; the card goes once the dialog closes otherwise; an Escape
-    not taken is sent again."""
+    """The question a remote agent, one in an agent terminal here or an ops window waits on
+    becomes a card of hok, one question at a time; Seb's pick closes its dialog with Escape and
+    goes to it as one line of the host; a no leaves it; the card goes once the dialog closes
+    otherwise; an Escape not taken is sent again."""
     session = "11111111-2222-3333-4444-555555555555"
     on_worker = {"remote.json": '{"worker": "sebpc", "job": "1"}', "session": f"{session}\n"}
     names = ("one", "two", "no", "words", "closes", "glitch", "permission", "bad", "garbled")
     bundles = {name: on_worker for name in names}
-    here = ("here", "terminal", "gone")
+    ops = f"{daemon.OPS}{session}"
+    here = ("here", "terminal", "gone", ops)
     bundles.update({name: {"session": f"{session}\n"} for name in here})
-    prepare(root, bundles, 12)
+    prepare(root, bundles, 13)
     way = {
         "question": "Which way?\nSay.",
         "header": "Way",
@@ -2328,9 +2329,9 @@ def check_remote_dialog(root):
         write_dialog(transcripts / name / f"{session}.jsonl", questions, name=tool)
     with (transcripts / "garbled" / f"{session}.jsonl").open("a") as file:
         file.write('not json\n{"type": "assistant", "message": "x"}\n')
-    statuses = dict.fromkeys(bundles, "waiting")
+    statuses = dict.fromkeys([*bundles, "ops-host"], "waiting")
     typed = []
-    terminals = {"terminal": 1, "gone": 2}
+    terminals = {"terminal": 1, "gone": 2, ops: 3}
 
     def type_keys(bundle, keys):
         typed.append((bundle, keys))
@@ -2341,16 +2342,20 @@ def check_remote_dialog(root):
             "DECK_DIR",
             "DIALOGS_DIR",
             "DIALOG_EVERY",
+            "HOST_FOLDER",
             "REMOTE_ENTER_AFTER",
             "TITLE",
             "TOLD_DIR",
             "get_own_transcript",
             "get_session_status",
             "get_terminals",
+            "get_transcript",
+            "is_agent_running",
             "remote_agent",
         )
     }
     daemon.DECK_DIR = root / "deck"
+    daemon.HOST_FOLDER = str(root / "ops-host")
     daemon.DIALOGS_DIR = root / "dialogs"
     daemon.DIALOG_EVERY = 0
     daemon.REMOTE_ENTER_AFTER = 0
@@ -2358,7 +2363,11 @@ def check_remote_dialog(root):
     daemon.TOLD_DIR = root / "told"
     daemon.get_own_transcript = lambda session, bundle: transcripts / bundle / f"{session}.jsonl"
     daemon.get_session_status = lambda bundle, session: statuses[bundle]
-    daemon.get_terminals = lambda: dict(terminals)
+    daemon.get_terminals = lambda ops=False: {
+        name: pid for name, pid in terminals.items() if ops or not name.startswith(daemon.OPS)
+    }
+    daemon.get_transcript = lambda session, name: transcripts / name / f"{session}.jsonl"
+    daemon.is_agent_running = lambda name: name in terminals
     daemon.remote_agent = types.SimpleNamespace(
         get_recorded=written_remotes,
         take_left_notes=lambda get_folder: None,
@@ -2393,6 +2402,11 @@ def check_remote_dialog(root):
             stopped_again = stop.exists()
             del terminals["gone"]
             ask()
+            window = daemon.HELD.read_json(daemon.HELD_DIR / f"{cards[ops][1:]}.json")
+            answered_ops = answer_card(cards[ops], "2")
+            stopped_ops = (daemon.DECK_DIR / ops / session / "stop").exists()
+            events = daemon.get_agent_folder(ops) / "pr-events"
+            told_ops = [path.read_text() for path in sorted(events.glob("*.txt"))]
             answered = answer_card(cards["one"], "2 go on")
             note = daemon.read_dialog_note("one")
             told_one = get_told("one")
@@ -2437,10 +2451,22 @@ def check_remote_dialog(root):
     one = "Seb answered your question in hok, which closed its dialog: Way: Right, and in his words: go on."
     checks = [
         (
-            "a card for each question asked on a worker or in an agent terminal here, once: none"
-            " for a permission, a garbled transcript, or an agent here with no terminal",
+            "a card for each question asked on a worker, in an agent terminal here or in an ops"
+            " window, once: none for a permission, a garbled transcript, or an agent here with no"
+            " terminal",
             sorted(cards)
-            == ["bad", "closes", "glitch", "gone", "no", "one", "terminal", "two", "words"],
+            == ["bad", "closes", "glitch", "gone", "no", "one", ops, "terminal", "two", "words"],
+        ),
+        (
+            "the card of an ops window is asked by ops for its session; a pick leaves its stop, and"
+            " its line in the pr-events/ of the window",
+            window["caller"] == "ops"
+            and window["session"] == session
+            and window["title"] == "answer the question of the ops window 11111111 on the laptop"
+            and answered_ops["code"] == 0
+            and stopped_ops
+            and told_ops
+            == ["Seb answered your question in hok, which closed its dialog: Way: Right."],
         ),
         (
             "a pick on the card of an agent here leaves the stop its terminal takes, and its line",
