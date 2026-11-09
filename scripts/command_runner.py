@@ -8,6 +8,9 @@ from rich.live import Live
 from rich.tree import Tree
 from typing import Callable, Collection, Self
 
+# GitHub refuses a 10th session on the one SSH connection every git call shares (ssh-github-mux).
+MAX_PARALLEL = 8
+
 
 def ignore_error(runner: "Runner"):
     pass
@@ -173,7 +176,7 @@ class Runner:
             runner.live.start()
         try:
             futures = []
-            with ThreadPoolExecutor(max_workers=max(16, len(collection))) as executor:
+            with ThreadPoolExecutor(max_workers=MAX_PARALLEL) as executor:
                 for item in collection:
                     futures.append(
                         executor.submit(

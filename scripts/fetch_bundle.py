@@ -190,7 +190,7 @@ def handle_commit(runner: UtilsRunner, commit):
         if (commit_hash := commit.get("name")) and not cross_base:
             fetch_ref = target_ref = commit_hash
         else:
-            base = get_base_for_repo(get_base_from_bundle_name(bundle_name), repo)
+            base = get_base_for_repo(pr_base or get_base_from_bundle_name(bundle_name), repo)
             fetch_ref = base
             target_ref = get_remote_branch_name(base, repo)
         runner.git_fetch(repo=repo, dev=False, ref=fetch_ref)

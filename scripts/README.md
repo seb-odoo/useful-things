@@ -22,7 +22,8 @@ from a machine where they are `--seb` and `/home/seb/src/odoo`.
 A PR fetched by `fetch_bundle.py` keeps its branch name. When that name starts with another version
 than the PR target (or with none), its folder sits under the target, which is then its base. A
 bundle whose agent started bare keeps the folder its name gave (`c/c-33` for the o-sfu branch
-`c-33`): its container is open on it.
+`c-33`): its container is open on it. Its worktrees still come on the target of the PR: on
+2026-11-09 the build of c-33 asked odoo and enterprise for `odoo/c`, a base read from the name.
 
 ### The repos of a bundle
 
@@ -360,7 +361,7 @@ Removes a bundle from the local system (worktrees, branches, filestore, database
   24 GB, which `podman system df` did not show
 - Completes the bundle names having a worktree folder (needs `argcomplete`'s global completion,
   see `activate-global-python-argcomplete`)
-- Accepts several bundles at once, deleted in parallel (one thread per bundle)
+- Accepts several bundles at once, deleted in parallel (one thread per bundle, 8 at a time)
 - Accepts `fnmatch` patterns, expanded against the existing worktree folders: `'saas-19.*'`
 - Leaves a bundle untouched, and exits 1, when one of its worktrees holds uncommitted files or its
   branch holds commits no remote has: they are listed, and the other bundles of the run are still

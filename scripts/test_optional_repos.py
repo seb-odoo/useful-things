@@ -17,6 +17,21 @@ GIT = ["git", "-c", "user.name=me", "-c", "user.email=me@localhost", "-c", "comm
 HERE = pathlib.Path(__file__).resolve().parent
 PREPARE = "import sys, utils; utils.UtilsRunner().prepare_worktree_bundle_folder(bundle_name=sys.argv[1])"
 WORKSPACE_LOCK = 'version = 4\n\n[[package]]\nname = "o-sfu"\nversion = "0.12.0"\n'
+# fetch_bundle.py on the PR c-33 of odoo/o-sfu, which targets master, with GitHub and runbot faked.
+FETCH_PR = """
+import runpy, sys
+import branch_status, requests
+branch_status.get_pr = lambda *args: {
+    "baseRefName": "master",
+    "headRefName": "c-33",
+    "headRepository": {"name": "o-sfu"},
+    "headRepositoryOwner": {"login": "odoo"},
+}
+branch_status.get_github_repo = lambda repo, remote=None: f"odoo/{repo}"
+requests.request = lambda *args, **kwargs: type("Answer", (), {"json": lambda self: {}})()
+sys.argv = ["fetch_bundle.py", "https://github.com/odoo/o-sfu/pull/928", "--no-open"]
+runpy.run_path("fetch_bundle.py", run_name="__main__")
+"""
 
 
 def git(cwd, *args):
@@ -174,6 +189,15 @@ def check(root):
                     "o-sfu: 0 crates added to the store, 0 in its Cargo.lock" in out,
                     (root / "src" / ".cargo-crates").is_dir())
                    == (0, ("HEAD", git(osfu, "rev-parse", "master")), True, True)))
+    git(osfu, "push", "--quiet", "origin", "master:refs/heads/c-33")
+    code, out = run(env, "-c", FETCH_PR)
+    bare = root / "src" / "c" / "c-33"
+    found = [(git(bare / repo, "rev-parse", "--abbrev-ref", "HEAD"), git(bare / repo, "rev-parse", "HEAD"))
+             for repo in ("odoo", "o-sfu") if (bare / repo).is_dir()] if not code else out
+    checks.append(("the o-sfu PR of a bare bundle: odoo on the base of the PR, o-sfu on its branch",
+                   (code, found, (root / "src" / "master" / "c-33").exists())
+                   == (0, [("HEAD", git(root / "repo" / "odoo", "rev-parse", "master")),
+                           ("c-33", git(osfu, "rev-parse", "master"))], False)))
     return [name for name, passed in checks if not passed], len(checks)
 
 
