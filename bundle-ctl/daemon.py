@@ -3663,8 +3663,8 @@ def may_queue(caller, bundle):
 
 def hold_fetch(caller, bundle, name, body, sender):
     """Hold the fetch a bundle on an outside PR asks for Seb's yes in hok: the fetched bundle is
-    not marked, reads the shared memory, and pushes a branch of Seb by itself (security check
-    11-03, B6). The yes fetches it, with its task when it has one."""
+    not marked and reads the shared memory (security check 11-03, B6). The yes fetches it, with
+    its task when it has one."""
     if HELD is None:
         raise Refused("no gateway-core beside useful-things: hok cannot list the fetch")
     build = ["fetch_bundle.py", name, "--no-open"]

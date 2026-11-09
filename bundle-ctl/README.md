@@ -832,8 +832,8 @@ request still keeps the bundle.
 
 ## A task for another bundle
 
-The agent of a bundle runs its task in auto mode, and git-gate lets it push its own branch with no
-yes. So a task on a bundle that is there already (`open`, and `create` or `fetch` of a folder that
+The agent of a bundle runs its task in auto mode, with the memory every bundle shares. So a task
+on a bundle that is there already (`open`, and `create` or `fetch` of a folder that
 holds an `.agent`), `--resume` included, goes to the queue with no yes only from the host, from
 that bundle, or from its parent, the bundle that queued its last task (`.agent/parent`). From any
 other bundle, a review bundle on the PR of a stranger say, the daemon holds it as `bN` for Seb's yes
