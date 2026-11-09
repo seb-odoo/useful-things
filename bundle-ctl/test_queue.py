@@ -2295,15 +2295,17 @@ def answer_card(card, said, yes=True):
 
 
 def check_remote_dialog(root):
-    """The question a remote agent waits on becomes a card of hok, one question at a time; Seb's
-    pick closes its dialog with Escape and goes to it as one line of the host; a no leaves it; the
-    card goes once the dialog closes otherwise; an Escape not taken is sent again."""
+    """The question a remote agent, or one in an agent terminal here, waits on becomes a card of
+    hok, one question at a time; Seb's pick closes its dialog with Escape and goes to it as one
+    line of the host; a no leaves it; the card goes once the dialog closes otherwise; an Escape
+    not taken is sent again."""
     session = "11111111-2222-3333-4444-555555555555"
     on_worker = {"remote.json": '{"worker": "sebpc", "job": "1"}', "session": f"{session}\n"}
     names = ("one", "two", "no", "words", "closes", "glitch", "permission", "bad", "garbled")
     bundles = {name: on_worker for name in names}
-    bundles["here"] = {"session": f"{session}\n"}
-    prepare(root, bundles, 8)
+    here = ("here", "terminal", "gone")
+    bundles.update({name: {"session": f"{session}\n"} for name in here})
+    prepare(root, bundles, 12)
     way = {
         "question": "Which way?\nSay.",
         "header": "Way",
@@ -2320,7 +2322,7 @@ def check_remote_dialog(root):
         "options": [*way["options"], {"label": "Up"}],
     }
     transcripts = root / "transcripts"
-    for name in (*names, "here"):
+    for name in (*names, *here):
         questions = [way, tools] if name == "two" else [way]
         tool = "Bash" if name == "permission" else "AskUserQuestion"
         write_dialog(transcripts / name / f"{session}.jsonl", questions, name=tool)
@@ -2328,6 +2330,7 @@ def check_remote_dialog(root):
         file.write('not json\n{"type": "assistant", "message": "x"}\n')
     statuses = dict.fromkeys(bundles, "waiting")
     typed = []
+    terminals = {"terminal": 1, "gone": 2}
 
     def type_keys(bundle, keys):
         typed.append((bundle, keys))
@@ -2335,6 +2338,7 @@ def check_remote_dialog(root):
     stubs = {
         name: getattr(daemon, name)
         for name in (
+            "DECK_DIR",
             "DIALOGS_DIR",
             "DIALOG_EVERY",
             "REMOTE_ENTER_AFTER",
@@ -2342,9 +2346,11 @@ def check_remote_dialog(root):
             "TOLD_DIR",
             "get_own_transcript",
             "get_session_status",
+            "get_terminals",
             "remote_agent",
         )
     }
+    daemon.DECK_DIR = root / "deck"
     daemon.DIALOGS_DIR = root / "dialogs"
     daemon.DIALOG_EVERY = 0
     daemon.REMOTE_ENTER_AFTER = 0
@@ -2352,15 +2358,18 @@ def check_remote_dialog(root):
     daemon.TOLD_DIR = root / "told"
     daemon.get_own_transcript = lambda session, bundle: transcripts / bundle / f"{session}.jsonl"
     daemon.get_session_status = lambda bundle, session: statuses[bundle]
+    daemon.get_terminals = lambda: dict(terminals)
     daemon.remote_agent = types.SimpleNamespace(
         get_recorded=written_remotes,
         take_left_notes=lambda get_folder: None,
         read_remote=read_written(stubs["remote_agent"]),
+        is_remote=lambda folder: False,
         type_keys=type_keys,
     )
+    stop = daemon.DECK_DIR / "terminal" / session / "stop"
 
     def ask():
-        daemon.ask_dialogs(daemon.get_remote_agents())
+        daemon.ask_dialogs(daemon.get_dialog_places())
 
     def get_told(bundle):
         return [path.read_text() for path in sorted((daemon.TOLD_DIR / bundle).glob("*/*.txt"))]
@@ -2374,6 +2383,16 @@ def check_remote_dialog(root):
                 line.split(": ")[0]: line.split()[-1] for line in journal.getvalue().splitlines()
             }
             first = daemon.HELD.read_json(daemon.HELD_DIR / f"{cards['one'][1:]}.json")
+            laptop = daemon.HELD.read_json(daemon.HELD_DIR / f"{cards['terminal'][1:]}.json")
+            answered_here = answer_card(cards["terminal"], "1")
+            stopped, told_here = stop.exists(), get_told("terminal")
+            stop.unlink(missing_ok=True)
+            note_here = daemon.read_dialog_note("terminal")
+            daemon.write_dialog_note("terminal", {**note_here, "sent": 0})
+            ask()
+            stopped_again = stop.exists()
+            del terminals["gone"]
+            ask()
             answered = answer_card(cards["one"], "2 go on")
             note = daemon.read_dialog_note("one")
             told_one = get_told("one")
@@ -2418,9 +2437,29 @@ def check_remote_dialog(root):
     one = "Seb answered your question in hok, which closed its dialog: Way: Right, and in his words: go on."
     checks = [
         (
-            "a card for each question asked on a worker, once: none for a permission, a garbled"
-            " transcript, or here",
-            sorted(cards) == ["bad", "closes", "glitch", "no", "one", "two", "words"],
+            "a card for each question asked on a worker or in an agent terminal here, once: none"
+            " for a permission, a garbled transcript, or an agent here with no terminal",
+            sorted(cards)
+            == ["bad", "closes", "glitch", "gone", "no", "one", "terminal", "two", "words"],
+        ),
+        (
+            "a pick on the card of an agent here leaves the stop its terminal takes, and its line",
+            laptop["title"] == "answer the question of terminal, its agent on the laptop"
+            and answered_here["code"] == 0
+            and stopped
+            and not any(bundle == "terminal" for bundle, _keys in typed)
+            and told_here
+            == [
+                "Seb answered your question in hok, which closed its dialog: Way: Left (Recommended)."
+            ]
+            and stopped_again
+            and "terminal: its answered dialog still waits on the laptop, Escape sent again"
+            in lines,
+        ),
+        (
+            "the card of an agent here goes once its terminal closed",
+            f"gone: its dialog closed, hok {cards['gone']} goes" in lines
+            and not (daemon.HELD_DIR / f"{cards['gone'][1:]}.json").exists(),
         ),
         (
             "the card holds the words of the agent on one line, and what to pick",

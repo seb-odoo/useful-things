@@ -478,8 +478,13 @@ necessary. but if we have a good setup, full remote should offer the same possib
   card goes 5 s after the dialog closed otherwise (answered in its terminal, the job ended, the
   agent brought back), and an Escape the dialog did not take goes again after a minute
   (`DIALOG_ESCAPE_AGAIN`), as a key sent while the tunnel is down is lost.
-  `~/.local/state/bundle-ctl/dialogs/BUNDLE.json` keeps where each dialog is. An agent here has
-  its window on his screen: no card. `python3 test_queue.py`.
+  `~/.local/state/bundle-ctl/dialogs/BUNDLE.json` keeps where each dialog is. An agent in an
+  agent terminal here gets the same card, `on the laptop` (Seb, 2026-11-09: "some agent asks me
+  questions that didn't end up in hok today", as the agent of 20.0-skills-override-calls-super--seb
+  asked on the threads of odoo#301422 in its terminal only): its Escape is the `stop` its
+  terminal takes (see Prompts from deck), its line goes with the other lines of the host, and the
+  card goes once its terminal closed. One in a VS Code tab gets none: nothing here types in it.
+  `python3 test_queue.py`.
 - Its PR events (see PR events) come after them, the same way. Its stand-in runs
   `client/prwatch.py`, started again a minute after it ends, as the bundle (`devnet`, the names of
   the gateways and their CA, `ODOO_PROXY_HOST`), on the `.agent/` of the bundle here. The daemon
