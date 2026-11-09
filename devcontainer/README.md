@@ -99,6 +99,10 @@ with pip inside. The rest follows from that choice.
   signature with a key the container does not have. `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_0` and
   `GIT_CONFIG_VALUE_0` in `containerEnv` turn it off there only: the environment wins over every
   config file, and the host keeps signing.
+- **`bctl` is a file on PATH, not a function**: `bundle-ctl/client/bin/bctl`, which the bashrc
+  puts on PATH. `timeout`, `xargs` or a hook start a file only: with the function of before,
+  `timeout 590 bctl build` answered "No such file" (2026-11-09). A Claude session keeps the PATH
+  of its start, so one started before that has the function, which works but not under `timeout`.
 - **The shell helpers reach non-interactive shells** through `BASH_ENV`, which points at
   `container-rw/devcontainer.bashrc`: an agent runs `bash -c`, which does not read `~/.bashrc`.
   Claude Code then sources a copy of the functions it took at the start of the session, which

@@ -225,10 +225,13 @@ function otta() {
 function twc() { node "${REPO_ROOT:-$HOME/repo}/TestWarden/release/test-warden.cjs" "$@"; }
 
 # --- bundle-ctl: create, open and list bundles through the host daemon ---
-function bctl() {
-	local client="${BUNDLE_CTL_CLIENT:-${REPO_ROOT:-$HOME/repo}/useful-things/bundle-ctl/client}"
-	python3 "${client}/bctl.py" "$@"
-}
+# A file on PATH and not a function: `timeout`, `xargs` or a hook can only start a file.
+_bctl_bin="${BUNDLE_CTL_CLIENT:-${REPO_ROOT:-$HOME/repo}/useful-things/bundle-ctl/client}/bin"
+case ":$PATH:" in
+	*":${_bctl_bin}:"*) ;;
+	*) export PATH="${_bctl_bin}:$PATH" ;;
+esac
+unset _bctl_bin
 alias gbs="bctl branches"
 function ocode() { bctl open "${1:-${ODOO_PROXY_HOST}}"; }
 
