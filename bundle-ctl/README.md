@@ -823,6 +823,8 @@ request still keeps the bundle.
   request that waits, under the same `bN`, and waits for it.
 - `delete_bundle` still refuses uncommitted files: the job log in `jobs/` says so. Commits of
   others need its `--force`, which drops such files too: the request is then refused on them.
+  The files a run of `delete_bundle` had removed when a restart of the daemon killed it count as
+  no uncommitted file, here as in `delete_bundle` itself (scripts/README.md).
 - A bundle with no folder nor branch left is still asked while `delete_bundle.py` has a folder of
   it to remove after the worktrees and branches: its Claude config, its Postgres data and its VS
   Code extensions. The request lists the ones left, and the yes runs `delete_bundle.py` as usual.

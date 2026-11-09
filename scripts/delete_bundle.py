@@ -11,6 +11,7 @@ import argparse
 import fnmatch
 import glob
 import os
+import pathlib
 import re
 import subprocess
 import threading
@@ -36,11 +37,20 @@ from config import (
     CLAUDE_CONFIG_CONTAINER,
     EXTENSIONS_CONTAINER,
     FILESTORE_CONTAINER,
+    STATE_ROOT,
     WORKTREE_CONTAINER,
 )
 from rich import print
 from rich.tree import Tree
 from utils import UtilsRunner
+
+DELETING = pathlib.Path(STATE_ROOT) / "bundle-ctl" / "deleting"
+
+
+def get_uncommitted(status: str, cut: bool):
+    """The lines of `git status --porcelain` that are work. After a cut removal, a file deleted
+    in the worktree only is none: git has it in HEAD."""
+    return [line for line in status.splitlines() if not (cut and line.startswith(" D "))]
 
 
 def _existing_bundles():
@@ -58,13 +68,14 @@ def _bundle_name_completer(prefix, parsed_args, **kwargs):
     return [bundle for bundle in _existing_bundles() if bundle not in already_given]
 
 
-def get_unsaved_work(runner: UtilsRunner, bundle_name: str):
+def get_unsaved_work(runner: UtilsRunner, bundle_name: str, cut: bool = False):
     """Map the repos of a bundle to the work its deletion would lose, by kind.
 
     A worktree is read the way `git worktree remove` reads it, so the tooling files and the
     node_modules of a bundle don't count as uncommitted: `finish_worktree_bundle_folder` puts each
     one in the `info/exclude` of its repo. A commit counts as saved as soon as a remote ref holds
-    it, the dev remote included.
+    it, the dev remote included. `cut` says a run of this script was killed while it removed the
+    worktrees (see get_uncommitted).
     """
     unsaved = {}
     lock = threading.Lock()
@@ -78,8 +89,8 @@ def get_unsaved_work(runner: UtilsRunner, bundle_name: str):
                 cwd=folder,
                 handle_exceptions={"fatal: not a git repository": ignore_error},
             )
-            if res and res.stdout.strip():
-                found["uncommitted files"] = res.stdout.strip().splitlines()
+            if res and (lines := get_uncommitted(res.stdout, cut)):
+                found["uncommitted files"] = lines
         res = runner.run(
             [
                 "git",
@@ -197,9 +208,17 @@ def delete_bundle(
     on a worker: bundle-ctl finds it by its `.agent/remote.json`, which goes with the folder.
     Nor a name that is no bundle name: the folders below are named after it, and the branch
     names gbs deletes come from refs every bundle writes (security check 11-03, C8).
+
+    `DELETING/<bundle>` lives while the worktrees are removed. A run killed there (a restart of
+    bundle-ctl kills its jobs) leaves it, and the next run takes the files that run deleted for
+    none of Seb's work. On 2026-10-30 a restart cut such a run 17 s in: the bundle kept about
+    74,000 deleted files, which every later run took for uncommitted work. No bundle writes that
+    folder.
     """
     if not BUNDLE_NAME.fullmatch(bundle_name):
         return {"name": {"no bundle name": [repr(bundle_name)]}}
+    deleting = DELETING / bundle_name
+    cut = deleting.exists()
     agent = os.path.join(get_worktree_bundle_folder(bundle_name), ".agent")
     if any(
         os.path.exists(os.path.join(agent, name)) for name in ("remote.json", "remote-starting")
@@ -209,7 +228,7 @@ def delete_bundle(
             "bctl bring-back or wait for its end, and delete the bundle again[/yellow]",
         )
         return {}
-    if not force and (unsaved := get_unsaved_work(runner, bundle_name)):
+    if not force and (unsaved := get_unsaved_work(runner, bundle_name, cut)):
         return unsaved
     containers = runner.run(
         [
@@ -235,6 +254,8 @@ def delete_bundle(
     repositories = runner.run(["podman", "images", "--format", "{{.Repository}}"]).stdout.split()
     if images := bundle_images(bundle_name, repositories):
         runner.run(["podman", "rmi", "--ignore", *images])
+    DELETING.mkdir(parents=True, exist_ok=True)
+    deleting.touch()
 
     def handle_repo(runner: UtilsRunner, repo: str):
         # Every step below writes into the shared repository (worktree metadata, refs):
@@ -262,7 +283,7 @@ def delete_bundle(
                         "worktree",
                         "remove",
                         wt_bundle_repo_folder,
-                        *(["--force"] if force else []),
+                        *(["--force"] if force or cut else []),
                     ],
                     handle_exceptions={
                         f"fatal: '{wt_bundle_repo_folder}' is not a working tree": ignore_error,
@@ -285,6 +306,7 @@ def delete_bundle(
                 )
 
     runner.parallel_run(Tree("Repositories"), get_repos(), handle_repo)
+    deleting.unlink(missing_ok=True)
     runner.run(["rm", "-rf", get_worktree_bundle_folder(bundle_name)])
     tab_groups.ask({"op": "close", "bundle": bundle_name})
     claude_config = f"{CLAUDE_CONFIG_CONTAINER}/{bundle_name}"

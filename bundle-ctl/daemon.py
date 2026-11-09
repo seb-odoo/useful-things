@@ -116,6 +116,7 @@ from config import (  # noqa: E402
     WORKTREE_CONTAINER,
     node_modules_key,
 )
+from delete_bundle import DELETING, get_uncommitted  # noqa: E402
 from utils import UtilsRunner  # noqa: E402
 
 import cpulog  # noqa: E402
@@ -2594,16 +2595,21 @@ def get_others_commits(bundle, repo, drop=()):
 
 
 def check_uncommitted(bundle):
-    """Refused when a worktree of the bundle has a file not committed, which --force would drop."""
+    """Refused when a worktree of the bundle has a file not committed, which --force would drop.
+    The files a cut delete_bundle.py removed are none (delete_bundle.get_uncommitted)."""
+    cut = (DELETING / bundle).exists()
     for repo in get_repos():
         worktree = get_worktree_bundle_repo_folder(bundle, repo)
-        if os.path.isdir(worktree) and subprocess.run(
-            [*GIT, "status", "--porcelain"],
-            capture_output=True,
-            check=False,
-            cwd=worktree,
-            text=True,
-        ).stdout.strip():
+        if os.path.isdir(worktree) and get_uncommitted(
+            subprocess.run(
+                [*GIT, "status", "--porcelain"],
+                capture_output=True,
+                check=False,
+                cwd=worktree,
+                text=True,
+            ).stdout,
+            cut,
+        ):
             raise Refused(f"{bundle} has uncommitted files in {repo}")
 
 

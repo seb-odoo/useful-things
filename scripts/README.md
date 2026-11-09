@@ -366,6 +366,13 @@ Removes a bundle from the local system (worktrees, branches, filestore, database
 - Leaves a bundle untouched, and exits 1, when one of its worktrees holds uncommitted files or its
   branch holds commits no remote has: they are listed, and the other bundles of the run are still
   deleted. The files of the web tooling are none (Shared node_modules)
+- Leaves `~/.local/state/bundle-ctl/deleting/<bundle>` while it removes the worktrees, and takes
+  it away once the worktrees and branches are gone. A run that finds it knows a run before it was
+  killed there (a restart of bundle-ctl kills its jobs): the tracked files that run deleted are no
+  uncommitted work, and `git worktree remove` gets `--force`; a changed, new or staged file still
+  keeps the bundle. On 2026-10-30 a restart cut the first idle delete of a bundle 17 s in, and 58
+  runs then refused that bundle on about 74,000 deleted files (`test_cut_delete.py`). No bundle
+  mounts that folder
 - Leaves a bundle whose dev container still runs, with a yellow line: delete it again once its
   window is closed
 - Leaves a bundle whose agent runs on a worker (`.agent/remote.json`, or `remote-starting` while

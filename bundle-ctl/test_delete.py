@@ -1246,9 +1246,44 @@ def check_git_config(root):
     return [], 1
 
 
+def check_cut(root):
+    """Before a forced deletion, a file a cut delete_bundle.py removed is no work, while a file
+    deleted with no such run, or added after it, still is."""
+    repo, deleting = root / "odoo", daemon.DELETING
+    repo.mkdir()
+    git(repo, "init", "-q")
+    (repo / "file").write_text("x\n")
+    git(repo, "add", "file")
+    git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "file")
+    (repo / "file").unlink()
+    daemon.DELETING = root / "deleting"
+    daemon.get_repos = lambda: ["odoo"]
+    daemon.get_worktree_bundle_repo_folder = lambda bundle, name: str(root / name)
+
+    def refused():
+        try:
+            daemon.check_uncommitted("b")
+        except daemon.Refused:
+            return True
+        return False
+
+    found = [refused()]
+    daemon.DELETING.mkdir()
+    (daemon.DELETING / "b").touch()
+    found.append(refused())
+    (repo / "notes").write_text("mine\n")
+    found.append(refused())
+    daemon.DELETING = deleting
+    expected = [True, False, True]
+    return ([] if found == expected else [f"cut: refused {found}, expected {expected}"]), 1
+
+
 def main():
     with tempfile.TemporaryDirectory() as root:
         failures, total = check_git_config(pathlib.Path(root))
+    with tempfile.TemporaryDirectory() as root:
+        more, count = check_cut(pathlib.Path(root))
+        failures, total = failures + more, total + count
     with tempfile.TemporaryDirectory() as root:
         more, count = check(pathlib.Path(root))
         failures, total = failures + more, total + count
