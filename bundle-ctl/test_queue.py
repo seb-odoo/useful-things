@@ -2294,6 +2294,96 @@ def answer_card(card, said, yes=True):
     return daemon.HELD.read_json(path.with_suffix(".result"))
 
 
+def check_dialog_read(root):
+    """The card of a question reads the lines around each path:line it names from the tree of
+    its agent, the bundle's or the mounts of the ops container, with no link followed; a worker
+    keeps its tree, and a reference it cannot read says why."""
+    tree, drafts = root / "tree", root / "drafts" / "deck"
+    (tree / "odoo" / "addons" / "mail").mkdir(parents=True)
+    (tree / "odoo" / "addons" / "mail" / "x.py").write_text(
+        "".join(f"line {number}\tend\n" for number in range(1, 31))
+    )
+    (root / "secret.py").write_text("key\n")
+    (tree / "odoo" / "link.py").symlink_to(root / "secret.py")
+    (tree / "odoo" / "folder").symlink_to(root)
+    drafts.mkdir(parents=True)
+    (drafts / "feed.py").write_text("a\nb\nc\n")
+    question = (
+        "On `mail/x.py:20` and /workspace/odoo/addons/mail/x.py:2-3, not 19.0:3. Also"
+        " odoo/link.py:1, odoo/folder/secret.py:1, odoo/../secret.py:1 and mail/x.py:99."
+    )
+    stubs = {
+        name: getattr(daemon, name) for name in ("get_ops_mounts", "get_worktree_bundle_folder")
+    }
+    daemon.get_worktree_bundle_folder = lambda bundle: str(tree)
+    daemon.get_ops_mounts = lambda: [("/home/seb/repo/deck", str(drafts))]
+    try:
+        references = daemon.get_references(question)
+        many = daemon.get_references("a.py:1 b.py:2 c.py:3 d.py:4 a.py:1")
+        here = daemon.get_read_lines("fix", None, references)
+        more = daemon.get_read_lines("fix", None, daemon.get_references(question.split("Also")[1]))
+        more += daemon.get_read_lines("fix", None, [["mail/x.py", 99, None]])
+        ops = daemon.get_read_lines(f"{daemon.OPS}s", None, [["~/repo/deck/feed.py", 2, None]])
+        worker = daemon.get_read_lines("fix", "sebpc", [["mail/x.py", 20, None]])
+    finally:
+        vars(daemon).update(stubs)
+    around = [
+        f"{'>' if number == 20 else ' '}{number:>6}  " + f"line {number}\tend".expandtabs()
+        for number in range(15, 26)
+    ]
+    no_line = "no such line in that file"
+    checks = [
+        (
+            "a question names up to 3 path:line, each once, never a version",
+            references
+            == [
+                ["mail/x.py", 20, None],
+                ["/workspace/odoo/addons/mail/x.py", 2, 3],
+                ["odoo/link.py", 1, None],
+            ]
+            and many == [["a.py", 1, None], ["b.py", 2, None], ["c.py", 3, None]],
+        ),
+        (
+            "one line comes with 5 around, found in a repo of the bundle; a range comes whole",
+            here[0]
+            == {
+                "label": "read",
+                "path": "odoo/addons/mail/x.py",
+                "code": around,
+                "cut": 0,
+                "style": "text",
+                "first": 15,
+                "last": 25,
+            }
+            and [here[1]["first"], here[1]["last"], here[1]["path"]]
+            == [2, 3, "odoo/addons/mail/x.py"],
+        ),
+        (
+            "a link, a link on the way and a .. are not read, a line past the end says so",
+            more == [{"label": "read", "path": "odoo/addons/mail/x.py", "why": no_line}],
+        ),
+        (
+            "an ops window reads the source of the mount that holds the path",
+            ops[0]["code"] == ["      1  a", ">     2  b", "      3  c"]
+            and ops[0]["path"] == "/home/seb/repo/deck/feed.py",
+        ),
+        (
+            "a worker keeps the tree of its agent",
+            worker
+            == [
+                {
+                    "label": "read",
+                    "path": "mail/x.py",
+                    "why": "not read: the agent runs on sebpc, where its files are",
+                }
+            ],
+        ),
+    ]
+    return [
+        f"dialog read: {name}: {here, more, ops}" for name, passed in checks if not passed
+    ], len(checks)
+
+
 def check_remote_dialog(root):
     """The question a remote agent, one in an agent terminal here or an ops window waits on
     becomes a card of hok, one question at a time; Seb's pick closes its dialog with Escape and
@@ -3194,6 +3284,7 @@ def main():
         check_tell,
         check_remote_type,
         check_remote_told,
+        check_dialog_read,
         check_remote_dialog,
         check_ramp,
         check_renew,

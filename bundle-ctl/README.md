@@ -472,7 +472,14 @@ necessary. but if we have a good setup, full remote should offer the same possib
   of an agent"). A block of code of the question, between fences, and the preview of an option
   keep their lines, 80 lines at most a question and a preview, 300 characters a line
   (`DIALOG_CODE`), a tab as spaces (Seb, 2026-11-10: "it would be nice if the hok card included
-  the context of code itself"). Seb answers with the number of an option, words after it or not, or with his
+  the context of code itself"). A file and line the question names, `path:line` or
+  `path:first-last`, 3 at most, are read too (his pick in hok the same day, "hok reads it too"),
+  in the tree of the agent: for a bundle, its folder, which is `/workspace`, then each repo of it
+  and `odoo/addons`; for an ops window, the source of the mount of the ops container that holds
+  the path, a relative one under `~/repo`. Each folder on the way is opened with no link
+  followed, and only a regular text file of 2 MB at most is read (`DIALOG_READ`): 5 lines on
+  each side of one line, 40 of a range. An agent on a worker keeps its tree there until its job
+  ends, so its card says these lines were not read. Seb answers with the number of an option, words after it or not, or with his
   own words, which `hok` leaves beside the request (`N.pick`). A yes to the last question sends
   Escape to that claude, as deck's Stop does, and leaves one line in `told/`, typed once the
   dialog closed, with the lines that waited behind it: `Seb answered your question in hok, which

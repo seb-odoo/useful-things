@@ -195,6 +195,12 @@ DIALOG_ESCAPE_AGAIN = 60
 DIALOG_EVERY = 5
 DIALOG_SIZES = {"header": 60, "question": 2000, "label": 200, "description": 600}
 DIALOG_CODE = {"lines": 80, "width": 300}
+OPS_HOME = "/home/vscode"
+DIALOG_READ = {"around": 5, "lines": 40, "references": 3, "size": 2 * 1024 * 1024}
+CODE_REFERENCE = re.compile(
+    r"(?<![\w./~-])((?:~/|/)?[\w+-][\w.+-]*(?:/[\w.+-]+)*\.[A-Za-z][A-Za-z0-9]*)"
+    r":([0-9]{1,6})(?:-([0-9]{1,6}))?"
+)
 FENCE = re.compile(r"\s*(`{3,}|~{3,})\s*([\w.+#-]*)[^`]*")
 DIALOG_TAIL = 256 * 1024
 ESCAPE = "\x1b"
@@ -3371,6 +3377,7 @@ def get_questions(data):
                     for label, option in zip(labels, options, strict=True)
                 ],
                 "previews": [get_preview(option.get("preview")) for option in options],
+                "references": get_references(question.get("question")),
             },
         )
     return found
@@ -3426,6 +3433,149 @@ def get_preview(text):
     if fence and len(lines) > 1 and is_fence_end(lines[-1], fence[1]):
         return size_code(lines[1:-1], fence[2], left)
     return size_code(lines, "", left)
+
+
+def get_references(text):
+    """The files and lines a question names as `path:line` or `path:first-last`, each once,
+    DIALOG_READ at most: [path, first, last], last None for one line."""
+    found = []
+    for path, first, last in CODE_REFERENCE.findall(text if isinstance(text, str) else ""):
+        reference = [path, int(first), int(last) if last else None]
+        if reference not in found and len(found) < DIALOG_READ["references"]:
+            found.append(reference)
+    return found
+
+
+def get_read_lines(bundle, worker, references):
+    """The lines around each path:line a question names, read from the tree of its agent: the
+    folder of its bundle, or the mounts of the ops container for an ops window. A path that is no
+    text file there gets no line: `host:8069` reads as one. A worker keeps the tree of its agent
+    until the job ends, so its references are not read (README.md, "Remote agents")."""
+    if not references:
+        return []
+    if worker:
+        why = f"not read: the agent runs on {worker}, where its files are"
+        return [{"label": "read", "path": path, "why": why} for path, _first, _last in references]
+    get_candidates = get_ops_candidates if bundle.startswith(OPS) else get_bundle_candidates
+    lines = []
+    for path, first, last in references:
+        try:
+            candidates = get_candidates(bundle, path)
+        except (OSError, KeyError, ValueError, subprocess.SubprocessError):
+            candidates = []
+        for root, inside, shown in candidates:
+            if (text := read_tree_file(root, inside)) is not None:
+                code = get_read_code(text, first, last)
+                why = {"why": "no such line in that file"}
+                lines.append({"label": "read", "path": shown, **(code or why)})
+                break
+    return lines
+
+
+def get_bundle_candidates(bundle, path):
+    """Where a path of the agent of a bundle may be on the host, in order: (folder, path in it,
+    path shown). /workspace is the folder of the bundle; a relative path may start in a repo."""
+    root = pathlib.Path(get_worktree_bundle_folder(bundle))
+    if path.startswith("/workspace/"):
+        return [(root, path.removeprefix("/workspace/"), path.removeprefix("/workspace/"))]
+    if path.startswith(("/", "~")):
+        return []
+    inside = [path, *(f"{repo}/{path}" for repo in get_repos())]
+    inside += [f"odoo/addons/{path}", f"odoo/odoo/addons/{path}"]
+    return [(root, each, each) for each in inside]
+
+
+def get_ops_candidates(_bundle, path):
+    """Where a path of an ops window may be on the host, in order: (folder, path in it, path
+    shown), the folder the source of the mount of the ops container that holds it. A relative
+    path starts in ~/repo, its working folder; ~ is the home of the container, then Seb's."""
+    if path.startswith("~/"):
+        rest = path.removeprefix("~/")
+        paths = [f"{OPS_HOME}/{rest}", f"{pathlib.Path(CONFIG['REPO_ROOT']).parent}/{rest}"]
+    else:
+        paths = [path if path.startswith("/") else f"{CONFIG['REPO_ROOT']}/{path}"]
+    mounts = get_ops_mounts()
+    candidates = []
+    for each in paths:
+        for destination, source in mounts:
+            if each.startswith(f"{destination}/"):
+                candidates.append(
+                    (pathlib.Path(source), each.removeprefix(f"{destination}/"), each)
+                )
+                break
+    return candidates
+
+
+def get_ops_mounts():
+    """The mounts of the ops container, (destination, source), the deepest destination first."""
+    label = f"label=devcontainer.local_folder={HOST_FOLDER}"
+    found = subprocess.run(
+        ["podman", "ps", "-q", "--filter", label],
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=10,
+    ).stdout.split()
+    if not HOST_FOLDER or not found:
+        return []
+    inspect = subprocess.run(
+        ["podman", "inspect", found[0]],
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=10,
+    )
+    mounts = (json.loads(inspect.stdout or "[]") or [{}])[0].get("Mounts") or []
+    places = [(mount["Destination"].rstrip("/"), mount["Source"]) for mount in mounts]
+    return sorted(places, key=lambda place: -len(place[0]))
+
+
+def read_tree_file(root, inside):
+    """The text of a file under root, a folder of the host an agent writes: each folder on the
+    way opened with no link followed, a regular file of DIALOG_READ["size"] at most, or None."""
+    parts = inside.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return None
+    try:
+        folder = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError:
+        return None
+    try:
+        for part in parts[:-1]:
+            fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=folder)
+            os.close(folder)
+            folder = fd
+        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=folder)
+    except OSError:
+        return None
+    finally:
+        os.close(folder)
+    with os.fdopen(fd, "rb") as file:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > DIALOG_READ["size"]:
+            return None
+        try:
+            return file.read(DIALOG_READ["size"] + 1).decode()
+        except UnicodeDecodeError:
+            return None
+
+
+def get_read_code(text, first, last):
+    """The lines a reference names, with DIALOG_READ["around"] lines on each side of one line, or
+    a range of DIALOG_READ["lines"] at most, each after its number, the named ones marked."""
+    lines = text.splitlines()
+    end = last or first
+    if not 1 <= first <= len(lines) or end < first:
+        return None
+    start = first if last else max(first - DIALOG_READ["around"], 1)
+    stop = min(end if last else first + DIALOG_READ["around"], len(lines))
+    stop = min(stop, start + DIALOG_READ["lines"] - 1)
+    numbered = [
+        f"{'>' if first <= number <= end else ' '}{number:>6}  {lines[number - 1].expandtabs()}"
+        for number in range(start, stop + 1)
+    ]
+    code = size_code(numbered, "", {"lines": DIALOG_READ["lines"]})
+    return {**code, "first": start, "last": stop}
 
 
 def is_fence_end(line, fence):
@@ -3490,6 +3640,7 @@ def get_dialog_item(bundle, worker, dialog, index):
         "lines": [
             {"label": "header", "text": question["header"]},
             *({"label": "question", **part} for part in question["parts"]),
+            *get_read_lines(bundle, worker, question["references"]),
             *get_option_lines(question),
         ],
         "options": len(labels),
