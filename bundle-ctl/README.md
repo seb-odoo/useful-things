@@ -469,7 +469,10 @@ necessary. but if we have a good setup, full remote should offer the same possib
   hours on a question only their terminal showed, and his yes to g426 and g427 waited in `told/`
   behind it). Its header, question and options are the words of the agent, each on one line and
   cut (`DIALOG_SIZES`), in the part of the card the agent speaks in (host-ctl README, "A question
-  of an agent"). Seb answers with the number of an option, words after it or not, or with his
+  of an agent"). A block of code of the question, between fences, and the preview of an option
+  keep their lines, 80 lines at most a question and a preview, 300 characters a line
+  (`DIALOG_CODE`), a tab as spaces (Seb, 2026-11-10: "it would be nice if the hok card included
+  the context of code itself"). Seb answers with the number of an option, words after it or not, or with his
   own words, which `hok` leaves beside the request (`N.pick`). A yes to the last question sends
   Escape to that claude, as deck's Stop does, and leaves one line in `told/`, typed once the
   dialog closed, with the lines that waited behind it: `Seb answered your question in hok, which

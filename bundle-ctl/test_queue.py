@@ -2308,11 +2308,15 @@ def check_remote_dialog(root):
     bundles.update({name: {"session": f"{session}\n"} for name in here})
     prepare(root, bundles, 13)
     way = {
-        "question": "Which way?\nSay.",
+        "question": "Which way?\n\nSay.\n```diff\n-left\x1b\n+right\n```",
         "header": "Way",
         "multiSelect": False,
         "options": [
-            {"label": "Left (Recommended)", "description": "Mine: yes."},
+            {
+                "label": "Left (Recommended)",
+                "description": "Mine: yes.",
+                "preview": "```py\n\tgo()\n```",
+            },
             {"label": "Right", "description": "\x1b[31mred"},
         ],
     }
@@ -2488,11 +2492,13 @@ def check_remote_dialog(root):
             and not (daemon.HELD_DIR / f"{cards['gone'][1:]}.json").exists(),
         ),
         (
-            "the card holds the words of the agent on one line, and what to pick",
+            "the card holds the words of the agent, its code and previews as lines, what to pick",
             first["lines"][1:]
             == [
                 {"label": "question", "text": "Which way? Say."},
+                {"label": "question", "code": ["-left", "+right"], "cut": 0, "style": "diff"},
                 {"label": "1", "text": "Left (Recommended): Mine: yes."},
+                {"label": "1", "code": ["        go()"], "cut": 0, "style": "text"},
                 {"label": "2", "text": "Right: [31mred"},
             ]
             and first["options"] == 2

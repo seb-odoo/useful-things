@@ -194,6 +194,8 @@ DIALOGS_DIR = STATE / "dialogs"
 DIALOG_ESCAPE_AGAIN = 60
 DIALOG_EVERY = 5
 DIALOG_SIZES = {"header": 60, "question": 2000, "label": 200, "description": 600}
+DIALOG_CODE = {"lines": 80, "width": 300}
+FENCE = re.compile(r"\s*(`{3,}|~{3,})\s*([\w.+#-]*)[^`]*")
 DIALOG_TAIL = 256 * 1024
 ESCAPE = "\x1b"
 LAPTOP = "the laptop"
@@ -3306,10 +3308,11 @@ def drop_dialog(bundle):
 
 def get_dialog(bundle):
     """The question the claude of an agent waits on: its session, the id of its
-    AskUserQuestion call and its questions, in the words of the agent, each text on one line and
-    sized. None when its claude waits on nothing, or on another dialog. The transcript comes from
-    the agent: read as data. An ops window has its session in its name, its record in the ops
-    container, and its transcript in the folders of ops alone."""
+    AskUserQuestion call and its questions, in the words of the agent, sized: each text on one
+    line, a block of code and a preview as their lines. None when its claude waits on nothing, or
+    on another dialog. The transcript comes from the agent: read as data. An ops window has its
+    session in its name, its record in the ops container, and its transcript in the folders of
+    ops alone."""
     ops = bundle.startswith(OPS)
     session = bundle.removeprefix(OPS) if ops else read_text(get_agent_folder(bundle) / "session")
     container = os.path.basename(HOST_FOLDER or "") if ops else bundle
@@ -3361,12 +3364,13 @@ def get_questions(data):
         found.append(
             {
                 "header": size_text(question.get("header"), "header"),
-                "question": size_text(question.get("question"), "question"),
+                "parts": get_question_parts(question.get("question")),
                 "several": question.get("multiSelect") is True,
                 "options": [
                     [label, size_text(option.get("description"), "description")]
                     for label, option in zip(labels, options, strict=True)
                 ],
+                "previews": [get_preview(option.get("preview")) for option in options],
             },
         )
     return found
@@ -3377,8 +3381,68 @@ def size_text(text, kind):
     if not isinstance(text, str):
         return ""
     text = " ".join("".join(char if char.isprintable() else " " for char in text).split())
-    most = DIALOG_SIZES[kind]
-    return text if len(text) <= most else f"{text[: most - 3]}..."
+    return cut_text(text, DIALOG_SIZES[kind])
+
+
+def cut_text(text, most):
+    return text if len(text) <= most else f"{text[: most - 3]}..." if most > 3 else ""
+
+
+def get_question_parts(text):
+    """The question of an agent as parts, in order: its words on one line, DIALOG_SIZES for them
+    all, and each block of code between fences, as its lines (README.md, "Remote agents")."""
+    parts, words, code, fence = [], [], [], None
+    left = {"lines": DIALOG_CODE["lines"], "words": DIALOG_SIZES["question"]}
+
+    def add_words():
+        text = cut_text(size_text(" ".join(words), "question"), left["words"])
+        left["words"] -= len(text)
+        parts.extend([{"text": text}] if text else [])
+        words.clear()
+
+    for line in text.splitlines() if isinstance(text, str) else []:
+        if fence is None and (fence := FENCE.fullmatch(line)):
+            add_words()
+        elif fence is not None and is_fence_end(line, fence[1]):
+            parts.append(size_code(code, fence[2], left))
+            code, fence = [], None
+        elif fence is not None:
+            code.append(line)
+        else:
+            words.append(line)
+    if fence is not None:
+        parts.append(size_code(code, fence[2], left))
+    add_words()
+    return parts
+
+
+def get_preview(text):
+    """The preview of an option, as its lines, or as the lines of the fence that holds it whole."""
+    lines = text.strip("\n").splitlines() if isinstance(text, str) and text.strip() else []
+    if not lines:
+        return None
+    left = {"lines": DIALOG_CODE["lines"]}
+    fence = FENCE.fullmatch(lines[0])
+    if fence and len(lines) > 1 and is_fence_end(lines[-1], fence[1]):
+        return size_code(lines[1:-1], fence[2], left)
+    return size_code(lines, "", left)
+
+
+def is_fence_end(line, fence):
+    return bool(re.fullmatch(rf"\s*{re.escape(fence[0])}{{{len(fence)},}}\s*", line))
+
+
+def size_code(lines, language, left):
+    """Lines of code of an agent as they came, its tabs as spaces and its control characters
+    dropped, cut to DIALOG_CODE. left: the lines still allowed, taken. cut: the lines left out."""
+    most = max(left["lines"], 0)
+    left["lines"] -= min(len(lines), most)
+    shown = []
+    for line in lines[:most]:
+        line = "".join(char if char.isprintable() else " " for char in line.expandtabs())
+        shown.append(cut_text(line.rstrip(), DIALOG_CODE["width"]))
+    style = "diff" if language.lower() in ("diff", "patch") else "text"
+    return {"code": shown, "cut": len(lines) - len(shown), "style": style}
 
 
 def read_entries(path, size):
@@ -3425,11 +3489,8 @@ def get_dialog_item(bundle, worker, dialog, index):
         "key": f"dialog {bundle}",
         "lines": [
             {"label": "header", "text": question["header"]},
-            {"label": "question", "text": question["question"]},
-            *(
-                {"label": str(number), "text": f"{label}: {description}" if description else label}
-                for number, (label, description) in enumerate(question["options"], 1)
-            ),
+            *({"label": "question", **part} for part in question["parts"]),
+            *get_option_lines(question),
         ],
         "options": len(labels),
         "send": {
@@ -3449,6 +3510,17 @@ def get_dialog_item(bundle, worker, dialog, index):
         "title": f"answer {which} of {who} on {worker or LAPTOP}",
         "yes": yes,
     }
+
+
+def get_option_lines(question):
+    """Each option of a question under its number: its label and description, then its preview."""
+    lines = []
+    options = zip(question["options"], question["previews"], strict=True)
+    for number, ((label, description), preview) in enumerate(options, 1):
+        text = f"{label}: {description}" if description else label
+        lines.append({"label": str(number), "text": text})
+        lines += [{"label": str(number), **preview}] if preview else []
+    return lines
 
 
 def is_same_dialog(note, dialog):
@@ -3633,10 +3705,17 @@ def clean(text):
     return "".join(char if char.isprintable() else f"\\x{ord(char):02x}" for char in text)
 
 
+def clean_value(value):
+    """A value of a line of a card: its text cleaned, each one of a list too, a number kept."""
+    if isinstance(value, list):
+        return [clean_value(each) for each in value]
+    return value if type(value) is int else clean(value)
+
+
 def hold(item):
     """Hold a request for Seb's yes in hok, the text of its caller cleaned: the id hok lists."""
     lines = [
-        clean(line) if isinstance(line, str) else {key: clean(text) for key, text in line.items()}
+        clean(line) if isinstance(line, str) else {key: clean_value(v) for key, v in line.items()}
         for line in item["lines"]
     ]
     item = {**item, "lines": lines}
