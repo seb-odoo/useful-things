@@ -103,6 +103,7 @@ def check_remote(root):
         name: getattr(daemon, name)
         for name in (
             "get_agent",
+            "get_agent_folder",
             "get_open_bundle_folders",
             "get_repo_folder",
             "get_repos",
@@ -128,6 +129,12 @@ def check_remote(root):
         daemon.remote_agent.STATE = agent.parent / "state"
         daemon.remote_agent.keep_record("master-a--seb", {"worker": "sebpc", "job": "1"})
         checks.append(("an agent on a worker is alive, with its worker", read() == (True, "sebpc")))
+        task = "- ci: odoo#1 ci/x red, https://runbot.odoo.com/1"
+        (agent / "task.md").write_text(f"{task}\n")
+        daemon.get_agent = lambda bundle, head_date, is_alive: {"state": "done"}
+        daemon.get_agent_folder = lambda bundle: root / "bundles" / bundle / ".agent"
+        done = {row["bundle"]: row["agent"] for row in daemon.list_bundles()}["master-a--seb"]
+        checks.append(("a done agent carries its task, for the triage", done.get("task") == task))
     finally:
         vars(daemon).update(stubs)
     return [name for name, passed in checks if not passed], len(checks)

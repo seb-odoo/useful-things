@@ -625,7 +625,7 @@ def list_bundles():
         opening = now - state["launches"].get(bundle, 0) < LAUNCH_GRACE
         remote = remote_agent.is_remote(pathlib.Path(folder))
         agent = get_agent(bundle, dates[bundle], is_open or opening or remote)
-        if agent and agent["state"] == "stopped":
+        if agent and agent["state"] in ("done", "stopped"):
             agent["task"] = read_text(get_agent_folder(bundle) / "task.md")
         if agent and (remote := remote_agent.read_remote(pathlib.Path(folder))):
             agent["where"] = remote["worker"]
