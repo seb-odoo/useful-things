@@ -479,7 +479,11 @@ necessary. but if we have a good setup, full remote should offer the same possib
   the path, a relative one under `~/repo`. Each folder on the way is opened with no link
   followed, and only a regular text file of 2 MB at most is read (`DIALOG_READ`): 5 lines on
   each side of one line, 40 of a range. An agent on a worker keeps its tree there until its job
-  ends, so its card says these lines were not read. Seb answers with the number of an option, words after it or not, or with his
+  ends: the same paths are read in the checkout of its job, with one `agent-read` of the worker a
+  reference (remote-runs README, "Verbs"), 8 s at most for the card (`DIALOG_READ`), as the
+  thread that holds the cards also types in the agents. A worker with no connection, or that
+  gives no answer in time, leaves a row that says so, and one that gave no answer is not asked
+  again for 60 s: the cards of one pass wait on it once. Seb answers with the number of an option, words after it or not, or with his
   own words, which `hok` leaves beside the request (`N.pick`). A yes to the last question sends
   Escape to that claude, as deck's Stop does, and leaves one line in `told/`, typed once the
   dialog closed, with the lines that waited behind it: `Seb answered your question in hok, which

@@ -2296,8 +2296,9 @@ def answer_card(card, said, yes=True):
 
 def check_dialog_read(root):
     """The card of a question reads the lines around each path:line it names from the tree of
-    its agent, the bundle's or the mounts of the ops container, with no link followed; a worker
-    keeps its tree, and a reference it cannot read says why."""
+    its agent, the bundle's or the mounts of the ops container, with no link followed, or the
+    checkout of its job on a worker, one agent-read a reference; a reference it cannot read says
+    why."""
     tree, drafts = root / "tree", root / "drafts" / "deck"
     (tree / "odoo" / "addons" / "mail").mkdir(parents=True)
     (tree / "odoo" / "addons" / "mail" / "x.py").write_text(
@@ -2306,17 +2307,37 @@ def check_dialog_read(root):
     (root / "secret.py").write_text("key\n")
     (tree / "odoo" / "link.py").symlink_to(root / "secret.py")
     (tree / "odoo" / "folder").symlink_to(root)
+    (tree / "odoo" / "addons" / "mail" / "y.py").mkdir()
     drafts.mkdir(parents=True)
     (drafts / "feed.py").write_text("a\nb\nc\n")
     question = (
         "On `mail/x.py:20` and /workspace/odoo/addons/mail/x.py:2-3, not 19.0:3. Also"
         " odoo/link.py:1, odoo/folder/secret.py:1, odoo/../secret.py:1 and mail/x.py:99."
     )
-    stubs = {
-        name: getattr(daemon, name) for name in ("get_ops_mounts", "get_worktree_bundle_folder")
-    }
+    names = ("WORKERS", "get_ops_mounts", "get_worktree_bundle_folder", "remote_agent")
+    stubs = {name: getattr(daemon, name) for name in names}
     daemon.get_worktree_bundle_folder = lambda bundle: str(tree)
     daemon.get_ops_mounts = lambda: [("/home/seb/repo/deck", str(drafts))]
+    up, remote, asked, replies = [True], [{"worker": "sebpc", "job": "12"}], [], []
+
+    def ssh(workers, worker, verb, bundle, *words, timeout=600):
+        asked.append([worker, verb, bundle, *words, timeout])
+        if isinstance(reply := replies.pop(0), Exception):
+            raise reply
+        return reply
+
+    daemon.WORKERS = types.SimpleNamespace(is_up=lambda name: up[0])
+    daemon.remote_agent = types.SimpleNamespace(read_remote=lambda folder: remote[0], ssh=ssh)
+
+    def on_worker(*answers, references=(["mail/x.py", 20, None],), rest=False):
+        asked.clear()
+        replies[:] = answers
+        if not rest:
+            daemon.workers_late.clear()
+        return daemon.get_read_lines("fix", "sebpc", [list(each) for each in references])
+
+    def count_fds():
+        return len(os.listdir("/proc/self/fd"))
     try:
         references = daemon.get_references(question)
         many = daemon.get_references("a.py:1 b.py:2 c.py:3 d.py:4 a.py:1")
@@ -2324,7 +2345,32 @@ def check_dialog_read(root):
         more = daemon.get_read_lines("fix", None, daemon.get_references(question.split("Also")[1]))
         more += daemon.get_read_lines("fix", None, [["mail/x.py", 99, None]])
         ops = daemon.get_read_lines(f"{daemon.OPS}s", None, [["~/repo/deck/feed.py", 2, None]])
-        worker = daemon.get_read_lines("fix", "sebpc", [["mail/x.py", 20, None]])
+        fds = count_fds()
+        folders = [daemon.get_read_lines("fix", None, [["mail/y.py", 1, None]]) for _ in range(20)]
+        fds = count_fds() - fds
+        text = (tree / "odoo" / "addons" / "mail" / "x.py").read_text()
+        found = {"read": "odoo/addons/mail/x.py", "text": text}
+        said = RuntimeError("agent-read: agent-read: no agent job of this bundle runs as JOB")
+        four = (["mail/x.py", 20, None], ["/etc/x.py", 1, None], ["b.py", 1, None])
+        four += (["c.py", 1, None],)
+        worker = on_worker(found, {"read": None}, said, references=four)
+        worker_asked = [words[:-1] for words in asked]
+        timeouts = [words[-1] for words in asked]
+        odd = (["a.py", 1, None], ["b.py", 1, None], ["c.py", 1, None])
+        odd = on_worker({"read": ["x"]}, [1], UnicodeDecodeError("utf-8", b"", 0, 1, "x"),
+                        references=odd)
+        refused = on_worker(references=(["odoo/../x.py", 1, None], ["a/./b.py", 1, None]))
+        refused_asked = len(asked)
+        two = (["a.py", 1, None], ["b.py", 1, None])
+        late = on_worker(subprocess.TimeoutExpired("ssh", 8), references=two)
+        late_asked = len(asked)
+        rested = on_worker(references=two, rest=True)
+        rested_asked = len(asked)
+        up[0] = False
+        cut = on_worker(references=two)
+        cut_asked = len(asked)
+        up[0], remote[0] = True, None
+        left = on_worker()
     finally:
         vars(daemon).update(stubs)
     around = [
@@ -2368,19 +2414,68 @@ def check_dialog_read(root):
             and ops[0]["path"] == "/home/seb/repo/deck/feed.py",
         ),
         (
-            "a worker keeps the tree of its agent",
-            worker
+            "a worker reads the first candidate that is a file in the checkout of the job",
+            worker[0] == here[0]
+            and worker_asked[0][:5] == ["sebpc", "agent-read", "fix", "12", "mail/x.py"]
+            and "odoo/addons/mail/x.py" in worker_asked[0]
+            and len(worker_asked) == 3,
+        ),
+        (
+            "each ask of a card has what is left of its 8 s, and an odd answer gives no line",
+            all(0 < timeout <= 8 for timeout in timeouts)
+            and timeouts == sorted(timeouts, reverse=True)
+            and odd[:1]
+            == [{"label": "read", "path": "c.py", "why": "not read: sebpc said: 'utf-8' codec"
+                 " can't decode bytes in position 0-0: x"}]
+            and len(odd) == 1,
+        ),
+        (
+            "a path the worker refuses is not asked and gives no line, as here",
+            refused == [] and refused_asked == 0,
+        ),
+        (
+            "a folder named as a file gives no line here, and leaves no file open",
+            folders == [[]] * 20 and fds == 0,
+        ),
+        (
+            "a path with no candidate is not asked, no file gives no row, a refusal says why",
+            worker[1:]
             == [
                 {
                     "label": "read",
-                    "path": "mail/x.py",
-                    "why": "not read: the agent runs on sebpc, where its files are",
+                    "path": "c.py",
+                    "why": "not read: sebpc said: no agent job of this bundle runs as JOB",
                 }
             ],
         ),
+        (
+            "a worker that does not answer in time is not asked again for a while",
+            late_asked == 1
+            and late
+            == [
+                {"label": "read", "path": path, "why": "not read: sebpc gave no answer in 8 s"}
+                for path in ("a.py", "b.py")
+            ]
+            and rested == late
+            and rested_asked == 0,
+        ),
+        (
+            "no connection, or an agent that left the worker, asks nothing and says so",
+            cut
+            == [
+                {"label": "read", "path": path, "why": "not read: no connection to sebpc"}
+                for path in ("a.py", "b.py")
+            ]
+            and left
+            == [{"label": "read", "path": "mail/x.py", "why": "not read: its agent left sebpc"}]
+            and not asked
+            and not cut_asked,
+        ),
     ]
     return [
-        f"dialog read: {name}: {here, more, ops}" for name, passed in checks if not passed
+        f"dialog read: {name}: {here, more, ops, worker, odd, timeouts, late, cut, left, fds}"
+        for name, passed in checks
+        if not passed
     ], len(checks)
 
 

@@ -196,7 +196,15 @@ DIALOG_EVERY = 5
 DIALOG_SIZES = {"header": 60, "question": 2000, "label": 200, "description": 600}
 DIALOG_CODE = {"lines": 80, "width": 300}
 OPS_HOME = "/home/vscode"
-DIALOG_READ = {"around": 5, "lines": 40, "references": 3, "size": 2 * 1024 * 1024}
+DIALOG_READ = {
+    "around": 5,
+    "lines": 40,
+    "references": 3,
+    "size": 2 * 1024 * 1024,
+    "paths": 16,
+    "seconds": 8,
+    "rest": 60,
+}
 CODE_REFERENCE = re.compile(
     r"(?<![\w./~-])((?:~/|/)?[\w+-][\w.+-]*(?:/[\w.+-]+)*\.[A-Za-z][A-Za-z0-9]*)"
     r":([0-9]{1,6})(?:-([0-9]{1,6}))?"
@@ -393,6 +401,7 @@ bundle_locks = {}
 moving_back = set()
 building_for_worker = set()
 dialogs_missing = {}
+workers_late = {}
 remote_stops = {}
 missing_agents = {}
 orphans = {}
@@ -3448,14 +3457,13 @@ def get_references(text):
 
 def get_read_lines(bundle, worker, references):
     """The lines around each path:line a question names, read from the tree of its agent: the
-    folder of its bundle, or the mounts of the ops container for an ops window. A path that is no
-    text file there gets no line: `host:8069` reads as one. A worker keeps the tree of its agent
-    until the job ends, so its references are not read (README.md, "Remote agents")."""
+    folder of its bundle, the checkout of its job on a worker, or the mounts of the ops container
+    for an ops window. A path that is no text file there gets no line: `host:8069` reads as one
+    (README.md, "Remote agents")."""
     if not references:
         return []
     if worker:
-        why = f"not read: the agent runs on {worker}, where its files are"
-        return [{"label": "read", "path": path, "why": why} for path, _first, _last in references]
+        return get_worker_read_lines(bundle, worker, references)
     get_candidates = get_ops_candidates if bundle.startswith(OPS) else get_bundle_candidates
     lines = []
     for path, first, last in references:
@@ -3470,6 +3478,72 @@ def get_read_lines(bundle, worker, references):
                 lines.append({"label": "read", "path": shown, **(code or why)})
                 break
     return lines
+
+
+def get_worker_read_lines(bundle, worker, references):
+    """get_read_lines for an agent on a worker, which keeps the tree of its job until the job
+    ends: one `agent-read` of the worker a reference, with the candidates of
+    get_bundle_candidates that the worker takes, DIALOG_READ["seconds"] for them all, as the
+    thread that holds the cards also types in the agents. Past that time, or with no connection,
+    each reference left gets a row that says why, and a worker that gave no answer in time is
+    not asked again for DIALOG_READ["rest"] seconds, so that a pass of several cards waits on it
+    once."""
+    try:
+        remote = remote_agent.read_remote(pathlib.Path(get_worktree_bundle_folder(bundle)))
+    except (OSError, ValueError):
+        remote = None
+    deadline = time.monotonic() + DIALOG_READ["seconds"]
+    late = f"not read: {worker} gave no answer in {DIALOG_READ['seconds']} s"
+    lines, why = [], None
+    if not remote or remote["worker"] != worker:
+        why = f"not read: its agent left {worker}"
+    elif time.monotonic() - workers_late.get(worker, -math.inf) < DIALOG_READ["rest"]:
+        why = late
+    elif not WORKERS.is_up(worker):
+        why = f"not read: no connection to {worker}"
+    for path, first, last in references:
+        try:
+            candidates = get_bundle_candidates(bundle, path)
+        except (OSError, KeyError, ValueError):
+            candidates = []
+        shown = {inside: each for _root, inside, each in candidates if is_worker_path(inside)}
+        shown = dict(list(shown.items())[: DIALOG_READ["paths"]])
+        if not shown:
+            continue
+        left = deadline - time.monotonic()
+        why = why or (late if left <= 0 else None)
+        if why:
+            lines.append({"label": "read", "path": path, "why": why})
+            continue
+        try:
+            answer = remote_agent.ssh(
+                WORKERS, worker, "agent-read", bundle, remote["job"], *shown, timeout=left
+            )
+        except subprocess.TimeoutExpired:
+            workers_late[worker] = time.monotonic()
+            why = late
+            lines.append({"label": "read", "path": path, "why": why})
+            continue
+        except (OSError, RuntimeError, ValueError) as error:
+            said = re.sub(r"^(agent-read: )+", "", " ".join(str(error).split()))
+            said = cut_text(f"not read: {worker} said: {said}", DIALOG_SIZES["description"])
+            lines.append({"label": "read", "path": path, "why": said})
+            continue
+        read = answer.get("read") if isinstance(answer, dict) else None
+        if isinstance(read, str) and read in shown and isinstance(answer.get("text"), str):
+            code = get_read_code(answer["text"], first, last)
+            no_line = {"why": "no such line in that file"}
+            lines.append({"label": "read", "path": shown[read], **(code or no_line)})
+    return lines
+
+
+def is_worker_path(inside):
+    """Whether the worker takes a path in the checkout of a job: the parts of CODE_REFERENCE, none
+    empty, `.` or `..`, nor longer than 255, 1024 characters in all (remote-runs README, "Verbs").
+    The others are no file of the tree here either."""
+    parts = inside.split("/")
+    fits = all(part not in ("", ".", "..") and len(part) <= 255 for part in parts)
+    return fits and len(inside) <= 1024
 
 
 def get_bundle_candidates(bundle, path):
@@ -3550,14 +3624,16 @@ def read_tree_file(root, inside):
         return None
     finally:
         os.close(folder)
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode) or info.st_size > DIALOG_READ["size"]:
+        os.close(fd)
+        return None
     with os.fdopen(fd, "rb") as file:
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_size > DIALOG_READ["size"]:
-            return None
-        try:
-            return file.read(DIALOG_READ["size"] + 1).decode()
-        except UnicodeDecodeError:
-            return None
+        data = file.read(DIALOG_READ["size"] + 1)
+    try:
+        return data.decode() if len(data) <= DIALOG_READ["size"] else None
+    except UnicodeDecodeError:
+        return None
 
 
 def get_read_code(text, first, last):
