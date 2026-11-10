@@ -539,7 +539,26 @@ def check_prompt(root, check):
         check(f"{agent} on {session[:8]} is not told", found[0] == 404, found)
     remote.add("b4")
     found = ask(daemon.prompt_window, BUNDLE_SESSION, agent="b4", text="go on")
-    check("an agent on a worker is not told", found[0] == 404 and "worker" in found[1]["error"])
+    check(
+        "an agent that starts on a worker is not told",
+        found[0] == 404 and "worker" in found[1]["error"],
+    )
+    daemon.get_remote_agents = lambda: {"b4": "sebpc"}
+    daemon.TOLD_DIR = root / "told"
+    found = ask(daemon.prompt_window, BUNDLE_SESSION, agent="b4", text="the @ of both")
+    told = sorted(
+        path.read_text() for path in (root / "told" / "b4" / BUNDLE_SESSION).glob("*.txt")
+    )
+    check(
+        "an agent on a worker with its terminal open here gets it as a line of the host",
+        found[0] == 200
+        and told == ["the @ of both"]
+        and "the @ of both" not in prompts("b4", BUNDLE_SESSION),
+        found,
+    )
+    for path in (root / "told" / "b4" / BUNDLE_SESSION).glob("*.txt"):
+        path.unlink()
+    daemon.get_remote_agents = dict
     remote.clear()
     agents["b7"] = root / "b7" / ".agent"
     agents["b7"].mkdir(parents=True)

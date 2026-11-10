@@ -4713,9 +4713,9 @@ def prompt_window(caller, query, body):
 
 def get_remote_worker(agent, session):
     """The worker that runs the agent of a bundle on that session, which its terminal here does
-    not type in: a prompt of deck goes there as the lines of the host in told/ (README.md,
-    "Prompts from deck"). None for an ops agent, or another session."""
-    if agent.startswith(OPS) or agent in get_terminals():
+    not type in, open or not: a prompt of deck goes there as the lines of the host in told/
+    (README.md, "Prompts from deck"). None for an ops agent, or another session."""
+    if agent.startswith(OPS):
         return None
     worker = get_remote_agents().get(agent)
     if not worker or read_text(get_agent_folder(agent) / "session") != session:

@@ -1482,12 +1482,16 @@ feed of deck asks, on the host: `POST /prompt {agent, session, text}` and `POST 
 session}`, where `agent` is the bundle of the row, or `ops-SESSION` for an ops agent. The window
 of that agent must run that session here: else 404, nothing is left, nothing starts (a closed
 window, a tab of VS Code, a session the agent does not run). Not by the session alone, as a bundle
-may claim the session of another in its `.agent/session`. An agent on a worker with its terminal
-open here is refused too, as Seb may be typing there. One with no terminal here gets the prompt as
+may claim the session of another in its `.agent/session`. An agent on a worker gets the prompt as
 a line of the host, in `told/BUNDLE/SESSION`, typed on its worker within a second as the answer to
 a question card is (see Remote agents), when its `.agent/session` is that session (Seb,
 2026-11-05: the card of an agent that waits for him in deck sends his answer from the box, and
-the agents of sebpc waited too).
+the agents of sebpc waited too). Its terminal open here changes nothing, as for the other lines of
+the host: until 2026-11-10 it was refused, `runs on a worker: Move to Laptop first`, as Seb could
+be typing there, and his words on the card of 20.0-planning-send-slot-warn-no-contact--seb, "can
+you @ the 2 persons", reached nothing (Seb: "something I type in the feedback box should never be
+lost or not sent, whatever the button I press"). A prompt typed while he has a draft in that
+terminal lands in his draft, as a task does (see Remote agents).
 
 - The daemon leaves the prompt in `~/.local/state/bundle-ctl/deck/AGENT/SESSION/` of the host,
   never in `.agent/`: a bundle writes that folder, and its own lines there would be typed as Seb's.
