@@ -4916,8 +4916,9 @@ def get_deck_window(body):
 
 
 def prompt_window(caller, query, body):
-    """`POST /prompt {agent, session, text}`: a prompt Seb sent from deck, for the agent window
-    that runs that session, which types it as his own (README.md, "Prompts from deck"). Only the
+    """`POST /prompt {agent, session, text, open}`: a prompt Seb sent from deck, for the agent
+    window that runs that session, which types it as his own, and with `open` for a window
+    opened again on that session when none runs it (README.md, "Prompts from deck"). Only the
     host asks (HOST_ONLY)."""
     text = body.get("text")
     if not isinstance(text, str) or not 0 < len(text.strip()) <= len(text) <= MAX_TASK:
@@ -4930,18 +4931,41 @@ def prompt_window(caller, query, body):
         raise Refused("a line that starts with ! may run in a shell: type it in the terminal")
     folder, why = get_deck_window(body)
     worker = folder is None and get_remote_worker(body["agent"], body["session"])
+    on = ""
     if worker:
         folder = TOLD_DIR / body["agent"] / body["session"]
         folder.parent.mkdir(parents=True, exist_ok=True)
+        on = f", typed on {worker} as the lines of the host"
+    elif folder is None and body.get("open"):
+        folder = open_for_prompt(caller, body["agent"], body["session"])
+        on = ", its window opened again"
     elif folder is None:
         return 404, {"error": why}
     try:
         leave_event(folder.parent, text, folder.name)
     except OSError as error:
         raise Refused(f"{body['agent']}: the prompt was not left: {error}") from error
-    on = f", typed on {worker} as the lines of the host" if worker else ""
     print(f"{body['agent']}: a prompt from deck, {len(text)} characters{on}", flush=True)
     return 200, {"bundle": body["agent"]}
+
+
+def open_for_prompt(caller, agent, session):
+    """The folder of deck where the terminal of agent looks for its prompts on session, once a
+    terminal is asked on that session: an ops agent in a new ops agent window, a bundle in its
+    agent terminal, as `bctl open AGENT --terminal` (Seb, 2026-11-11: "the agent in "closed"
+    list could be resumed by simply sending a message in their chat"). A bundle terminal takes
+    the last session of the bundle, the one kept at its deletion for a deleted bundle: one that
+    went on in another session since is refused, as the prompt would wait for a session no
+    terminal runs."""
+    if not agent.startswith(OPS):
+        last = read_text(get_agent_folder(agent) / "session")
+        if (last or read_text(get_kept(agent, ".session"))) != session:
+            raise Refused(f"{agent}: its bundle went on in another session since")
+    elif agent != f"{OPS}{session}":
+        raise ValueError(f"agent: {OPS}{session} for that session")
+    open_bundle(caller, {}, {"bundle": agent, "terminal": True})
+    (DECK_DIR / agent).mkdir(parents=True, exist_ok=True)
+    return DECK_DIR / agent / session
 
 
 def get_remote_worker(agent, session):

@@ -75,7 +75,7 @@ the pager. `python3 test_node_modules.py` and `python3 test_delete.py` have the 
 | `POST /place` | the agent of `bundle` put `where`: `local`, or a worker of `BUNDLE_CTL_WORKERS` (see Remote agents). The host or the ops container asks |
 | `POST /requeue` | the session of the agent of `bundle`, or of an ops agent window with `ops-SESSION` (see Ops agents), queued again, last, paused with `paused`, and its agent window closed once its turn ended, 2 minutes at most: meanwhile `client/run-hook.py` refuses the Bash calls of a bundle, on a reason that tells it to end its turn, and a turn still running at the end goes on told it was cut (see Cut sessions). With `github`, it waits for the GitHub connection of the host. The host or the ops container asks, or with `github` the bundle itself |
 | `POST /close` | the agent window of `bundle` closed with no yes, as after its verdict: its claude and its container stop, its session stays; refused while a claude of the bundle is in a turn or waits for an answer, or while its agent starts (see Agents in a terminal). An agent on a worker stops there as after its verdict and its work tree comes back: its turn is read in the session record the worker mirrors back, and it is refused while it moves (see Remote agents); with `force` (deck's Close), a turn there does not refuse it: its claude stops at its next tool call or at the end of the turn, a dialog at once. Refused to a container |
-| `POST /prompt` | a prompt Seb sent from deck, typed as his own in the window of `agent` (a bundle, or `ops-SESSION`) while it runs `session`, or on its worker for an agent that runs there with no terminal here; 404 otherwise (see Prompts from deck). Refused to a container |
+| `POST /prompt` | a prompt Seb sent from deck, typed as his own in the window of `agent` (a bundle, or `ops-SESSION`) while it runs `session`, or on its worker for an agent that runs there with no terminal here; with `open`, a terminal opened again on that session when none runs it; 404 otherwise (see Prompts from deck). Refused to a container |
 | `POST /stop` | Escape in the window of `agent` while it runs `session`, in a turn or a dialog, or on its worker for an agent that runs there with no terminal here (see Prompts from deck). Refused to a container |
 | `POST /schedule` | when the queued task of `bundle` may start: `when` is `spot` (once a slot, the memory and the CPU let it), `manual` (it waits for a manual resume, until it is scheduled again) or `HH:MM` (that time of the host, today or tomorrow); it no longer goes over the cap. Then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
 | `POST /unqueue` | the queued task of a bundle dropped; the host, that bundle or the one that queued the task asks |
@@ -1481,7 +1481,7 @@ The chat of deck sends a prompt to an agent window from any device of Seb, and s
 feed of deck asks, on the host: `POST /prompt {agent, session, text}` and `POST /stop {agent,
 session}`, where `agent` is the bundle of the row, or `ops-SESSION` for an ops agent. The window
 of that agent must run that session here: else 404, nothing is left, nothing starts (a closed
-window, a tab of VS Code, a session the agent does not run). Not by the session alone, as a bundle
+window, a tab of VS Code, a session the agent does not run), unless deck asks `open` (below). Not by the session alone, as a bundle
 may claim the session of another in its `.agent/session`. An agent on a worker gets the prompt as
 a line of the host, in `told/BUNDLE/SESSION`, typed on its worker within a second as the answer to
 a question card is (see Remote agents), when its `.agent/session` is that session (Seb,
@@ -1492,6 +1492,15 @@ be typing there, and his words on the card of 20.0-planning-send-slot-warn-no-co
 you @ the 2 persons", reached nothing (Seb: "something I type in the feedback box should never be
 lost or not sent, whatever the button I press"). A prompt typed while he has a draft in that
 terminal lands in his draft, as a task does (see Remote agents).
+
+With `open`, a prompt to an agent no window runs opens one on that session, as `bctl open AGENT
+--terminal`, and waits in its folder until the terminal types it once the session resumed (Seb,
+2026-11-11: "the agent in "closed" list could be resumed by simply sending a message in their
+chat"; deck README, "Closed agents"). An ops agent gets a new ops agent window on its session; a
+bundle its agent terminal, which takes the last session of the bundle, or the session kept at its
+deletion: a bundle that went on in another session since is refused, `its bundle went on in
+another session since`, and nothing opens. An agent whose window runs that session gets the prompt
+as without `open`, and one on a worker as the lines of the host.
 
 - The daemon leaves the prompt in `~/.local/state/bundle-ctl/deck/AGENT/SESSION/` of the host,
   never in `.agent/`: a bundle writes that folder, and its own lines there would be typed as Seb's.

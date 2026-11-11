@@ -609,6 +609,37 @@ def check_prompt(root, check):
         check(f"a prompt {bad[:8]!r} is refused", found[0] == "ValueError", found)
     found = ask(daemon.prompt_window, BUNDLE_SESSION, agent="../b4", text="go on")
     check("a bad agent is refused", found[0] == "ValueError", found)
+    opened = []
+    daemon.open_bundle = lambda caller, query, body: opened.append(body) or (202, {"job": "j"})
+    daemon.STATE = root / "state"
+    agents["b8"] = root / "b8" / ".agent"
+    agents["b8"].mkdir(parents=True)
+    (agents["b8"] / "session").write_text(f"{BUNDLE_SESSION}\n")
+    closed = f"ops-{STOPPED_SESSION}"
+    for agent, session in (("b8", BUNDLE_SESSION), (closed, STOPPED_SESSION)):
+        found = ask(daemon.prompt_window, session, agent=agent, text="go on", open=True)
+        check(
+            f"a prompt with open to the closed {agent[:5]} opens its terminal and waits there",
+            found[0] == 200
+            and opened[-1] == {"bundle": agent, "terminal": True}
+            and prompts(agent, session) == ["go on"],
+            found,
+        )
+    found = ask(daemon.prompt_window, STOPPED_SESSION, agent="b8", text="go on", open=True)
+    check(
+        "but not on a session its bundle left since",
+        found[0] == "Refused" and len(opened) == 2 and not prompts("b8", STOPPED_SESSION),
+        found,
+    )
+    agents["b9"] = root / "b9" / ".agent"
+    (root / "state" / "deleted").mkdir(parents=True)
+    (root / "state" / "deleted" / "b9.session").write_text(f"{BUNDLE_SESSION}\n")
+    found = ask(daemon.prompt_window, BUNDLE_SESSION, agent="b9", text="go on", open=True)
+    check("a deleted bundle opens on the session kept", found[0] == 200 and len(opened) == 3, found)
+    found = ask(daemon.prompt_window, OPS_SESSION, agent=closed, text="go on", open=True)
+    check("an ops window on another session is refused", found[0] == "ValueError", found)
+    found = ask(daemon.prompt_window, BUNDLE_SESSION, agent="b4", text="go on", open=True)
+    check("an agent with its window opens nothing", found[0] == 200 and len(opened) == 3, found)
     found = ask(daemon.stop_window, BUNDLE_SESSION, agent="b4")
     stop = root / "deck" / "b4" / BUNDLE_SESSION / "stop"
     check("a stop leaves stop", found[0] == 200 and stop.is_file(), found)
