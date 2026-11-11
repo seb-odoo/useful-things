@@ -1,6 +1,6 @@
 #!/bin/sh
-# ExecCondition of ssh-github-mux.service: the key is asked when the screen is unlocked, and an
-# ask nobody answered is not repeated until the next unlock or a git command of the host.
+# ExecCondition of ssh-github-mux.service: an ask nobody answered is not repeated until the next
+# unlock or a git command of the host.
 dir=~/.local/state/ssh-github-mux
 mkdir -p "$dir/request" "$dir/sock"
 
@@ -11,10 +11,6 @@ hold() {
 }
 
 [ -e "$dir/sock/probe" ] && rm -f "$dir/sock/probe" && exit 0
-case $(dbus-send --session --print-reply=literal --dest=org.cinnamon.ScreenSaver \
-    /org/cinnamon/ScreenSaver org.cinnamon.ScreenSaver.GetActive 2>/dev/null) in
-*true*) hold ;;
-esac
 [ -e "$dir/request/held" ] || exit 0
 [ "$dir/request/now" -nt "$dir/request/start" ] || hold
 rm -f "$dir/request/held"

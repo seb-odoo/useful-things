@@ -12,10 +12,13 @@ each push of a container.
   starts `ssh-github-mux.service`, the connection itself, with the key of ssh-agent-gate.
 - An ask nobody answers dies after a minute, and the bundles that wait for GitHub ask again every
   10 minutes (the bctl queue) and at each fetch of an agent: Seb got a stream of asks while away,
-  then 8 in an hour while he was at the machine and left the prompt alone. So `here`, the
-  `ExecCondition` of the unit, holds the start and leaves `request/held` while the Cinnamon
-  screensaver is active, and the unit leaves that file too when a run ended with no socket (the
-  keys are not loaded, the network is down).
+  then 8 in an hour while he was at the machine and left the prompt alone. So the unit leaves
+  `request/held` when a run ended with no socket (the keys are not loaded, the network is down),
+  and `here`, the `ExecCondition` of the unit, holds the next start while that file is there.
+- `here` held the start too while the Cinnamon screensaver was active, until 2026-11-11: since
+  10-28 a reconnect asks no card, so the hold saved nothing, and that day the screensaver crashed
+  at an undock and came back saying "active" for good: GitHub stayed down for the bundles from
+  12:33 to the evening, the bundles' asks and Seb's own all held (his pick: drop the test).
 - While `request/held` is there, only an ask of Seb himself goes through: `request/now`, written
   by `wait` for a git command of the host, and by `on-unlock` at unlock
   (`ssh-github-mux-unlock.service`). The queue and the agents write `request/start`, held until
@@ -43,7 +46,7 @@ each push of a container.
   is up, `ssh-github-mux-probe.timer` runs `probe` every 2 minutes: a session through the socket
   must get GitHub's greeting within 20 seconds, else the unit restarts, and the sessions that
   still run through it end. The journal of `ssh-github-mux-probe` keeps what `ssh -v` said, which
-  shows whether the master got its session from GitHub. That restart passes a locked screen
+  shows whether the master got its session from GitHub. That restart passes a `request/held`
   (`sock/probe`, read by `here`): the keys are loaded, a reconnect asks no card. When the next
   probe finds the new connection stuck too, a desktop notification says so.
 

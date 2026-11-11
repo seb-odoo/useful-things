@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """probe restarts a connection that opens no new session, here lets that restart through a
-locked screen, and install links the units, with ssh, timeout and systemctl faked:
+held start, and install links the units, with ssh, timeout and systemctl faked:
 python3 test_probe.py"""
 
 import os
@@ -80,10 +80,12 @@ def main():
         found["an answer again: the count starts over"] = ((sock / "probe-failed").exists(), False)
         server.close()
 
-        fake(root, "dbus-send", "echo 'boolean true'")
-        found["here: a probe restart passes a locked screen"] = (run(root, "here").returncode, 0)
+        request = sock.parent / "request"
+        request.mkdir()
+        (request / "held").touch()
+        found["here: a probe restart passes a held start"] = (run(root, "here").returncode, 0)
         found["here: once"] = ((sock / "probe").exists(), False)
-        found["here: a locked screen holds the rest"] = (run(root, "here").returncode, 1)
+        found["here: a held start holds the rest"] = (run(root, "here").returncode, 1)
 
         calls.unlink()
         fake(root, "systemctl", f'echo "systemctl $*" >> {calls}; [ "$2" != is-active ]')

@@ -15,7 +15,9 @@ HERE = pathlib.Path(__file__).resolve().parent
 
 def run(root, script):
     env = {"HOME": str(root), "PATH": f"{root / 'bin'}:{os.environ['PATH']}"}
-    subprocess.run(["sh", str(HERE / script)], capture_output=True, check=False, env=env, timeout=30)
+    return subprocess.run(
+        ["sh", str(HERE / script)], capture_output=True, check=False, env=env, timeout=30
+    ).returncode
 
 
 def fake(root, name, text):
@@ -57,13 +59,23 @@ def main():
         )
 
         (request / "held").unlink()
-        (request / "held").symlink_to(root / "made")
+        fake(root, "dbus-send", "boolean true")
+        found["here: a screensaver that says active holds nothing"] = (
+            (run(root, "here"), (request / "held").exists()),
+            (0, False),
+        )
+
+        made = root / "made"
+        made.write_text("kept\n")
+        (request / "held").unlink(missing_ok=True)
+        (request / "held").symlink_to(made)
+        (request / "start").touch()
+        os.utime(request / "start", (time.time() + 60,) * 2)
         (sock / "stopped").unlink()
         (sock / "stopped").symlink_to(root / "made-stopped")
-        fake(root, "dbus-send", "boolean true")
-        run(root, "here")
-        found["here: no file where a link points"] = ((root / "made").exists(), False)
-        found["here: request/held"] = ((request / "held").is_file(), True)
+        found["here: held"] = (run(root, "here"), 1)
+        found["here: the file a link names"] = (made.read_text(), "kept\n")
+        found["here: request/held"] = ((request / "held").is_symlink(), False)
         found["here: no file where a link at sock/stopped points"] = (
             (root / "made-stopped").exists(),
             False,
