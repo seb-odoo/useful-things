@@ -1625,7 +1625,9 @@ Since the ops container has a project folder of its own (`ops-home-seb-repo`, se
 `claude --resume`, which looks in its own folder only: on 2026-11-05 the first 3 cut sessions
 resumed after K1 ended at once on "claude ended with code 1".
 A `stopped` agent whose last turn ended is not cut: on 2026-10-16 the 5 of the last 3 days had all
-ended on a report Seb had read, after a chat of his ("ready thanks", "send to ops").
+ended on a report Seb had read, after a chat of his ("ready thanks", "send to ops"). A session
+queued already is not cut either: the daemon parks there the agents a shutdown closed (see After a
+shutdown).
 
 `bctl open --cut` prints for each its bundle or `ops-SESSION`, the title of the conversation, when
 it was cut and why, its last call and its last prompt, cut to 160 characters. With `--resume` the
@@ -1659,6 +1661,50 @@ file written, a request held in hok) before running it again; then that last cal
 2026-10-08 told one container the same. `python3 test_cut.py` runs each case on fake transcripts
 and a fake `/proc`, the request held for `hok`, the client, and the yes, with the windows it
 closes first.
+
+## After a shutdown
+
+The rows of the agent list are the agent windows open now, and only the queue is kept in
+`state.json`. So a shutdown, a crash of the X server or a kill used to take every open agent out of
+the list: after the unexpected shutdown of 2026-11-05, 14 bundle agents came back only because an
+ops session found them in the journal of the daemon, as `--cut` lists the turns that had not ended
+only.
+
+Each agent window keeps a note while it is open, `windows/NAME.json` beside the state of the daemon
+(NAME is the bundle or `ops-SESSION`), with the process of its `agent-terminator.py` and the boot
+of the host. The window drops it when someone closes it: the daemon, the agent list or a takeover
+(SIGUSR1), a tab that takes an ops session, Seb on its close button, or its claude that ends
+(terminator ends on code 0), unless the host shuts down (`systemctl is-system-running` says
+`stopping`). An X server that goes ends terminator on code 1, and a shutdown kills it: the note
+stays. At each pass (10 to 60 seconds) the daemon touches the note of each live window, so its time
+says when the window was last seen open, and takes a note whose process is gone for a lost window.
+A window opened before the notes gets one from the daemon, `adopted`: as its close drops none, it
+counts as lost after a reboot only (another boot id), and in the same boot its note goes 2 minutes
+(`LOST_AFTER`) after its process.
+
+For each lost window the daemon reads the transcript of its session (`cut.get_pending`), and parks
+its agent when it had work left: its turn was cut (see Cut sessions), a background command or agent
+it started still ran (a wait on a hok card, the watch of a review), or its last answer did not close
+the work, with a verdict on its first line for a bundle, `Nothing left` on its last for an ops
+session. Parked is queued again with `resume` and `paused`, on the prompt of a cut session that
+says the laptop shut down or its desktop session ended, with the priority, the model and the effort
+of its last task (0 for an ops session). It is left closed when it ended on its verdict or on
+`Nothing left` (its report stays in deck), runs on a worker, is queued already or being deleted,
+its folder is gone, or a new window or a VS Code window holds its session. While its container or
+its claude still stops, as for a few seconds after a crash of the X server, the note waits for the
+next pass, 10 minutes at most (`LOST_WAIT`). The journal says `NAME: its window ended at HH:MM with
+nobody closing it`, then why it is parked or left.
+
+Then the daemon holds one request, `bN`, that `hok` shows as "resume the N agents a shutdown or a
+crash closed", with each agent, why it had work left and its last prompt, and what the first one is
+told (Seb, 2026-11-11: "Parked + one card", over agents that start by themselves after the login,
+and a card with nothing in the list until his yes). His rule of 2026-10-16 stays: "I don't want
+them to all automatically come back at reboot. just when I ask, or in queue, but not started". A
+window lost before his answer asks the same request again with it, under the same number. His yes
+takes each of them still paused out of the pause, and the queue starts them a few at a time, as the
+cap and the memory let it. A no leaves them paused, each with its Resume in the agent list and in
+deck. Meanwhile a parked review bundle may lose its checkout, which comes back at its resume (see
+Disk). `python3 test_lost_windows.py` runs each case.
 
 ## Agent windows
 

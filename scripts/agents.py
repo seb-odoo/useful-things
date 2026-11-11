@@ -19,6 +19,7 @@ from config import CLAUDE_CONFIG_CONTAINER, HOST_PROJECT, STATE_ROOT, TRANSCRIPT
 EFFORTS = ("low", "medium", "high", "xhigh")
 HANDLED_FOR = 24 * 3600
 MAX_HANDLED = 64 * 1024
+MAX_NOTE = 4096
 MAX_READ = 1 << 20
 MAX_RECORD = 64 * 1024
 IDLE_AFTER = 15 * 60
@@ -45,6 +46,7 @@ VALUE_FORMS = {
     "terminal": re.compile(r"[0-9]{1,10}"),
     "where": re.compile(r"auto|local|worker(?::[a-z][a-z0-9-]{0,39})?"),
 }
+WINDOWS = STATE / "windows"
 
 title_by_session = {}
 
@@ -428,3 +430,57 @@ def read_state():
         return json.loads(STATE_FILE.read_text())
     except (OSError, ValueError):
         return {"launches": {}, "queue": []}
+
+
+def get_boot():
+    """The id of this boot of the host: a note of a window written in another boot was left by a
+    shutdown."""
+    try:
+        return pathlib.Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    except OSError:
+        return ""
+
+
+def is_host_stopping():
+    """Whether the host shuts down: its windows then close with no one asking."""
+    state = subprocess.run(
+        ["systemctl", "is-system-running"],
+        capture_output=True,
+        check=False,
+        text=True,
+    ).stdout.strip()
+    return state == "stopping"
+
+
+def write_window_note(name, pid, adopted=False):
+    """Note that the agent window of a bundle or of an ops session (NAME) is open in the process
+    PID, its agent-terminator.py: the note stays when a shutdown or a crash closes the window, and
+    the daemon then brings its agent back (README.md of bundle-ctl, "After a shutdown"). `adopted`
+    is a window the daemon found with no note, opened before the notes: its close drops none."""
+    WINDOWS.mkdir(parents=True, exist_ok=True)
+    note = {"boot": get_boot(), "pid": pid, **({"adopted": True} if adopted else {})}
+    fresh = WINDOWS / f".{name}.{pid}.new"
+    fresh.write_text(json.dumps(note))
+    fresh.replace(WINDOWS / f"{name}.json")
+
+
+def read_window_note(path):
+    """The note of a window, None when it is not one."""
+    try:
+        note = json.loads(read_bytes(path, MAX_NOTE) or b"")
+    except ValueError:
+        return None
+    return note if isinstance(note, dict) and type(note.get("pid")) is int else None
+
+
+def get_window_notes():
+    """The note of each window, by its name: (name, path, note), the note None when unreadable."""
+    return [(path.stem, path, read_window_note(path)) for path in sorted(WINDOWS.glob("*.json"))]
+
+
+def drop_window_note(name, pid):
+    """Drop the note of a window someone closed, unless a newer window of NAME wrote its own."""
+    path = WINDOWS / f"{name}.json"
+    note = read_window_note(path)
+    if note and note["pid"] == pid:
+        path.unlink(missing_ok=True)

@@ -1,4 +1,5 @@
-"""The Claude sessions a crash or a restart cut, in the bundle containers and in the ops container.
+"""The Claude sessions a crash or a restart cut, in the bundle containers and in the ops container,
+and what a session whose window a shutdown closed had left to do (get_pending).
 
 A session is cut when no claude runs it any more, its transcript was written in the last WINDOW,
 and its last turn had not ended:
@@ -31,6 +32,7 @@ GO_ON = "Continue from where you left off."
 INTERRUPTED = "[Request interrupted by user"
 LOCAL = ("<bash-", "<command-", "<local-command-")
 MAX_TAIL = 64 << 20
+NOTHING_LEFT = re.compile(r"[*_\s]*nothing (is )?left\b", re.IGNORECASE)
 NOTIFIED = re.compile(rb"<task-id>([^<]+)</task-id>")
 PARTS = re.compile(r"^\s*(#+\s*|\*\*)(Done|Decide|Your action)\b", re.IGNORECASE | re.MULTILINE)
 REPORT_LINES = 15
@@ -199,6 +201,26 @@ def get_cut(session):
     if session["background"] and is_short(last["text"]):
         return "it waited for a background command or agent"
     return None
+
+
+def get_pending(session, ops=False):
+    """What a session whose window a shutdown or a crash closed had left to do, None when
+    nothing: its turn was cut, a background command or agent it started still ran (a wait on a hok
+    card, the watch of a review), or its last answer did not close the work, with a verdict on its
+    first line for the agent of a bundle, on "Nothing left" for an ops session."""
+    if why := get_cut(session):
+        return why
+    if session["background"]:
+        return "a background command or agent it started still ran"
+    last = session["last"]
+    lines = [line for line in (last["text"] if last else "").splitlines() if line.strip()]
+    while lines and SEPARATELY.match(lines[-1]):
+        lines.pop()
+    if ops:
+        closed = lines and NOTHING_LEFT.match(lines[-1])
+        return None if closed else "its last answer did not end on Nothing left"
+    closed = lines and VERDICT.match(lines[0].strip().lstrip("#*_` "))
+    return None if closed else "its last answer gave no verdict"
 
 
 def get_live_sessions(records, proc="/proc"):

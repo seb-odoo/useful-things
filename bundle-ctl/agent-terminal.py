@@ -71,6 +71,7 @@ from agents import (  # noqa: E402
     get_session_status,
     get_transcript,
     has_window,
+    is_host_stopping,
     open_regular,
     open_unlinked,
     read_text,
@@ -664,15 +665,7 @@ def close_groups(agent, bundle):
     """Close the Firefox tab groups of the bundle, as Seb closed its agent. Not when the daemon
     closed the window to queue the agent again (its `pause` stays until the window is gone), nor
     when the host shuts down, as Firefox opens the groups again at its start."""
-    if (agent / "pause").exists():
-        return
-    state = subprocess.run(
-        ["systemctl", "is-system-running"],
-        capture_output=True,
-        check=False,
-        text=True,
-    ).stdout.strip()
-    if state != "stopping":
+    if not (agent / "pause").exists() and not is_host_stopping():
         tab_groups.ask({"op": "close", "bundle": bundle})
 
 

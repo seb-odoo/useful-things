@@ -286,6 +286,13 @@ def check_find(root):
         ("the last call", rows[2]["call"] == "Bash hctl job 3"),
         ("the title", (rows[0]["title"], rows[2]["title"]) == (BUNDLE, "Ops")),
     ]
+    read_state = daemon.read_state
+    daemon.read_state = lambda: {"launches": {}, "queue": [{"bundle": MAPPED}]}
+    left = [row["name"] for row in daemon.find_cut()]
+    daemon.read_state = read_state
+    checks.append(("a session queued already, as after a shutdown", left == [
+        BUNDLE, f"ops-{OPS_CUT}", f"ops-{OPS_TAKEN}",
+    ]))
     return [f"find: {name}: {found}" for name, passed in checks if not passed], len(checks)
 
 

@@ -37,6 +37,11 @@ the ops container, and the title of its conversation, which changes with no chan
 window has an agent left. Opened on a new session with no task, it waits for Seb's first prompt:
 it shows in front. When a tab of the ops VS Code window resumes its session, the window closes, as
 two claude processes on one session would each go on from where they loaded it.
+
+While it is open, the window keeps a note in windows/BUNDLE.json, beside the state of the daemon,
+and drops it when someone closes it: the daemon, the agent list or a takeover (SIGUSR1), a tab that
+takes the session, Seb on its close button, or its claude that ends. A shutdown or a crash of the X
+server leaves the note, and the daemon brings the agent back (README.md, "After a shutdown").
 """
 
 import contextlib
@@ -58,12 +63,15 @@ sys.path.insert(0, str(HERE.parent / "scripts"))
 from agents import (  # noqa: E402
     MAX_RECORD,
     OPS,
+    drop_window_note,
     get_agent_folder,
     get_mtime,
     get_transcript,
     is_agent_running,
+    is_host_stopping,
     read_bytes,
     read_text,
+    write_window_note,
 )
 from config import CLAUDE_CONFIG_CONTAINER, HOST_FOLDER  # noqa: E402
 
@@ -101,6 +109,7 @@ WINDOW = """\
 WMCTRL = shutil.which("wmctrl")
 WORKER = re.compile(r"[a-z][a-z0-9-]{0,39}")
 
+closing = []
 titles = {}
 
 
@@ -194,8 +203,21 @@ def get_windows(pid):
     return [line[0] for line in lines if line[2:3] == [str(pid)]]
 
 
+def close(terminator):
+    closing.append(True)
+    terminator.terminate()
+
+
+def is_closed_on_purpose(code):
+    """Whether someone closed the window: the daemon, the agent list or a takeover (SIGUSR1, or a
+    tab that took the session), or terminator ended by itself, as on Seb's click or once claude
+    ended, while the host does not shut down. An X server that goes ends terminator on code 1, a
+    shutdown kills it."""
+    return bool(closing) or (code == 0 and not is_host_stopping())
+
+
 def follow(bundle, terminator, since):
-    signal.signal(signal.SIGUSR1, lambda *args: terminator.terminate())
+    signal.signal(signal.SIGUSR1, lambda *args: close(terminator))
     agent = get_agent_folder(bundle)
     done = agent / "done"
     run = get_mtime(agent / "run.lock") if (agent / "remote.json").exists() else None
@@ -210,7 +232,7 @@ def follow(bundle, terminator, since):
             pass
         record = get_record(bundle, start)
         if record and record.get("entrypoint") == "claude-vscode":
-            terminator.terminate()
+            close(terminator)
             continue
         if bundle.startswith(OPS) and time.monotonic() - refreshed >= REFRESH:
             refreshed, shown = time.monotonic(), None
@@ -247,7 +269,10 @@ def main():
     fresh = not read_text(agent / "task.md") and not get_transcript(session, bundle)
     terminator += [] if fresh else ["--hidden"]
     since = time.time() * 1000
+    write_window_note(bundle, os.getpid())
     code = follow(bundle, subprocess.Popen(terminator), since)
+    if is_closed_on_purpose(code):
+        drop_window_note(bundle, os.getpid())
     if bundle.startswith(OPS):
         shutil.rmtree(agent, ignore_errors=True)
     sys.exit(code)

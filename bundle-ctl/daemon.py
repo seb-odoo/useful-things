@@ -57,6 +57,7 @@ from agents import (  # noqa: E402
     format_time,
     get_agent,
     get_agent_folder,
+    get_boot,
     get_bundle_container,
     get_last_text,
     get_mtime,
@@ -66,6 +67,7 @@ from agents import (  # noqa: E402
     get_session_records,
     get_session_status,
     get_transcript,
+    get_window_notes,
     get_window_pids,
     has_window,
     is_agent_running,
@@ -77,6 +79,7 @@ from agents import (  # noqa: E402
     reads_told,
     touch,
     write_text,
+    write_window_note,
 )
 from branch_status import (  # noqa: E402
     GIT,
@@ -243,6 +246,9 @@ LOGIN_BACK = (
     " check what changed meanwhile where your work depends on it (a PR: its threads, its head,"
     " its CI; its base)."
 )
+LOST_AFTER = 120
+LOST_WAIT = 600
+LOST_WHY = "as the laptop shut down or its desktop session ended"
 MAX_AGENTS = int(
     os.environ.get("BUNDLE_CTL_MAX_AGENTS") or CONFIG.get("BUNDLE_CTL_MAX_AGENTS") or 8,
 )
@@ -286,6 +292,7 @@ REMOTE_TOLD_EVERY = 1
 REPORT_HEAD = 4096
 REQUEUE_AFTER = (15, 30, 60, 120, 240)
 RESTART_RETRY = 3600
+RESTORE_KEY = "resume the agents a shutdown or a crash closed"
 RESUMED = (
     f"{GO_ON}\n\nSeb closed your window and queued this session again at {{time}}: what you left"
     " running in the background (a PR watch, a server, a test) stopped with it. Before anything"
@@ -1487,13 +1494,14 @@ def write_parent(bundle, kept):
     fresh.replace(PARENTS_DIR / bundle)
 
 
-def enqueue(caller, bundle, body, build=None, session=None, first=False):
+def enqueue(caller, bundle, body, build=None, session=None, first=False, restored=None):
     """Queue the task of a bundle. `build` is the script that makes a bundle not made yet: the
     agent starts in its bare folder and runs it with `bctl build` once it needs the code. With no
     priority, the task of an agent takes the one of the agent's own task. `session` is the session
     a resume goes on with, when it is not the last one of the agent: never taken from a request,
     as the sessions of every bundle share one folder. `first` puts the task before the other tasks
-    of its bundle."""
+    of its bundle. `restored` is when the window of an agent a shutdown closed was last seen open,
+    and why it had work left (park_lost)."""
     priority = body["priority"] if "priority" in body else get_task_priority(caller)
     after = get_next_time(body["after"]) if "after" in body else None
     effort, model, queued = body.get("effort"), body.get("model"), time.time()
@@ -1524,6 +1532,7 @@ def enqueue(caller, bundle, body, build=None, session=None, first=False):
                 **({"github": True} if body.get("github") else {}),
                 **({"login": True} if body.get("login") else {}),
                 **({"once": True} if body.get("once") else {}),
+                **({"restored": restored} if restored else {}),
                 **({"session": session} if session else {}),
             },
         )
@@ -1960,6 +1969,7 @@ def keep_launching():
         while True:
             warn_disk()
             delete_safely()
+            restore_safely()
             restart_safely()
             free_safely()
             tell_safely()
@@ -2433,6 +2443,13 @@ def delete_safely():
 def restart_safely():
     try:
         restart_old_terminal()
+    except Exception:
+        traceback.print_exc()
+
+
+def restore_safely():
+    try:
+        restore_lost_windows()
     except Exception:
         traceback.print_exc()
 
@@ -4037,14 +4054,23 @@ def hold_task(caller, bundle, body, build=None):
     return 200, {"bundle": bundle, "held": hold(item)}
 
 
-def find_cut():
-    """The sessions a crash or a restart cut (cut.py), newest first: the last session of each
-    bundle whose container is down, and each session of the ops container that no claude runs."""
-    now = time.time()
+def get_live():
+    """The sessions a claude of the host or of the ops container runs, and those of the agents on
+    a worker."""
     # A bundle writes its own records (security check 11-03, B20).
     ops = pathlib.Path(CLAUDE_CONFIG_CONTAINER, os.path.basename(HOST_FOLDER or ""), "sessions")
     live = cut.get_live_sessions([ops, PROJECTS.parent / "sessions"] if HOST_FOLDER else [])
-    live |= {read_text(folder / ".agent" / "session") for folder in get_remote_folders()}
+    return live | {read_text(folder / ".agent" / "session") for folder in get_remote_folders()}
+
+
+def find_cut():
+    """The sessions a crash or a restart cut (cut.py), newest first: the last session of each
+    bundle whose container is down, and each session of the ops container that no claude runs.
+    One queued already, as after a shutdown (park_lost), waits there."""
+    now = time.time()
+    live = get_live()
+    with state_lock:
+        queued = {item["bundle"] for item in read_state()["queue"]}
     # A bundle's session is the one of its .agent/session, in its own folder: a bundle writes the
     # title of any transcript it reaches (security check 11-03, B7).
     paths = []
@@ -4078,6 +4104,7 @@ def find_cut():
         if (
             not why
             or path.stem in live
+            or name in queued
             or (not name.startswith(OPS) and get_worktree_bundle_folder(name) in running)
         ):
             continue
@@ -4209,6 +4236,212 @@ def resume_cut(sessions):
         opened and f"ops agent windows open on {', '.join(opened)}",
         queued and f"queued to go on in their agent terminal: {', '.join(queued)}",
         left and f"left as they are: {', '.join(left)}",
+    ]
+    return "; ".join(filter(None, parts))
+
+
+def is_window_name(name):
+    """Whether a name is one of an agent window: a bundle, or ops-SESSION."""
+    if name.startswith(OPS):
+        return bool(SESSION_ID.fullmatch(name.removeprefix(OPS)))
+    return bool(BUNDLE_NAME.fullmatch(name))
+
+
+def get_window_processes():
+    """The agent-terminator.py process of each agent window of the host, by its bundle or ops
+    session: the process of a container shows in /proc too, with the command line it chose."""
+    windows = {}
+    for path in pathlib.Path("/proc").glob("[0-9]*/cmdline"):
+        try:
+            args = path.read_bytes().split(b"\0")
+        except OSError:
+            continue
+        found = [at for at, arg in enumerate(args) if arg.endswith(b"agent-terminator.py")]
+        if found and len(args) > found[0] + 1 and is_host_process(path.parent.name):
+            windows[args[found[0] + 1].decode(errors="replace")] = int(path.parent.name)
+    return windows
+
+
+def find_lost_windows():
+    """The agent windows whose note stays though their process is gone, with the note and when
+    each was last seen open: no one closed them, a shutdown, a crash of the X server or a kill did,
+    as a close drops the note (agent-terminator.py). The note of a window opened before the notes,
+    which the daemon writes for it (adopted), counts after a reboot only, as its close drops none:
+    one of this boot whose process is gone for LOST_AFTER is dropped."""
+    boot, now = get_boot(), time.time()
+    windows = get_window_processes()
+    lost = []
+    for name, path, note in get_window_notes():
+        seen = get_mtime(path) or now
+        pid = windows.get(name)
+        if note is None or not is_window_name(name):
+            path.unlink(missing_ok=True)
+        elif pid == note["pid"] and note.get("boot") == boot:
+            os.utime(path)
+        elif pid is not None:
+            write_window_note(name, pid, adopted=True)
+        elif not note.get("adopted") or note.get("boot") != boot:
+            lost.append((name, path, seen))
+        elif now - seen > LOST_AFTER:
+            path.unlink(missing_ok=True)
+    noted = {name for name, _path, _note in get_window_notes()}
+    for name, pid in windows.items():
+        if name not in noted and is_window_name(name):
+            write_window_note(name, pid, adopted=True)
+    return lost
+
+
+def get_session_transcript(name):
+    """The session of the agent of a bundle or of an ops window (ops-SESSION), and its transcript,
+    None when it has none."""
+    if name.startswith(OPS):
+        session = name.removeprefix(OPS)
+        return session, get_transcript(session, name)
+    session = read_text(get_agent_folder(name) / "session")
+    return session, get_own_transcript(session, name)
+
+
+def park_lost(name, seen):
+    """Queue again, paused, the session of an agent window a shutdown or a crash closed when it had
+    work left (cut.get_pending), with the priority, the model and the effort of its last task, on
+    the prompt of a cut session: it waits for Seb's yes (hold_restore). Whether it did, None while
+    its container or its claude still stops, as after a crash of the X server; the journal says
+    why not."""
+    ops = name.startswith(OPS)
+    folder = get_agent_folder(name).parent
+    session, transcript = get_session_transcript(name)
+    with state_lock:
+        queued = any(item["bundle"] == name for item in read_state()["queue"])
+    container = not ops and folder.is_dir() and get_bundle_container(name)
+    left = None
+    if not ops and not folder.is_dir():
+        left = "its folder is gone"
+    elif not transcript:
+        left = "it has no conversation"
+    elif queued:
+        left = "it is queued already"
+    elif get_window_pids(name):
+        left = "a new window holds its session"
+    elif not ops and (remote_agent.is_remote(folder) or is_deleting(name)):
+        left = "it runs on a worker, or Seb said yes to its deletion"
+    elif container and has_window(container):
+        left = "a VS Code window holds its session"
+    elif container or (ops and session in get_live()):
+        return None
+    row = None if left else cut.read_session(transcript)
+    why = row and cut.get_pending(row, ops)
+    closed = f"{name}: its window ended at {format_time(seen)} with nobody closing it"
+    if not left and not why:
+        left = "it had no work left"
+    if left:
+        print(f"{closed}, left closed: {left}", flush=True)
+        return False
+    call = row["call"] if cut.get_cut(row) else None
+    prompt = cut.get_prompt({"call": call, "stopped": seen}, LOST_WHY)
+    body = {"paused": True, "priority": 0, "resume": True, "task": prompt}
+    try:
+        if ops:
+            check_ops_session(name, {"bundle": name})
+        else:
+            body["priority"] = get_task_priority(name)
+            for key in ("effort", "model"):
+                if value := read_text(get_agent_folder(name) / key):
+                    body[key] = value
+            check_task(name, body, session)
+        enqueue(HOST, name, body, session=session, restored={"seen": seen, "why": why})
+    except (Refused, ValueError) as error:
+        print(f"{closed}, not queued: {error}", flush=True)
+        return False
+    print(f"{closed} ({why}): paused in the queue until Seb's yes", flush=True)
+    return True
+
+
+def get_restore_lines(item):
+    """What the card of hold_restore says of an agent it resumes."""
+    name = item["bundle"]
+    _session, transcript = get_session_transcript(name)
+    try:
+        row = cut.read_session(transcript) if transcript else {}
+    except OSError:
+        row = {}
+    title = row.get("title") or ""
+    lines = [name + (f": {title}" if title not in ("", name) else "")]
+    lines.append(f"  closed {format_time(item['restored']['seen'])}: {item['restored']['why']}")
+    return lines + ([f"  last prompt: {cut.shorten(row['prompt'])}"] if row.get("prompt") else [])
+
+
+def hold_restore():
+    """Hold one card for Seb's yes, whose yes resumes each agent park_lost put in the queue that
+    still waits there paused; asked again with the new list when more come before his answer."""
+    with state_lock:
+        items = [item for item in read_state()["queue"] if item.get("restored") and item.get("paused")]
+    if HELD is None or not items:
+        return
+    lines = [line for item in items for line in get_restore_lines(item)]
+    lines += ["", f"What {items[0]['bundle']} is told:", *items[0]["task"].splitlines()]
+    count = f"{len(items)} agent{'s' * (len(items) != 1)}"
+    item = {
+        "client": HOST,
+        "key": RESTORE_KEY,
+        "lines": lines,
+        "send": {"restore": [[item["bundle"], item["queued"]] for item in items]},
+        "title": f"resume the {count} a shutdown or a crash closed",
+        "yes": (
+            "they leave the pause, and the queue starts them a few at a time, as the cap and the"
+            " memory let it; a no leaves them paused in the queue, each with its Resume in the"
+            " agent list and in deck"
+        ),
+    }
+    try:
+        held = hold(item)
+        print(f"the resume of the {count} a shutdown closed waits for Seb: hok {held}", flush=True)
+    except (OSError, ValueError) as error:
+        print(f"no card for the {count} a shutdown closed: {error}", flush=True)
+
+
+def restore_lost_windows():
+    """Park the agents of the windows a shutdown or a crash closed, and ask Seb once for them all
+    (Seb, 2026-11-11: "Parked + one card", over a start with no card and a card alone)."""
+    parked = False
+    for name, path, seen in find_lost_windows():
+        done = park_lost(name, seen)
+        if done is None and time.time() - seen > LOST_WAIT:
+            print(f"{name}: its claude or its container still runs, its window left closed", flush=True)
+        elif done is None:
+            continue
+        path.unlink(missing_ok=True)
+        parked = parked or done
+    if parked:
+        hold_restore()
+
+
+def resume_restored(parked):
+    """Seb's yes to the card of hold_restore: each agent it names that still waits paused in the
+    queue leaves the pause, as Resume does. The answer is what hok shows."""
+    resumed, left = [], []
+    with state_lock:
+        state = read_state()
+        for name, queued in parked:
+            item = next(
+                (
+                    item
+                    for item in state["queue"]
+                    if item["bundle"] == name and item["queued"] == queued and item.get("paused")
+                ),
+                None,
+            )
+            if item is None:
+                left.append(name)
+                continue
+            item.update(after=None, paused=False)
+            for key in ("forced", "github", "login"):
+                item.pop(key, None)
+            resumed.append(name)
+        write_state(state)
+    launch_queued()
+    parts = [
+        resumed and f"out of the pause, started as the queue lets them: {', '.join(resumed)}",
+        left and f"no longer paused in the queue: {', '.join(left)}",
     ]
     return "; ".join(filter(None, parts))
 
@@ -5171,6 +5404,8 @@ def send_held(item):
         return send_dialog(item)
     if "resume" in item["send"]:
         return resume_cut(item["send"]["resume"])
+    if "restore" in item["send"]:
+        return resume_restored(item["send"]["restore"])
     if "queue" in item["send"]:
         return send_task(item)
     if "fetch" in item["send"]:
