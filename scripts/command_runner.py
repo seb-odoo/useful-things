@@ -1,5 +1,6 @@
 """Fetch bundle info from runbot"""
 
+import os
 import subprocess
 import time
 
@@ -57,6 +58,11 @@ class Runner:
         """
         runner = self
         cwd = cwd or self.cwd
+        if handle_exceptions:
+            # The messages handled are git's English ones, and gettext reads LANGUAGE over LC_ALL.
+            env = {**(kwargs.get("env") or os.environ), "LC_ALL": "C.UTF-8"}
+            env.pop("LANGUAGE", None)
+            kwargs["env"] = env
         local_live = False
         if not runner.live:
             local_live = True

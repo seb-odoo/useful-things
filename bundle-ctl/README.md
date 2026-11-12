@@ -712,6 +712,8 @@ for another one. `delete_bundle.py` keeps a bundle with
 uncommitted files or a commit no remote has; that one is tried again only after a new use. Commits of others no remote has (the older
 head of a PR its author rebased since) and commits whose change the base has go with `--force`,
 unless a file is not committed. `bctl fetch` brings a bundle back.
+A folder whose `delete_bundle.py` stopped halfway is looked at too: it has no `.made` then, but
+its mark in `deleting/` (scripts/README.md).
 The session of its agent is kept in `deleted/BUNDLE.session` beside `state.json`, and `bctl open
 BUNDLE --terminal` from the host goes on with it once the bundle is gone: the bare folder is made
 again (see Bare start), with `fetch_bundle.py BUNDLE --no-open` as its build. So the Agent button

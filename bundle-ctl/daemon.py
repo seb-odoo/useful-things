@@ -5324,7 +5324,7 @@ def drop_idle_reviews():
             or (bare and bundle in parked)
             or remote_agent.is_remote(folder)
             or not BUNDLE_NAME.fullmatch(bundle)
-            or not (bare or is_made(folder))
+            or not (bare or is_made(folder) or (DELETING / bundle).exists())
             or str(folder) in open_windows
             or get_worktree_bundle_folder(bundle) != str(folder)
         ):

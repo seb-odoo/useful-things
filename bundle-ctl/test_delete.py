@@ -809,6 +809,28 @@ def check_reviews(root):
         (root / "claude-config" / later / ".claude.json").touch()
     wait_jobs()
     checks.append(("a bundle used while its deletion waited stays", calls == []))
+    cut, deleting = "master-cut-aku", daemon.DELETING
+    (root / "master" / cut / "odoo").mkdir(parents=True)
+    (root / "wt" / cut / "logs").mkdir(parents=True)
+    (root / "claude-config" / cut).mkdir()
+    for path in (
+        root / "wt" / cut / "logs" / "HEAD",
+        root / "claude-config" / cut / ".claude.json",
+    ):
+        path.touch()
+        os.utime(path, (old, old))
+    daemon.DELETING = root / "deleting"
+    daemon.drop_idle_reviews()
+    wait_jobs()
+    checks.append(("a half-made bundle stays", calls == []))
+    daemon.DELETING.mkdir()
+    (daemon.DELETING / cut).touch()
+    daemon.drop_idle_reviews()
+    wait_jobs()
+    daemon.DELETING = deleting
+    checks.append(
+        ("one whose delete_bundle took its .made, then stopped, goes", calls == [(cut,)]),
+    )
     return [name for name, passed in checks if not passed], len(checks)
 
 

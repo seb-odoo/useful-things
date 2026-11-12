@@ -372,7 +372,13 @@ Removes a bundle from the local system (worktrees, branches, filestore, database
   uncommitted work, and `git worktree remove` gets `--force`; a changed, new or staged file still
   keeps the bundle. On 2026-10-30 a restart cut the first idle delete of a bundle 17 s in, and 58
   runs then refused that bundle on about 74,000 deleted files (`test_cut_delete.py`). No bundle
-  mounts that folder
+  mounts that folder. `.made` goes with the mark, before the worktrees: a run that stops halfway
+  leaves a half-made bundle, which `bctl fetch` builds again (the build drops the mark), never a
+  made one with no worktree. On 2026-11-12 such a bundle, its delete of 11-09 failed, got a review
+  task: its agent had no checkout, and `bctl build` answered it was made
+- Matches git's errors in English whatever the locale (`LC_ALL=C.UTF-8`, `LANGUAGE` dropped): on
+  2026-11-09 the git of the daemon's jobs spoke French for four hours, and its 12 deletes failed
+  on "n'est pas une copie de travail" after removing the worktrees
 - Leaves a bundle whose dev container still runs, with a yellow line: delete it again once its
   window is closed
 - Leaves a bundle whose agent runs on a worker (`.agent/remote.json`, or `remote-starting` while

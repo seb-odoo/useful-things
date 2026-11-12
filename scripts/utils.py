@@ -31,7 +31,7 @@ from commands import (
     get_worktree_container_folder,
     is_bundle_worktree,
 )
-from config import BUNDLE_DB_CONTAINER, HOST_BOX, WORKTREE_CONTAINER, node_modules_key
+from config import BUNDLE_DB_CONTAINER, DELETING, HOST_BOX, WORKTREE_CONTAINER, node_modules_key
 
 MAX_GITDIR = 4096
 MAX_PACKAGE = 1 << 20
@@ -373,6 +373,7 @@ class UtilsRunner(Runner):
             untracked = set(res.stdout.splitlines())
             if names := [name for name in written if {name, f"{name}/"} & untracked]:
                 self._exclude_at_root(repo, names)
+        runner.run(["rm", "-f", f"{DELETING}/{bundle_name}"])
         runner.run(["touch", f"{bundle_folder}/{MADE}"])
         if open_window:
             runner.open_devcontainer_folder(folder=bundle_folder)

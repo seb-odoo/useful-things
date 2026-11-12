@@ -73,6 +73,7 @@ EXTENSIONS_CONTAINER = f"{_CONFIG['CACHE_ROOT']}/devcontainer/vscode-extensions"
 FILESTORE_CONTAINER = f"{_CONFIG['SHARE_ROOT']}/Odoo/filestore"
 OPTIONAL_REPOS = ("design-themes", "documentation", "o-sfu", "runbot")
 STATE_ROOT = _CONFIG["STATE_ROOT"]
+DELETING = f"{STATE_ROOT}/bundle-ctl/deleting"
 WORKTREE_CONTAINER = _CONFIG["WORKTREE_ROOT"]
 STICKY_BUNDLES = [
     "master",

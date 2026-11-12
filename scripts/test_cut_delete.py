@@ -41,6 +41,7 @@ def check(root):
     bundle = root / "src" / "master" / BUNDLE
     odoo = bundle / "odoo"
     deleting = root / "state" / "bundle-ctl" / "deleting" / BUNDLE
+    made = bundle / ".made"
     found = {}
 
     def create():
@@ -58,9 +59,15 @@ def check(root):
     found["a file Seb deleted is still work"] = (delete(), (1, True, True))
     git(odoo, "checkout", "--", str(TRACKED))
     code, _out = run(env, "-c", CUT, BUNDLE, str(TRACKED))
-    found["the run is killed in the removal of odoo, with its mark left"] = (
-        (code, (odoo / ".git").exists(), (odoo / TRACKED).exists(), deleting.exists()),
-        (137, True, False, True),
+    found["the run is killed in the removal of odoo, with its mark left and no .made"] = (
+        (
+            code,
+            (odoo / ".git").exists(),
+            (odoo / TRACKED).exists(),
+            deleting.exists(),
+            made.exists(),
+        ),
+        (137, True, False, True, False),
     )
     (odoo / "notes").write_text("mine\n")
     found["a file added since is still work after a cut"] = (delete(), (1, True, False))
@@ -68,6 +75,21 @@ def check(root):
     found["the next run removes the cut bundle and its mark"] = (
         (delete(), deleting.exists(), git(root / "repo" / "odoo", "branch", "--list", BUNDLE)),
         ((0, False, False), False, ""),
+    )
+    create()
+    made.unlink()
+    deleting.touch()
+    create()
+    found["a build of a half-made bundle drops its mark"] = (
+        (made.exists(), deleting.exists()),
+        (True, False),
+    )
+    french = {**env, "LANG": "C.UTF-8", "LANGUAGE": "fr"}
+    french.pop("LC_ALL", None)
+    code, _out = run(french, "delete_bundle.py", BUNDLE)
+    found["a delete whose git speaks French removes the bundle"] = (
+        (code, bundle.exists()),
+        (0, False),
     )
     return found
 

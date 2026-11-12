@@ -23,6 +23,7 @@ from command_runner import ignore_error
 from commands import (
     BUNDLE_NAME,
     GIT,
+    MADE,
     clean_bundle_name,
     get_database_bundle_prefixes,
     get_remote_dev_repo,
@@ -35,16 +36,16 @@ from commands import (
 from config import (
     BUNDLE_DB_CONTAINER,
     CLAUDE_CONFIG_CONTAINER,
+    DELETING as DELETING_FOLDER,
     EXTENSIONS_CONTAINER,
     FILESTORE_CONTAINER,
-    STATE_ROOT,
     WORKTREE_CONTAINER,
 )
 from rich import print
 from rich.tree import Tree
 from utils import UtilsRunner
 
-DELETING = pathlib.Path(STATE_ROOT) / "bundle-ctl" / "deleting"
+DELETING = pathlib.Path(DELETING_FOLDER)
 
 
 def get_uncommitted(status: str, cut: bool):
@@ -256,6 +257,7 @@ def delete_bundle(
         runner.run(["podman", "rmi", "--ignore", *images])
     DELETING.mkdir(parents=True, exist_ok=True)
     deleting.touch()
+    pathlib.Path(get_worktree_bundle_folder(bundle_name), MADE).unlink(missing_ok=True)
 
     def handle_repo(runner: UtilsRunner, repo: str):
         # Every step below writes into the shared repository (worktree metadata, refs):
