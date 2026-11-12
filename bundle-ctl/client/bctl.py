@@ -725,6 +725,11 @@ def main():
         type=int,
         help="a task held for Seb, or --cut: seconds to wait for his answer",
     )
+    open_.add_argument(
+        "--hold",
+        action="store_true",
+        help="ops with a task: hold it for Seb's yes in hok, as the task of a bundle",
+    )
     commands.add_parser("build", help="make the bundle of this container, started bare")
     add_repo = commands.add_parser(
         "add-repo",
@@ -822,6 +827,12 @@ def main():
         bool(args.bundle) == args.cut or (args.cut and (args.terminal or read_task(args)))
     ):
         parser.error("open: a BUNDLE, or --cut with no task nor --terminal")
+    if (
+        args.command == "open"
+        and args.hold
+        and (args.bundle != "ops" or read_task(args) is None or args.terminal or args.resume)
+    ):
+        parser.error("open --hold: ops with a task, nothing else")
 
     printer = None
     if args.command == "run":
@@ -961,7 +972,10 @@ def main():
             body["effort"] = args.effort
         if getattr(args, "where", None) is not None:
             body["where"] = args.where
-        answer = request("POST", f"/{args.command}", body)
+        if getattr(args, "hold", False):
+            answer = request("POST", "/hold-ops", {"task": task})
+        else:
+            answer = request("POST", f"/{args.command}", body)
         if "job" in answer:
             answer = follow(answer["job"])
         if "held" in answer:

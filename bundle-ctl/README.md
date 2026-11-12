@@ -1539,6 +1539,11 @@ where `hctl` is. A bundle sends a task alone, as feedback on the tooling (a skil
 gateway): the daemon holds it as `bN`, `hok` shows it word for word, and a yes opens an ops agent
 on it, after a line that names the bundle. `bctl open ops --task TEXT --wait 1750` waits for that
 answer as `bctl delete` does, and the same task sent again takes back the request that waits.
+The host and the ops container hold a task the same way with `bctl open ops --task TEXT --hold`,
+for a task written from text that comes from outside: a report of the review board (review-board
+README, "Reports"; security check of 2026-11-12, P1). The yes opens the agent after a line that
+says Seb said yes; `--hold` takes a task alone. It is a route of its own, `POST /hold-ops`, so a
+daemon that does not know it yet answers 404 and opens nothing (W9 of that check).
 
 - The window is named `ops-SESSION`, a new session id, where a bundle window has the bundle name:
   the terminator config, `agent-terminal.py ops-SESSION`, `BUNDLE_CTL_AGENT_WINDOW`. The task

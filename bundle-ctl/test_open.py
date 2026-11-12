@@ -39,6 +39,7 @@ BODIES = [
     ({"terminal": True, "task": "do"}, "terminal: only without a task"),
     ({"terminal": True, "resume": True}, "terminal: only without a task"),
 ]
+HOLD = "hold-ops: a task alone"
 MOVED = "ops-0f897331-3dea-4b5b-a0c4-1c27061e4efc"
 NEW = "ops-11111111-2222-3333-4444-555555555555"
 ONLY_HOST = "ops: only the host and the ops container open it, a bundle sends a task"
@@ -55,6 +56,7 @@ OPS_CASES = [
     ("bundle", {"task": "do", "model": "opus"}, ONLY_HOST),
     ("bundle", {"task": " "}, "task: a text of at most 32768 characters"),
     (daemon.HOST, {"task": "do", "priority": 1}, "ops: only a task or terminal"),
+    (daemon.HOST, {"task": "do", "hold": True}, "ops: only a task or terminal"),
     (daemon.HOST, {"task": " "}, "task: a text of at most 32768 characters"),
     (daemon.HOST, {}, "window ops"),
     (daemon.HOST, {"terminal": True}, "terminal ops- with no task"),
@@ -216,6 +218,47 @@ def answer_held(root, start_job):
     return [] if found == expected else [f"yes to b1: {found!r}, expected {expected!r}"]
 
 
+# The held ids go on from b5: OPS_CASES and TASK_CASES hold b1 to b4 before.
+HOLD_CASES = [
+    (daemon.HOST, {"task": "report"}, "held b5"),
+    (daemon.HOST, {"task": "report", "window": NEW}, "held b5"),
+    (daemon.HOST, {}, HOLD),
+    (daemon.HOST, {"task": " "}, HOLD),
+    (daemon.HOST, {"task": ["report"]}, HOLD),
+    (daemon.HOST, {"task": "report", "terminal": True}, HOLD),
+    (daemon.HOST, {"task": "report", "bundle": "ops"}, HOLD),
+    (daemon.HOST, {"task": "x" * 40000}, "task: a text of at most 32768 characters"),
+    ("bundle", {"task": "report"}, "held b6"),
+]
+
+
+def hold(caller, body):
+    try:
+        _code, answer = daemon.hold_ops(caller, {}, body)
+    except (ValueError, daemon.Refused) as error:
+        return str(error)
+    return f"held {answer['held']}"
+
+
+def answer_hold(root, start_job):
+    """What Seb's yes to a task the host held opens: an ops agent on it, told that he said yes."""
+    opened = []
+    daemon.STATE = root
+    daemon.get_agent_folder = lambda name: root / name
+    daemon.open_terminal = lambda log, name: opened.append(
+        (daemon.get_agent_folder(name) / "task.md").read_text(),
+    )
+    daemon.start_job = start_job
+    path = daemon.HELD_DIR / "5.json"
+    answer = path.with_suffix(".answer")
+    answer.write_text(f"yes {daemon.HELD.read_json(path)['digest']}\n")
+    with daemon.work_lock:
+        daemon.HELD.take(answer, daemon.send_held)
+    found = opened
+    expected = [daemon.HELD_TASK + "report"]
+    return [] if found == expected else [f"yes to b5: {found!r}, expected {expected!r}"]
+
+
 def queue_task(agent, queued, caller, parent, body):
     (agent / "parent").unlink(missing_ok=True)
     if parent:
@@ -328,9 +371,16 @@ def main():
         failures += answer_task(agent, queued)
         daemon.move_to_tab = move_to_tab
         failures += get_moved(pathlib.Path(root))
+        for caller, body, expected in HOLD_CASES:
+            found = hold(caller, body)
+            if found != expected:
+                failures.append(f"hold-ops {caller} {body}: {found!r}, expected {expected!r}")
+        failures += answer_hold(pathlib.Path(root), start_job)
+        if daemon.VERBS.get(("POST", "/hold-ops")) is not daemon.hold_ops:
+            failures.append("POST /hold-ops is not a route")
     for line in failures:
         print(line)
-    cases = len(CASES) + len(BODIES) + len(OPS_CASES) + len(TASK_CASES) + 6
+    cases = len(CASES) + len(BODIES) + len(OPS_CASES) + len(TASK_CASES) + len(HOLD_CASES) + 8
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

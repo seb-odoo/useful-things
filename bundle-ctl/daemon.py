@@ -271,6 +271,7 @@ NOT_BUILT = (
 )
 OPS_OPEN = "ops-window-open"
 OPS_TASK = "The agent of the bundle {bundle} sends this task, and Seb said yes to it in hok:\n\n"
+HELD_TASK = "This task waited for Seb's yes in hok, which he gave:\n\n"
 OUTSIDE_TASK = (
     "The agent of the bundle {bundle}, on a PR of an author outside odoo, sends this task: this"
     " bundle is marked outside too.\n\n"
@@ -3968,16 +3969,31 @@ def hold(item):
     return f"{HELD_LETTER}{HELD.add(HELD_DIR, item)}"
 
 
+def hold_ops(caller, query, body):
+    """`bctl open ops --hold --task TEXT`: the task held for Seb's yes in hok whoever asks, the
+    host too, for a task written from text of outside (a report of the review board). A route of
+    its own, so that a daemon that does not know it answers 404 and opens nothing (security check
+    2026-11-12, W9)."""
+    task = body.get("task")
+    if set(body) - {"task", "window"} or not isinstance(task, str) or not task.strip():
+        raise ValueError("hold-ops: a task alone")
+    if len(task) > MAX_TASK:
+        raise ValueError(f"task: a text of at most {MAX_TASK} characters")
+    if not HOST_FOLDER:
+        raise Refused("ops: no ops container on this host")
+    return hold_ops_task(caller, task)
+
+
 def hold_ops_task(caller, task):
-    """Hold the task a bundle sends to a new ops agent for Seb's yes in hok. The same task asked
-    again takes back the request that waits."""
+    """Hold the task a bundle sends to a new ops agent for Seb's yes in hok, or the one the host
+    asks to hold (hold_ops). The same task asked again takes back the request that waits."""
     if HELD is None:
         raise Refused("no gateway-core beside useful-things: hok cannot list the task")
     item = {
         "client": caller,
         "key": f"ops {caller} {hashlib.sha256(task.encode()).hexdigest()}",
         "lines": task.splitlines(),
-        "send": {"task": OPS_TASK.format(bundle=caller) + task},
+        "send": {"task": (HELD_TASK if caller == HOST else OPS_TASK.format(bundle=caller)) + task},
         "title": "send a task to a new ops agent",
         "yes": "an ops agent window opens on the task below, with hctl and the drafts",
     }
@@ -5878,7 +5894,9 @@ def open_ops(caller, bundle, body):
             if len(kept) < len(state["queue"]):
                 state["queue"] = kept
                 write_state(state)
-    elif body.get("resume") or {"after", "effort", "model", "paused", "priority"} & set(body):
+    elif body.get("resume") or {"after", "effort", "model", "paused", "priority", "hold"} & set(
+        body
+    ):
         raise ValueError("ops: only a task or terminal")
     name = bundle
     if bundle == "ops" and ("task" in body or body.get("terminal")):
@@ -6038,6 +6056,7 @@ VERBS = {
     ("POST", "/fetch"): fetch,
     ("POST", "/force-queue"): force_queue,
     ("POST", "/free-disk"): free_disk,
+    ("POST", "/hold-ops"): hold_ops,
     ("POST", "/move"): move_task,
     ("POST", "/node-modules"): node_modules,
     ("POST", "/open"): open_bundle,
