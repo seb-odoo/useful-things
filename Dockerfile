@@ -48,7 +48,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
 # runs Odoo"). PGDG for the 16 of the host and pgvector. No cluster of the package: a bundle starts
 # from a copy of /opt/bundle-pg/16, made here once, so its first start runs no initdb.
 # template_vector is the one the team skills create enterprise DBs from. Readable by all: the -uid
-# image gives vscode the uid of the host user, which makes the copy.
+# image gives vscode the uid of the host user, which makes the copy. PG_USER is no superuser, as
+# Odoo master refuses one: `postgres` is the role of initdb. pgvector is trusted, so PG_USER
+# creates it as it creates unaccent and pg_trgm, for a DB not made from template_vector and for
+# the dump a remote-runs job restores.
 ARG PG_USER
 RUN install -d /usr/share/postgresql-common/pgdg /etc/postgresql-common && \
     curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
@@ -60,9 +63,10 @@ RUN install -d /usr/share/postgresql-common/pgdg /etc/postgresql-common && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         postgresql-16 postgresql-16-pgvector && \
     rm -rf /var/lib/apt/lists/* && \
+    echo "trusted = true" >> /usr/share/postgresql/16/extension/vector.control && \
     test -n "$PG_USER" && \
     install -d -o vscode /opt/bundle-pg && \
-    runuser -u vscode -- /usr/lib/postgresql/16/bin/initdb -D /opt/bundle-pg/16 -U "$PG_USER" \
+    runuser -u vscode -- /usr/lib/postgresql/16/bin/initdb -D /opt/bundle-pg/16 -U postgres \
         -E UTF8 --locale=C.UTF-8 --lc-collate=C --wal-segsize=1 --auth=trust -N && \
     printf '%s\n' \
         "listen_addresses = ''" \
@@ -79,9 +83,10 @@ RUN install -d /usr/share/postgresql-common/pgdg /etc/postgresql-common && \
         "log_min_messages = warning" \
         >> /opt/bundle-pg/16/postgresql.conf && \
     runuser -u vscode -- /usr/lib/postgresql/16/bin/pg_ctl -D /opt/bundle-pg/16 -o "-k /tmp" -w start && \
-    runuser -u vscode -- psql -h /tmp -U "$PG_USER" -d postgres \
+    runuser -u vscode -- psql -h /tmp -U postgres -d postgres \
+        -c "CREATE ROLE \"$PG_USER\" LOGIN CREATEDB" \
         -c "CREATE DATABASE template_vector IS_TEMPLATE true" && \
-    runuser -u vscode -- psql -h /tmp -U "$PG_USER" -d template_vector -c "CREATE EXTENSION vector" && \
+    runuser -u vscode -- psql -h /tmp -U postgres -d template_vector -c "CREATE EXTENSION vector" && \
     runuser -u vscode -- /usr/lib/postgresql/16/bin/pg_ctl -D /opt/bundle-pg/16 -m fast -w stop && \
     chmod -R a+rX /opt/bundle-pg
 

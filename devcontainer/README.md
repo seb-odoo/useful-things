@@ -67,8 +67,20 @@ with pip inside. The rest follows from that choice.
     (`test_bundle_pg.py`). The server runs as `vscode`,
     so the host user owns its files. A stop of the container kills it, and the next start replays
     its WAL: `fsync` stays on, and `synchronous_commit = off` loses the last commits at most.
-  - The role is `PGUSER`, superuser of its own server with `trust` on the socket, so Odoo creates
-    the `vector` extension itself.
+  - The role is `PGUSER`, with `trust` on the socket and CREATEDB, no superuser: Odoo master
+    refuses one since 2026-11-12 (odoo `89609aa5cfe3`). The superuser is `postgres`, the role of
+    initdb, which PostgreSQL keeps superuser. pgvector is marked trusted in the image, so `PGUSER`
+    creates `vector` as it creates `unaccent` and `pg_trgm`, in a database not made from
+    `template_vector` too. Trust on the socket lets any process of the container connect as
+    `postgres`: the server runs as `vscode`, so a superuser there can do no more than `vscode`.
+  - A cluster copied before had `PGUSER` as the role of initdb.
+    [`container-rw/bundle-pg-role.sh`](../container-rw/bundle-pg-role.sh), run by `bundle-pg.sh`
+    after each start, renames that role `postgres`, makes `PGUSER` again with CREATEDB, and gives
+    it every database but `postgres`, the templates and `template_vector`, with their tables,
+    sequences, views, functions, types and schemas (2 s for a master database of 400 tables). A
+    second run only reads. A server already running when the script came moves at its next
+    start, or by hand with nothing connected: `bash "$(dirname "$BASH_ENV")/bundle-pg-role.sh"`.
+    `test_bundle_pg_role.sh`, in a bundle container, runs it on a cluster made as before.
   - Sized for test databases (measured 2026-10-16): 22 MB of memory when idle, about 80 MB during
     an install of `mail`, about 33 MB of disk beside the databases, thanks to `wal_recycle = off`
     and WAL segments of 1 MB. `max_parallel_workers_per_gather = 0`, as the `/dev/shm` of a

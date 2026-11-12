@@ -40,6 +40,7 @@ def main():
                 return 1
             script = script.replace(old, new)
         (root / "bundle-pg.sh").write_text(script)
+        (root / "bundle-pg-role.sh").write_text(f'echo role >> "{root}/roles"\n')
         env = {"HOME": str(root / "home"), "PATH": os.environ["PATH"]}
         try:
             for name in ("first start", "second start"):
@@ -63,6 +64,9 @@ def main():
                 failures.append(f"cluster mode {data.stat().st_mode & 0o777:o}, expected 700")
             if (count := len((root / "pids").read_text().split())) != 1:
                 failures.append(f"{count} servers started, expected 1")
+            roles = (root / "roles").read_text().split() if (root / "roles").exists() else []
+            if len(roles) != 1:
+                failures.append(f"bundle-pg-role.sh ran {len(roles)} times, expected 1")
         finally:
             for pid in (root / "pids").read_text().split() if (root / "pids").exists() else ():
                 try:
