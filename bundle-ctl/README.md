@@ -1075,7 +1075,7 @@ is the contained terminal of the VS Code window.
 | mark | the sessions of the window |
 | --- | --- |
 | 🚀 | an agent window whose claude did not start yet: its container starts |
-| ⏳ | one works: `busy`, out of a call that waits for hok, or waits for the reset of the usage limit, as Claude then goes on by itself (its last notice is `Usage limit reached · continuing automatically at 4pm`, not cancelled by Esc, for 5 hours at most: a claude started later on that session does not go on by itself) |
+| ⏳ | one works: `busy`, out of a call that waits for hok, or waits for the reset of the usage limit, as Claude then goes on by itself (its last notice is `Usage limit reached · continuing automatically at 4pm`, not cancelled by Esc, or its last message is the one Claude writes for the limit, until the reset time it holds: a prompt typed during the wait, a hok event or a task notification, ends on that message, after a `Usage limit reached again` notice or with none; for 5 hours at most: a claude started later on that session does not go on by itself) |
 | ✋ | one waits for a permission or an answer (`waiting`), or for Seb's answer in hok (`busy` on `hok-answer` or `hctl job`), or none works and one last answer ends on `Waiting for you`, or has no close line and is no `pushed:` nor `nothing to do:` (`ready to push`, `needs Seb:`, `blocked:`, a chat) |
 | ✅ | none works and all last answers end on `Nothing left`, or have no close line and are `pushed:` or `nothing to do:` |
 | ❌ | the run of an agent window ended before its claude started (`.agent/done` is `failed`) |

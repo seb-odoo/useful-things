@@ -21,10 +21,10 @@ window (ops-SESSION) shows the title of its conversation in place of a name, els
 its first prompt, and guesses it from the parts of the answer: finished with a Done part and
 neither a Decide nor a Your action part.
 An idle session that waits for the reset of the usage limit works, as Claude goes on with it by
-itself ("Usage limit reached · continuing automatically at 4pm"), until Esc cancels that, for 5
-hours at most. A busy session whose running call waits for Seb's answer in hok (`hok-answer`,
-`hctl job`) waits for him, but not an `hctl job` of a request that hok told his yes to: that one
-waits for the run.
+itself ("Usage limit reached · continuing automatically at 4pm", or its limit message last when a
+prompt came during the wait), until Esc cancels that, for 5 hours at most. A busy session whose
+running call waits for Seb's answer in hok (`hok-answer`, `hctl job`) waits for him, but not an
+`hctl job` of a request that hok told his yes to: that one waits for the run.
 """
 
 import calendar
@@ -52,6 +52,7 @@ KINDS = (
     ("⭐", "mine", lambda name, own: True),
 )
 LEFT = re.compile(r"[*_\s]*nothing (is )?left\b", re.IGNORECASE)
+LIMIT_ERROR = "usage_limit_reached"
 LINK = re.compile(r"\[([^\]]+)\]\([^)\s]+\)")
 LOGIN_WAIT = "claude-switch: the main login expires"
 MAX_LINE = 4 << 20
@@ -185,13 +186,21 @@ def get_last_answer(session, bundle=""):
 
 def is_resuming(session, bundle=""):
     """Whether a session waits for the reset of the usage limit, that Claude then goes on with by
-    itself: its last notice says so, and no message nor other notice came after it. Not past
-    RESUMING_FOR, the longest wait of a session limit: a claude that ended while it waited leaves
-    that notice last, and one started later on the session does not go on by itself."""
-    since = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - RESUMING_FOR))
+    itself: its last notice says so, and no message nor other notice came after it, or its last
+    message is the one Claude writes for the limit, until the reset time it holds. A prompt typed
+    during the wait (a hok event, a task notification, Seb's words) ends on that message, after a
+    `Usage limit reached again` notice or with no notice (2026-11-12: a card in deck for each
+    agent until the reset). Not past RESUMING_FOR, the longest wait of a session limit: a claude
+    that ended while it waited leaves that notice last, and one started later on the session does
+    not go on by itself."""
+    now = time.time()
+    since = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now - RESUMING_FOR))
     for line in reversed(read_tail(session, bundle)):
         try:
             entry = json.loads(line)
+            if entry.get("apiError") == LIMIT_ERROR:
+                resets = entry["apiErrorParams"]["rate_limit_info"]["resetsAt"]
+                return entry["timestamp"] > since and float(resets) > now
             if entry["type"] in ("user", "assistant") or entry.get("subtype") == "informational":
                 return RESUMING in str(entry.get("content")) and entry["timestamp"] > since
         except (AttributeError, KeyError, RecursionError, TypeError, ValueError):

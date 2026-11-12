@@ -27,6 +27,9 @@ ANSWERS = {
     "resuming": ["You've hit your session limit · resets 4pm (UTC)"],
     "cancelled": ["You've hit your session limit · resets 4pm (UTC)"],
     "resumed": ["You've hit your session limit · resets 4pm (UTC)"],
+    "again": ["You've hit your session limit · resets 4pm (UTC)"],
+    "prompted": ["You've hit your session limit · resets 4pm (UTC)"],
+    "again-reset": ["You've hit your session limit · resets 4pm (UTC)"],
     "report": ["Which icon?", "The list shows it.\n\n## Done\n- 18/18 cases as expected"],
     "seb": ["needs Seb: which base?"],
     "separately": [
@@ -110,6 +113,9 @@ MARKS = [
     (["left=idle", "resuming=idle"], f"⏳ {TITLE}"),
     (["cancelled=idle"], f"✋ {TITLE}"),
     (["resumed=idle"], f"✋ {TITLE}"),
+    (["again=idle"], f"⏳ {TITLE}"),
+    (["prompted=idle"], f"⏳ {TITLE}"),
+    (["again-reset=idle"], f"✋ {TITLE}"),
     (["hok=busy"], f"✋ {TITLE}"),
     (["hok-again=busy"], f"✋ {TITLE}"),
     (["hok-answered=busy"], f"⏳ {TITLE}"),
@@ -122,7 +128,12 @@ NOTICES = {
     "resuming": [(LIMIT, 60)],
     "cancelled": [(LIMIT, 60), ("Automatic continue cancelled · /rate-limit-options", 50)],
     "resumed": [(LIMIT, 6 * 3600)],
+    "again": [(LIMIT, 120)],
+    "prompted": [(LIMIT, 120)],
+    "again-reset": [(LIMIT, 120)],
 }
+AGAIN = "Usage limit reached again · continuing automatically at 4pm · esc to cancel"
+PROMPTED = {"again": (AGAIN, 3600), "prompted": (None, 3600), "again-reset": (AGAIN, -60)}
 OPS = "🔧 Ops windows in the list (ops)"
 OPS_MARKS = [
     ("ops-report", [], OPS),
@@ -180,6 +191,31 @@ FOLLOWED = [
 ]
 
 
+def get_prompted(notice, resets):
+    """What a prompt typed during the wait of the usage limit adds to a transcript, as Claude
+    wrote it on 2026-11-12: the prompt, the notice if any, then the limit message."""
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+    entries = [{"type": "user", "message": {"content": "hok event: Seb said yes"}}]
+    if notice:
+        entries.append(
+            {"type": "system", "subtype": "informational", "content": notice, "timestamp": stamp}
+        )
+    text = {"type": "text", "text": "You've hit your session limit · resets 4pm (UTC)"}
+    entries.append(
+        {
+            "type": "assistant",
+            "timestamp": stamp,
+            "message": {"content": [text]},
+            "isApiErrorMessage": True,
+            "error": "rate_limit",
+            "apiError": "usage_limit_reached",
+            "apiErrorParams": {"rate_limit_info": {"resetsAt": int(time.time()) + resets}},
+        }
+    )
+    entries.append({"type": "system", "subtype": "turn_duration"})
+    return entries
+
+
 def write_transcripts(home):
     """Each transcript in the folder of the bundles and in the one of the ops sessions, as a case
     names it for a bundle or an ops window."""
@@ -201,6 +237,8 @@ def write_transcripts(home):
                 {"type": "system", "subtype": "informational", "content": notice, "timestamp": stamp}
             )
             entries.append({"type": "queue-operation"})
+        if session in PROMPTED:
+            entries.extend(get_prompted(*PROMPTED[session]))
         for kind, key, topic in TOPICS.get(session, []):
             entries.append({"type": kind, key: topic, "sessionId": session})
         lines = "".join(f"{json.dumps(entry)}\n" for entry in entries)
