@@ -14,7 +14,7 @@
     bctl branches [--json]
     bctl create BASE NAME [--branch-repo REPO]... [--no-open] [TASK]
     bctl fetch BUNDLE|PR_LINK|OWNER:BRANCH [--no-open] [TASK]
-    bctl open BUNDLE [TASK] [--resume | --terminal] [--wait SECONDS]
+    bctl open BUNDLE [TASK] [--resume | --terminal] [--hold] [--wait SECONDS]
     bctl open --cut [--resume [--wait SECONDS]]
     bctl build
     bctl delete [BUNDLE] --reason TEXT [--drop COMMIT]... [--wait SECONDS]
@@ -79,7 +79,9 @@ terminal of the bundle runs that session, the task is typed there at once, idle 
 A task on a bundle that is made already, or that has an agent, goes to the queue when the host,
 that bundle or the bundle that queued its last task sends it. From any other bundle it waits for
 Seb in hok, and his yes queues it as from the bundle that queued the last task, so that the sender
-gets no say over that bundle. --wait then works as for delete.
+gets no say over that bundle. --wait then works as for delete. fetch with a task on a bundle made
+already does as open. open --hold holds the task of any caller that way, the host's too, on a
+bundle made already, and his yes queues a task of the host as from the host.
 
 open --terminal opens the agent terminal of the bundle again, on its last Claude session, with
 no prompt: after the X server took the windows away, for one. It is refused while a terminal holds
@@ -728,7 +730,7 @@ def main():
     open_.add_argument(
         "--hold",
         action="store_true",
-        help="ops with a task: hold it for Seb's yes in hok, as the task of a bundle",
+        help="with a task: hold it for Seb's yes in hok, as the task of another bundle",
     )
     commands.add_parser("build", help="make the bundle of this container, started bare")
     add_repo = commands.add_parser(
@@ -830,9 +832,9 @@ def main():
     if (
         args.command == "open"
         and args.hold
-        and (args.bundle != "ops" or read_task(args) is None or args.terminal or args.resume)
+        and (read_task(args) is None or args.terminal or (args.bundle == "ops" and args.resume))
     ):
-        parser.error("open --hold: ops with a task, nothing else")
+        parser.error("open --hold: a task, and on ops a task alone")
 
     printer = None
     if args.command == "run":
@@ -972,8 +974,10 @@ def main():
             body["effort"] = args.effort
         if getattr(args, "where", None) is not None:
             body["where"] = args.where
-        if getattr(args, "hold", False):
+        if getattr(args, "hold", False) and args.bundle == "ops":
             answer = request("POST", "/hold-ops", {"task": task})
+        elif getattr(args, "hold", False):
+            answer = request("POST", "/hold-task", body)
         else:
             answer = request("POST", f"/{args.command}", body)
         if "job" in answer:

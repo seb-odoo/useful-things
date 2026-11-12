@@ -3984,6 +3984,19 @@ def hold_ops(caller, query, body):
     return hold_ops_task(caller, task)
 
 
+def hold_bundle_task(caller, query, body):
+    """`bctl open BUNDLE --hold --task TEXT`: the task held for Seb's yes in hok whoever asks, the
+    host too: the automatic triage asks so the agent jobs it does not start by itself. A route of
+    its own, as hold_ops: a daemon that does not know it answers 404 and queues nothing."""
+    bundle = body.get("bundle") or ""
+    if "task" not in body or body.get("terminal"):
+        raise ValueError("hold-task: a task, with no terminal")
+    if not BUNDLE_NAME.fullmatch(bundle) or not is_made(get_worktree_bundle_folder(bundle)):
+        raise Refused(f"{bundle} is not made: bctl create or fetch it with its task")
+    check_task(bundle, body)
+    return hold_task(caller, bundle, body)
+
+
 def hold_ops_task(caller, task):
     """Hold the task a bundle sends to a new ops agent for Seb's yes in hok, or the one the host
     asks to hold (hold_ops). The same task asked again takes back the request that waits."""
@@ -4050,12 +4063,12 @@ def send_fetch(item):
 
 
 def hold_task(caller, bundle, body, build=None):
-    """Hold the task a bundle sends to a bundle it may not queue on for Seb's yes in hok: the agent
-    of that bundle runs it in auto mode and pushes its branch. The same task asked again takes back
-    the request that waits."""
+    """Hold the task a bundle sends to a bundle it may not queue on for Seb's yes in hok, or the
+    one any caller asks to hold (hold_bundle_task): the agent of that bundle runs it in auto mode
+    and pushes its branch. The same task asked again takes back the request that waits."""
     if HELD is None:
         raise Refused("no gateway-core beside useful-things: hok cannot list the task")
-    task = OPS_TASK.format(bundle=caller) + body["task"]
+    task = (HELD_TASK if caller == HOST else OPS_TASK.format(bundle=caller)) + body["task"]
     item = {
         "client": caller,
         "key": f"task {caller} {bundle} {hashlib.sha256(task.encode()).hexdigest()}",
@@ -5424,15 +5437,19 @@ def send_deletion(item):
 
 def send_task(item):
     """Seb's yes to the task a bundle sends to another one: queued as from the parent of that
-    bundle, so that the yes does not make the sender its parent."""
+    bundle, so that the yes does not make the sender its parent. One the host held is queued as
+    from the host."""
     queued = item["send"]["queue"]
     bundle, body = queued["bundle"], queued["body"]
     try:
         check_task(bundle, body)
     except Refused as error:
         raise ValueError(str(error)) from None
-    parent = read_text(get_agent_folder(bundle) / "parent") or HOST
-    enqueue(parent, bundle, body, queued["build"])
+    if item["client"] == HOST:
+        queue_task(HOST, bundle, body, queued["build"])
+    else:
+        parent = read_text(get_agent_folder(bundle) / "parent") or HOST
+        enqueue(parent, bundle, body, queued["build"])
     return f"the task of {item['client']} is queued for {bundle}"
 
 
@@ -5533,7 +5550,12 @@ def fetch(caller, query, body):
     if "task" not in body:
         check_disk()
     if is_made(get_worktree_bundle_folder(bundle)):
-        raise Refused(f"{bundle} is already here, open it instead")
+        if "task" not in body:
+            raise Refused(f"{bundle} is already here, open it instead")
+        check_task(bundle, body)
+        if not may_queue(caller, bundle):
+            return hold_task(caller, bundle, body)
+        return 202, queue_task(caller, bundle, body)
     check_unpushed(bundle, "pfb")
     check_task(bundle, body)
     outside.check_fetch(bundle, name)
@@ -6057,6 +6079,7 @@ VERBS = {
     ("POST", "/force-queue"): force_queue,
     ("POST", "/free-disk"): free_disk,
     ("POST", "/hold-ops"): hold_ops,
+    ("POST", "/hold-task"): hold_bundle_task,
     ("POST", "/move"): move_task,
     ("POST", "/node-modules"): node_modules,
     ("POST", "/open"): open_bundle,

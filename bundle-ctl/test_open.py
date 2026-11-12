@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """What open --terminal refuses, and what open ops opens, without podman: python3 test_open.py"""
 
+import contextlib
 import io
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -259,13 +261,114 @@ def answer_hold(root, start_job):
     return [] if found == expected else [f"yes to b5: {found!r}, expected {expected!r}"]
 
 
-def queue_task(agent, queued, caller, parent, body):
+HOLD_TASK = "hold-task: a task, with no terminal"
+MADE = "master-made--seb"
+MAX_MODEL = "model: one of haiku, opus, sonnet"
+NOT_MADE = "half is not made: bctl create or fetch it with its task"
+VERIFY = {"task": "verify", "priority": 5, "effort": "high", "model": "sonnet"}
+# The caller of open BUNDLE --hold, its body, and the request held or the refusal: whoever asks,
+# the host and the parent too. "half" is a bundle not made. The held ids go on from b7.
+HOLD_TASK_CASES = [
+    (daemon.HOST, {"task": "draft"}, "held b7"),
+    (daemon.HOST, {"task": "draft"}, "held b7"),
+    (daemon.HOST, VERIFY, "held b8"),
+    (daemon.HOST, {"task": daemon.GO_ON, "resume": True}, "held b9"),
+    ("other", {"task": "draft"}, "held b10"),
+    ("parent", {"task": "draft"}, "held b11"),
+    (daemon.HOST, {"bundle": "half", "task": "draft"}, NOT_MADE),
+    (daemon.HOST, {}, HOLD_TASK),
+    (daemon.HOST, {"task": "draft", "terminal": True}, HOLD_TASK),
+    (daemon.HOST, {"task": "draft", "model": "max"}, MAX_MODEL),
+    (daemon.HOST, {"task": "draft", "priority": 101}, "priority: an integer from -100 to 100"),
+]
+PR = "https://github.com/odoo/odoo/pull/300049"
+# The caller of fetch on a bundle made already, the bundle that queued its last task, the body,
+# and what becomes of the task: as open takes it, or refused with no task.
+FETCH_CASES = [
+    (daemon.HOST, None, {"name": PR, "task": "do"}, "queued by host"),
+    (daemon.HOST, None, {"name": PR}, f"{MADE} is already here, open it instead"),
+    ("parent", "parent", {"name": MADE, "task": "do"}, "queued by parent"),
+    ("other", "parent", {"name": MADE, "task": "do"}, "held b12"),
+    (daemon.HOST, None, {"name": PR, "task": "do", "model": "max"}, MAX_MODEL),
+]
+
+
+def hold_bundle(caller, body):
+    try:
+        _code, answer = daemon.hold_bundle_task(caller, {}, {"bundle": "bundle", **body})
+    except (ValueError, daemon.Refused) as error:
+        return str(error)
+    return f"held {answer['held']}"
+
+
+def answer_hold_task(agent):
+    """What Seb's yes to the tasks the host held queues: as from the host, not from the parent of
+    the bundle, which is told of the verdict no more, with what the task was held with."""
+    queued = []
+    daemon.enqueue = lambda caller, bundle, body, build=None: queued.append((caller, body))
+    (agent / "parent").write_text("parent\n")
+    daemon.write_parent("bundle", {"parent": "parent"})
+    for number in (7, 8):
+        path = daemon.HELD_DIR / f"{number}.json"
+        answer = path.with_suffix(".answer")
+        answer.write_text(f"yes {daemon.HELD.read_json(path)['digest']}\n")
+        daemon.HELD.take(answer, daemon.send_held)
+    found = [
+        daemon.HELD.read_json(daemon.HELD_DIR / "7.result")["text"],
+        *[(caller, body["task"], body.get("priority"), body.get("model")) for caller, body in queued],
+        daemon.read_parent("bundle"),
+    ]
+    expected = [
+        "the task of host is queued for bundle",
+        (daemon.HOST, daemon.HELD_TASK + "draft", None, None),
+        (daemon.HOST, daemon.HELD_TASK + "verify", 5, "sonnet"),
+        {},
+    ]
+    return [] if found == expected else [f"yes to b7 and b8: {found!r}, expected {expected!r}"]
+
+
+def client_hold():
+    """The route bctl open --hold asks: /hold-ops on ops, /hold-task on a bundle with what the task
+    is queued with, and the options it refuses."""
+    sys.path.insert(0, str(HERE / "client"))
+    import bctl
+
+    os.environ.pop("AGENT_WINDOW", None)
+    asked = []
+    bctl.request = lambda method, path, body=None, **kwargs: asked.append((path, body)) or {
+        "bundle": "bundle",
+        "held": "b1",
+    }
+    found = []
+    for args in (
+        ["ops", "--task", "x"],
+        ["bundle", "--task", "x", "--resume", "--priority", "5", "--model", "haiku"],
+        ["bundle"],
+        ["bundle", "--resume"],
+        ["bundle", "--task", "x", "--terminal"],
+        ["ops", "--task", "x", "--resume"],
+    ):
+        sys.argv = ["bctl", "open", *args, "--hold"]
+        output = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                bctl.main()
+        except SystemExit as error:
+            found.append(error.code)
+    held = {"bundle": "bundle", "resume": True, "task": "x", "priority": 5, "model": "haiku"}
+    expected = [("/hold-ops", {"task": "x"}), ("/hold-task", held)]
+    if (asked, found) != (expected, [2] * 4):
+        return [f"bctl open --hold: asked {asked!r}, exits {found!r}"]
+    return []
+
+
+def queue_task(agent, queued, caller, parent, body, verb=None):
     (agent / "parent").unlink(missing_ok=True)
     if parent:
         (agent / "parent").write_text(f"{parent}\n")
     (agent / "session").write_text("x\n")
     try:
-        code, answer = daemon.open_bundle(caller, {}, {"bundle": "bundle", **body})
+        code, answer = (verb or daemon.open_bundle)(caller, {}, {"bundle": "bundle", **body})
     except (ValueError, daemon.Refused) as error:
         return str(error)
     if "held" in answer:
@@ -378,9 +481,28 @@ def main():
         failures += answer_hold(pathlib.Path(root), start_job)
         if daemon.VERBS.get(("POST", "/hold-ops")) is not daemon.hold_ops:
             failures.append("POST /hold-ops is not a route")
+        daemon.get_agent_folder = lambda bundle: agent
+        daemon.get_worktree_bundle_folder = lambda bundle: str(pathlib.Path(root) / bundle)
+        daemon.is_made = lambda folder: pathlib.Path(folder).name != "half"
+        for caller, body, expected in HOLD_TASK_CASES:
+            found = hold_bundle(caller, body)
+            if found != expected:
+                failures.append(f"hold-task {caller} {body}: {found!r}, expected {expected!r}")
+        daemon.check_disk = lambda: None
+        daemon.get_pr = lambda repo, number, fields: {"baseRefName": "master", "headRefName": MADE}
+        for caller, parent, body, expected in FETCH_CASES:
+            found = queue_task(agent, queued, caller, parent, body, daemon.fetch)
+            if found != expected:
+                case = f"fetch of {caller}, parent {parent}"
+                failures.append(f"{case}: {found!r}, expected {expected!r}")
+        failures += answer_hold_task(agent)
+        if daemon.VERBS.get(("POST", "/hold-task")) is not daemon.hold_bundle_task:
+            failures.append("POST /hold-task is not a route")
+        failures += client_hold()
     for line in failures:
         print(line)
-    cases = len(CASES) + len(BODIES) + len(OPS_CASES) + len(TASK_CASES) + len(HOLD_CASES) + 8
+    held = len(HOLD_CASES) + len(HOLD_TASK_CASES) + len(FETCH_CASES)
+    cases = len(CASES) + len(BODIES) + len(OPS_CASES) + len(TASK_CASES) + held + 11
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 
