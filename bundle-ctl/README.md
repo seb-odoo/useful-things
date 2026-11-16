@@ -269,6 +269,10 @@ repo, which has its own README (the sandbox, the load, the sync). Agents change 
   ends on 125 as its server never answered), a stream lost during it, or a job the worker killed
   (137: its memory or its time; -9: the worker lost it), runs the command here, with one line on
   stderr: `bctl run: runs here, not on NAME: why`.
+- So does a job whose Odoo logged `Chrome headless failed to start` or `Chrome executable not
+  found`: Odoo skips each browser test whose Chrome did not start within 10 s, and exits 0. On
+  2026-11-16 a reviewer's `WebSuite` run on sebpc passed that way with no test run (a first start
+  from its disk took 7.6 s); the same Chrome starts in 0.5 s in a bundle.
 - `POST /worker/VERB?worker=NAME&arg=...` (`workers.py`) is the relay: from a bundle only, the
   verb and each word checked, then a fixed `ssh -F none -S MASTER -o ControlMaster=no -T worker
   VERB BUNDLE ARGS...` through the connection `worker-mux@NAME` holds, the bundle's bytes passed

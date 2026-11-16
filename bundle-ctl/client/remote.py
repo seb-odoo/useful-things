@@ -39,6 +39,8 @@ MAX_WAIT = 600
 NOT_STARTED = 125
 # The worker kills a job past its memory (137), or lost it with its processes (-9).
 KILLED = (137, -9)
+# Odoo skips a browser test when its Chrome does not start in 10 s, and exits 0 (16.0 to master).
+NO_BROWSER = re.compile(rb"Chrome headless failed to start|Chrome executable not found")
 ENGINE = re.compile(r"engine-linux-\w+|test-warden-engine")
 ENGINE_SERVER = re.compile(r"http://(?:localhost|127\.0\.0\.1):([0-9]{1,5})(?:/\S*)?")
 VENV_PYTHON = re.compile(r"/(odoo[0-9]{2})/bin/python[0-9.]*$")
@@ -421,10 +423,12 @@ def submit(worker, argv, kind, workers, base):
 
 
 def follow(worker, job):
-    """Print the job's output as it comes; its exit code, or None when the stream broke."""
+    """Print the job's output as it comes. Returns its exit code, or None when the stream broke,
+    and whether Odoo logged that its Chrome did not start."""
     connection, reader = open_stream(worker, "follow", job)
     connection.shutdown(socket.SHUT_WR)
     told = None
+    stderr_end, no_browser = b"", False
     for kind, payload in read_frames(reader):
         if kind == "o":
             sys.stdout.buffer.write(payload)
@@ -432,6 +436,9 @@ def follow(worker, job):
         elif kind == "e":
             sys.stderr.buffer.write(payload)
             sys.stderr.buffer.flush()
+            seen = stderr_end + payload
+            no_browser = no_browser or bool(NO_BROWSER.search(seen))
+            stderr_end = seen[-64:]
         elif kind == "s":
             state = json.loads(payload)
             text = (f"waits on {worker}, place {state['place']} ({state.get('blocker')})"
@@ -444,9 +451,9 @@ def follow(worker, job):
             if end.get("reason"):
                 say(f"on {worker}: {end['reason']}")
             connection.close()
-            return end.get("exit")
+            return end.get("exit"), no_browser
     connection.close()
-    return None
+    return None, no_browser
 
 
 def get_back(worker, job, dbs_out):
@@ -479,9 +486,9 @@ def run(argv, worker, kind, workers, base):
     signal.signal(signal.SIGTERM, cancel)
     signal.signal(signal.SIGINT, cancel)
     try:
-        code = follow(worker, job)
+        code, no_browser = follow(worker, job)
     except Fallback as error:
-        code, reason = None, str(error)
+        code, no_browser, reason = None, False, str(error)
     else:
         reason = "the stream broke"
     if code is None:
@@ -492,6 +499,10 @@ def run(argv, worker, kind, workers, base):
         return None
     if code in KILLED:
         say(f"job {job} was killed on {worker} (its memory or its time), runs here again")
+        return None
+    if no_browser:
+        say(f"Chrome did not start in job {job} on {worker}, so Odoo skipped its browser tests:"
+            " runs here again")
         return None
     if dbs_out:
         try:
