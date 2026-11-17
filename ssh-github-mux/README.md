@@ -20,9 +20,10 @@ each push of a container.
   at an undock and came back saying "active" for good: GitHub stayed down for the bundles from
   12:33 to the evening, the bundles' asks and Seb's own all held (his pick: drop the test).
 - While `request/held` is there, only an ask of Seb himself goes through: `request/now`, written
-  by `wait` for a git command of the host, and by `on-unlock` at unlock
-  (`ssh-github-mux-unlock.service`). The queue and the agents write `request/start`, held until
-  then, and their tasks wait in the queue as they already do.
+  by `wait` for a git command of the host, by git-gate for one he typed in a bundle repo (it runs
+  in host-box and reaches GitHub through the gate, not through `wait`), and by `on-unlock` at
+  unlock (`ssh-github-mux-unlock.service`). The queue and the agents write `request/start`, held
+  until then, and their tasks wait in the queue as they already do.
 - Where git-gate is installed, its fragment replaces the one at the root of this repo, and no
   container mounts any of this. Without it, that fragment gives containers this folder as
   `/etc/ssh/ssh_config.d` and as `~/.local/share/ssh-github-mux`, `sock/` read-only and `request/`
