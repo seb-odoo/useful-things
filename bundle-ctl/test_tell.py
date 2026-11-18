@@ -107,7 +107,7 @@ def check_tell(root, check):
     daemon.get_remote_agents = dict
     check("a bad bundle name is refused", tell_bundle("../b1")[0] == "ValueError")
     found = tell(BUNDLE_SESSION, bundle="b1")
-    check("a bundle with a session is refused", found[0] == "ValueError", found)
+    check("a bundle with a session it never ran is refused", found[0] == "ValueError", found)
     daemon.reads_told = lambda bundle: False
     found = tell(BUNDLE_SESSION)
     check("a terminal of before told/ gets it in .agent, as then",
@@ -673,6 +673,283 @@ def check_window(root, check):
     check("each claude knows its window", found == expected, found)
 
 
+def check_wake(root, check):
+    """Seb's words with his answer wake the conversation no window types the line in, and POST
+    /reach says what POST /tell would do, changing nothing."""
+    base = root / "wake"
+    ops = f"ops-{OPS_SESSION}"
+    agents = {name: base / name / ".agent" for name in ("w1", "w2")}
+    agents[ops] = base / "ops" / OPS_SESSION
+    for folder in agents.values():
+        folder.mkdir(parents=True)
+    (agents["w1"] / "session").write_text(f"{BUNDLE_SESSION}\n")
+    (agents["w2"] / "session").write_text(f"{STOPPED_SESSION}\n")
+    projects, transcripts = base / "ops-projects", base / "transcripts"
+    for folder in (projects, transcripts / "w1", transcripts / "w2"):
+        folder.mkdir(parents=True)
+    for folder, session in (
+        (projects, OPS_SESSION),
+        (transcripts / "w1", BUNDLE_SESSION),
+        (transcripts / "w1", PUSHED_SESSION),
+        (transcripts / "w2", STOPPED_SESSION),
+    ):
+        (folder / f"{session}.jsonl").write_text("{}\n")
+
+    def get_projects(name):
+        return [projects] if name.startswith("ops-") else [transcripts / name]
+
+    def get_transcript(session, bundle=""):
+        paths = [folder / f"{session}.jsonl" for folder in get_projects(bundle)]
+        return next((path for path in paths if path.is_file()), None)
+
+    def close_dead_window(name):
+        if name.startswith("ops-"):
+            shutil.rmtree(agents[name], ignore_errors=True)
+
+    def enqueue(caller, bundle, body, session=None):
+        queued.append((caller, bundle, body, session))
+        return {"bundle": bundle, "queued": 1}
+
+    def start_job(caller, verb, work, lock=None, bundle=None):
+        work(None)
+        return 202, {"job": "j"}
+
+    live, looked, queue, queued, opened = set(), [], [], [], []
+    daemon.get_projects = get_projects
+    daemon.get_transcript = get_transcript
+    daemon.TRANSCRIPTS = transcripts
+    daemon.get_agent_folder = lambda name: agents.get(name, base / "gone" / name / ".agent")
+    daemon.get_bundle_names = lambda: ["w1", "w2"]
+    daemon.get_terminals = lambda: {"w1": 1}
+    daemon.get_remote_agents = dict
+    daemon.is_agent_running = lambda name: False
+    daemon.reads_told = lambda bundle: True
+    daemon.TOLD_DIR = base / "told"
+    daemon.PARENTS_DIR = base / "parents"
+    daemon.HOST_FOLDER = str(base / "host-ctl")
+    daemon.get_session_status = lambda container, session: None
+    daemon.cut.get_live_sessions = lambda folders: looked.append(folders) or set(live)
+    daemon.read_state = lambda: {"queue": queue}
+    daemon.get_bundle_container = lambda bundle: None
+    daemon.close_dead_window = close_dead_window
+    daemon.enqueue = enqueue
+    daemon.start_job = start_job
+    daemon.open_terminal = lambda log, name: opened.append(name)
+    daemon.keep_parent("w2", "w1")
+    told_w1 = base / "told" / "w1" / BUNDLE_SESSION
+    words = "Push it as a draft.\nThen stop."
+
+    def reach(session=None, **body):
+        try:
+            return daemon.look_reach(daemon.HOST, {}, {"session": session, **body})
+        except (daemon.Refused, ValueError) as error:
+            return type(error).__name__, str(error)
+
+    def left():
+        return [
+            sorted(path.relative_to(base).as_posix() for path in base.rglob("*.txt")),
+            [path.name for path in base.rglob("task.md")],
+            list(queued),
+            list(opened),
+        ]
+
+    before = left()
+    waits = f"the claude of {ops} ended: the line waits in its window for the one that goes on"
+    found = [
+        reach(BUNDLE_SESSION),
+        reach(BUNDLE_SESSION, bundle="w1"),
+        reach(bundle="w1", words=False),
+        reach(STOPPED_SESSION),
+        reach(STOPPED_SESSION, words=False),
+        reach(bundle="w2"),
+        reach(PUSHED_SESSION, bundle="w1"),
+        reach(OPS_SESSION),
+        reach(OPS_SESSION, words=False),
+    ]
+    expected = [
+        (200, {"reach": "typed", "bundle": "w1"}),
+        (200, {"reach": "typed", "bundle": "w1"}),
+        (200, {"reach": "typed", "bundle": "w1"}),
+        (200, {"reach": "wake", "bundle": "w2"}),
+        (200, {"reach": "none", "why": f"no agent window runs {STOPPED_SESSION}"}),
+        (200, {"reach": "wake", "bundle": "w2"}),
+        (200, {"reach": "wake", "bundle": "w1"}),
+        (200, {"reach": "wake", "bundle": ops}),
+        (200, {"reach": "none", "why": waits}),
+    ]
+    check("reach says typed, wake or none", found == expected, found)
+    check("and leaves nothing behind, nor tells a parent", left() == before, left())
+
+    found = tell(BUNDLE_SESSION, words=words)
+    check(
+        "a line typed now is typed as before, the words not woken",
+        found == (200, {"bundle": "w1", "asks": False, "woke": False})
+        and prwatch_lines(told_w1) == [TEXT] and not queued,
+        found,
+    )
+    found = tell(STOPPED_SESSION)
+    check(
+        "with no words, no window is a 404 as before",
+        found == (404, {"error": f"no agent window runs {STOPPED_SESSION}"}) and not queued,
+        found,
+    )
+    prwatch_lines(told_w1)
+    found = tell(STOPPED_SESSION, words=words)
+    prompt = f"{TEXT}\n\nSeb's words with his answer: {words}"
+    check(
+        "with words, the session of a bundle goes on as a resume task of the queue",
+        found == (200, {"bundle": "w2", "woke": True, "asks": False})
+        and queued == [
+            ("host", "w2", {"priority": 0, "resume": True, "task": prompt}, STOPPED_SESSION),
+        ],
+        (found, queued),
+    )
+    check("and its parent hears of the card", len(prwatch_lines(told_w1)) == 1)
+    (agents["w2"] / "model").write_text("sonnet\n")
+    found = tell_words(bundle="w2", words=words)
+    check(
+        "by its bundle too, with the model of its last task",
+        found[0] == 200
+        and queued[-1][2]["model"] == "sonnet"
+        and queued[-1][3] == STOPPED_SESSION
+        and len(prwatch_lines(told_w1)) == 1,
+        (found, queued[-1:]),
+    )
+    found = tell_words(session=PUSHED_SESSION, bundle="w1", words=words)
+    check(
+        "an earlier session of a bundle whose terminal runs another one goes on after it",
+        found[0] == 200 and queued[-1][1:4:2] == ("w1", PUSHED_SESSION),
+        (found, queued[-1:]),
+    )
+    found = tell_words(session=BUNDLE_SESSION, bundle="w1", words=words)
+    check(
+        "the session its terminal runs is typed there",
+        found == (200, {"bundle": "w1", "asks": False, "woke": False})
+        and len(prwatch_lines(told_w1)) == 1,
+        found,
+    )
+    queued.clear()
+
+    live.add(STOPPED_SESSION)
+    found = tell(STOPPED_SESSION, words=words), reach(bundle="w2")
+    why = daemon.LIVE_ELSEWHERE
+    check(
+        "a session a claude runs in a tab is not woken, and says why",
+        found == ((404, {"error": why}), (200, {"reach": "none", "why": why})) and not queued,
+        found,
+    )
+    folder = pathlib.Path(daemon.CLAUDE_CONFIG_CONTAINER, "w2", "sessions")
+    check("as the records of its own container say", looked[-1] == [folder], looked[-1:])
+    live.clear()
+    queue.append({"bundle": "w2"})
+    found = reach(bundle="w2")
+    check("nor a bundle whose task waits", found[1].get("why") == "w2 is already queued", found)
+    queue.clear()
+    found = tell_words(bundle="gone", words=words), reach(bundle="gone")
+    check(
+        "nor a deleted bundle",
+        found[0] == (404, {"error": "gone is deleted"})
+        and found[1] == (200, {"reach": "none", "why": "gone is deleted"}),
+        found,
+    )
+
+    for session, name in ((STOPPED_SESSION, "of another bundle"), (OPS_SESSION, "of ops")):
+        found = tell_words(session=session, bundle="w1", words=words)
+        check(f"a session {name} with a bundle is refused (B17)", found[0] == "ValueError", found)
+    (transcripts / "w1" / f"{OPS_SESSION}.jsonl").write_text("{}\n")
+    found = reach(OPS_SESSION, bundle="w1")
+    check("even when the bundle holds a copy", found[0] == "ValueError", found)
+    (transcripts / "w1" / f"{OPS_SESSION}.jsonl").unlink()
+    for bad in ("a\x1b[201~", "a" * 2001, 3):
+        found = tell_words(session=STOPPED_SESSION, words=bad)
+        check(f"words {str(bad)[:6]!r} are refused", found[0] == "ValueError", found)
+    found = tell(STOPPED_SESSION, words="  ")
+    check("blank words are no words", found[0] == 404 and not queued, found)
+    check("words of reach are true or false", reach(STOPPED_SESSION, words="y")[0] == "ValueError")
+
+    daemon.leave_told(ops, OPS_SESSION, "hok event: an earlier line.")
+    (projects / f"{OPS_SESSION}.jsonl").rename(projects / "kept")
+    found = tell(OPS_SESSION, words=words)
+    check(
+        "an ops window whose claude ended and with no transcript keeps the line",
+        found == (200, {"bundle": ops, "asks": False, "woke": False})
+        and len(get_lines(agents[ops])) == 2,
+        found,
+    )
+    max((agents[ops] / "pr-events").glob("[!.]*.txt")).unlink()
+    (projects / "kept").rename(projects / f"{OPS_SESSION}.jsonl")
+    live.add(OPS_SESSION)
+    found = tell(OPS_SESSION, words=words)
+    folders = [
+        pathlib.Path(daemon.CLAUDE_CONFIG_CONTAINER, "host-ctl", "sessions"),
+        daemon.PROJECTS.parent / "sessions",
+    ]
+    check(
+        "nor is one whose session a tab of the ops container runs",
+        found[0] == 200 and found[1]["woke"] is False and not opened and looked[-1] == folders,
+        (found, looked[-1:]),
+    )
+    max((agents[ops] / "pr-events").glob("[!.]*.txt")).unlink()
+    live.clear()
+    found = tell(OPS_SESSION, words=words)
+    check(
+        "with words, an ops session goes on in a new ops agent window",
+        found == (200, {"bundle": ops, "woke": True, "asks": False}) and opened == [ops],
+        found,
+    )
+    check(
+        "on the line and the words, with the lines its old window held",
+        (agents[ops] / "task.md").read_text() == prompt
+        and get_lines(agents[ops]) == ["hok event: an earlier line."],
+        get_lines(agents[ops]),
+    )
+    shutil.rmtree(agents[ops])
+    found = tell(OPS_SESSION, words=words)
+    check(
+        "and so does one whose window closed",
+        found[0] == 200 and opened == [ops, ops] and (agents[ops] / "task.md").is_file(),
+        found,
+    )
+    check("only the host asks reach", ("POST", "/reach") in daemon.HOST_ONLY)
+    check("the verb is served", daemon.VERBS.get(("POST", "/reach")) is daemon.look_reach)
+
+
+def tell_words(**body):
+    try:
+        return daemon.tell(daemon.HOST, {}, {"text": TEXT, **body})
+    except (daemon.Refused, ValueError) as error:
+        return type(error).__name__, str(error)
+
+
+def check_held(root, check):
+    """The words Seb typed with his yes to a held task end that task."""
+    agents = {"h1": root / "held" / "h1" / ".agent"}
+    agents["h1"].mkdir(parents=True)
+    daemon.get_agent_folder = agents.__getitem__
+    daemon.read_state = lambda: {"queue": []}
+    daemon.get_bundle_container = lambda bundle: None
+    queued, opened = [], []
+    daemon.enqueue = lambda caller, bundle, body, build=None: queued.append(body["task"])
+    daemon.open_ops = lambda caller, bundle, body: opened.append(body["task"]) or (202, {"job": "j"})
+    daemon.jobs["j"] = {"state": "done"}
+    sent = {
+        "queue": {"queue": {"bundle": "h1", "body": {"task": "Do it."}, "build": None}},
+        "fetch": {"fetch": {"bundle": "h1", "body": {"task": "Do it."}, "build": []}},
+        "ops": {"task": "Do it."},
+    }
+    for said in (None, "", "and run the tests\x1b too"):
+        for send in sent.values():
+            item = {"client": "c9", "send": send, **({"said": said} if said is not None else {})}
+            daemon.send_held(item)
+    ended = "Do it.\n\nSeb said with his yes: and run the tests  too"
+    found = queued + opened
+    check(
+        "a task for another bundle, a fetch and an ops task end on his words, none without",
+        found == ["Do it."] * 4 + [ended] * 2 + ["Do it."] * 2 + [ended],
+        found,
+    )
+
+
 def main():
     failures, count = [], [0]
 
@@ -695,6 +972,8 @@ def main():
         check_prompt(root, check)
         check_window(root, check)
         check_watch(root, check)
+        check_wake(root, check)
+        check_held(root, check)
         check("no podman ran", not (root / "podman.log").exists())
     for line in failures:
         print(line)

@@ -236,11 +236,15 @@ HOST_ONLY = {
     ("POST", "/close"),
     ("POST", "/force-queue"),
     ("POST", "/prompt"),
+    ("POST", "/reach"),
     ("POST", "/stop"),
     ("POST", "/tell"),
 }
 JOB_WAIT = 50
 LIMIT_SOON = 10 * 60
+LIVE_ELSEWHERE = (
+    "its claude runs in a VS Code tab or a terminal of its own, which hok cannot type into"
+)
 LOGIN_BACK = (
     f"{GO_ON}\n\nThe main login is renewed: this session waited for it in the queue since"
     " {time}, as claude-switch held its requests meanwhile. Go on with what it stopped, and first"
@@ -4183,6 +4187,7 @@ def send_fetch(item):
     fetched = item["send"]["fetch"]
     bundle, body = fetched["bundle"], fetched["body"]
     if "task" in body:
+        body = {**body, "task": add_said(body["task"], item)}
         try:
             check_task(bundle, body)
         except Refused as error:
@@ -4369,13 +4374,18 @@ def resume_bundle(name, session, prompt):
     """Queue a cut session of a bundle to go on in its agent terminal, on this prompt, with the
     priority, the model and the effort of the last task of its agent, once the terminal where its
     claude ended closed."""
+    body = get_resume_body(name, prompt)
+    check_task(name, body, session)
+    close_dead_window(name)
+    return enqueue(HOST, name, body, session=session)
+
+
+def get_resume_body(name, prompt):
     body = {"priority": get_task_priority(name), "resume": True, "task": prompt}
     for key in ("effort", "model"):
         if value := read_text(get_agent_folder(name) / key):
             body[key] = value
-    check_task(name, body, session)
-    close_dead_window(name)
-    return enqueue(HOST, name, body, session=session)
+    return body
 
 
 def resume_cut(sessions):
@@ -4698,36 +4708,174 @@ def read_hok_waiting(fresh=False):
 def tell(caller, query, body):
     """`POST /tell {session, text}`: one line of hok, once Seb answered a card of a Claude session,
     for the agent window that runs that session, as a PR event (README.md, "hok events"). A card
-    a gateway held names its bundle and no session: `{bundle, text}` tells the session its
-    terminal runs. Only the host asks (HOST_ONLY): the line is typed as a prompt. `asks` says
-    that its claude waits on a dialog, which the terminal types nothing into until Seb answers."""
-    session, bundle, text = body.get("session"), body.get("bundle"), body.get("text")
+    a gateway held names its bundle: `{bundle, text}` tells the session its terminal runs, and
+    with `session`, only while it runs that session of the bundle. With `words`, what Seb typed
+    with his answer, a conversation no window types the line in goes on, woken on the line and
+    the words. Only the host asks (HOST_ONLY): the line is typed as a prompt. `asks` says that its
+    claude waits on a dialog, which the terminal types nothing into until Seb answers."""
+    text = body.get("text")
     if not isinstance(text, str) or not text.isprintable() or not 0 < len(text) <= MAX_TOLD:
         raise ValueError(f"text: one line of at most {MAX_TOLD} characters")
-    if bundle is not None:
-        if session is not None or not isinstance(bundle, str) or not BUNDLE_NAME.fullmatch(bundle):
-            raise ValueError("bundle: a bundle name, and no session")
-        tell_parent(bundle, get_parent_line(bundle, text))
-        session = read_text(get_agent_folder(bundle) / "session")
-        if not is_told_bundle(bundle) or not SESSION_ID.fullmatch(session or ""):
-            return 404, {"error": f"no agent window runs {bundle}"}
-        agent = bundle
-    elif not isinstance(session, str) or not SESSION_ID.fullmatch(session):
-        raise ValueError("session: a session id")
-    else:
-        agent = get_session_agent(session)
-        child = not (agent or "").startswith(OPS) and get_noted_bundle(session)
-        if child:
-            tell_parent(child, get_parent_line(child, text))
-    if agent is None:
-        return 404, {"error": f"no agent window runs {session}"}
+    words = body.get("words")
+    if words is not None and (
+        not isinstance(words, str) or len(words) > MAX_TOLD or CONTROL.search(words)
+    ):
+        raise ValueError(
+            f"words: a text of at most {MAX_TOLD} characters, no control character but new lines"
+            " and tabs",
+        )
+    words = (words or "").strip()
+    reach = get_reach(body.get("session"), body.get("bundle"), bool(words))
+    if reach["parent"]:
+        tell_parent(reach["parent"], get_parent_line(reach["parent"], text))
+    agent, session = reach["agent"], reach["session"]
+    if reach["reach"] == "wake":
+        prompt = f"{text}\n\nSeb's words with his answer: {words}"
+        if agent.startswith(OPS):
+            resume_ops(agent, prompt)
+        else:
+            resume_bundle(agent, session, prompt)
+        print(f"{agent}: woken on {text[:100]}", flush=True)
+        return 200, {"bundle": agent, "woke": True, "asks": False}
+    if reach["reach"] == "none":
+        return 404, {"error": reach["why"]}
     try:
         leave_told(agent, session, text)
     except OSError as error:
         raise Refused(f"{agent}: the line was not left: {error}") from error
     print(f"{agent}: told {text[:100]}", flush=True)
     container = os.path.basename(HOST_FOLDER or "") if agent.startswith(OPS) else agent
-    return 200, {"bundle": agent, "asks": get_session_status(container, session) == "waiting"}
+    asks = get_session_status(container, session) == "waiting"
+    return 200, {"bundle": agent, "asks": asks, **({"woke": False} if words else {})}
+
+
+def look_reach(caller, query, body):
+    """`POST /reach {session, bundle, words}`: what /tell would do now with the line of a card,
+    changing nothing (README.md, "hok events"), so that hok refuses Seb's words when they would
+    reach nobody. Only the host asks (HOST_ONLY)."""
+    words = body.get("words", True)
+    if type(words) is not bool:
+        raise ValueError("words: true or false")
+    found = get_reach(body.get("session"), body.get("bundle"), words)
+    if found["reach"] in ("typed", "wake"):
+        return 200, {"reach": found["reach"], "bundle": found["agent"]}
+    return 200, {"reach": "none", "why": found["why"]}
+
+
+def get_reach(session, bundle, words):
+    """What /tell does with the line of a card, changing nothing: `typed` by the agent window that
+    runs the conversation now, `left` in an ops window whose claude ended for the claude that goes
+    on there, `wake` with Seb's words when no window types it and the conversation can go on,
+    else `none`, with `why`. `agent` is the window, `session` its conversation, and `parent` the
+    bundle whose parent hears of the card (tell_parent)."""
+    if bundle is not None:
+        return get_bundle_reach(session, bundle, words)
+    if not isinstance(session, str) or not SESSION_ID.fullmatch(session):
+        raise ValueError("session: a session id")
+    agent = get_session_agent(session)
+    ops = f"{OPS}{session}"
+    reach = {
+        "agent": agent,
+        "parent": None if (agent or "").startswith(OPS) else get_noted_bundle(session),
+        "reach": "none",
+        "session": session,
+        "why": f"no agent window runs {session}",
+    }
+    if agent and (agent != ops or is_agent_running(ops)):
+        return {**reach, "reach": "typed"}
+    if agent:
+        why = f"the claude of {ops} ended: the line waits in its window for the one that goes on"
+        reach = {**reach, "reach": "left", "why": why}
+    if not words:
+        return reach
+    if agent or get_transcript(session, ops):
+        found = get_ops_wake(session)
+    elif claimant := get_claimant(session, get_bundle_names()):
+        found = get_bundle_wake(claimant, session)
+    else:
+        return reach
+    return {**reach, **found} if found["reach"] == "wake" else {**reach, "why": found["why"]}
+
+
+def get_bundle_reach(session, bundle, words):
+    """get_reach for a card that names its bundle, and the session of its agent with `session`:
+    that session must be one the agent of this bundle ran (is_bundle_session)."""
+    if not isinstance(bundle, str) or not BUNDLE_NAME.fullmatch(bundle):
+        raise ValueError("bundle: a bundle name")
+    current = read_text(get_agent_folder(bundle) / "session")
+    if session is None:
+        session = current if SESSION_ID.fullmatch(current or "") else None
+    elif not isinstance(session, str) or not SESSION_ID.fullmatch(session):
+        raise ValueError("session: a session id")
+    elif get_agent_folder(bundle).parent.is_dir() and not is_bundle_session(session, bundle):
+        raise ValueError(f"session: no session the agent of {bundle} ran")
+    reach = {"agent": bundle, "parent": bundle, "session": session}
+    if session and session == current and is_told_bundle(bundle):
+        return {**reach, "reach": "typed"}
+    if not words:
+        return {**reach, "reach": "none", "why": f"no agent window runs {bundle}"}
+    return {**reach, **get_bundle_wake(bundle, session)}
+
+
+def get_ops_wake(session):
+    """Whether a session of the ops container can go on in an ops agent window (resume_ops)."""
+    name = f"{OPS}{session}"
+    if not HOST_FOLDER:
+        return {"reach": "none", "why": "no ops container on this host"}
+    if session in get_live_in(name):
+        return {"reach": "none", "why": LIVE_ELSEWHERE}
+    try:
+        check_ops_session(name, {"bundle": name, "terminal": True})
+    except (Refused, ValueError) as error:
+        return {"reach": "none", "why": str(error)}
+    return {"reach": "wake", "agent": name}
+
+
+def get_bundle_wake(bundle, session):
+    """Whether a session of a bundle can go on as a `--resume` task of the queue
+    (resume_bundle)."""
+    if not get_agent_folder(bundle).parent.is_dir() or is_deleting(bundle):
+        return {"reach": "none", "why": f"{bundle} is deleted"}
+    if not session or not is_bundle_session(session, bundle):
+        return {"reach": "none", "why": f"{bundle} has no session to go on with"}
+    if session in get_live_in(bundle):
+        return {"reach": "none", "why": LIVE_ELSEWHERE}
+    try:
+        check_task(bundle, get_resume_body(bundle, GO_ON), session)
+    except (Refused, ValueError) as error:
+        return {"reach": "none", "why": str(error)}
+    return {"reach": "wake", "agent": bundle}
+
+
+def is_bundle_session(session, bundle):
+    """Whether the agent of a bundle ran this session: its transcript is the bundle's, no
+    transcript of the ops container has its id, and no other bundle holds it in its own folder,
+    as for get_claimant (security check 11-03, B17)."""
+    if not get_transcript(session, bundle):
+        return False
+    if any((folder / f"{session}.jsonl").exists() for folder in get_projects(OPS)):
+        return False
+    return {path.parent.name for path in TRANSCRIPTS.glob(f"*/{session}.jsonl")} <= {bundle}
+
+
+def get_bundle_names():
+    """The bundles whose agent ran a session, by their `.agent/session`."""
+    found = pathlib.Path(get_worktree_container_folder()).glob("*/*/.agent/session")
+    names = [path.parent.parent.name for path in found]
+    return [name for name in names if BUNDLE_NAME.fullmatch(name)]
+
+
+def get_live_in(agent):
+    """The sessions a claude runs now in the container of an agent window, the ops container or
+    a bundle, from the records of that container only: a bundle writes its own (security check
+    11-03, B20)."""
+    if agent.startswith(OPS):
+        container = os.path.basename(HOST_FOLDER or "")
+        folders = [pathlib.Path(CLAUDE_CONFIG_CONTAINER, container, "sessions")]
+        folders.append(PROJECTS.parent / "sessions")
+    else:
+        folders = [pathlib.Path(CLAUDE_CONFIG_CONTAINER, agent, "sessions")]
+    return cut.get_live_sessions(folders)
 
 
 def get_parent_line(bundle, text):
@@ -5576,6 +5724,7 @@ def send_task(item):
     from the host."""
     queued = item["send"]["queue"]
     bundle, body = queued["bundle"], queued["body"]
+    body = {**body, "task": add_said(body["task"], item)}
     try:
         check_task(bundle, body)
     except Refused as error:
@@ -5591,7 +5740,7 @@ def send_task(item):
 def send_held(item):
     """Seb's yes to what was held: the deletion of a bundle, the task a bundle sends to a new ops
     agent or to another bundle, the resume of the cut sessions, what frees the disk, or the answer
-    to a question of a remote agent."""
+    to a question of a remote agent. The words Seb typed with his yes to a task end that task."""
     if "dialog" in item["send"]:
         return send_dialog(item)
     if "resume" in item["send"]:
@@ -5620,9 +5769,17 @@ def send_held(item):
         return send_orphan(item)
     if "bundle" in item["send"]:
         return send_deletion(item)
-    _code, answer = open_ops(HOST, "ops", {"task": item["send"]["task"]})
+    _code, answer = open_ops(HOST, "ops", {"task": add_said(item["send"]["task"], item)})
     wait_job(jobs[answer["job"]])
     return f"an ops agent window opens on the task of {item['client']}"
+
+
+def add_said(task, item):
+    """A held task, ended by the words Seb typed with his yes (`said`, from take() of held.py)."""
+    said = item.get("said")
+    if not isinstance(said, str) or not said.strip():
+        return task
+    return f"{task}\n\nSeb said with his yes: {cut_text(as_typed(said).strip(), MAX_TOLD)}"
 
 
 def wait_job(job):
@@ -6223,6 +6380,7 @@ VERBS = {
     ("POST", "/place"): place_agent,
     ("POST", "/schedule"): schedule_task,
     ("POST", "/prompt"): prompt_window,
+    ("POST", "/reach"): look_reach,
     ("POST", "/stop"): stop_window,
     ("POST", "/tell"): tell,
     ("POST", "/answered"): tell_watchers,

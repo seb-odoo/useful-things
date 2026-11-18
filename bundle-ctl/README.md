@@ -78,6 +78,8 @@ the pager. `python3 test_node_modules.py` and `python3 test_delete.py` have the 
 | `POST /close` | the agent window of `bundle` closed with no yes, as after its verdict: its claude and its container stop, its session stays; refused while a claude of the bundle is in a turn or waits for an answer, or while its agent starts (see Agents in a terminal). An agent on a worker stops there as after its verdict and its work tree comes back: its turn is read in the session record the worker mirrors back, and it is refused while it moves (see Remote agents); with `force` (deck's Close), a turn there does not refuse it: its claude stops at its next tool call or at the end of the turn, a dialog at once. Refused to a container |
 | `POST /prompt` | a prompt Seb sent from deck, typed as his own in the window of `agent` (a bundle, or `ops-SESSION`) while it runs `session`, or on its worker for an agent that runs there with no terminal here; with `open`, a terminal opened again on that session when none runs it; 404 otherwise (see Prompts from deck). Refused to a container |
 | `POST /stop` | Escape in the window of `agent` while it runs `session`, in a turn or a dialog, or on its worker for an agent that runs there with no terminal here (see Prompts from deck). Refused to a container |
+| `POST /tell` | one line of `hok` for the conversation that asked a card, typed in the agent window that runs it; with `words`, the conversation that no window types it in goes on, woken on the line and Seb's words (see hok events). Refused to a container |
+| `POST /reach` | what `POST /tell` would do now with the line of a card, changing nothing: `typed`, `wake`, or `none` with why (see hok events). Refused to a container |
 | `POST /schedule` | when the queued task of `bundle` may start: `when` is `spot` (once a slot, the memory and the CPU let it), `manual` (it waits for a manual resume, until it is scheduled again) or `HH:MM` (that time of the host, today or tomorrow); it no longer goes over the cap. Then the answer of `GET /queue`. The host, that bundle or the one that queued the task asks |
 | `POST /unqueue` | the queued task of a bundle dropped; the host, that bundle or the one that queued the task asks |
 | `POST /run` | a heavy command waits for cores: one JSON line each time its place changes, then the CPUs it got (see Runs) |
@@ -862,7 +864,9 @@ only from the host, from that bundle, or from its parent, the bundle that queued
 (`.agent/parent`). From any other bundle, a review bundle on the PR of a stranger say, the daemon
 holds it as `bN` for Seb's yes in `hok`, opened by "The agent of the bundle X sends this task". His
 yes queues it as from the parent: the sender does not become the parent, and its next task waits
-for a yes again. The same task sent again replaces the request that waits. A `fetch` with no task
+for a yes again. The words Seb types with his yes end the task, on `Seb said with his yes:
+WORDS` (from `said` of `held.take` in gateway-core). The same task sent again replaces the
+request that waits. A `fetch` with no task
 of a bundle made already is refused: it is there, `open` it. Until 2026-11-12 a task was refused
 too: the bundle of the review board's turn on odoo#300049 was made with no local branch, so `bctl
 status` had no row for it, and each pass of the automatic triage sent `bctl fetch` on its PR and
@@ -1448,17 +1452,47 @@ a prompt.
   review-board waited 6 min behind a question of the agent, and he wondered whether it came).
 - A request a gateway or this daemon held (`bN`, such as `bctl delete`) names its bundle, not
   its conversation: `POST /tell {bundle, text}` types the line in the session the terminal of
-  that bundle runs now, or its agent on a worker, 404 when neither runs.
+  that bundle runs now, or its agent on a worker, 404 when neither runs. A push of git-gate, or a
+  card whose gateway client named its session, names both: `POST /tell {session, bundle, text}`
+  types the line while that terminal or worker runs that session. The session must be one the
+  agent of that bundle ran: its transcript is the bundle's, no transcript of the ops container
+  has its id, and no other bundle holds it in its own folder (security check 11-03, B17), else
+  the request is refused.
 - An ops window whose claude ended keeps its folder until the window closes, and the line waits
   there for the window that goes on with the session. All of them end when the ops container goes
   down: on 2026-10-29 the line of request 542 was lost, as every ops window was down from 13:42 to
   14:33. The resume of a cut session (Seb's yes in `hok`) closes the old window, which removes its
   folder, so the lines go to the folder of the new one.
 - No window runs it (a tab of a VS Code window, a closed window, a bundle whose terminal ended):
-  404, nothing is left. The claude of an agent window has `AGENT_WINDOW` (the bundle, or
+  404, nothing is left, unless Seb typed words (below). The claude of an agent window has
+  `AGENT_WINDOW` (the bundle, or
   `ops-SESSION`) in its environment, so a conversation knows whether it is told: in a window it
   ends its turn on a wait for Seb's answer, in a tab it keeps a background `hctl job N --wait
   86400`, or `hok-answer gN` with no `--wait`.
+- Seb's words with his answer (`words`, 2000 characters at most, new lines kept) reach the
+  conversation even when no window types its line (Seb, 2026-11-18: "make sure this feedback
+  either wakes up a relevant agent, or that it's impossible to send feedback when it wouldn't be
+  received", after his words on f2 reached nobody; that evening the window of the bundle of g827
+  had closed 14 s before his yes). When no agent window
+  types the line now, or the claude of its ops window ended, the conversation goes on, woken on
+  a prompt made of the line, a blank line, then `Seb's words with his answer: WORDS`. A session
+  of the ops container goes on in a new ops agent window, as a cut session does (see Cut
+  sessions), with the lines its old window held; a session of a bundle as a `--resume` task of
+  the queue, with the priority, the model and the effort of the last task of its agent. The
+  answer is then `{bundle, woke: true, asks: false}`. Nothing wakes a deleted bundle, a session
+  with no transcript, a bundle whose task waits in the queue or whose VS Code window is open, nor
+  a session a claude still runs elsewhere, in a VS Code tab or a terminal of its own, as the
+  records of the sessions folder of its container say: hok cannot type there, and two claudes on
+  one session would mix their turns. Then `/tell` does as with no words (the line typed or left,
+  else 404 with why), and `woke` is false. A wake can take some seconds: it closes the window
+  where the claude ended, 30 s at most, and starts the queue.
+- `POST /reach {session, bundle, words}` says what `/tell` would do now, changing nothing, so that
+  hok refuses Seb's words before they leave when they would reach nobody: `{reach: "typed",
+  bundle}` when the line is typed now, `{reach: "wake", bundle}` when `/tell` with words wakes
+  the conversation, else `{reach: "none", why}`. With `words` false (true when left out), it asks
+  for the line alone. An ops window whose claude ended holds the line for the claude that goes on
+  there, which may never come: `/reach` answers `none` for it, unless words wake it. Both verbs
+  decide with the same code, so they never disagree.
 - A window closed by hand while its conversation waited removes the lines with its folder: that
   conversation, in a tab or in a new window, is told nothing.
 - A `bctl open BUNDLE --resume` with a task takes the same way into a running agent terminal (see
@@ -1522,7 +1556,8 @@ a prompt.
   reads whose another card is.
 
 `python3 test_tell.py` runs the verb on fake agent folders, the environment of both windows, the
-lines of a parent, and the watch of a card.
+lines of a parent, the watch of a card, the wake on Seb's words with what `/reach` answers, and
+the words of a yes at the end of a held task.
 
 ## Prompts from deck
 
@@ -1592,7 +1627,9 @@ answer as `bctl delete` does, and the same task sent again takes back the reques
 The host and the ops container hold a task the same way with `bctl open ops --task TEXT --hold`,
 for a task written from text that comes from outside: a report of the review board (review-board
 README, "Reports"; security check of 2026-11-12, P1). The yes opens the agent after a line that
-says Seb said yes; `--hold` takes a task alone. It is a route of its own, `POST /hold-ops`, so a
+says Seb said yes; `--hold` takes a task alone. The words Seb types with his yes end the task, on
+`Seb said with his yes: WORDS`, as they do for a held task of a bundle. It is a route of its own,
+`POST /hold-ops`, so a
 daemon that does not know it yet answers 404 and opens nothing (W9 of that check).
 
 - The window is named `ops-SESSION`, a new session id, where a bundle window has the bundle name:
