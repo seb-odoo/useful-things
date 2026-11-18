@@ -3,6 +3,7 @@
 and how it finds them, without a terminal: python3 test_restart.py
 """
 
+import json
 import math
 import os
 import pathlib
@@ -84,6 +85,61 @@ REQUEUE_CASES = [
     ({"status": "shell"}, False),
     ({"minimized": False}, False),
 ]
+
+LIMIT_SWITCH ={"main": {"out_until": 4 * 86400}, "backup": {"out_until": -3600, "token": True}}
+LIMIT_BASE = {
+    "kind": "local",
+    "switch": LIMIT_SWITCH,
+    "session": "s1",
+    "status": "idle",
+    "resets": 4 * 86400,
+    "window": True,
+    "minimized": True,
+    "queued": False,
+    "held": True,
+    "pause": False,
+    "ending": False,
+}
+BLOCKED = "Identity verification pending"
+LIMIT_CASES = [
+    ({}, "here"),
+    ({"kind": "ops"}, "here"),
+    ({"kind": "remote"}, "worker"),
+    ({"kind": "remote", "window": False}, "worker"),
+    ({"kind": "remote", "window": False, "minimized": False}, "worker"),
+    ({"kind": "remote", "minimized": False}, False),
+    ({"kind": "remote", "ending": True}, False),
+    ({"kind": "ops", "minimized": False}, False),
+    ({"status": "shell"}, "here"),
+    ({"status": "busy"}, False),
+    ({"status": "waiting"}, False),
+    ({"status": None}, False),
+    ({"resets": None}, False),
+    ({"resets": 300}, False),
+    ({"minimized": False}, False),
+    ({"queued": True}, False),
+    ({"held": False}, False),
+    ({"pause": True}, False),
+    ({"switch": {**LIMIT_SWITCH, "backup": {"out_until": 3600, "token": True}}}, False),
+    (
+        {
+            "switch": {
+                **LIMIT_SWITCH,
+                "backup": {"out_until": -60, "token": True, "blocked_reason": BLOCKED},
+            }
+        },
+        False,
+    ),
+    (
+        {"switch": {**LIMIT_SWITCH, "backup": {"out_until": -60, "refused": 1, "token": True}}},
+        False,
+    ),
+    ({"switch": {**LIMIT_SWITCH, "backup": {"out_until": -60, "token": False}}}, False),
+    ({"switch": {**LIMIT_SWITCH, "backup": {"out_until": -60}}}, False),
+    ({"switch": {"main": {"out_until": -60}, "backup": {"out_until": -60}}}, "here"),
+    ({"switch": None}, False),
+]
+LIMIT_NAMES = {"local": "l", "ops": "ops-s1", "remote": "r"}
 
 
 def restart(root, terminals):
@@ -210,6 +266,136 @@ def check_free(root):
     return failures
 
 
+def limit(root, case, at, lines=None, fresh=True):
+    """How one pass at `at` puts back in the queue the agent in `case`, of a terminal here (`l`),
+    an ops window (`ops-s1`) or a worker (`r`): `here` as Back to queue does, `worker` stopped on
+    its worker. The times of the case are seconds from `at`: until when an account is out, when
+    the limit of the session resets. With `fresh`, no agent went back on that limit before."""
+    name = LIMIT_NAMES[case["kind"]]
+    agent = root / name / ".agent"
+    agent.mkdir(parents=True, exist_ok=True)
+    (agent / "session").write_text(f"{case['session']}\n")
+    (agent / "terminal").write_text(f"{1000 if case['held'] else 1}\n")
+    for kept, there in (("pause", case["pause"]), ("remote-ending", case["ending"])):
+        (agent / kept).unlink(missing_ok=True)
+        if there:
+            (agent / kept).touch()
+    status = root / "status.json"
+    switch = case["switch"]
+    status.write_text(
+        "{"
+        if switch is None
+        else json.dumps(
+            {
+                account: {**entry, "out_until": at + entry["out_until"]}
+                for account, entry in switch.items()
+            }
+        )
+    )
+    containers = {"l": "l", "ops-s1": "host-ctl", "r": "r"}
+    session = name.removeprefix("ops-") if case["kind"] == "ops" else case["session"]
+    done = []
+    daemon.SWITCH_STATUS = status
+    daemon.HOST_FOLDER = "/repo/host-ctl"
+    daemon.read_state = lambda: {"queue": [{"bundle": name}] if case["queued"] else []}
+    daemon.get_agent_folder = lambda bundle: root / bundle / ".agent"
+    daemon.get_terminals = lambda ops=False: {name: 1000} if ops and case["window"] else {}
+    daemon.get_remote_agents = lambda: {"r": "sebpc"} if name == "r" else {}
+    daemon.get_session_status = lambda container, asked: (
+        case["status"] if (container, asked) == (containers[name], session) else None
+    )
+    daemon.TITLE.get_limit_reset = lambda asked, bundle: (
+        at + case["resets"] if case["resets"] and (asked, bundle) == (session, name) else None
+    )
+    daemon.read_stat = lambda pid: (pid + 1, 0)
+    daemon.is_minimized = lambda pid, env: pid == 1001 and case["minimized"]
+    daemon.session_env = dict
+    daemon.requeue_agent = lambda caller, query, body, **kwargs: done.append(
+        ("here", caller, body, kwargs)
+    )
+    daemon.requeue_remote_agent = lambda bundle: done.append(("worker", bundle))
+    daemon.print = lambda *args, **kwargs: lines.append(args[0]) if lines is not None else None
+    if fresh:
+        daemon.limit_requeues.update(switch=None, agents=set())
+    daemon.requeue_usage_limited()
+    return done
+
+
+def check_limit(root):
+    """Each case of LIMIT_CASES, then an agent that stops on the limit again: it stays until the
+    state of the switch changes, then goes back once more; another session of its bundle goes
+    at once. Then the journal lines, and how an agent on a worker goes back."""
+    failures = []
+    host_folder, requeue_remote_agent = daemon.HOST_FOLDER, daemon.requeue_remote_agent
+    at = time.time()
+    for changes, expected in LIMIT_CASES:
+        case = {**LIMIT_BASE, **changes}
+        name = LIMIT_NAMES[case["kind"]]
+        found = limit(root, case, at)
+        wanted = {"here": [("here", "host", {"bundle": name}, {})], "worker": [("worker", name)]}
+        if found != wanted.get(expected, []):
+            failures.append(f"limit {changes}: {found}, expected {expected}")
+    blocked = {
+        **LIMIT_SWITCH,
+        "backup": {"out_until": -60, "token": True, "blocked_reason": BLOCKED},
+    }
+    steps = [
+        (LIMIT_BASE, 1),
+        (LIMIT_BASE, 0),
+        ({**LIMIT_BASE, "switch": blocked}, 0),
+        (LIMIT_BASE, 1),
+        (LIMIT_BASE, 0),
+        ({**LIMIT_BASE, "session": "s2"}, 1),
+    ]
+    found = [len(limit(root, case, at, fresh=index == 0)) for index, (case, _) in enumerate(steps)]
+    if found != [count for _, count in steps]:
+        failures.append(f"limit again, same switch, changed, same, new session: {found}")
+    lines = []
+    limit(root, LIMIT_BASE, at, lines)
+    limit(root, {**LIMIT_BASE, "kind": "remote"}, at, lines)
+    when = daemon.format_time(at + 4 * 86400)
+    expected = [
+        f"l: its claude waits for the usage limit until {when}, and claude-switch has backup"
+        " free: back to the queue",
+        f"r: its claude on sebpc waits for the usage limit until {when}, and claude-switch has"
+        " backup free: back to the queue",
+    ]
+    if lines != expected:
+        failures.append(f"limit journal: {lines}")
+    daemon.HOST_FOLDER, daemon.requeue_remote_agent = host_folder, requeue_remote_agent
+    daemon.print = lambda *args, **kwargs: None
+    failures += check_remote_requeue(root)
+    return failures
+
+
+def check_remote_requeue(root):
+    """requeue_remote_agent stops the claude of the agent on its worker, then queues its session
+    last; a bundle queued already is refused before anything stops."""
+    calls = []
+    agent = root / "w" / ".agent"
+    agent.mkdir(parents=True)
+    (agent / "session").write_text("s1\n")
+    queue = [{"bundle": "a", "priority": 3}, {"bundle": "b", "priority": -2}]
+    daemon.read_state = lambda: {"queue": queue}
+    daemon.get_agent_folder = lambda bundle: root / bundle / ".agent"
+    daemon.get_bundle_container = lambda bundle: None
+    daemon.enqueue = lambda caller, bundle, task: calls.append(("queue", caller, bundle, task))
+    end = daemon.remote_agent.end
+    daemon.remote_agent.end = lambda bundle, folder: calls.append(("end", bundle, folder))
+    try:
+        daemon.requeue_remote_agent("w")
+        queue.append({"bundle": "w"})
+        try:
+            daemon.requeue_remote_agent("w")
+        except daemon.Refused:
+            calls.append("refused")
+    finally:
+        daemon.remote_agent.end = end
+    task = {"priority": -2, "resume": True, "task": daemon.GO_ON}
+    expected = [("end", "w", root / "w"), ("queue", "host", "w", task), "refused"]
+    return [] if calls == expected else [f"requeue_remote_agent: {calls}"]
+
+
 def check_processes(root):
     """get_terminals and read_stat on processes named as agent-terminal.py runs."""
     script = root / "agent-terminal.py"
@@ -260,11 +446,13 @@ def main():
     with tempfile.TemporaryDirectory() as root:
         failures += check_free(pathlib.Path(root))
     with tempfile.TemporaryDirectory() as root:
+        failures += check_limit(pathlib.Path(root))
+    with tempfile.TemporaryDirectory() as root:
         failures += check_launches(pathlib.Path(root))
     daemon.get_terminals, daemon.read_stat = get_terminals, read_stat
     for failure in failures:
         print(f"FAIL {failure}")
-    total = len(CASES) + len(FREE_CASES) + len(REQUEUE_CASES) + 6
+    total = len(CASES) + len(FREE_CASES) + len(REQUEUE_CASES) + len(LIMIT_CASES) + 9
     print(f"{total - len(failures)}/{total} cases as expected")
     return 1 if failures else 0
 

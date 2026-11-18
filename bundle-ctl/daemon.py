@@ -240,6 +240,7 @@ HOST_ONLY = {
     ("POST", "/tell"),
 }
 JOB_WAIT = 50
+LIMIT_SOON = 10 * 60
 LOGIN_BACK = (
     f"{GO_ON}\n\nThe main login is renewed: this session waited for it in the queue since"
     " {time}, as claude-switch held its requests meanwhile. Go on with what it stopped, and first"
@@ -344,6 +345,7 @@ SESSION_VARIABLES = (
 SOCKET = STATE / "sock" / "ctl.sock"
 START_CHECK = 10
 STATUS_FRESH = 30
+SWITCH_STATUS = remote_agent.DUMMIES.parent / "status.json"
 TERMINAL_CODE = [
     HERE / "agent-terminal.py",
     HERE / "agent-terminator.py",
@@ -423,6 +425,7 @@ FOLDER_LABELS = (
 git_statuses = {}
 jobs = {}
 kept_reviews = {}
+limit_requeues = {"switch": None, "agents": set()}
 package_heads = {}
 restarted = {}
 ops_lock = threading.Lock()
@@ -2462,7 +2465,7 @@ def restore_safely():
 
 
 def free_safely():
-    for free in (free_done_terminals, requeue_failed_terminals):
+    for free in (free_done_terminals, requeue_failed_terminals, requeue_usage_limited):
         try:
             free()
         except Exception:
@@ -3013,6 +3016,109 @@ def requeue_failed_terminals():
             flush=True,
         )
         requeue_agent(HOST, {}, {"bundle": bundle}, after=after)
+
+
+def requeue_usage_limited():
+    """Put back in the queue each agent whose claude stopped on the usage limit while claude-switch
+    has an account free: its claude goes on at the reset of the 429 it got, 4 days later for the
+    weekly one of 2026-11-18, and a new claude on its session sends through the switch again. An
+    agent terminal or an ops window goes as Back to queue does. An agent on a worker stops there,
+    and its session is queued to go on there. Not when its reset comes within LIMIT_SOON, and only
+    while its window here, when it has one, is minimized, as for free_done_terminals. Once per
+    state of the switch: an agent that stops on the limit again waits for an account to change."""
+    now = time.time()
+    switch = get_switch_state(now)
+    if switch != limit_requeues["switch"]:
+        limit_requeues.update(switch=switch, agents=set())
+    free = [account for account, is_free, _until in switch if is_free]
+    if not free:
+        return
+    with state_lock:
+        state = read_state()
+    queued = {item["bundle"] for item in state["queue"]} | set(state.get("deletions", []))
+    terminals, remotes = get_terminals(ops=True), get_remote_agents()
+    env = None
+    for name in sorted({*terminals, *remotes} - queued):
+        agent = get_agent_folder(name)
+        ops = name.startswith(OPS)
+        session = name.removeprefix(OPS) if ops else read_text(agent / "session")
+        container = os.path.basename(HOST_FOLDER or "") if ops else name
+        local = name not in remotes and not ops
+        if (
+            not session
+            or (name, session) in limit_requeues["agents"]
+            or (agent / "pause").exists()
+            or is_deleting(name)
+            or (local and read_text(agent / "terminal") != str(terminals[name]))
+            or any(
+                (agent / kept).exists()
+                for kept in ("remote-down", "remote-ending", "remote-moving")
+            )
+            or get_session_status(container, session) not in ("idle", "shell")
+        ):
+            continue
+        resets = TITLE.get_limit_reset(session, name)
+        if not resets or resets < now + LIMIT_SOON:
+            continue
+        if name in terminals:
+            env = env or session_env()
+            try:
+                parent, _started = read_stat(terminals[name])
+            except (OSError, IndexError, ValueError):
+                continue
+            if not is_minimized(parent, env):
+                continue
+        limit_requeues["agents"].add((name, session))
+        where = f" on {remotes[name]}" if name in remotes else ""
+        print(
+            f"{name}: its claude{where} waits for the usage limit until {format_time(resets)},"
+            f" and claude-switch has {' and '.join(free)} free: back to the queue",
+            flush=True,
+        )
+        try:
+            if name in remotes:
+                requeue_remote_agent(name)
+            else:
+                requeue_agent(HOST, {}, {"bundle": name})
+        except (Refused, ValueError) as error:
+            print(f"{name}: not back to the queue: {error}", flush=True)
+
+
+def get_switch_state(now):
+    """Each account of claude-switch, whether it sends a message now, and until when it is out,
+    from its status.json (claude-switch README): free when not out, with no identity block nor
+    refused token, and for the backup with a token. Empty when the file cannot be read."""
+    try:
+        accounts = sorted(json.loads(read_text(SWITCH_STATUS) or "").items())
+    except (AttributeError, ValueError):
+        return ()
+    state = []
+    for account, entry in accounts:
+        try:
+            until = float(entry.get("out_until") or 0)
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if not math.isfinite(until):
+            continue
+        is_free = (
+            until <= now
+            and not entry.get("blocked_reason")
+            and not entry.get("refused")
+            and (account != "backup" or entry.get("token") is True)
+        )
+        state.append((account, is_free, until))
+    return tuple(state)
+
+
+def requeue_remote_agent(bundle):
+    """Stop the claude of a bundle's agent on its worker as `bctl close` does, and queue its
+    session again, last, as Back to queue does here: it goes on there once its job ended."""
+    with state_lock:
+        priority = min((item.get("priority", 0) for item in read_state()["queue"]), default=0)
+    task = {"priority": priority, "resume": True, "task": GO_ON}
+    check_task(bundle, task)
+    remote_agent.end(bundle, get_agent_folder(bundle).parent)
+    enqueue(HOST, bundle, task)
 
 
 def close_freed(bundle):

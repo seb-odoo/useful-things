@@ -935,6 +935,28 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   The journal says `BUNDLE: its claude waits for the main login, back to the queue`.
   `python3 test_terminal.py`, `python3 test_restart.py`, `python3 test_window_title.py` and
   `python3 test_queue.py` run each case.
+- A turn that ends on the usage limit goes back to the queue once claude-switch has an account
+  free (Seb, 2026-11-18). Its claude goes on by itself at the reset of the 429 it got only: that
+  day main hit its weekly limit, which resets 4 days later, and the switch kept the backup flagged
+  until 11:19, so each agent got the 429 of main, and Seb put 19 of them back in the queue by hand
+  once the backup was free. A line typed in such a session does not help: claude answers it with
+  its limit message again, and the terminal holds it meanwhile. At each pass the daemon reads
+  `~/.local/state/claude-switch/status.json` (claude-switch README), and while an account there
+  is free (not out, no `blocked_reason`, not `refused`, and for the backup a `token`), it puts
+  back each agent whose session is idle or on a background command and whose last message is
+  the limit message of Claude, before or after its verdict, with a reset more than 10 minutes
+  away (`LIMIT_SOON`): a reset that comes sooner goes faster than the end of the queue. Not cut
+  at the 5 hours of the mark of the window: a claude started later on that session waits all the
+  same, and 6 of the 19 were past them. An agent terminal and an ops agent window go as Back to
+  queue does, last, while their window is minimized, as above. An agent on a worker stops there
+  as `bctl close` stops it, and its session, queued last, goes on there once its job ended, while
+  its window here, when it has one, is minimized. Once per state of the switch (which account is
+  free, until when each one is out): an agent that stops on the limit again stays until that state
+  changes, as a status that says an account is free while the switch sends nothing with it would
+  requeue it at each pass. The daemon keeps that in memory, so after its restart such an agent
+  goes back once more. The journal says `BUNDLE: its claude waits for the usage limit until
+  MM-DD HH:MM, and claude-switch has backup free: back to the queue`, `its claude on WORKER` for an
+  agent on a worker. `python3 test_restart.py` and `python3 test_window_title.py` run each case.
 - Quitting claude or closing the terminal stops the container. Before the verdict nothing else
   does: Seb may type in that session at any time. Without a verdict the agent then reads `stopped`. So does a
   terminal that dies without closing (killed, or lost with the X server): `podman exec` does not see that hangup, so the wrapper ends on the hangup and stops

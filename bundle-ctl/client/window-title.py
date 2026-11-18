@@ -53,6 +53,7 @@ KINDS = (
 )
 LEFT = re.compile(r"[*_\s]*nothing (is )?left\b", re.IGNORECASE)
 LIMIT_ERROR = "usage_limit_reached"
+LIMIT_FOR = 7 * 86400
 LINK = re.compile(r"\[([^\]]+)\]\([^)\s]+\)")
 LOGIN_WAIT = "claude-switch: the main login expires"
 MAX_LINE = 4 << 20
@@ -206,6 +207,31 @@ def is_resuming(session, bundle=""):
         except (AttributeError, KeyError, RecursionError, TypeError, ValueError):
             continue
     return False
+
+
+def get_limit_reset(session, bundle=""):
+    """When the usage limit a session stopped on resets, as epoch seconds, None when it stopped on
+    none or that reset passed: its last message is the one Claude writes for the limit, with only
+    the notice that it goes on at the reset around it. A cancel by Esc, or the reset notice, ends
+    it. Not cut at RESUMING_FOR as is_resuming: a claude started later on that session waits all
+    the same, and does not go on by itself. A reset is LIMIT_FOR away at most, the weekly one."""
+    for line in reversed(read_tail(session, bundle)):
+        try:
+            entry = json.loads(line)
+            if entry.get("isSidechain"):
+                continue
+            if entry.get("apiError") == LIMIT_ERROR:
+                resets = float(entry["apiErrorParams"]["rate_limit_info"]["resetsAt"])
+                now = time.time()
+                return resets if now < resets <= now + LIMIT_FOR else None
+            if entry["type"] in ("user", "assistant"):
+                return None
+            notice = entry.get("subtype") == "informational"
+            if notice and RESUMING not in str(entry.get("content")):
+                return None
+        except (AttributeError, KeyError, RecursionError, TypeError, ValueError):
+            continue
+    return None
 
 
 def read_answers(session, bundle=""):

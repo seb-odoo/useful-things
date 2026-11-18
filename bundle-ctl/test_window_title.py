@@ -134,6 +134,19 @@ NOTICES = {
 }
 AGAIN = "Usage limit reached again · continuing automatically at 4pm · esc to cancel"
 PROMPTED = {"again": (AGAIN, 3600), "prompted": (None, 3600), "again-reset": (AGAIN, -60)}
+LIMIT_RESETS = [
+    ("limit-last", ["answer", "limit", "turn"], 4 * 86400),
+    ("limit-notice", ["answer", "limit", "notice", "turn", "queue"], 4 * 86400),
+    ("limit-old", ["answer", "old-limit", "notice", "blob"], 4 * 86400),
+    ("limit-prompted", ["limit", "notice", "prompt", "again", "limit"], 4 * 86400),
+    ("limit-cancelled", ["limit", "notice", "cancelled"], None),
+    ("limit-reset", ["limit", "notice", "reset"], None),
+    ("limit-answered", ["limit", "notice", "prompt", "answer"], None),
+    ("limit-passed", ["answer", "passed-limit"], None),
+    ("limit-far", ["answer", "far-limit"], None),
+    ("limit-subagent", ["answer", "subagent-limit"], None),
+    ("limit-none", ["answer"], None),
+]
 OPS = "🔧 Ops windows in the list (ops)"
 OPS_MARKS = [
     ("ops-report", [], OPS),
@@ -354,6 +367,61 @@ def get_api_errors(home):
             failures.append(f"API errors of {session}: {found}, expected {expected}")
     if (found := title.count_api_errors("error-loop", 99)) != 8:
         failures.append(f"API errors of error-loop, 99 at most: {found}, expected 8")
+    return failures
+
+
+def get_limit_resets(home):
+    """When the usage limit a session stopped on resets: its limit message last, with the notice
+    that it goes on at the reset, or a prompt answered by that message again, past the 5 hours of
+    the mark too; none once cancelled by Esc, reset, answered, past, more than a week away, nor
+    for a subagent."""
+    spec = importlib.util.spec_from_file_location("title", HERE / "client" / "window-title.py")
+    title = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(title)
+    now = int(time.time())
+
+    def stamp(ago):
+        return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(now - ago))
+
+    def limit(resets, ago=60, **more):
+        return {
+            "type": "assistant",
+            "timestamp": stamp(ago),
+            "message": {"content": [{"type": "text", "text": "You've hit your weekly limit"}]},
+            "isApiErrorMessage": True,
+            "error": "rate_limit",
+            "apiError": "usage_limit_reached",
+            "apiErrorParams": {"rate_limit_info": {"resetsAt": now + resets}},
+            **more,
+        }
+
+    def notice(text):
+        entry = {"type": "system", "subtype": "informational", "content": text}
+        return {**entry, "timestamp": stamp(30)}
+
+    entries = {
+        "limit": limit(4 * 86400),
+        "old-limit": limit(4 * 86400, ago=6 * 3600),
+        "passed-limit": limit(-60),
+        "far-limit": limit(8 * 86400),
+        "subagent-limit": limit(4 * 86400, isSidechain=True),
+        "notice": notice(LIMIT),
+        "again": notice(AGAIN),
+        "cancelled": notice(NOTICES["cancelled"][1][0]),
+        "reset": notice("Usage limit reset · Continuing automatically"),
+        "prompt": {"type": "user", "message": {"content": "hok event: Seb said yes"}},
+        "answer": {"type": "assistant", "message": {"content": [{"type": "text", "text": "ok"}]}},
+        "turn": {"type": "system", "subtype": "turn_duration"},
+        "queue": {"type": "queue-operation"},
+        "blob": {"type": "api-request-blob", "message": {"role": "assistant", "content": "x"}},
+    }
+    failures = []
+    for session, kinds, resets in LIMIT_RESETS:
+        lines = "".join(f"{json.dumps(entries[kind])}\n" for kind in kinds)
+        (home / ".claude" / "projects" / "-workspace" / f"{session}.jsonl").write_text(lines)
+        expected = resets and now + resets
+        if (found := title.get_limit_reset(session)) != expected:
+            failures.append(f"limit reset of {session}: {found}, expected {expected}")
     return failures
 
 
@@ -727,6 +795,7 @@ def main():
         failures += get_shadowed(home)
         failures += get_hok_waits()
         failures += get_api_errors(home)
+        failures += get_limit_resets(home)
         failures += get_first_prompts(home)
         failures += get_close_lines()
         failures += get_deep_lines(home)
@@ -746,7 +815,7 @@ def main():
     for line in failures:
         print(line)
     cases = len(MARKS) + len(OPS_MARKS) + len(HOK_WAITS) + len(CLOSE_LINES) + len(CONFIGS)
-    cases += len(API_ERRORS) + len(LOGIN_WAITS) + len(PROMPTS) + 1
+    cases += len(API_ERRORS) + len(LOGIN_WAITS) + len(LIMIT_RESETS) + len(PROMPTS) + 1
     cases += len(FOLLOWED) + 12
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
