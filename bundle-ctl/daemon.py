@@ -1030,7 +1030,13 @@ def requeue_agent(caller, query, body, after=None, login=False):
         answer = enqueue(caller, bundle, task, session=session)
     else:
         check_task(bundle, task)
-        answer = enqueue(caller, bundle, task)
+        pause = get_agent_folder(bundle) / "pause"
+        write_text(pause, f"{time.time() + PAUSE_WAIT}\n")
+        try:
+            answer = enqueue(caller, bundle, task)
+        except Exception:
+            pause.unlink(missing_ok=True)
+            raise
     why = "when Seb put it back in the queue"
     if paused:
         why = "when Seb paused it"

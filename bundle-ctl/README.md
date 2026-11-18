@@ -1216,7 +1216,9 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   session of each selected bundle again (`POST /requeue`, at the lowest priority of the queue, so last), and the daemon
   closes its window once its turn ended, 2 minutes at most: when its turn comes, a new terminal
   goes on with that session, told that its window closed and to check what changed since its last
-  turn (`RESUMED` in `daemon.py`). Pause does the same with
+  turn (`RESUMED` in `daemon.py`). Its task waits for that window to close, after the verdict of
+  the agent too: until 2026-11-18 the queue gave it to the terminal of that idle session, which
+  typed it, then the window closed, and the session was in the queue no more. Pause does the same with
   `paused`: the task waits in the queue until Resume or
   Time there (Seb, 2026-10-16: "move agents from and to the queue easily, or pause them"). Until
   its window closes, its row says `pausing` or `back to queue` after its state, read from its

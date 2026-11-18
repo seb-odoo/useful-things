@@ -755,16 +755,18 @@ def check_requeue(root):
     its turn ended, or at PAUSE_WAIT; meanwhile the hook refuses its commands, and a turn cut there
     goes on told so. Only the host asks, for an agent window, or an agent for itself to wait for
     GitHub."""
-    agents = {"idle": RUNS_IT, "busy": RUNS_IT, "slow": RUNS_IT, "offline": RUNS_IT, "other": FRESH}
+    agents = {"idle": RUNS_IT, "busy": RUNS_IT, "slow": RUNS_IT, "offline": RUNS_IT}
+    agents.update(done={**RUNS_IT, "done": "0\n"}, other=FRESH)
     state, _launched = prepare(root, agents, 8)
     state["queue"] = [{**state["queue"][-1], "paused": True, "priority": -5}]
-    windows = {"idle", "busy", "slow", "offline"}
-    statuses = {"idle": "idle", "busy": "busy", "slow": "busy", "offline": "idle"}
+    windows = {"idle", "busy", "slow", "offline", "done"}
+    statuses = {"idle": "idle", "busy": "busy", "slow": "busy", "offline": "idle", "done": "idle"}
     last = {
         "idle": {"type": "text", "text": "Nothing left: done."},
         "busy": {"type": "text", "text": "Nothing left: done."},
         "slow": {"type": "tool_use", "name": "Bash", "input": {"command": "sleep 600"}},
         "offline": {"type": "text", "text": "Waiting for GitHub."},
+        "done": {"type": "text", "text": "pushed: 1234abc"},
     }
     for bundle in windows:
         (daemon.get_agent_folder(bundle) / "session").write_text(f"{bundle}\n")
@@ -829,6 +831,10 @@ def check_requeue(root):
     (root / "claude-config" / "busy" / "sessions" / "1.json").write_text(json.dumps(record))
     found = wait_closed("busy"), get_task("busy"), ask_hook("busy")
     checks.append(("it closes once its turn ended", found == closed))
+    code, _lines = run_client(path, "requeue", "done")
+    found = code, wait_closed("done"), [item["task"] for item in state["queue"][-1:]]
+    after = found == (0, True, [daemon.GO_ON]) and state["queue"][-1]["bundle"] == "done"
+    checks.append(("one after its verdict stays queued, not typed in its terminal", after))
     started = time.monotonic()
     code, _lines = run_client(path, "requeue", "slow", "--paused")
     closed = wait_closed("slow")
