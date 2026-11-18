@@ -63,7 +63,7 @@ the pager. `python3 test_node_modules.py` and `python3 test_delete.py` have the 
 | `GET /held` | what became of a deletion, a task for ops or for another bundle, a build of `node_modules` or a resume this caller asked (`?id=bN`): it waits, or what Seb said in `hok`; `?wait=S` long-polls it, 50 s at most |
 | `GET /hok` | the requests of `hok` that wait for the caller, a bundle its own and the host those of the ops session `?session=`: name, where a yes acts and what it does, when it was asked, put off or not (see the agent list) |
 | `POST /fetch` | `pfb` on a bundle name, a PR link or a fork label, then a window; with a task, only its queue entry, as for `create`, and on a bundle made already the task as `open` takes it; refused when the bundle is here and no task comes, a branch has unpushed commits or, with no task, the disk is short |
-| `POST /hold-task` | a task on a bundle made already, held as `bN` for Seb's yes in `hok` whoever asks, the host too (see A task for another bundle) |
+| `POST /hold-task` | a task on a bundle made already, or with `name` on the bundle of a PR that the yes fetches when it is not made, held as `bN` for Seb's yes in `hok` whoever asks, the host too (see A task for another bundle) |
 | `POST /node-modules` | the `node_modules` of the `package.json` of the web tooling of the branch of `base`, built in the store when it has none (see `scripts/README.md`, Shared node_modules): a job for the host; from a bundle, for its own base only, held as `bN` for Seb's yes in `hok`, which shows the change from the `package.json` of the tree it links; `tree` at once when it is built already |
 | `POST /open` | a VS Code window on a bundle folder, or with a task its agent, in the bundle's last session with `resume`, or with `terminal` the agent terminal on that session and no prompt; a window or a terminal is asked by the host, the bundle itself or its parent only (B11 of the security check 11-03: it starts a container and a claude at once, past the cap and the memory check), and the terminal is taken from its VS Code window when the bundle itself or the host asks; refused on a half-made bundle, but for `resume` or `terminal` in a bare folder or after its `bctl build` failed, whose session knows how to build it. With `terminal` from the host on a deleted bundle, the session kept at its deletion in its bare folder made again. A task from a bundle that is neither that bundle nor its parent waits for Seb's yes as `bN` (see A task for another bundle). On `ops`, from the host or the ops container only: the ops window, or with a task or `terminal` a new ops agent window, and from a bundle a task alone, held as `bN` for Seb's yes in `hok`; on `ops-SESSION`, that session in an ops agent window with `terminal`, or alone in a tab of the ops window (see Ops agents). With `cut` and `resume` and no bundle, the resume of every cut session, held as `bN` for one yes of Seb (see Cut sessions) |
 | `GET /job` | the state and log of a create/fetch/open, long-polled by `bctl` |
@@ -876,7 +876,12 @@ agent stopped before its verdict), and Seb sees which cards he gets too many of 
 The bundle must be made. A task of the host opens on a line that says Seb said yes, and his yes
 queues it as from the host. It is a route of its own, `POST /hold-task`, as `/hold-ops` (see Ops
 agents): a daemon that does not know it answers 404 and queues nothing. `bctl open ops --hold`
-still holds a task for a new ops agent. `python3 test_open.py` has the cases.
+still holds a task for a new ops agent. `bctl fetch PR_LINK --task TEXT --hold` holds it the same
+way on the bundle of a PR, made or not: his yes fetches the bundle when it is not made, as a
+`fetch` with a task does, and a PR of an author outside the odoo org marks it (see Outside PRs of
+`devcontainer/README.md`) before he answers. The automatic triage asks so the review of such a PR
+that the review board gives Seb (Seb, 2026-11-18: odoo#302139 waited 31 hours with no card). An
+older daemon refuses it as a bundle not made. `python3 test_open.py` has the cases.
 
 ## Agents in a terminal
 

@@ -4103,10 +4103,33 @@ def hold_bundle_task(caller, query, body):
     bundle = body.get("bundle") or ""
     if "task" not in body or body.get("terminal"):
         raise ValueError("hold-task: a task, with no terminal")
+    if "name" in body:
+        return hold_pr_task(caller, body)
     if not BUNDLE_NAME.fullmatch(bundle) or not is_made(get_worktree_bundle_folder(bundle)):
         raise Refused(f"{bundle} is not made: bctl create or fetch it with its task")
     check_task(bundle, body)
     return hold_task(caller, bundle, body)
+
+
+def hold_pr_task(caller, body):
+    """`bctl fetch PR_LINK --hold --task TEXT`: as open --hold, on the bundle of a PR, which the yes
+    fetches when it is not made yet. The automatic triage asks so the review of a PR the review
+    board gives Seb, by an author outside the odoo org (Seb, 2026-11-18: odoo#302139 waited 31
+    hours with no card)."""
+    pr_match = isinstance(body["name"], str) and PR_URL.fullmatch(body["name"])
+    if not pr_match:
+        raise ValueError("hold-task: name, the link of a PR")
+    pr = get_pr(*pr_match.groups(), "baseRefName,headRefName")
+    bundle = pr["headRefName"]
+    if not BUNDLE_NAME.fullmatch(bundle) or pr["baseRefName"] not in STICKY_BUNDLES:
+        raise ValueError(f"not a bundle name: {bundle}")
+    body = {key: value for key, value in body.items() if key not in ("bundle", "name", "open")}
+    check_task(bundle, body)
+    if is_made(get_worktree_bundle_folder(bundle)):
+        return hold_task(caller, bundle, body)
+    check_unpushed(bundle, "pfb")
+    outside.check_fetch(bundle, pr_match[0])
+    return hold_task(caller, bundle, body, ["fetch_bundle.py", pr_match[0], "--no-open"])
 
 
 def hold_ops_task(caller, task):

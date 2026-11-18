@@ -293,6 +293,37 @@ FETCH_CASES = [
 ]
 
 
+# The held ids go on from b13, as the cases above hold b7 to b12.
+HOLD_PR_CASES = [
+    (MADE, {"name": PR, "task": "review", "open": True}, ("held b13", None)),
+    (
+        "half",
+        {"name": PR, "task": "review", "open": True},
+        ("held b14", ["fetch_bundle.py", PR, "--no-open"]),
+    ),
+    ("half", {"name": "half", "task": "review"}, "hold-task: name, the link of a PR"),
+    ("half", {"name": PR}, HOLD_TASK),
+]
+
+
+def hold_pr(bundle, body):
+    """What bctl fetch PR --hold asks of the daemon, and the bundles it marks as outside before
+    the yes: the mark comes before the agent reads the PR."""
+    marked = []
+    daemon.get_pr = lambda repo, number, fields: {"baseRefName": "master", "headRefName": bundle}
+    daemon.check_unpushed = lambda bundle, script: None
+    daemon.outside.check_fetch = lambda bundle, name: marked.append(bundle)
+    try:
+        _code, answer = daemon.hold_bundle_task(daemon.HOST, {}, body)
+    except (ValueError, daemon.Refused) as error:
+        return str(error)
+    item = daemon.HELD.read_json(daemon.HELD_DIR / f"{answer['held'][1:]}.json")
+    queued = item["send"]["queue"]
+    if marked != ([] if queued["build"] is None else [bundle]) or "name" in queued["body"]:
+        return f"marked {marked}, queued {queued}"
+    return f"held {answer['held']}", queued["build"]
+
+
 def hold_bundle(caller, body):
     try:
         _code, answer = daemon.hold_bundle_task(caller, {}, {"bundle": "bundle", **body})
@@ -355,10 +386,19 @@ def client_hold():
                 bctl.main()
         except SystemExit as error:
             found.append(error.code)
+    for args in (["--task", "x"], []):
+        sys.argv = ["bctl", "fetch", PR, *args, "--hold"]
+        output = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                bctl.main()
+        except SystemExit as error:
+            found.append(error.code)
     held = {"bundle": "bundle", "resume": True, "task": "x", "priority": 5, "model": "haiku"}
-    expected = [("/hold-ops", {"task": "x"}), ("/hold-task", held)]
-    if (asked, found) != (expected, [2] * 4):
-        return [f"bctl open --hold: asked {asked!r}, exits {found!r}"]
+    fetched = {"name": PR, "open": True, "task": "x"}
+    expected = [("/hold-ops", {"task": "x"}), ("/hold-task", held), ("/hold-task", fetched)]
+    if (asked, found) != (expected, [2] * 5):
+        return [f"bctl open and fetch --hold: asked {asked!r}, exits {found!r}"]
     return []
 
 
@@ -495,13 +535,17 @@ def main():
             if found != expected:
                 case = f"fetch of {caller}, parent {parent}"
                 failures.append(f"{case}: {found!r}, expected {expected!r}")
+        for bundle, body, expected in HOLD_PR_CASES:
+            found = hold_pr(bundle, body)
+            if found != expected:
+                failures.append(f"fetch --hold {bundle} {body}: {found!r}, expected {expected!r}")
         failures += answer_hold_task(agent)
         if daemon.VERBS.get(("POST", "/hold-task")) is not daemon.hold_bundle_task:
             failures.append("POST /hold-task is not a route")
         failures += client_hold()
     for line in failures:
         print(line)
-    held = len(HOLD_CASES) + len(HOLD_TASK_CASES) + len(FETCH_CASES)
+    held = len(HOLD_CASES) + len(HOLD_TASK_CASES) + len(FETCH_CASES) + len(HOLD_PR_CASES)
     cases = len(CASES) + len(BODIES) + len(OPS_CASES) + len(TASK_CASES) + held + 11
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)

@@ -14,6 +14,7 @@
     bctl branches [--json]
     bctl create BASE NAME [--branch-repo REPO]... [--no-open] [TASK]
     bctl fetch BUNDLE|PR_LINK|OWNER:BRANCH [--no-open] [TASK]
+    bctl fetch PR_LINK TASK --hold
     bctl open BUNDLE [TASK] [--resume | --terminal] [--hold] [--wait SECONDS]
     bctl open --cut [--resume [--wait SECONDS]]
     bctl build
@@ -703,6 +704,11 @@ def main():
     fetch.add_argument("name")
     fetch.add_argument("--no-open", action="store_true")
     add_task_arguments(fetch)
+    fetch.add_argument(
+        "--hold",
+        action="store_true",
+        help="with a task and a PR link: hold it for Seb's yes in hok, which fetches the bundle",
+    )
     open_ = commands.add_parser("open", help="a VS Code window on a local bundle")
     open_.add_argument("bundle", nargs="?")
     add_task_arguments(open_)
@@ -835,6 +841,8 @@ def main():
         and (read_task(args) is None or args.terminal or (args.bundle == "ops" and args.resume))
     ):
         parser.error("open --hold: a task, and on ops a task alone")
+    if args.command == "fetch" and args.hold and read_task(args) is None:
+        parser.error("fetch --hold: a task")
 
     printer = None
     if args.command == "run":
@@ -974,7 +982,7 @@ def main():
             body["effort"] = args.effort
         if getattr(args, "where", None) is not None:
             body["where"] = args.where
-        if getattr(args, "hold", False) and args.bundle == "ops":
+        if getattr(args, "hold", False) and getattr(args, "bundle", None) == "ops":
             answer = request("POST", "/hold-ops", {"task": task})
         elif getattr(args, "hold", False):
             answer = request("POST", "/hold-task", body)
