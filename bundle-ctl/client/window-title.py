@@ -39,7 +39,7 @@ import time
 CLOSE = re.compile(r"[*_\s]*(nothing (is )?left|(waiting|waits) (for|on) you)\b", re.IGNORECASE)
 FINISHED = re.compile(r"(pushed:|nothing to do:)", re.IGNORECASE)
 FLAGS = {"--failed": "❌", "--starting": "🚀"}
-HOK_WAIT = re.compile(r"\b(hok-answer|hctl job)\b")
+HOK_WAIT = re.compile(r"\b(hok-answer\s+(?!-)|hctl job )[^;&|\n]*")
 JOB = re.compile(r"\bhctl job (\d+)")
 SAID_YES = re.compile(rb"Seb said yes to your requests? (\d+(?:, \d+)*)")
 KINDS = (
@@ -289,14 +289,17 @@ def is_hok_wait(call, told):
     given = call.get("input") if call.get("name") == "Bash" else None
     command = given.get("command") if isinstance(given, dict) else None
     job = JOB.search(str(command or ""))
-    return bool(HOK_WAIT.search(str(command or ""))) and not (job and job[1] in told)
+    waits = [found[0] for found in HOK_WAIT.finditer(str(command or ""))]
+    return any("--watch" not in wait for wait in waits) and not (job and job[1] in told)
 
 
 def get_hok_wait(session, bundle=""):
     """When a session began to wait for Seb's answer in hok, as epoch seconds: the start of the
     calls of hok-answer or `hctl job` it made in a row, the last one still running. None when no
     such call runs: answered, sent to the background, or another call runs. An `hctl job` of a
-    request that hok told his yes to waits for its run, not for him."""
+    request that hok told his yes to waits for its run, not for him, and `hok-answer --list` or
+    `--watch` return at once (2026-11-18: a deck card "waits for you" on a `waitbar` call that
+    listed the cards after it)."""
     lines = read_tail(session, bundle)
     told = {
         number

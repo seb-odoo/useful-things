@@ -45,6 +45,8 @@ CALLS = {
     "hok-background": [("hok-answer g3", "Command running in background with ID: b1")],
     "hok-then-test": [("hok-answer g3", "sent"), ("python3 test_queue.py", None)],
     "hok-after-prompt": [("hok-answer g3", "still waits"), ("go on", "prompt")],
+    "hok-list": [("waitbar until poll 'ls x'; ~/.claude/bin/hok-answer --list", None)],
+    "hok-watch": [("hok-answer 658 --watch", None)],
     "hok-said-yes": [
         ("hok event: Seb said yes to your request 4, it runs now", "prompt"),
         ("hctl job 4 --wait 590", None),
@@ -61,6 +63,8 @@ HOK_WAITS = [
     ("hok-background", None),
     ("hok-then-test", None),
     ("hok-after-prompt", None),
+    ("hok-list", None),
+    ("hok-watch", None),
     ("hok-said-yes", None),
     ("hok-said-yes-to-another", 600),
 ]

@@ -1091,7 +1091,10 @@ is the contained terminal of the VS Code window.
   waited for him). A busy session whose running call waits for Seb's answer in hok, a
   `hok-answer` or an `hctl job` that the tail of its transcript shows with no result yet, waits
   for him too (Seb, 2026-10-22: "agents that waits on hok should be in waiting for me state, not
-  in running"). `client/window-title.py BUNDLE SESSION=STATUS...` picks it. With wmctrl, `agent-terminator.py`
+  in running"). `hok-answer --list` and `hok-answer N --watch` return at once: a call that holds
+  them waits on nothing of his (2026-11-18: an ops session showed ✋ through a `waitbar` call
+  that listed the cards after it).
+  `client/window-title.py BUNDLE SESSION=STATUS...` picks it. With wmctrl, `agent-terminator.py`
   opens the window on 🚀 and follows the session of its claude every second until the window
   closes, and keeps the last mark once that claude ended; a busy session is read again every 10
   seconds, as such a call changes the mark and not the status. claude-autoopen follows the
