@@ -116,9 +116,7 @@ def main():
         ],
     )
     notes = branch_status.get_command_notes(overrides)
-    found["checks overridden since the head"] = sorted(
-        branch_status.get_overridden(overrides, notes)
-    )
+    found["checks overridden, before the head too"] = sorted(branch_status.get_overridden(notes))
     override = "@robodoo override=ci/runbot"
     found["a red check after an override=ci/runbot of"] = {
         login: [check["context"] for check in facts(login, override)["failing"]]
@@ -148,7 +146,7 @@ def main():
         "a draft goes to": "drafts",
         "a ready PR goes to": "reviewer",
         "team": {"teammate"},
-        "checks overridden since the head": ["ci/runbot", "ci/style"],
+        "checks overridden, before the head too": ["ci/runbot", "ci/security", "ci/style"],
         "a red check after an override=ci/runbot of": {
             "stranger": ["ci/runbot"],
             "later": ["ci/runbot"],

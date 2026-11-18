@@ -653,8 +653,9 @@ Each bundle sits in one group, the most urgent among its repos. On screen, in th
 | Waits on mergebot | ready or staged, merged or closed |
 | Not mine | the branch of a colleague: no `BUNDLE_SUFFIX`, the fw-bot heads of my PRs count as mine |
 
-A red check stops failing once a `@robodoo override=` of it, in a comment or a review posted after
-the head commit, sets it aside for mergebot: GitHub still shows it red.
+A red check stops failing once a `@robodoo override=` of it, in a comment or a review, sets it
+aside for mergebot: GitHub still shows it red. The override stays for as long as the PR exists,
+over the pushes that follow it, as mergebot keeps it on the PR, not on a commit.
 
 A robodoo command (`override=`, `delegate+`) counts from me, my team (the logins of
 `~/.claude/external/mail-agent/logins.json` whose trigram is in its `team.json`), a reviewer asked

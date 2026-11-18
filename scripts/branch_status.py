@@ -507,13 +507,12 @@ def get_command_notes(pr):
     ]
 
 
-def get_overridden(pr, notes):
-    """The checks a `@robodoo override=` posted since the head commit sets aside."""
-    head_date = pr["commits"]["nodes"][0]["commit"]["committedDate"]
+def get_overridden(notes):
+    """The checks a `@robodoo override=` sets aside: mergebot keeps an override on the PR over
+    the pushes that follow it."""
     return {
         context
-        for body, date in notes
-        if date > head_date
+        for body, _date in notes
         for match in OVERRIDE.finditer(body)
         for context in match[1].split(",")
     }
@@ -524,7 +523,7 @@ def get_pr_facts(pr, repo, now):
     if pr["mergebot"] == "merged":
         state = "merged"
     notes = get_command_notes(pr)
-    overridden = get_overridden(pr, notes)
+    overridden = get_overridden(notes)
     contexts = [
         c
         for c in (pr["commits"]["nodes"][0]["commit"]["status"] or {}).get("contexts", [])
