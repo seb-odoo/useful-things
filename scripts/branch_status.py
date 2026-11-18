@@ -57,14 +57,20 @@ AGENT_TAGS = {
     "waiting": "[dim]waiting[/dim]",
 }
 AGENT_WORKING = ("building", "queued", "running", "waiting")
+APPROVAL_GAP = 600
 ASK_SEVERITIES = {"dim": 2, "red": 0, "yellow": 1}
 ASKED_STYLES = ((7 * 86400, "red"), (2 * 86400, "yellow"), (0, "dim"))
 AUTO_ASKED_STYLES = ((7 * 86400, "red"), (86400, "yellow"), (0, "dim"))
 BEHIND_STYLES = ((501, "red"), (150, "yellow"), (0, "default"))
 BOTS = ("fw-bot", "robodoo")
 CI_RUNNING = "[dim]ci running[/dim]"
+# The pattern of mergebot (runbot_merge, Project._find_commands): it reads no command elsewhere.
+COMMAND = re.compile(
+    r"^[^\S\r\n]*[@#]?robodoo(?:[^\S\r\n]+|:[^\S\r\n]*)(.*)",
+    re.IGNORECASE | re.MULTILINE,
+)
 COMMITS_READ = 50
-DELEGATE = re.compile(r"@robodoo\b.*\bdelegate[+=]")
+DELEGATE = re.compile(r"\bdelegate[+=]")
 FW_BOT = "fw-bot"
 # A bundle writes the .git/config of these repos: git runs none of the programs it may name there.
 GIT = ("git", "-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null", "-c", "core.pager=cat")
@@ -104,7 +110,8 @@ MENTION = re.compile(r"(?<![\w/])@([\w-]+)(?![\w/-])")
 MERGEBOT_TIMEOUT = 3
 MINOR_CHECKS = {"ci/security": "dim", "ci/style": "yellow"}
 ORG_MEMBERS = ("MEMBER", "OWNER")
-OVERRIDE = re.compile(r"@robodoo\b.*\boverride=([\w/.,-]+)")
+ORG_PEOPLE = (*ORG_MEMBERS, "COLLABORATOR")
+OVERRIDE = re.compile(r"\boverride=([\w/.,-]+)")
 PR_STYLES = {"closed": "red", "draft": "dim", "merged": "magenta"}
 PR_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
 PRS_PER_QUERY = 5
@@ -210,7 +217,8 @@ def read_prs(pairs):
             "{ nodes { author { login } createdAt headRefName headRefOid isDraft number "
             "reviewDecision state url "
             "comments(last: 30) { nodes { author { login } authorAssociation body createdAt } } "
-            "reviews(last: 30) { nodes { author { login } authorAssociation body submittedAt } } "
+            "reviews(last: 30) { nodes { author { login } authorAssociation body state "
+            "submittedAt } } "
             "timelineItems(last: 20, itemTypes: [REVIEW_REQUESTED_EVENT]) { nodes { "
             "... on ReviewRequestedEvent { actor { login } createdAt "
             "requestedReviewer { ... on User { login } } } } } "
@@ -513,9 +521,49 @@ def get_overridden(notes):
     return {
         context
         for body, _date in notes
-        for match in OVERRIDE.finditer(body)
+        for command in COMMAND.findall(body)
+        for match in OVERRIDE.finditer(command)
         for context in match[1].split(",")
     }
+
+
+def get_comments(pr):
+    """The dates of the comments and review texts of someone else that wait on me: from a
+    commander or a member of the odoo org but its bots, more than robodoo commands, after my last
+    comment or review, and not closed by an approval of the same author more than APPROVAL_GAP
+    later. The automatic triage gives each as a `review` job (Seb, 2026-11-02: "receiving
+    comments on PR should also start an agent"): odoo#301623 stayed handled past a comment of its
+    reviewer (2026-11-18)."""
+
+    def seconds(at):
+        return datetime.fromisoformat(at).timestamp()
+
+    commanders = get_commanders(pr)
+    notes = [
+        (
+            node,
+            (node["author"] or {}).get("login"),
+            node.get("submittedAt") or node.get("createdAt"),
+        )
+        for key in ("comments", "reviews")
+        for node in pr[key]["nodes"]
+    ]
+    mine = max((at or "" for _node, login, at in notes if login == pr["viewer"]), default="")
+    approved = {}
+    for node, login, at in notes:
+        if node.get("state") == "APPROVED" and at:
+            approved[login] = max(approved.get(login, ""), at)
+    return sorted(
+        at
+        for node, login, at in notes
+        if at
+        and at > mine
+        and node.get("state", "COMMENTED") in ("COMMENTED", "CHANGES_REQUESTED")
+        and login not in (*BOTS, pr["viewer"])
+        and (login in commanders or node["authorAssociation"] in ORG_PEOPLE)
+        and COMMAND.sub("", node["body"] or "").strip()
+        and not (login in approved and seconds(approved[login]) - seconds(at) > APPROVAL_GAP)
+    )
 
 
 def get_pr_facts(pr, repo, now):
@@ -552,7 +600,10 @@ def get_pr_facts(pr, repo, now):
     return {
         "answers": sorted(t["comments"]["nodes"][0]["createdAt"] for t in to_answer),
         "ask": dict(zip(("style", "label", "date"), get_ask(pr, now))),
-        "delegated": any(DELEGATE.search(body) for body, _date in notes),
+        "comments": get_comments(pr),
+        "delegated": any(
+            DELEGATE.search(command) for body, _date in notes for command in COMMAND.findall(body)
+        ),
         "failing": [
             {"context": c["context"], "url": c["targetUrl"]}
             for c in contexts
@@ -636,6 +687,7 @@ def get_news(repos):
             continue
         head = facts["head"]
         news += [f"{repo} thread {date}" for date in facts["answers"]]
+        news += [f"{repo} comment {date}" for date in facts["comments"]]
         news += [f"{repo} failing {check['context']} {head}" for check in facts["failing"]]
         if row["conflict"]:
             news.append(f"{repo} conflict {head}")

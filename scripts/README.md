@@ -609,7 +609,12 @@ new waits on me, or a day passed since the click and since gbs last saw its wind
 (`.agent/handled.open`): a bundle I opened and left goes back to Waits on me and to the automatic
 triage (Seb, 2026-10-27, after odoo#296017 sat 8 days with its conflict). The click touches
 `.agent/handled` and keeps in `.agent/handled.json` what waits on me then: each review thread to answer, each failing check of
-a head, a conflict of a head, changes requested, a staging error of a head, a delegation. An item
+a head, a conflict of a head, changes requested, a staging error of a head, a delegation, and each
+comment or review text of someone else since my last comment or review, as the automatic triage
+reads them for its `review` job (sweep-open-branches): from someone whose robodoo commands count
+or a collaborator, more than robodoo commands, and not closed by an approval of the same author
+more than 10 minutes later (odoo#301623, 2026-11-18: a comment of its reviewer came after my
+click, and the bundle stayed handled). An item
 missing from that list is something new, and puts the bundle back in Waits on me; an item that
 goes away (a thread I answered) is not. `test_handled.py` runs each case.
 
@@ -657,7 +662,9 @@ A red check stops failing once a `@robodoo override=` of it, in a comment or a r
 aside for mergebot: GitHub still shows it red. The override stays for as long as the PR exists,
 over the pushes that follow it, as mergebot keeps it on the PR, not on a commit.
 
-A robodoo command (`override=`, `delegate+`) counts from me, my team (the logins of
+A robodoo command (`override=`, `delegate+`) is a line that starts with `robodoo`, `@robodoo` or
+`robodoo:`, as mergebot reads it: odoo#301623 got a `robodoo delegate+` with no `@`
+(2026-11-18). It counts from me, my team (the logins of
 `~/.claude/external/mail-agent/logins.json` whose trigram is in its `team.json`), a reviewer asked
 on the PR, or on a fw-bot hop a login fw-bot pings at the start of its comments, and from a member
 of the odoo org (GitHub `authorAssociation`) but fw-bot and robodoo: the rule of triage. A team
@@ -712,7 +719,7 @@ left to do, dim is background, cyan is a worktree, magenta is merged.
 - The mergebot state is read from `mergebot.odoo.com/<owner>/<repo>/pull/<n>.json`: green for
   `ready` and `staged`, a green `r+` for approved, red for an error. It also tells a PR the bot
   merged from one that was closed, which GitHub shows the same way.
-- `delegated`, in green, is a review or a comment holding `@robodoo delegate+`, from someone whose
+- `delegated`, in green, is a review or a comment holding `robodoo delegate+`, from someone whose
   robodoo commands count.
 - Review threads count apart: a yellow `N threads` when someone else wrote last, a dim
   `N replied` when I did.

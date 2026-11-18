@@ -59,7 +59,7 @@ def main():
     found["a draft goes to"] = branch_status.get_waiting_group({**pr, "state": "draft"})
     found["a ready PR goes to"] = branch_status.get_waiting_group(pr)
     facts = {**pr, "answers": ["d"], "delegated": True, "failing": [{"context": "ci/runbot"}]}
-    facts.update(head="a", mergebot="error", review="CHANGES_REQUESTED")
+    facts.update(comments=["c"], head="a", mergebot="error", review="CHANGES_REQUESTED")
     rows = {"enterprise": {"conflict": None, "pr": None}, "odoo": {"conflict": True, "pr": facts}}
     found["what waits on me"] = branch_status.get_news(rows)
     with tempfile.TemporaryDirectory() as root:
@@ -126,6 +126,29 @@ def main():
         login: facts(login, "@robodoo delegate+")["delegated"]
         for login in ("stranger", "asked", "member")
     }
+    found["delegated by a member writing"] = {
+        body: facts("member", body)["delegated"]
+        for body in ("Ok.\r\nrobodoo delegate+", "ROBODOO: delegate+", "ask @robodoo delegate+")
+    }
+
+    def review(login, body, at, state="COMMENTED"):
+        return {**note(login, body, at), "state": state}
+
+    talk = pull(
+        note("member", "Why here?", "2026-10-14T10:00:00Z"),
+        note("me", "Because.", "2026-10-14T11:00:00Z"),
+        note("member", "Still unclear.\r\n\r\nrobodoo delegate+", "2026-10-14T12:00:00Z"),
+        note("asked", "@robodoo r+", "2026-10-14T13:00:00Z"),
+        note("stranger", "Nice.", "2026-10-14T14:00:00Z"),
+        reviews=[
+            review("asked", "A typo.", "2026-10-14T15:00:00Z"),
+            review("asked", "", "2026-10-14T15:05:00Z", "APPROVED"),
+            review("teammate", "Rename it?", "2026-10-14T16:00:00Z"),
+            review("teammate", "", "2026-10-14T17:00:00Z", "APPROVED"),
+        ],
+    )
+    talked = branch_status.get_pr_facts(talk, "odoo", time.time())
+    found["comments that wait on me"] = talked.get("comments")
     expected = {
         "never opened": False,
         "opened, no agent yet": True,
@@ -158,8 +181,15 @@ def main():
             "member": [],
         },
         "delegated by": {"stranger": False, "asked": True, "member": True},
+        "delegated by a member writing": {
+            "Ok.\r\nrobodoo delegate+": True,
+            "ROBODOO: delegate+": True,
+            "ask @robodoo delegate+": False,
+        },
+        "comments that wait on me": ["2026-10-14T12:00:00Z", "2026-10-14T15:00:00Z"],
         "what waits on me": [
             "odoo changes requested",
+            "odoo comment c",
             "odoo conflict a",
             "odoo delegated",
             "odoo failing ci/runbot a",
