@@ -1458,9 +1458,11 @@ a prompt.
   that bundle runs now, or its agent on a worker, 404 when neither runs. A push of git-gate, or a
   card whose gateway client named its session, names both: `POST /tell {session, bundle, text}`
   types the line while that terminal or worker runs that session. The session must be one the
-  agent of that bundle ran: its transcript is the bundle's, no transcript of the ops container
-  has its id, and no other bundle holds it in its own folder (security check 11-03, B17), else
-  the request is refused.
+  agent of that bundle ran: its transcript is in the bundle's own folder of transcripts, no
+  transcript of the ops container has its id, and no other bundle holds it in its own folder
+  (security check 11-03, B17), else the request is refused. The `-workspace` all bundles shared
+  before 11-03 does not count: a bundle could name an old session of another bundle there, which
+  its next start copies into its own folder to resume (review of 2026-11-18).
 - An ops window whose claude ended keeps its folder until the window closes, and the line waits
   there for the window that goes on with the session. All of them end when the ops container goes
   down: on 2026-10-29 the line of request 542 was lost, as every ops window was down from 13:42 to

@@ -4848,10 +4848,11 @@ def get_bundle_wake(bundle, session):
 
 
 def is_bundle_session(session, bundle):
-    """Whether the agent of a bundle ran this session: its transcript is the bundle's, no
+    """Whether the agent of a bundle ran this session: its transcript is in the bundle's own
+    folder, not only in the `-workspace` all bundles wrote before 11-03 (review 11-18), no
     transcript of the ops container has its id, and no other bundle holds it in its own folder,
     as for get_claimant (security check 11-03, B17)."""
-    if not get_transcript(session, bundle):
+    if not get_own_transcript(session, bundle):
         return False
     if any((folder / f"{session}.jsonl").exists() for folder in get_projects(OPS)):
         return False

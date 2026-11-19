@@ -16,6 +16,8 @@ sys.path.insert(0, str(HERE))
 
 import daemon  # noqa: E402
 
+agents_module = sys.modules["agents"]
+
 OPS_SESSION = "11111111-2222-3333-4444-555555555555"
 BUNDLE_SESSION = "66666666-7777-8888-9999-000000000000"
 STOPPED_SESSION = "33333333-7777-8888-9999-000000000000"
@@ -684,7 +686,8 @@ def check_wake(root, check):
         folder.mkdir(parents=True)
     (agents["w1"] / "session").write_text(f"{BUNDLE_SESSION}\n")
     (agents["w2"] / "session").write_text(f"{STOPPED_SESSION}\n")
-    projects, transcripts = base / "ops-projects", base / "transcripts"
+    agents_module.PROJECTS = base / "projects"
+    projects, transcripts = agents_module.get_projects(ops)[0], base / "transcripts"
     for folder in (projects, transcripts / "w1", transcripts / "w2"):
         folder.mkdir(parents=True)
     for folder, session in (
@@ -694,13 +697,6 @@ def check_wake(root, check):
         (transcripts / "w2", STOPPED_SESSION),
     ):
         (folder / f"{session}.jsonl").write_text("{}\n")
-
-    def get_projects(name):
-        return [projects] if name.startswith("ops-") else [transcripts / name]
-
-    def get_transcript(session, bundle=""):
-        paths = [folder / f"{session}.jsonl" for folder in get_projects(bundle)]
-        return next((path for path in paths if path.is_file()), None)
 
     def close_dead_window(name):
         if name.startswith("ops-"):
@@ -715,9 +711,9 @@ def check_wake(root, check):
         return 202, {"job": "j"}
 
     live, looked, queue, queued, opened = set(), [], [], [], []
-    daemon.get_projects = get_projects
-    daemon.get_transcript = get_transcript
-    daemon.TRANSCRIPTS = transcripts
+    daemon.get_projects = agents_module.get_projects
+    daemon.get_transcript = agents_module.get_transcript
+    agents_module.TRANSCRIPTS = daemon.TRANSCRIPTS = transcripts
     daemon.get_agent_folder = lambda name: agents.get(name, base / "gone" / name / ".agent")
     daemon.get_bundle_names = lambda: ["w1", "w2"]
     daemon.get_terminals = lambda: {"w1": 1}
@@ -860,6 +856,19 @@ def check_wake(root, check):
     found = reach(OPS_SESSION, bundle="w1")
     check("even when the bundle holds a copy", found[0] == "ValueError", found)
     (transcripts / "w1" / f"{OPS_SESSION}.jsonl").unlink()
+    old = "88888888-7777-8888-9999-000000000000"
+    (agents_module.PROJECTS / "-workspace").mkdir()
+    (agents_module.PROJECTS / "-workspace" / f"{old}.jsonl").write_text("{}\n")
+    found = reach(old, bundle="w1"), tell_words(session=old, bundle="w1", words=words)
+    check(
+        "a session of the -workspace all bundles wrote before is no session of a bundle",
+        [answer[0] for answer in found] == ["ValueError", "ValueError"] and not queued,
+        found,
+    )
+    (agents["w2"] / "session").write_text(f"{old}\n")
+    found = tell(old, words=words)
+    check("even the one it claims", found[0] == 404 and not queued, found)
+    (agents["w2"] / "session").write_text(f"{STOPPED_SESSION}\n")
     for bad in ("a\x1b[201~", "a" * 2001, 3):
         found = tell_words(session=STOPPED_SESSION, words=bad)
         check(f"words {str(bad)[:6]!r} are refused", found[0] == "ValueError", found)
