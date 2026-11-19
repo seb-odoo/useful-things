@@ -75,7 +75,9 @@ may ask it: a container gets a 403, the ops container asks it through hctl.
 
 open --resume gives the task to the last Claude session of the bundle as its next prompt, where a
 task alone starts a new session. Without a task, the session is told to go on. While the agent
-terminal of the bundle runs that session, the task is typed there at once, idle or busy.
+terminal of the bundle runs that session, the task is typed there at once, idle or busy. A session
+that gave its verdict with more than 150k tokens of context gets no task: a new session takes it,
+told the last report of the old one and where its transcript is.
 
 A task on a bundle that is made already, or that has an agent, goes to the queue when the host,
 that bundle or the bundle that queued its last task sends it. From any other bundle it waits for

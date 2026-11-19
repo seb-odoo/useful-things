@@ -1969,6 +1969,84 @@ def check_tell(root):
     return [f"tell: {name}" for name, passed in checks if not passed], len(checks)
 
 
+def check_fresh(root):
+    """A task that would go on in a session that gave its verdict with more than FRESH_OVER tokens
+    of context starts a new session, with the last report of the old one and where its transcript
+    is: one with no terminal starts at once, a minimized terminal is closed for it, one on screen
+    is left to Seb. A smaller session, and a session still at work, are told as before."""
+    ended = {**ENDED_ANOTHER, "task.md": "", "container": "c\n"}
+    bundles = {
+        "on-screen": ended,
+        "minimized": ended,
+        "small": ended,
+        "at-work": {**RUNS_ANOTHER, "task.md": "", "container": "c\n"},
+        "closed": {name: text for name, text in ended.items() if name != "terminal"},
+    }
+    state, launched = prepare(root, bundles, 8)
+    for item in state["queue"]:
+        item.update(resume=True, task="answer the thread")
+    transcripts = root / "transcripts"
+    transcripts.mkdir()
+    for bundle in bundles:
+        usage = {
+            "input_tokens": 10,
+            "cache_read_input_tokens": 90_000 if bundle == "small" else 190_000,
+        }
+        entry = {
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "Done: pushed"}], "usage": usage},
+        }
+        (transcripts / f"{bundle}.jsonl").write_text(json.dumps(entry) + "\n")
+    closed = []
+    saved = {
+        name: getattr(daemon, name)
+        for name in (
+            "close_freed",
+            "get_own_transcript",
+            "get_session_status",
+            "get_terminals",
+            "is_terminal_minimized",
+        )
+    }
+    daemon.close_freed = closed.append
+    daemon.get_session_status = lambda bundle, session: "idle"
+    daemon.get_own_transcript = lambda session, bundle: transcripts / f"{bundle}.jsonl"
+    daemon.get_terminals = lambda: dict.fromkeys(set(bundles) - {"closed"}, 1)
+    daemon.is_terminal_minimized = lambda agent, env: agent.parent.name == "minimized"
+    daemon.TOLD_DIR = root / "told"
+    try:
+        daemon.launch_queued()
+        deadline = time.monotonic() + 5
+        while not closed and time.monotonic() < deadline:
+            time.sleep(0.05)
+    finally:
+        for name, value in saved.items():
+            setattr(daemon, name, value)
+    told = {bundle for bundle in bundles if any((root / "told" / bundle).glob("s/[!.]*.txt"))}
+    waits = {item["bundle"]: item["waits_for"] for item in state["queue"]}
+    started = daemon.get_agent_folder("closed")
+    task = daemon.read_text(started / "task.md")
+    checks = [
+        ("a small session and one at work are told", told == {"small", "at-work"}),
+        ("the session with no terminal starts anew", launched == ["closed"]),
+        ("its old session goes to the history", not (started / "session").exists()),
+        (
+            "its prompt holds the old report, the transcript and the task",
+            "190k tokens" in task
+            and "Done: pushed" in task
+            and "-workspace/s.jsonl" in task
+            and task.endswith("answer the thread"),
+        ),
+        ("a minimized terminal closes for it", closed == ["minimized"]),
+        (
+            "both large terminals wait to close",
+            {waits.get(name) for name in ("on-screen", "minimized")}
+            == {"the terminal of the previous agent of the bundle to close"},
+        ),
+    ]
+    return [f"fresh: {name}" for name, passed in checks if not passed], len(checks)
+
+
 def check_remote_type(root):
     """A task for a bundle whose agent runs on a worker is typed in its session there, as its
     terminal here would: one asked with --resume and a text of its own at once, idle or busy, any
@@ -3383,6 +3461,7 @@ def main():
         check_second_task,
         check_hand_over,
         check_tell,
+        check_fresh,
         check_remote_type,
         check_remote_told,
         check_dialog_read,

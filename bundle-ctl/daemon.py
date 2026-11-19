@@ -59,6 +59,7 @@ from agents import (  # noqa: E402
     get_agent_folder,
     get_boot,
     get_bundle_container,
+    get_context,
     get_last_text,
     get_mtime,
     get_own_transcript,
@@ -186,6 +187,14 @@ DONE_WORD = re.compile(r"[a-z0-9-]{1,20}")
 FETCH_TIMEOUT = 60
 FOLDERS_KEPT = 60
 FREE_AFTER = 5 * 60
+FRESH_OVER = 150_000
+FRESH_REPORT = 8 * 1024
+FRESH_START = (
+    "The last session of this bundle gave its verdict with {tokens}k tokens of context, so this"
+    " task starts a new session. Its last report:\n\n{report}\n\nIts whole conversation is"
+    " ~/.claude/projects/-workspace/{session}.jsonl: grep it when you need why something was done"
+    " or what was tried, never read it whole.\n\nThe task:\n\n{task}"
+)
 GITHUB_ASK = 600
 GITHUB_MUX = pathlib.Path.home() / ".local" / "state" / "ssh-github-mux"
 GITHUB_OWNER = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}")
@@ -1800,6 +1809,9 @@ def launch_queued():
             container = is_running and get_bundle_container(bundle)
             can_start = has_display and (is_running or has_room)
             in_terminal = (folder / "terminal").exists() and (container or is_held(folder))
+            large = (item.get("resume") or in_terminal) and get_large_context(item, folder)
+            if large and not in_terminal:
+                make_fresh(item, folder, large)
             earlier = next((kept for kept in queue if kept["bundle"] == bundle), None)
             if earlier:
                 item["waits_for"] = (
@@ -1810,7 +1822,7 @@ def launch_queued():
                 item["waits_for"] = "a manual resume"
             elif is_deleting(bundle):
                 item["waits_for"] = "the deletion of its checkout"
-            elif goes_to_terminal(item, folder, now) and tell_terminal(item):
+            elif not large and goes_to_terminal(item, folder, now) and tell_terminal(item):
                 continue
             elif is_busy(bundle, is_running or bundle in state["launches"]):
                 item["waits_for"] = get_previous_end(folder)
@@ -1818,7 +1830,12 @@ def launch_queued():
                 in_terminal or not get_agent_worker(item, folder, is_running, bare)[0]
             ):
                 item["waits_for"] = f"disk space ({free:.0f} GB left, {DISK_STOP:.0f} needed)"
-            elif in_terminal and not (waits_for := get_terminal_wait(item, now)):
+            elif in_terminal and not (waits_for := get_terminal_wait(item, now)) and (
+                large or item.get("fresh")
+            ):
+                leave_large_terminal(item, folder, large)
+                item["waits_for"] = "the terminal of the previous agent of the bundle to close"
+            elif in_terminal and not waits_for:
                 hand_to_terminal(item)
                 continue
             elif in_terminal:
@@ -3139,6 +3156,46 @@ def close_freed(bundle):
         pause.unlink(missing_ok=True)
 
 
+def get_large_context(item, folder):
+    """The tokens of context of the session a task would go on in, when that session gave its
+    verdict with more than FRESH_OVER: the task then starts a new session (Seb, 2026-11-19), as a
+    larger context costs more than it brings. 0 for a session at work, going on alone, or named
+    by the task."""
+    if item["task"] == GO_ON or item.get("session") or not (folder / "done").exists():
+        return 0
+    transcript = get_own_transcript(read_text(folder / "session"), item["bundle"])
+    context = get_context(transcript) if transcript else 0
+    return context if context > FRESH_OVER else 0
+
+
+def make_fresh(item, folder, context):
+    """Turn a task that would go on in a large session into the first prompt of a new one, with
+    the last report of the old session and where its transcript is."""
+    session = read_text(folder / "session")
+    transcript = get_own_transcript(session, item["bundle"])
+    report = (transcript and get_last_text(transcript) or "(none)").strip()[:FRESH_REPORT]
+    item["task"] = FRESH_START.format(
+        tokens=context // 1000, report=report, session=session, task=item["task"]
+    )[:MAX_TASK]
+    item.update(fresh=True, resume=False)
+    print(
+        f"{item['bundle']}: its session holds {context // 1000}k, a new one takes the task",
+        flush=True,
+    )
+
+
+def leave_large_terminal(item, folder, context):
+    """Close the terminal of a large session that gave its verdict and is idle, once minimized as
+    free_done_terminals does, so that the task starts a new session. A terminal on screen is
+    Seb's: the task waits for him to close it."""
+    if not item.get("fresh"):
+        make_fresh(item, folder, context)
+    if (folder / "pause").exists() or not is_terminal_minimized(folder, session_env()):
+        return
+    print(f"{item['bundle']}: its terminal closes for a new session", flush=True)
+    threading.Thread(target=close_freed, args=(item["bundle"],), daemon=True).start()
+
+
 def get_terminal_wait(item, now):
     """What a task behind the agent of a terminal waits for before that terminal types it as the
     next prompt of the session, None when nothing: the verdict of that agent, then an idle session
@@ -3239,6 +3296,7 @@ def type_remote(item):
         not remote
         or not session
         or item.get("build")
+        or item.get("fresh")
         or item.get("where") == "local"
         or item.get("session") not in (None, session)
         or (agent / "remote-ending").exists()

@@ -214,6 +214,22 @@ def get_last_text(transcript):
     return None
 
 
+def get_context(transcript):
+    """The tokens the last call of a session sent, cache included: what its next prompt carries."""
+    for entry in reversed(load_takeover().read_entries(transcript)):
+        message = entry.get("message")
+        usage = message.get("usage") if isinstance(message, dict) else None
+        if (
+            entry.get("type") != "assistant"
+            or entry.get("isSidechain")
+            or not isinstance(usage, dict)
+        ):
+            continue
+        keys = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+        return sum(usage[key] for key in keys if type(usage.get(key)) is int)
+    return 0
+
+
 def is_host_process(pid, proc="/proc"):
     """Whether a process runs in the pid namespace of this one, the host's: a process of a
     container shows in the /proc of the host too, with the command line it chose (security check

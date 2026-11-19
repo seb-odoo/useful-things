@@ -1911,6 +1911,16 @@ try again: it waits for `the previous agent of the bundle to end (at work since 
 start of its run (Seb, 2026-10-21, as `its agent to end` read as the task waiting on itself:
 "why would a queued item wait on itself?"). Once an agent in a terminal gave its verdict, that
 terminal types the task as the next prompt of the same session (see below). A
+session that gave its verdict with more than 150k tokens of context (`FRESH_OVER`, the last call
+of its transcript) does not get the task: a new session starts on it, as with `--resume` too
+(Seb, 2026-11-19, from 73 bundle sessions: a resume carries 100k at the median, 59k is the start
+of a new session, and the extra context costs every call of the task more than finding back what
+it needs). Its prompt opens on the size, the last report of the old session and the path of its
+transcript in the container, to grep for why something was done, then the task. Its terminal
+closes once minimized, as after a verdict; on screen it is his, and the task waits for `the
+terminal of the previous agent of the bundle to close`. A session at work, going on alone
+(`Continue from where you left off.`) or named by the task stays the same session, whatever its
+size. A
 VS Code window opened on the bundle meanwhile first
 takes that terminal's session over, and the task starts in the window at the next pass.
 A second task for a bundle that is queued already is taken too, behind the first one whatever its
