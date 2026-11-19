@@ -1862,7 +1862,7 @@ bounds what the agents spend, and Seb's windows are his.
 `--model haiku|sonnet|opus` (default `opus`) is the model of the task's agent, for the one that
 queues to send a job that needs less to a model that costs less. `--effort low|medium|high|xhigh`
 (default `medium`) is how much that agent thinks: `medium` is where Anthropic's guide starts on
-the three models, and the `xhigh` of Seb's settings stays for his own sessions. The daemon refuses
+the three models, and the default of Seb's own settings since 2026-11-19. The daemon refuses
 any other name, `max` included, and `client/agent-run.sh` runs on `opus` at `medium` when
 `.agent/model` or `.agent/effort` holds anything else. `python3 test_options.py` runs each case.
 `--priority N` (-100 to 100) puts the task ahead of the ones with a lower priority; equal
