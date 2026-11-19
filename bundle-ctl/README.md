@@ -257,7 +257,11 @@ repo, which has its own README (the sandbox, the load, the sync). Agents change 
   in the cache), the DB the command names when it exists here, submits, and prints
   the job's output as it comes. A DB the command made, or changed with `-i` or `-u`, comes back
   under its name: restored beside, then renamed over the old one, with its filestore but the
-  assets, which Odoo makes again.
+  assets, which Odoo makes again. A dump that holds `vector` is restored in a copy of
+  `template_vector`, as PGUSER is no superuser and a bundle image older than 2026-11-12 does not
+  trust pgvector (devcontainer README, "How it runs Odoo"). A restore that fails, or lacks an
+  extension of the dump, changes no DB here, and the command runs here again: an extension lost
+  silently left an `ai` installed with no `ai_embedding` table (2026-11-19).
 - For an engine run, the client reads the bundle's server that listens on the port of `--server`
   (`/proc/net/tcp`, then the process that holds that socket and runs `odoo-bin`): its cmdline,
   its folder and its environment give the venv, the DB, the addons path and the options. It sends

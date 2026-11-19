@@ -208,21 +208,43 @@ def drop(database):
     subprocess.run(["dropdb", "--if-exists", "--force", database], capture_output=True, check=False)
 
 
-def restore(database, folder):
-    """The DB the job sent back, put here under its name once whole."""
+def dump_extensions(dump):
+    listing = subprocess.run(["pg_restore", "-l", str(dump)], capture_output=True, text=True,
+                             check=False).stdout
+    return set(re.findall(r"^\d+; \d+ \d+ EXTENSION - (\S+)", listing, re.MULTILINE))
+
+
+def load(database, folder):
+    """The DB the job sent back, in a DB of its own here, or None when it is not whole."""
     dump = folder / "db.dump"
     if not dump.is_file():
         say(f"{database} did not come back")
-        return
+        return None
     temporary = f"{database[:50]}-rr-restore"
     drop(temporary)
-    if subprocess.run(["createdb", temporary], check=False).returncode or subprocess.run(
+    wanted = dump_extensions(dump)
+    # PGUSER cannot create vector where the image predates its trusted mark (2026-11-12)
+    createdb = ["createdb", temporary]
+    if "vector" in wanted and exists("template_vector"):
+        createdb[1:1] = ["-T", "template_vector"]
+    # 1 is also the exit of an error that loses nothing (COMMENT ON EXTENSION of another owner)
+    if subprocess.run(createdb, check=False).returncode or subprocess.run(
         ["pg_restore", "-d", temporary, "--no-owner", "-j", "2", str(dump)],
         capture_output=True, check=False,
     ).returncode > 1:
-        say(f"{database}: the restore failed, the DB here is left as it was")
+        say(f"{database}: the restore failed")
         drop(temporary)
-        return
+        return None
+    missing = wanted - set((psql("-c", "SELECT extname FROM pg_extension",
+                                 database=temporary) or "").split())
+    if missing:
+        say(f"{database}: the restore lacks the extension {', '.join(sorted(missing))}")
+        drop(temporary)
+        return None
+    return temporary
+
+
+def replace(database, temporary, folder):
     drop(database)
     psql("-c", f'ALTER DATABASE "{temporary}" RENAME TO "{database}"')
     store = FILESTORE / database
@@ -457,14 +479,21 @@ def follow(worker, job):
 
 
 def get_back(worker, job, dbs_out):
+    """Whether every DB came back whole. If one did not, no DB here changed."""
     connection, reader = open_stream(worker, "get", job)
     connection.shutdown(socket.SHUT_WR)
     data = reader.read()
     connection.close()
     with tempfile.TemporaryDirectory() as temp:
         extract(data, temp)
-        for name in dbs_out:
-            restore(name, pathlib.Path(temp) / name)
+        loaded = {name: load(name, pathlib.Path(temp) / name) for name in dbs_out}
+        if not all(loaded.values()):
+            for temporary in filter(None, loaded.values()):
+                drop(temporary)
+            return False
+        for name, temporary in loaded.items():
+            replace(name, temporary, pathlib.Path(temp) / name)
+    return True
 
 
 def run(argv, worker, kind, workers, base):
@@ -506,7 +535,11 @@ def run(argv, worker, kind, workers, base):
         return None
     if dbs_out:
         try:
-            get_back(worker, job, dbs_out)
+            whole = get_back(worker, job, dbs_out)
         except (Fallback, OSError, tarfile.TarError) as error:
             say(f"the DB did not come back: {error}")
+        else:
+            if not whole:
+                say("the DBs here are left as they were, runs here again")
+                return None
     return code
