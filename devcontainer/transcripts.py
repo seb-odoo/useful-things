@@ -13,7 +13,9 @@ learn from another. A bundle on a PR of an author outside odoo (scripts/outside.
 both are links of its Claude folder, to those folders, or to an empty one.
 
 The session of the bundle (.agent/session) comes from the old shared folder when its own folder
-has none: the transcript, and the regular files of its folder, copied, with no link followed.
+has none: the transcript, and the regular files of its folder, copied, with no link followed. Not
+for a bundle on an outside PR: it writes its .agent/session, and would get any session of the
+old folder it names.
 
 Run by initialize.py before each start, after outside.py, and by the stand-in of a remote agent.
 """
@@ -92,14 +94,14 @@ def main():
     mine = root / bundle
     mine.mkdir(parents=True, exist_ok=True)
     old.mkdir(parents=True, exist_ok=True)
-    session = read_session(folder)
+    outside = (own / "outside").is_file()
+    session = None if outside else read_session(folder)
     if session and not os.path.lexists(mine / f"{session}.jsonl"):
         copy_file(old / f"{session}.jsonl", mine / f"{session}.jsonl")
         if (old / session).is_dir() and not (old / session).is_symlink():
             copy_tree(old / session, mine / session)
     own.mkdir(parents=True, exist_ok=True)
     (own / "empty").mkdir(exist_ok=True)
-    outside = (own / "outside").is_file()
     link(own / "transcripts", own / "empty" if outside else root)
     link(own / "transcripts-before", own / "empty" if outside else old)
 

@@ -227,7 +227,9 @@ learns from another, and adds no turn to its session, which the host resumed in 
 (security check 11-03, B7; Seb: "make them read-only? or whatever you think is best"). A bundle on
 an outside PR reads neither: both are links of `claude-config/<bundle>`, to an empty folder for
 it. [`transcripts.py`](transcripts.py) makes them at each start, and copies the session of
-`.agent/session` from the old folder when the own one has none (regular files only). The host
+`.agent/session` from the old folder when the own one has none (regular files only), but for a
+bundle on an outside PR: it writes its `.agent/session`, and would get any old session it names
+(review of 2026-11-18). The host
 reads a bundle's sessions in its own folder, then in the old one for a container that has not
 restarted since; it resumes one, or names the bundle of a cut session, from the own folder and
 `.agent/session` only, never from a title. The `/resume` list of a tab shows the sessions of its

@@ -66,6 +66,8 @@ def main():
         empty = str(configs / "b2" / "empty")
         found = [os.readlink(configs / "b2" / name) for name in ("transcripts", "transcripts-before")]
         check("an outside bundle reads none", found, [empty, empty])
+        copied = os.path.lexists(mine / "b2" / f"{SESSION}.jsonl")
+        check("nor gets the session it names", copied, False)
         check("no copy through a link of the bundle", list(victim.iterdir()), [])
         (mine / "b1" / f"{SESSION}.jsonl").write_text("mine\n")
         run(root, "b1", root / "b1")
