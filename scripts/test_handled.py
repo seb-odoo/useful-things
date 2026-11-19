@@ -79,7 +79,7 @@ def main():
             "submittedAt": at,
         }
 
-    def pull(*comments, reviews=()):
+    def pull(*comments, reviews=(), pinger="fw-bot"):
         red = {"context": "ci/runbot", "state": "FAILURE", "targetUrl": "https://runbot/1"}
         head = {"committedDate": "2026-10-14T15:00:00Z", "status": {"contexts": [red]}}
         asked = {"actor": {"login": "me"}, "createdAt": "2026-10-14T16:00:00Z"}
@@ -88,7 +88,7 @@ def main():
             "asked": None,
             "author": {"login": "me"},
             "auto_asked": 0,
-            "comments": {"nodes": [note("fw-bot", ping, "2026-10-14T16:00:00Z"), *comments]},
+            "comments": {"nodes": [note(pinger, ping, "2026-10-14T16:00:00Z"), *comments]},
             "commits": {"nodes": [{"commit": head}]},
             "headRefName": "master-x--me",
             "headRefOid": "a",
@@ -105,8 +105,9 @@ def main():
             "viewer": "me",
         }
 
-    def facts(login, command):
-        return branch_status.get_pr_facts(pull(note(login, command)), "odoo", time.time())
+    def facts(login, command, pinger="fw-bot"):
+        pr = pull(note(login, command), pinger=pinger)
+        return branch_status.get_pr_facts(pr, "odoo", time.time())
 
     overrides = pull(
         note("me", "@robodoo override=ci/security", "2026-10-14T09:00:00Z"),
@@ -122,6 +123,9 @@ def main():
         login: [check["context"] for check in facts(login, override)["failing"]]
         for login in ("stranger", "later", "robodoo", "me", "teammate", "asked", "pinged", "member")
     }
+    found["the same of pinged, robodoo pinging"] = [
+        check["context"] for check in facts("pinged", override, "robodoo")["failing"]
+    ]
     found["delegated by"] = {
         login: facts(login, "@robodoo delegate+")["delegated"]
         for login in ("stranger", "asked", "member")
@@ -183,6 +187,7 @@ def main():
             "pinged": [],
             "member": [],
         },
+        "the same of pinged, robodoo pinging": [],
         "delegated by": {"stranger": False, "asked": True, "member": True},
         "delegated by a member writing": {
             "Ok.\r\nrobodoo delegate+": True,

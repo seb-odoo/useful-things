@@ -486,19 +486,20 @@ def get_team():
 
 def get_commanders(pr):
     """Whose robodoo commands count: me, my team, the reviewers asked on the PR, and on a fw-bot
-    hop the logins fw-bot pings at the start of its comments. Robodoo refuses the command of
-    anyone else, but its text stays."""
+    hop the logins the bots ping at the start of their comments (robodoo posts the forward-port
+    messages of fw-bot since 2026-11-16), never a bot. Robodoo refuses the command of anyone else,
+    but its text stays."""
     asked = {
         (node.get("requestedReviewer") or {}).get("login") for node in pr["timelineItems"]["nodes"]
     }
     pings = {
         login
         for node in pr["comments"]["nodes"]
-        if (node["author"] or {}).get("login") == FW_BOT
+        if (node["author"] or {}).get("login") in BOTS
         and (match := LEADING_PINGS.match(node["body"] or ""))
         for login in MENTION.findall(match[0])
     }
-    return ({pr["viewer"]} | get_team() | asked | pings) - {None}
+    return ({pr["viewer"]} | get_team() | asked | pings) - set(BOTS) - {None}
 
 
 def get_command_notes(pr):

@@ -666,7 +666,8 @@ A robodoo command (`override=`, `delegate+`) is a line that starts with `robodoo
 `robodoo:`, as mergebot reads it: odoo#301623 got a `robodoo delegate+` with no `@`
 (2026-11-18). It counts from me, my team (the logins of
 `~/.claude/external/mail-agent/logins.json` whose trigram is in its `team.json`), a reviewer asked
-on the PR, or on a fw-bot hop a login fw-bot pings at the start of its comments, and from a member
+on the PR, or on a fw-bot hop a login a bot pings at the start of its comments (robodoo posts the
+forward-port messages of fw-bot since 2026-11-16, odoo#303799), never a bot, and from a member
 of the odoo org (GitHub `authorAssociation`) but fw-bot and robodoo: the rule of triage. A team
 request asks no reviewer by name, so the member rule is what counts the reviewer it brings, and
 the texts of the bots quote `@robodoo r+`. Robodoo refuses the command of anyone else, but its
