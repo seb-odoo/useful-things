@@ -650,7 +650,7 @@ Each bundle sits in one group, the most urgent among its repos. On screen, in th
 | Group | A bundle is there when |
 | --- | --- |
 | Open in VS Code | its dev container runs, so a window is open on it |
-| Waits on me | no PR, a branch that is not pushed, a conflict, a failing check other than security, review threads someone else wrote last, changes requested, a staging error, a delegation with no r+ |
+| Waits on me | no PR, a branch that is not pushed, a conflict, a failing check other than security, review threads someone else wrote last, a comment or review text of someone else since my last word (the ones "handled" reads), changes requested, a staging error, a delegation with no r+ |
 | Drafts | a draft of mine with nothing to do and no CI running |
 | Waits on a reviewer | the PR is ready and nobody answered yet |
 | Waits on CI | checks are running, or an r+ waits for them |
@@ -723,6 +723,9 @@ left to do, dim is background, cyan is a worktree, magenta is merged.
   robodoo commands count.
 - Review threads count apart: a yellow `N threads` when someone else wrote last, a dim
   `N replied` when I did.
+- A yellow `N comments` counts the comments and review texts of someone else since my last
+  comment or review, as "handled" reads them (Seb, 2026-11-19: a reviewer who waits on me puts
+  the bundle in Waits on me, as the triage gives it a `review` job).
 - The state of a colleague's PR is dim as a whole.
 
 All the PRs come from GraphQL queries of 5 branches each, one alias per repo and branch, sent

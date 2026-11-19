@@ -638,6 +638,8 @@ def format_pr(facts):
             tags.append(review)
         if threads := facts["threads"]:
             tags.append(f"[yellow]{threads} thread{'s' * (threads > 1)}[/yellow]")
+        if comments := len(facts["comments"]):
+            tags.append(f"[yellow]{comments} comment{'s' * (comments > 1)}[/yellow]")
         if replied := facts["replied"]:
             tags.append(f"[dim]{replied} replied[/dim]")
         tags += [
@@ -672,6 +674,7 @@ def get_group(facts, status, push):
         return "me", "wip"
     if (
         facts["threads"]
+        or facts["comments"]
         or facts["review"] == "CHANGES_REQUESTED"
         or (facts["delegated"] and facts["mergebot"] not in R_PLUS_STATES)
     ):
