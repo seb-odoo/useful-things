@@ -156,6 +156,10 @@ def main():
     quiet = {**talked, "delegated": False, "failing": []}
     found["a PR whose comments wait on me goes to"] = branch_status.get_group(quiet, None, {})
     found["its tags"] = branch_status.format_pr(quiet)[1]
+    emptied = {**pull(), "commits": {"nodes": []}, "state": "CLOSED"}
+    found["a closed PR with no commit fails"] = branch_status.get_pr_facts(
+        emptied, "enterprise", time.time()
+    )["failing"]
     expected = {
         "never opened": False,
         "opened, no agent yet": True,
@@ -197,6 +201,7 @@ def main():
         "comments that wait on me": ["2026-10-14T12:00:00Z", "2026-10-14T15:00:00Z"],
         "a PR whose comments wait on me goes to": ("me", "review"),
         "its tags": "[yellow]2 comments[/yellow]",
+        "a closed PR with no commit fails": [],
         "what waits on me": [
             "odoo changes requested",
             "odoo comment c",

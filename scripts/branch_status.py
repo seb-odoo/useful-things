@@ -575,7 +575,8 @@ def get_pr_facts(pr, repo, now):
     overridden = get_overridden(notes)
     contexts = [
         c
-        for c in (pr["commits"]["nodes"][0]["commit"]["status"] or {}).get("contexts", [])
+        for node in pr["commits"]["nodes"]
+        for c in (node["commit"]["status"] or {}).get("contexts", [])
         if c["context"] != "ci/codeowner"
     ]
     batches = {c["context"]: get_batch(c) for c in contexts}
