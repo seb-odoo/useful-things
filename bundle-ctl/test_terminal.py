@@ -638,8 +638,10 @@ def check_ops_close(case):
     case.check("closing the terminal stops its claude", stopped)
     patterns = [line.removeprefix(pkill) for line in case.log() if line.startswith(pkill)]
     pattern = patterns[0] if patterns else "^$"
-    wrapper, _, args = case.runs()[0].partition(" c1 ")[2].partition(" ")
-    case.check("podman exec runs the claude wrapper", wrapper == "/home/vscode/.claude/bin/claude")
+    shell, _, wrapped = case.runs()[0].partition(" c1 ")[2].partition(' exec "$0" "$@" ')
+    case.check("podman exec runs claude through bash, for BASH_ENV", shell == "bash -c")
+    wrapper, _, args = wrapped.partition(" ")
+    case.check("bash runs the claude wrapper", wrapper == "/home/vscode/.claude/bin/claude")
     claude = f"{NATIVE} {args}"
     other = claude.replace(" s2 ", " s3 ") + " of s2"
     case.check("the pkill matches its claude", re.search(pattern, claude))

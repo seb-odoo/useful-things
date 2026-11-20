@@ -806,7 +806,9 @@ def run_ops(name):
         code = run_tty(
             ["podman", "exec", "--interactive", "--tty", "--detach-keys=", "--user", USER]
             + ["--workdir", REPO_ROOT, "--env", f"TERM={os.environ.get('TERM', 'xterm')}", *VTE]
-            + ["--env", "SHELL=/bin/bash", "--env", f"AGENT_WINDOW={name}", container, *claude],
+            + ["--env", "SHELL=/bin/bash", "--env", f"AGENT_WINDOW={name}", container]
+            # bash reads BASH_ENV, the only file that puts bctl on the PATH claude gives its tools.
+            + ["bash", "-c", 'exec "$0" "$@"', *claude],
             Waker(agent, os.path.basename(HOST_FOLDER), session, name),
         )
     except HangUp:

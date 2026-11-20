@@ -115,6 +115,8 @@ with pip inside. The rest follows from that choice.
   puts on PATH. `timeout`, `xargs` or a hook start a file only: with the function of before,
   `timeout 590 bctl build` answered "No such file" (2026-11-09). A Claude session keeps the PATH
   of its start, so one started before that has the function, which works but not under `timeout`.
+  So an agent's claude starts through bash, which reads `BASH_ENV`: `agent-run.sh` in a bundle,
+  `bash -c` for an ops window, whose claude had no `bctl` before (2026-11-20).
 - **The shell helpers reach non-interactive shells** through `BASH_ENV`, which points at
   `container-rw/devcontainer.bashrc`: an agent runs `bash -c`, which does not read `~/.bashrc`.
   Claude Code then sources a copy of the functions it took at the start of the session, which
