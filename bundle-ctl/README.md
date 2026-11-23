@@ -956,9 +956,12 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   its limit message again, and the terminal holds it meanwhile. At each pass the daemon reads
   `~/.local/state/claude-switch/status.json` (claude-switch README), and while an account there
   is free (not out, no `blocked_reason`, not `refused`, and for the backup a `token`), it puts
-  back each agent whose session is idle or on a background command and whose last message is
-  the limit message of Claude, before or after its verdict, with a reset more than 10 minutes
-  away (`LIMIT_SOON`): a reset that comes sooner goes faster than the end of the queue. Not cut
+  back each agent whose session is idle, on a background command or on a dialog, and whose last
+  message is the limit message of Claude, before or after its verdict, with a reset more than 10
+  minutes away (`LIMIT_SOON`): a reset that comes sooner goes faster than the end of the queue.
+  The dialog is the `/rate-limit-options` menu ("What do you want to do?") Claude opens by itself
+  at the limit, as no question can follow the limit message: until 2026-11-23 the record said
+  `waiting` under it, and 14 agents stopped on 11-20 were never put back once main was free. Not cut
   at the 5 hours of the mark of the window: a claude started later on that session waits all the
   same, and 6 of the 19 were past them. An agent terminal and an ops agent window go as Back to
   queue does, last, while their window is minimized, as above. An agent on a worker stops there

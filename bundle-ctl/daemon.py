@@ -3046,7 +3046,10 @@ def requeue_usage_limited():
     agent terminal or an ops window goes as Back to queue does. An agent on a worker stops there,
     and its session is queued to go on there. Not when its reset comes within LIMIT_SOON, and only
     while its window here, when it has one, is minimized, as for free_done_terminals. Once per
-    state of the switch: an agent that stops on the limit again waits for an account to change."""
+    state of the switch: an agent that stops on the limit again waits for an account to change.
+    A session that waits goes too: with the limit message last, its dialog is the
+    /rate-limit-options menu Claude opens by itself at the limit, which held 14 agents from
+    2026-11-20 to 11-23."""
     now = time.time()
     switch = get_switch_state(now)
     if switch != limit_requeues["switch"]:
@@ -3075,7 +3078,7 @@ def requeue_usage_limited():
                 (agent / kept).exists()
                 for kept in ("remote-down", "remote-ending", "remote-moving")
             )
-            or get_session_status(container, session) not in ("idle", "shell")
+            or get_session_status(container, session) not in ("idle", "shell", "waiting")
         ):
             continue
         resets = TITLE.get_limit_reset(session, name)
