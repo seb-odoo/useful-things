@@ -494,7 +494,19 @@ necessary. but if we have a good setup, full remote should offer the same possib
   reference (remote-runs README, "Verbs"), 8 s at most for the card (`DIALOG_READ`), as the
   thread that holds the cards also types in the agents. A worker with no connection, or that
   gives no answer in time, leaves a row that says so, and one that gave no answer is not asked
-  again for 60 s: the cards of one pass wait on it once. Seb answers with the number of an option, words after it or not, or with his
+  again for 60 s: the cards of one pass wait on it once. A PR the words of the question link
+  (`https://github.com/OWNER/REPO/pull/N`, its `#issuecomment-`, `#discussion_r` or
+  `#pullrequestreview-` anchor naming the comment asked), 2 at most and only of a repo of the
+  bundles, is read when the card is held, with one GraphQL query of `gh`: its last 100
+  comments, reviews and review threads, a pending review left out, 200 comments at most, each
+  body cut to 4000 characters and 300 lines, a thread with the last 20 lines of its diff hunk,
+  60000 characters for the bodies and hunks of them all, the linked ones and the newest first
+  (`DIALOG_COMMENTS`). An id comes from the anchor of its URL: `databaseId` is a 32-bit Int,
+  and GitHub's ids passed it. As the thread that holds the cards also types in the agents, and
+  the question comes from a container: 10 s for the PRs of a card, 6 reads a minute, a PR read
+  kept 2 minutes, and no read for a minute after GitHub gave no answer. hok and deck draw them
+  (host-ctl README, "A question of an agent"); a read refused or failed leaves a row that says
+  why. Seb answers with the number of an option, words after it or not, or with his
   own words, which `hok` leaves beside the request (`N.pick`). A yes to the last question sends
   Escape to that claude, as deck's Stop does, and leaves one line in `told/`, typed once the
   dialog closed, with the lines that waited behind it: `Seb answered your question in hok, which

@@ -222,6 +222,43 @@ CODE_REFERENCE = re.compile(
     r":([0-9]{1,6})(?:-([0-9]{1,6}))?"
 )
 FENCE = re.compile(r"\s*(`{3,}|~{3,})\s*([\w.+#-]*)[^`]*")
+PULL_LINK = re.compile(
+    r"https://github\.com/([\w.-]+/[\w.-]+)/pull/([0-9]{1,7})(?![0-9])(?:/files|/commits)?"
+    r"(?:#(?:issuecomment-|discussion_r|pullrequestreview-|r)([0-9]{1,15})(?![0-9]))?",
+    re.ASCII,
+)
+COMMENT_ID = re.compile(r"#(?:issuecomment-|discussion_r|pullrequestreview-)([0-9]{1,20})$")
+DIALOG_COMMENTS = {
+    "pulls": 2,
+    "asked": 10,
+    "seconds": 10,
+    "rest": 60,
+    "reads": 6,
+    "kept": 120,
+    "comments": 200,
+    "replies": 50,
+    "body": 4000,
+    "lines": 300,
+    "width": 1000,
+    "hunk": 20,
+    "total": 60000,
+    "size": 256 * 1024,
+}
+PULL_COMMENTS = """
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+    title
+    comments(last: 100) { totalCount nodes { url createdAt body author { login } } }
+    reviews(last: 100) { totalCount nodes { url submittedAt state body author { login } } }
+    reviewThreads(last: 100) { totalCount nodes {
+      isResolved isOutdated path line originalLine startLine originalStartLine
+      comments(first: 50) { totalCount nodes {
+        url createdAt body diffHunk author { login } pullRequestReview { url state }
+      } }
+    } }
+  } }
+}
+"""
 DIALOG_TAIL = 256 * 1024
 ESCAPE = "\x1b"
 LAPTOP = "the laptop"
@@ -425,6 +462,9 @@ moving_back = set()
 building_for_worker = set()
 dialogs_missing = {}
 workers_late = {}
+pulls_read = {}
+pulls_reads = []
+github_late = [-math.inf]
 remote_stops = {}
 missing_agents = {}
 orphans = {}
@@ -3571,10 +3611,11 @@ def get_questions(data):
         labels = [size_text(option.get("label"), "label") for option in options]
         if not all(labels):
             return None
+        parts = get_question_parts(question.get("question"))
         found.append(
             {
                 "header": size_text(question.get("header"), "header"),
-                "parts": get_question_parts(question.get("question")),
+                "parts": parts,
                 "several": question.get("multiSelect") is True,
                 "options": [
                     [label, size_text(option.get("description"), "description")]
@@ -3582,6 +3623,7 @@ def get_questions(data):
                 ],
                 "previews": [get_preview(option.get("preview")) for option in options],
                 "references": get_references(question.get("question")),
+                "pulls": get_pull_links(" ".join(part.get("text", "") for part in parts)),
             },
         )
     return found
@@ -3648,6 +3690,260 @@ def get_references(text):
         if reference not in found and len(found) < DIALOG_READ["references"]:
             found.append(reference)
     return found
+
+
+def get_pull_links(text):
+    """The PRs the words of a question link, DIALOG_COMMENTS["pulls"] at most, each once:
+    [repo, number, the ids of the comments or reviews its links name, DIALOG_COMMENTS["asked"]
+    at most]."""
+    found = {}
+    for repo, number, anchor in PULL_LINK.findall(text if isinstance(text, str) else ""):
+        key = (repo, int(number))
+        if key not in found and len(found) >= DIALOG_COMMENTS["pulls"]:
+            continue
+        asked = found.setdefault(key, [])
+        if anchor and int(anchor) not in asked and len(asked) < DIALOG_COMMENTS["asked"]:
+            asked.append(int(anchor))
+    return [[repo, number, asked] for (repo, number), asked in found.items()]
+
+
+def get_comment_lines(pulls):
+    """A row for each PR a question links: its comments, review bodies and review threads as
+    GitHub has them, or why none were read. Only a PR of a repo of the bundles is read, within
+    DIALOG_COMMENTS["seconds"] for them all (README.md, "Remote agents")."""
+    lines = []
+    deadline = time.monotonic() + DIALOG_COMMENTS["seconds"]
+    for repo, number, asked in pulls:
+        url = f"https://github.com/{repo}/pull/{number}"
+        row = {"label": "comments", "pr": f"{repo}#{number}", "url": url, "asked": asked}
+        if repo.lower() not in get_bundle_github_repos():
+            lines.append({**row, "why": "not read: not a PR of a repo of the bundles"})
+            continue
+        try:
+            found = {**row, **shape_pull_comments(read_pull(repo, number, deadline), asked)}
+        except (
+            OSError,
+            ValueError,
+            KeyError,
+            TypeError,
+            AttributeError,
+            subprocess.SubprocessError,
+        ) as error:
+            found = {**row, "why": cut_text(f"not read: {error}", 300)}
+        if len(json.dumps(found)) > DIALOG_COMMENTS["size"]:
+            found = {**row, "why": "not read: too many comments to carry here, see GitHub"}
+        lines.append(found)
+    return lines
+
+
+def get_bundle_github_repos():
+    """OWNER/NAME of the GitHub repo of each base repo, lower case."""
+    found = set()
+    for repo in get_repos():
+        with contextlib.suppress(OSError, KeyError, ValueError, subprocess.SubprocessError):
+            found.add(get_github_repo(repo).lower())
+    return found
+
+
+def read_pull(repo, number, deadline):
+    """The PR as one GraphQL query of gh gives it, a failure too, kept DIALOG_COMMENTS["kept"]
+    seconds. At most DIALOG_COMMENTS["reads"] reads a minute, none for DIALOG_COMMENTS["rest"]
+    seconds after GitHub gave no answer in time: the thread that holds the cards also types in
+    the agents, and a container writes the question."""
+    now = time.monotonic()
+    for key, (at, _kept) in list(pulls_read.items()):
+        if now - at >= DIALOG_COMMENTS["kept"]:
+            del pulls_read[key]
+    if (repo, number) in pulls_read:
+        kept = pulls_read[(repo, number)][1]
+        if isinstance(kept, Exception):
+            raise kept
+        return kept
+    if now - github_late[0] < DIALOG_COMMENTS["rest"]:
+        raise ValueError("GitHub gave no answer in time, asked again within a minute")
+    pulls_reads[:] = [at for at in pulls_reads if now - at < 60]
+    if len(pulls_reads) >= DIALOG_COMMENTS["reads"]:
+        raise ValueError(f"{DIALOG_COMMENTS['reads']} PRs read in the last minute already")
+    if deadline - now <= 0:
+        raise ValueError(f"the {DIALOG_COMMENTS['seconds']} s of the card went on another PR")
+    pulls_reads.append(now)
+    try:
+        kept = fetch_pull(repo, number, deadline - now)
+    except subprocess.TimeoutExpired:
+        github_late[0] = time.monotonic()
+        kept = ValueError(f"GitHub gave no answer in {DIALOG_COMMENTS['seconds']} s")
+    except ValueError as error:
+        kept = error
+    pulls_read[(repo, number)] = (time.monotonic(), kept)
+    if isinstance(kept, Exception):
+        raise kept
+    return kept
+
+
+def fetch_pull(repo, number, seconds):
+    owner, name = repo.split("/")
+    res = subprocess.run(
+        ["gh", "api", "graphql", "-f", f"query={PULL_COMMENTS}", "-f", f"owner={owner}"]
+        + ["-f", f"name={name}", "-F", f"number={number}"],
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=seconds,
+    )
+    if res.returncode:
+        raise ValueError(cut_text(" ".join(res.stderr.split()) or "gh failed", 200))
+    try:
+        pull = json.loads(res.stdout)["data"]["repository"]["pullRequest"]
+    except (KeyError, TypeError, ValueError):
+        pull = None
+    if not isinstance(pull, dict):
+        raise ValueError("GitHub gave no such PR")
+    return pull
+
+
+def get_comment_id(url):
+    """The id of a comment or a review, from the anchor of its URL: GitHub's ids passed what
+    databaseId holds, a 32-bit Int."""
+    found = COMMENT_ID.search(url) if isinstance(url, str) else None
+    return int(found[1]) if found else None
+
+
+def get_nodes(value, key):
+    nodes = ((value.get(key) if isinstance(value, dict) else None) or {}).get("nodes")
+    return [node for node in nodes or [] if isinstance(node, dict)]
+
+
+def get_total(value, key, shown):
+    total = ((value.get(key) or {}) if isinstance(value, dict) else {}).get("totalCount")
+    return max((total if type(total) is int else shown) - shown, 0)
+
+
+def shape_pull_comments(pull, asked):
+    """The comments of a PR as a card carries them, a pending review left out: the linked ones
+    and the newest first, DIALOG_COMMENTS["comments"] at most and DIALOG_COMMENTS["total"]
+    characters for their bodies and the ends of the diff hunks of their threads, which end on
+    the line commented."""
+    asked = set(asked)
+    comments, threads, bodies = [], [], []
+
+    def add(node, kind, at="createdAt", **extra):
+        comment = {
+            "id": get_comment_id(node.get("url")),
+            "kind": kind,
+            "author": str((node.get("author") or {}).get("login") or "ghost"),
+            "at": str(node.get(at) or ""),
+            "url": str(node.get("url") or ""),
+            **extra,
+        }
+        bodies.append((comment, str(node.get("body") or "")))
+        return comment
+
+    for node in get_nodes(pull, "comments"):
+        comments.append(add(node, "comment"))
+    for node in get_nodes(pull, "reviews"):
+        state = str(node.get("state") or "")
+        if state != "PENDING" and (str(node.get("body") or "").strip() or state != "COMMENTED"):
+            comments.append(add(node, "review", "submittedAt", state=state))
+    cut = sum(get_total(pull, key, len(get_nodes(pull, key))) for key in ("comments", "reviews"))
+    cut += get_total(pull, "reviewThreads", len(get_nodes(pull, "reviewThreads")))
+    for node in get_nodes(pull, "reviewThreads"):
+        posted = [
+            each
+            for each in get_nodes(node, "comments")
+            if (each.get("pullRequestReview") or {}).get("state") != "PENDING"
+        ]
+        replies = posted[: DIALOG_COMMENTS["replies"]]
+        if not replies:
+            continue
+        line = node.get("line") or node.get("originalLine")
+        start = node.get("startLine") or node.get("originalStartLine")
+        thread = {
+            "path": str(node.get("path") or ""),
+            "line": line if type(line) is int else None,
+            "start": start if type(start) is int and start != line else None,
+            "outdated": node.get("isOutdated") is True,
+            "resolved": node.get("isResolved") is True,
+            "hunk": replies[0].get("diffHunk"),
+            "comments": [
+                add(
+                    each,
+                    "thread",
+                    review=get_comment_id((each.get("pullRequestReview") or {}).get("url")),
+                )
+                for each in replies
+            ],
+            "cut": get_total(node, "comments", len(replies)),
+        }
+        threads.append(thread)
+    is_asked = lambda comment: bool({comment["id"], comment.get("review")} & asked)  # noqa: E731
+    first = sorted(bodies, key=lambda pair: pair[0]["at"], reverse=True)
+    first.sort(key=lambda pair: not is_asked(pair[0]))
+    kept = {id(comment) for comment, _body in first[: DIALOG_COMMENTS["comments"]]}
+    cut += len(first) - len(kept)
+    comments = [comment for comment in comments if id(comment) in kept]
+    for thread in threads:
+        thread["comments"] = [comment for comment in thread["comments"] if id(comment) in kept]
+    threads = [thread for thread in threads if thread["comments"]]
+    hunks = [(thread, thread["comments"][0]) for thread in threads]
+    pieces = [(comment, body, comment) for comment, body in first if id(comment) in kept]
+    pieces += [(thread, thread["hunk"], comment) for thread, comment in hunks]
+    pieces.sort(key=lambda piece: piece[2]["at"], reverse=True)
+    pieces.sort(key=lambda piece: not is_asked(piece[2]))
+    left = DIALOG_COMMENTS["total"]
+    for owner, text, _comment in pieces:
+        if "path" in owner:
+            owner["hunk"] = get_hunk(text)
+            size = sum(len(line) + 1 for line in owner["hunk"])
+            owner["hunk"] = owner["hunk"] if size <= left else []
+        else:
+            owner["body"], owner["cut"] = get_body(text, min(DIALOG_COMMENTS["body"], left))
+            size = sum(len(line) + 1 for line in owner["body"])
+        left -= min(size, max(left, 0))
+    comments.sort(key=lambda comment: comment["at"])
+    return {
+        "title": size_text(pull.get("title"), "description"),
+        "comments": comments,
+        "threads": threads,
+        "cut": cut,
+    }
+
+
+def get_body(text, most):
+    """A body of GitHub in lines, its control characters dropped, most characters and
+    DIALOG_COMMENTS["lines"] lines at most, and whether some of it was left out."""
+    text = "".join(
+        char if char.isprintable() or char == "\n" else " " for char in text.expandtabs()
+    )
+    lines, left, cut = [], most, False
+    for line in text.strip().splitlines():
+        line = line.rstrip()
+        cut = cut or len(line) > DIALOG_COMMENTS["width"]
+        line = cut_text(line, DIALOG_COMMENTS["width"])
+        left -= len(line) + 1
+        if left < 0 or len(lines) >= DIALOG_COMMENTS["lines"]:
+            return lines, True
+        lines.append(line)
+    return lines, cut
+
+
+def get_hunk(text):
+    """The header of a diff hunk of GitHub and its last DIALOG_COMMENTS["hunk"] lines, the line
+    numbers of the header moved to the first line kept."""
+    lines = [
+        cut_text("".join(char if char.isprintable() else " " for char in line.expandtabs()), 300)
+        for line in (text if isinstance(text, str) else "").splitlines()
+    ]
+    found = re.fullmatch(
+        r"@@ -([0-9]+)(?:,[0-9]+)? \+([0-9]+)(?:,[0-9]+)? @@(.*)", lines[0] if lines else ""
+    )
+    if not found:
+        return []
+    old, new, body = int(found[1]), int(found[2]), lines[1:]
+    for line in body[: max(len(body) - DIALOG_COMMENTS["hunk"], 0)]:
+        old += line[:1] not in ("+", "\\")
+        new += line[:1] not in ("-", "\\")
+    body = body[-DIALOG_COMMENTS["hunk"] :]
+    return [f"@@ -{old} +{new} @@{found[3]}", *body]
 
 
 def get_read_lines(bundle, worker, references):
@@ -3912,6 +4208,7 @@ def get_dialog_item(bundle, worker, dialog, index):
             {"label": "header", "text": question["header"]},
             *({"label": "question", **part} for part in question["parts"]),
             *get_read_lines(bundle, worker, question["references"]),
+            *get_comment_lines(question["pulls"]),
             *get_option_lines(question),
         ],
         "options": len(labels),
@@ -4128,10 +4425,13 @@ def clean(text):
 
 
 def clean_value(value):
-    """A value of a line of a card: its text cleaned, each one of a list too, a number kept."""
+    """A value of a line of a card: its text cleaned, each one of a list or a dict too, a number,
+    a boolean and None kept."""
     if isinstance(value, list):
         return [clean_value(each) for each in value]
-    return value if type(value) is int else clean(value)
+    if isinstance(value, dict):
+        return {clean(str(key)): clean_value(each) for key, each in value.items()}
+    return value if value is None or type(value) in (int, bool) else clean(value)
 
 
 def hold(item):

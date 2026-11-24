@@ -6,6 +6,7 @@ import http.server
 import importlib.util
 import io
 import json
+import math
 import os
 import pathlib
 import re
@@ -2563,6 +2564,297 @@ def check_dialog_read(root):
     ], len(checks)
 
 
+def check_dialog_comments(root):
+    """The card of a question that links a PR of a repo of the bundles carries its comments as
+    GitHub has them, read with one GraphQL query of gh: the review threads with the end of their
+    diff hunk, the asked comment and the newest first within the budget, a pending review left
+    out. GitHub is read 6 times a minute at most, a PR once in 2 minutes, not at all for a minute
+    after it gave no answer; a PR of another repo, or a gh that fails, leaves a row that says
+    why."""
+    pr = "https://github.com/odoo/odoo/pull/5"
+    hunk = "\n".join(["@@ -10,30 +10,31 @@ def f():", *[f" line {n}" for n in range(30)], "+new"])
+    big = 7105627583
+    pull = {
+        "title": "[FIX] mail: x",
+        "comments": {
+            "totalCount": 3,
+            "nodes": [
+                {
+                    "url": f"{pr}#issuecomment-{big}",
+                    "createdAt": "2026-11-01T10:00:00Z",
+                    "body": "old\x1b[31m red\r\nsecond",
+                    "author": {"login": "author"},
+                },
+                None,
+                {
+                    "url": f"{pr}#issuecomment-12",
+                    "createdAt": "2026-11-03T10:00:00Z",
+                    "body": "x" * 5000,
+                    "author": None,
+                },
+            ],
+        },
+        "reviews": {
+            "totalCount": 3,
+            "nodes": [
+                {
+                    "url": f"{pr}#pullrequestreview-21",
+                    "submittedAt": "2026-11-02T10:00:00Z",
+                    "state": "COMMENTED",
+                    "body": "",
+                    "author": {"login": "reviewer"},
+                },
+                {
+                    "url": f"{pr}#pullrequestreview-22",
+                    "submittedAt": "2026-11-02T11:00:00Z",
+                    "state": "APPROVED",
+                    "body": "",
+                    "author": {"login": "reviewer"},
+                },
+                {
+                    "url": f"{pr}#pullrequestreview-23",
+                    "submittedAt": None,
+                    "state": "PENDING",
+                    "body": "draft",
+                    "author": {"login": "me"},
+                },
+            ],
+        },
+        "reviewThreads": {
+            "totalCount": 2,
+            "nodes": [
+                {
+                    "isResolved": True,
+                    "isOutdated": False,
+                    "path": "mail/x.py",
+                    "line": 41,
+                    "originalLine": 40,
+                    "startLine": None,
+                    "originalStartLine": None,
+                    "comments": {
+                        "totalCount": 2,
+                        "nodes": [
+                            {
+                                "url": f"{pr}#discussion_r31",
+                                "createdAt": "2026-11-02T10:00:00Z",
+                                "body": "why this?",
+                                "diffHunk": hunk,
+                                "author": {"login": "reviewer"},
+                                "pullRequestReview": {
+                                    "url": f"{pr}#pullrequestreview-21",
+                                    "state": "COMMENTED",
+                                },
+                            },
+                            {
+                                "url": f"{pr}#discussion_r32",
+                                "createdAt": "2026-11-04T10:00:00Z",
+                                "body": "my draft answer",
+                                "author": {"login": "me"},
+                                "pullRequestReview": {
+                                    "url": f"{pr}#pullrequestreview-23",
+                                    "state": "PENDING",
+                                },
+                            },
+                        ],
+                    },
+                },
+                {
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "mail/y.py",
+                    "line": 3,
+                    "comments": {
+                        "totalCount": 1,
+                        "nodes": [
+                            {
+                                "url": f"{pr}#discussion_r33",
+                                "createdAt": "2026-11-04T10:00:00Z",
+                                "body": "only a draft",
+                                "pullRequestReview": {"url": "", "state": "PENDING"},
+                            },
+                        ],
+                    },
+                },
+            ],
+        },
+    }
+    gh = root / "bin" / "gh"
+    gh.parent.mkdir()
+    reply = root / "reply.json"
+    asked = root / "asked"
+    gh.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" >> {asked}\ncat {reply}\n')
+    gh.chmod(0o755)
+    names = ("get_repos", "get_github_repo", "DIALOG_COMMENTS")
+    stubs = {name: getattr(daemon, name) for name in names}
+    path = os.environ["PATH"]
+    os.environ["PATH"] = f"{gh.parent}:{path}"
+    daemon.get_repos = lambda: ["odoo", "enterprise", "gone"]
+    repos = {"odoo": "odoo/odoo", "enterprise": "odoo/enterprise"}
+    daemon.get_github_repo = lambda repo: repos[repo]
+    question = (
+        f"Thread of the reviewer: {pr}#discussion_r31 and {pr}#issuecomment-{big}, also"
+        " https://github.com/someone/other/pull/7 and https://github.com/odoo/enterprise/pull/9."
+    )
+
+    def reset():
+        daemon.pulls_read.clear()
+        daemon.pulls_reads.clear()
+        daemon.github_late[0] = -math.inf
+        asked.write_text("")
+
+    def reads():
+        return asked.read_text().count("graphql")
+
+    try:
+        links = daemon.get_pull_links(question)
+        hidden = daemon.get_questions(
+            {
+                "questions": [
+                    {
+                        "question": "Which? " + "a " * 1200 + f"{pr}#issuecomment-1",
+                        "options": [{"label": "Yes"}],
+                    }
+                ]
+            }
+        )[0]["pulls"]
+        reply.write_text(json.dumps({"data": {"repository": {"pullRequest": pull}}}))
+        daemon.DIALOG_COMMENTS = {**stubs["DIALOG_COMMENTS"], "total": 1010}
+        reset()
+        lines = daemon.get_comment_lines(links[:2])
+        sent = asked.read_text().splitlines()
+        again = daemon.get_comment_lines([["odoo/odoo", 5, []]])
+        cached = reads()
+        reset()
+        daemon.DIALOG_COMMENTS["reads"] = 2
+        limited = [daemon.get_comment_lines([["odoo/odoo", n, []]])[0] for n in (1, 2, 3)]
+        daemon.DIALOG_COMMENTS = {**stubs["DIALOG_COMMENTS"], "size": 500}
+        reset()
+        large = daemon.get_comment_lines([["odoo/odoo", 5, []]])
+        daemon.DIALOG_COMMENTS = dict(stubs["DIALOG_COMMENTS"])
+        reset()
+        reply.write_text("{}")
+        broken = daemon.get_comment_lines([["odoo/odoo", 5, []]])
+        reset()
+        gh.write_text("#!/bin/sh\necho 'HTTP 502' >&2\nexit 1\n")
+        failed = daemon.get_comment_lines([["odoo/odoo", 5, []]])
+        reset()
+        gh.write_text("#!/bin/sh\nsleep 5\n")
+        daemon.DIALOG_COMMENTS["seconds"] = 1
+        slow = daemon.get_comment_lines([["odoo/odoo", 5, []], ["odoo/odoo", 6, []]])
+        rested = daemon.get_comment_lines([["odoo/odoo", 7, []]])
+    finally:
+        os.environ["PATH"] = path
+        for name, value in stubs.items():
+            setattr(daemon, name, value)
+        reset()
+    one, other = lines
+    by_id = {each["id"]: each for each in [*one["comments"], *one["threads"][0]["comments"]]}
+    thread = one["threads"][0] if one.get("threads") else {}
+    hunk = daemon.get_hunk("@@ -1,3 +1,3 @@\n-a\n\\ No newline at end of file\n+a\n+b")
+    checks = [
+        (
+            "two PRs at most, each once with the ids its links name",
+            links == [["odoo/odoo", 5, [31, big]], ["someone/other", 7, []]]
+            and daemon.get_pull_links(f"{pr}0 {pr}#issuecomment-1x")[0][1:] == [50, []],
+        ),
+        ("a link past the words the card shows is not read", hidden == []),
+        (
+            "one GraphQL query with the PR as its variables",
+            sent[:2] == ["api", "graphql"] and "owner=odoo" in sent and "number=5" in sent,
+        ),
+        (
+            "a PR of another repo is not read",
+            other
+            == {
+                "label": "comments",
+                "pr": "someone/other#7",
+                "url": "https://github.com/someone/other/pull/7",
+                "asked": [],
+                "why": "not read: not a PR of a repo of the bundles",
+            },
+        ),
+        (
+            "the ids come from the URLs, past 32 bits too",
+            [each["id"] for each in one["comments"]] == [big, 22, 12]
+            and by_id[22]["state"] == "APPROVED"
+            and by_id[12]["author"] == "ghost",
+        ),
+        (
+            "a pending review and its draft comments are left out, a thread of drafts too",
+            32 not in by_id
+            and 23 not in by_id
+            and [each["path"] for each in one["threads"]] == ["mail/x.py"],
+        ),
+        (
+            "a body in lines with no control character",
+            by_id[big]["body"] == ["old [31m red", "second"] and not by_id[big]["cut"],
+        ),
+        (
+            "within the budget the asked ones and their hunk first, a long body cut and said so",
+            by_id[31]["body"] == ["why this?"]
+            and by_id[12]["cut"]
+            and by_id[12]["body"] == []
+            and daemon.get_body("y" * 1200, 4000) == (["y" * 997 + "..."], True)
+            and daemon.get_body("z\n" * 400, 4000) == (["z"] * 300, True),
+        ),
+        (
+            "a thread keeps its place, state and the end of its hunk renumbered",
+            thread.get("path") == "mail/x.py"
+            and thread["line"] == 41
+            and thread["resolved"]
+            and not thread["outdated"]
+            and len(thread["hunk"]) == 21
+            and thread["hunk"][0] == "@@ -21 +21 @@ def f():"
+            and thread["hunk"][-1] == "+new"
+            and thread["hunk"][1] == " line 11"
+            and by_id[31]["review"] == 21,
+        ),
+        (
+            "a line with no newline at the end counts for no side",
+            daemon.get_hunk("@@ -1 +1 @@\n" + "\n".join([" c", "\\ x"] + [" d"] * 20))[0]
+            == "@@ -2 +2 @@"
+            and len(hunk) == 5,
+        ),
+        (
+            "what GitHub has past what was read is counted",
+            one["cut"] == 1 and one["title"] == "[FIX] mail: x",
+        ),
+        (
+            "the row goes through the cleaning of hold() as it is",
+            {key: daemon.clean_value(value) for key, value in one.items()} == one,
+        ),
+        (
+            "a PR read is kept 2 minutes",
+            "comments" in again[0] and cached == 1,
+        ),
+        (
+            "GitHub is read a few times a minute at most",
+            "comments" in limited[1]
+            and limited[2]["why"] == "not read: 2 PRs read in the last minute already",
+        ),
+        (
+            "a row too large says so",
+            large[0]["why"] == "not read: too many comments to carry here, see GitHub",
+        ),
+        (
+            "no PR or a gh that fails leaves why",
+            broken[0]["why"] == "not read: GitHub gave no such PR"
+            and failed[0]["why"] == "not read: HTTP 502",
+        ),
+        (
+            "a GitHub with no answer takes the time of the card once, then rests",
+            slow[0]["why"] == "not read: GitHub gave no answer in 1 s"
+            and slow[1]["why"].startswith("not read: GitHub gave no answer in time")
+            and rested[0]["why"].startswith("not read: GitHub gave no answer in time"),
+        ),
+    ]
+    return [
+        f"dialog comments: {name}: {lines, broken, failed, slow}"
+        for name, passed in checks
+        if not passed
+    ], len(checks)
+
+
 def check_remote_dialog(root):
     """The question a remote agent, one in an agent terminal here or an ops window waits on
     becomes a card of hok, one question at a time; Seb's pick closes its dialog with Escape and
@@ -3465,6 +3757,7 @@ def main():
         check_remote_type,
         check_remote_told,
         check_dialog_read,
+        check_dialog_comments,
         check_remote_dialog,
         check_ramp,
         check_renew,
