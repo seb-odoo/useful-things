@@ -379,8 +379,8 @@ def check_records(agent_list):
 
 
 def check_reads(agent_list):
-    """What a cgroup, a process tree and the parent of a terminator read as, on files and
-    processes of their own."""
+    """What a cgroup, a process tree and the holder of an agent read as, on files and processes of
+    their own."""
     failures = []
     for session, expected in (("S1", (2.75, 1250)), ("S2", (4.0, 3000)), ("S3", None)):
         if (found := agent_list.read_tree(PROCESSES, session)) != expected:
@@ -394,16 +394,17 @@ def check_reads(agent_list):
             failures.append(f"cgroup {found!r}, expected (2.5, 1300)")
         if (found := agent_list.read_cgroup(cgroup / "gone")) is not None:
             failures.append(f"cgroup gone: {found!r}")
-        script = pathlib.Path(root, "agent-terminator.py")
+        script = pathlib.Path(root, "agent-tmux.py")
         script.write_text(TERMINATOR)
         command = [sys.executable, script, "ops-S1"]
         process = subprocess.Popen(command, stdout=subprocess.PIPE, text=True)
         try:
-            child = process.stdout.readline().strip()
-            if (found := agent_list.picker.get_terminator(child)) != (process.pid, "ops-S1"):
-                failures.append(f"terminator {found!r}, expected {(process.pid, 'ops-S1')!r}")
-            if (found := agent_list.picker.get_terminator(os.getpid())) is not None:
-                failures.append(f"terminator of another window: {found!r}")
+            process.stdout.readline()
+            agent_list.picker.holders["at"] = float("-inf")
+            if (found := agent_list.picker.get_holder(f"tmux:{process.pid}")) != (process.pid, "ops-S1"):
+                failures.append(f"holder {found!r}, expected {(process.pid, 'ops-S1')!r}")
+            if (found := agent_list.picker.get_holder(f"tmux:{os.getpid()}")) is not None:
+                failures.append(f"holder of another process: {found!r}")
         finally:
             process.kill()
             process.wait()
@@ -415,7 +416,7 @@ def check_usage(agent_list):
     disk of the bundle, measured once."""
     clock = [100.0]
     cgroups = [(10.0, 2 * 1024**3), (12.5, 2 * 1024**3)]
-    agent_list.picker.get_terminator = lambda pid: (5, "ops-S1") if pid == "77" else None
+    agent_list.picker.get_holder = lambda window: (5, "ops-S1") if window == "0x2" else None
     agent_list.get_worktree_bundle_folder = lambda name: f"/bundles/{name}"
     agent_list.read_cgroup = lambda path: cgroups.pop(0)
     agent_list.read_processes = lambda: PROCESSES

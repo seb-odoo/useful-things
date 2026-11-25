@@ -223,7 +223,7 @@ Fetches bundle metadata from runbot and creates/updates local worktrees.
 
 Queries the runbot API, checks out each repo at the matching commit, runs web tooling setup, and opens the bundle in VS Code. `design-themes`, `documentation`, `runbot` and `o-sfu` get a worktree only when the bundle has a branch there.
 
-`pfb -t BUNDLE` opens the terminator window of its agent instead, as `ocode -t` does, for a bundle
+`pfb -t BUNDLE` opens a terminal on its agent instead, as `ocode -t` does, for a bundle
 that is not local yet or was deleted: a deleted bundle lost its `.agent`, so its agent is a new one
 with no prompt.
 
@@ -772,10 +772,11 @@ the PR queries worked.
 ### open_bundle.py (`ocode`)
 
 Opens a local bundle in VS Code, in its dev container, and marks it handled (gbs above).
-`ocode -t BUNDLE` brings up the terminator window of its agent instead, and marks it handled too:
-`window-picker.py --terminal BUNDLE`, which brings up the window that holds its session, minimized
-or not, else opens it on its last session with `bctl open BUNDLE --terminal`, which starts a new
-agent with no prompt on a bundle that has none. A bundle that is not local is fetched first with
+`ocode -t BUNDLE` opens a terminal on its agent instead, and marks it handled too:
+`window-picker.py --terminal BUNDLE`, which attaches a terminator window to the tmux that holds its
+session (the agent runs with no window, `bundle-ctl/agent-tmux.py`), else starts it on its last
+session with `bctl open BUNDLE --terminal` and attaches once it runs, which starts a new agent with
+no prompt on a bundle that has none. A bundle that is not local is fetched first with
 `pfb --no-open`, then opened the same way; a pfb that fails stops it.
 A bundle whose agent runs on a worker opens that terminal too, with `ocode` or a bundle link
 (`open_devcontainer`): its VS Code window would start a second claude on the session (Seb,

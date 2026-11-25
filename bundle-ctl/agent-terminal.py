@@ -14,9 +14,10 @@ stops the container. A VS Code window opened on the bundle takes the session ove
 (client/agent-takeover.py): the terminal window closes, and the container lives
 as long as that window.
 A terminal closed while such a window is attached hands its session to that window the same way.
-The claude runs in a pty of the wrapper, which hands its clipboard escapes (OSC 52), ignored by
-terminator, to xclip while the window has the focus, and types in an idle session the task the
-daemon leaves for it, the prompts and the Escape of deck, the PR events of client/prwatch.py, and
+The daemon runs it with no window, in a tmux server of its own (agent-tmux.py). The claude runs in
+a pty of the wrapper, which drops its clipboard escapes (OSC 52), as a process of the container
+may not fill the clipboard of the host, and types in an idle session the task the daemon leaves for
+it, the prompts and the Escape of deck, the PR events of client/prwatch.py, and
 GO_ON after an API error.
 
 Started on a bundle whose run already began, it goes on with that session and does not run the
@@ -33,7 +34,6 @@ was cut, or gives it the task, the prompt of a session a crash cut. Other sessio
 stops it, and a closed terminal stops its own claude.
 """
 
-import base64
 import contextlib
 import fcntl
 import importlib.util
@@ -126,7 +126,6 @@ PASTE_END = b"\x1b[201~"
 PASTE_START = b"\x1b[200~"
 PROMPT_TIME = 3600
 RETRY_AFTER = 5 * 60
-SELECTIONS = {"c": "clipboard", "p": "primary"}
 START_LOCK = pathlib.Path.home() / ".claude" / "agent-start.lock"
 START_SPACE = 10
 STOP_GAP = 1
@@ -242,8 +241,8 @@ def keep_open(ending, session=None, bundle=""):
 
 def run_tty(command, waker=None):
     """Run the podman exec of a claude in a pty of its own, and copy this terminal to it and back,
-    so that the clipboard escape (OSC 52) of claude, which terminator ignores, reaches the clipboard
-    of the host, and that a PR event can be typed in it (Waker). Its exit code."""
+    so that the clipboard escape (OSC 52) of claude is dropped, and that a PR event can be typed in
+    it (Waker). Its exit code."""
     if not os.isatty(0):
         return subprocess.run(command, check=False).returncode
     size = fcntl.ioctl(0, termios.TIOCGWINSZ, bytes(8))
@@ -562,12 +561,12 @@ def write_all(fd, data):
 
 
 def take_clipboard(data):
-    """The output without its clipboard escapes, each set on the host, and in a bundle window
+    """The output without its clipboard escapes, and in a bundle window
     without the links it may not keep (links), and the tail held for the next read: an escape not
     ended yet, or what may start one. A tail that cannot be one goes out, as a program may print
     the start of an escape (a cat of a binary file). A link is judged once its URI ended, on BEL,
     ST or any other escape; one still open past LINK_LIMIT loses its start."""
-    out = CLIPBOARD.sub(lambda match: set_clipboard(*match.groups()), data)
+    out = CLIPBOARD.sub(b"", data)
     escapes = [(CLIPBOARD_START, CLIPBOARD_PART)]
     if links:
         out = LINK.sub(keep_link, C1.sub(b"", out))
@@ -605,52 +604,6 @@ def keep_link(match):
     nothing for another, whose text then shows as text."""
     uri = match[2]
     return match[0] if not uri or links[0].match(uri) else b""
-
-
-def set_clipboard(targets, payload):
-    """Set the text of a clipboard escape in the selections it names, never answer the query of
-    one (its payload is ?). Done aside, as xclip waits for the X server."""
-    try:
-        text = base64.b64decode(payload, validate=True)
-    except ValueError:
-        return b""
-    targets = targets.decode() or "c"
-    selections = [SELECTIONS[target] for target in targets if target in SELECTIONS]
-    threading.Thread(target=write_clipboard, args=(text, selections), daemon=True).start()
-    return b""
-
-
-def write_clipboard(text, selections):
-    """xclip, in a session of its own, as it stays to serve the selection after the window closes.
-    Only while the window of this terminal has the focus, its terminator being the parent of this
-    process: else a process of the container could fill the clipboard behind Seb's back."""
-    if not is_focused():
-        return
-    for selection in selections:
-        with contextlib.suppress(OSError, subprocess.SubprocessError):
-            subprocess.run(
-                ["xclip", "-selection", selection],
-                check=False,
-                input=text,
-                start_new_session=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=5,
-            )
-
-
-def is_focused():
-    try:
-        window = get_property("-root", "_NET_ACTIVE_WINDOW")
-        return get_property("-id", window, "_NET_WM_PID") == str(os.getppid())
-    except (IndexError, OSError, subprocess.SubprocessError):
-        return False
-
-
-def get_property(*args):
-    """The value of an X property: the last word xprop prints."""
-    out = subprocess.run(["xprop", *args], capture_output=True, check=False, text=True, timeout=2)
-    return out.stdout.split()[-1]
 
 
 def stop(*args):

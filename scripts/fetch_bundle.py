@@ -39,7 +39,7 @@ parser.add_argument(
     "-t",
     "--terminal",
     action="store_true",
-    help="then the terminator window of its agent, a new one when it has none, rather than VS Code",
+    help="then a terminal on its agent, started when it has none, rather than VS Code",
 )
 args = parser.parse_args()
 fork_remote_by_repo = {}

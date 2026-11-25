@@ -446,8 +446,8 @@ class UtilsRunner(Runner):
         self.open_devcontainer_folder(folder=folder)
 
     def open_agent_terminal(self, *, bundle_name):
-        """Bring up the terminator window of a bundle's agent, opened through bctl when it has none,
-        a new agent when it has no session. False when bctl refused it."""
+        """Open a terminal on the agent of a bundle, started through bctl when it has none, a new
+        agent when it has no session. False when bctl refused it."""
         picker = f"{_USEFUL_THINGS_FOLDER}/bundle-ctl/window-picker.py"
         command = [sys.executable, picker, "--terminal", bundle_name]
         if subprocess.run(command, check=False).returncode:

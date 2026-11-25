@@ -37,9 +37,9 @@ READERS = {
         "S.jsonl",
         "title.get_transcript = lambda *_: path; list(title.read_answers('S'))",
     ),
-    "agent-terminator.get_record": (
+    "agent-tmux.get_record": (
         "b/sessions/1.json",
-        "terminator.CLAUDE_CONFIG = root; terminator.get_record('b', 0)",
+        "holder.CLAUDE_CONFIG = root; holder.get_record('b', 0)",
     ),
     "bundle-info.read_entries": ("S.jsonl", "list(info.read_entries(path))"),
     "agent-list.get_last_prompt": ("S.jsonl", "listing.get_last_prompt(path)"),
@@ -78,7 +78,7 @@ import io, tarfile
 import agents, cut, remote_agent, utils
 claude_config = load("claude_config", here.parent / "devcontainer" / "claude-config.py")
 title = load("title", here / "client" / "window-title.py")
-terminator = load("terminator", here / "agent-terminator.py")
+holder = load("holder", here / "agent-tmux.py")
 info = load("info", here / "bundle-info.py")
 listing = load("listing", here / "agent-list.py")
 prwatch = load("prwatch", here / "client" / "prwatch.py")

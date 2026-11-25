@@ -677,8 +677,6 @@ At rest the daemon asks podman little (Seb, 2026-10-30: "laptop still as overloa
   podman for each request that waits. `python3 test_hok.py` and `python3 test_open_folders.py`
   have the cases.
 - `GET /branches` runs gbs, which keeps its git answers by commit (scripts README, gbs).
-- `agent-terminator.py` loads `client/window-title.py` in its own process, again once that file
-  changed: a python3 that ran it took 0.1 s of CPU, every 10 s for each ops or busy window.
 
 ## Disk
 
@@ -907,8 +905,8 @@ older daemon refuses it as a bundle not made. `python3 test_open.py` has the cas
 
 A task (`.agent/task.md`) runs with Claude in the bundle's container, without a VS Code window: an
 agent window holds 1.1 to 1.8 GB in its container plus about 650 MB of VS Code on the host, an
-agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` in a terminal
-(`AGENT_TERMINAL`, gnome-terminal by default):
+agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` with no window, in
+a tmux server of its own (`agent-tmux.py`, below):
 
 - It creates or starts the container with the `up` of the devcontainer CLI that the Dev Containers
   extension ships, with the arguments of that extension, on the bundle's devcontainer.json. So the
@@ -941,7 +939,7 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   `Continue from where you left off.` once the session has been idle 5 minutes on it
   (`RETRY_AFTER`), as it types a PR event, for 5 such turns in a row at most (`RETRIES` of
   `client/window-title.py`). On the sixth, the daemon puts the agent back in the queue as Back to
-  queue does, while its window is minimized and before its verdict: its slot goes to the next
+  queue does, while no terminal is attached to it and before its verdict: its slot goes to the next
   task, and the queue starts the same session again 15 minutes later, then 30, 60, 120 and 240
   after each turn that ends so again (`REQUEUE_AFTER`). The journal says `BUNDLE: 6 turns in a
   row ended on an API error, back to the queue until HH:MM`. A usage limit is not such an error:
@@ -953,7 +951,7 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
 - A turn that ends on the 529 claude-switch gives a dummy login while the main login expires
   (`the main login expires: a laptop session renews it`, gateway-core README) gets no
   `Continue from where you left off.`: a request passes once the login is renewed, not before.
-  The daemon puts the agent back in the queue at once, minimized as above, and its task waits
+  The daemon puts the agent back in the queue at once, unattached as above, and its task waits
   for `the main login, which a laptop session or bundle-ctl renews`: a login that lives longer
   than the 4 minutes before bundle-ctl renews it (see Remote agents), which meanwhile it tries
   every 5 minutes. Then the queue starts the session again, told that it waited for the login.
@@ -975,10 +973,10 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   at the limit, as no question can follow the limit message: until 2026-11-23 the record said
   `waiting` under it, and 14 agents stopped on 11-20 were never put back once main was free. Not cut
   at the 5 hours of the mark of the window: a claude started later on that session waits all the
-  same, and 6 of the 19 were past them. An agent terminal and an ops agent window go as Back to
-  queue does, last, while their window is minimized, as above. An agent on a worker stops there
+  same, and 6 of the 19 were past them. An agent terminal and an ops agent go as Back to queue
+  does, last, while no terminal is attached to them, as above. An agent on a worker stops there
   as `bctl close` stops it, and its session, queued last, goes on there once its job ended, while
-  its window here, when it has one, is minimized. Once per state of the switch (which account is
+  no terminal here is attached to it. Once per state of the switch (which account is
   free, until when each one is out): an agent that stops on the limit again stays until that state
   changes, as a status that says an account is free while the switch sends nothing with it would
   requeue it at each pass. The daemon keeps that in memory, so after its restart such an agent
@@ -987,7 +985,7 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   agent on a worker. `python3 test_restart.py` and `python3 test_window_title.py` run each case.
 - Quitting claude or closing the terminal stops the container. Before the verdict nothing else
   does: Seb may type in that session at any time. Without a verdict the agent then reads `stopped`. So does a
-  terminal that dies without closing (killed, or lost with the X server): `podman exec` does not see that hangup, so the wrapper ends on the hangup and stops
+  terminal that dies without closing (killed, or its tmux server gone): `podman exec` does not see that hangup, so the wrapper ends on the hangup and stops
   the container itself. With a VS Code window attached, it keeps the container and hands the
   session to that window instead (`client/agent-takeover.py`, as the window does when it opens):
   else its claude runs on with no terminal, and the tab finds the session open in another process.
@@ -1003,51 +1001,48 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   last answer of its session opens on a verdict and its session has been `idle` for 5 minutes
   (`FREE_AFTER`, so that Seb sees its ✅ or ✋ and can bring it up): not in a turn he started, a
   dialog, a background command a turn left (`shell`: the watch of a review that waits for his
-  review), nor the reset of the usage limit. Only while its window is minimized, as one on screen
-  is his to read, and while no task is queued for the bundle, which goes on in that session
+  review), nor the reset of the usage limit. Only while no terminal is attached to it, as one he
+  attached is his to read, and while no task is queued for the bundle, which goes on in that session
   (below). Its claude and its container stop as when Seb closes it, but its Firefox tab groups
   stay: they hold the pages the report asks him to open. The report stays in `.agent/result.md`
   and in the transcript, the agent reads `done`, and `bctl open BUNDLE --terminal` opens the
   session again. The journal says `BUNDLE: its agent ended on its verdict, its terminal closes`.
   `python3 test_restart.py` runs each case.
-- `bctl close BUNDLE` closes that window the same way, minimized or not, with no yes (Seb,
+- `bctl close BUNDLE` closes that agent the same way, attached or not, with no yes (Seb,
   2026-10-28: "`bctl close BUNDLE` with no card, idle windows only"; since 10-13, ops agents had
-  sent him 10 scripts in `hok` to close such windows by hand, with `wmctrl -i -c` or a `kill -USR1`
-  of `agent-terminator.py`). It is refused, 409, while a claude of the bundle is in a turn or waits
+  sent him 10 scripts in `hok` to close such windows by hand). It is refused, 409, while a claude of the bundle is in a turn or waits
   for an answer, with the check of a deletion yes (see Deletion), while its agent starts and its
   claude does not run yet, and for an agent on a worker, whose turn the host does not see. The
   daemon waits up to 30 s for the window to end. Only the host asks: a container gets a 403, and
   the ops container asks it through `hctl run -- bctl close BUNDLE`. `python3 test_delete.py` has
   the cases.
-- A terminal runs the code it started with. When `agent-terminal.py`, `agent-terminator.py` or a
-  script they load changed since, the daemon opens a new terminal on that bundle, which takes the
-  session over in the same container, and the old window closes (Seb, 2026-10-20: "can we somehow
+- A terminal runs the code it started with. When `agent-terminal.py`, `agent-tmux.py` or a
+  script they load changed since, the daemon starts a new terminal on that bundle, which takes the
+  session over in the same container, and the old one ends (Seb, 2026-10-20: "can we somehow
   restart them gracefully"). Only when its session is `idle`: not in a turn, nor in a background
   command a turn left (`shell`, a PR watch), which would end with its claude, nor the reset of the
-  usage limit, which its claude goes on from by itself and a new one does not. Only while its window
-  is minimized, so that Seb sees no window go, as the new one opens minimized; and not under
+  usage limit, which its claude goes on from by itself and a new one does not. Only while no
+  terminal is attached to it, so that Seb's view does not end under him; and not under
   `.agent/pause`. One terminal per pass of the daemon (10 to 60 seconds), each bundle once an hour
   at most; the journal says `BUNDLE: its terminal restarts on the code of HH:MM`, and the new
   window, before its claude resumes, `BUNDLE: restarts on the bundle-ctl code of HH:MM, same
   session` (Seb, 2026-10-21, who took the old line for a second terminal). A task given to an idle
   session says `goes on with the task from PARENT, same session` there. Ops windows stay as they
   are. `python3 test_restart.py` runs each case.
-- `bctl open BUNDLE --terminal` opens that terminal again, on the bundle's last session and with
-  no prompt: the way back once the X server took the windows away. It is refused while a terminal
+- `bctl open BUNDLE --terminal` starts that terminal again, on the bundle's last session and with
+  no prompt. It is refused while a terminal
   holds the session: a new terminal would take it over and cut its turn. While an agent window of
   the bundle runs, even one that still starts, it opens nothing: a second click on the Agent link
   of a Firefox group gave a second window, which stopped on "its agent starts in another terminal"
   (2026-10-30). A VS Code window that holds it gives it back (below). On a bundle with no agent,
   asked by the host (`ocode -t`), it starts a new agent there: a new session, an empty
-  `task.md`, and claude with no prompt, in a window that shows in front, as an ops agent with no
-  task.
-- What Seb selects with the mouse in claude, and what `/copy` copies, reach the clipboard of the
-  host (Seb, 2026-10-15). claude sends it as an OSC 52 escape, which VTE ignores, so the wrapper
-  runs `podman exec` in a pty of its own, takes the escape out of the output and gives its text
-  to `xclip`. Only while the window of the terminal has the focus (its `_NET_WM_PID` is the parent
-  of the wrapper, its terminator), so that a process of the container cannot fill the clipboard
-  behind Seb's back; a query of the clipboard gets no answer. claude sends the escape only while
-  it finds no `xclip` in the container and no `VTE_VERSION` in its environment.
+  `task.md`, and claude with no prompt, as an ops agent with no task: `ocode -t` then attaches a
+  terminal to it.
+- The wrapper runs `podman exec` in a pty of its own and takes the clipboard escapes of claude
+  (OSC 52) out of its output, so that a process of the container cannot fill the clipboard of the
+  host; a query of the clipboard gets no answer. Until 2026-11-25 it gave their text to `xclip`
+  while the terminator window of the agent had the focus (Seb, 2026-10-15); an agent has no window
+  since, so `/copy` reaches no clipboard: select the text in a terminal attached to it.
 - In a bundle window a link claude draws (OSC 8) stays a link only to github.com/odoo and
   odoo-dev, runbot.odoo.com, odoo.com, the Odoo the bundle serves (`http://*.BUNDLE.localhost`,
   a port at most) and the links of its band (`odoo-bundle://list/BUNDLE`, `tabs/BUNDLE`,
@@ -1056,41 +1051,56 @@ agent in a terminal about 250 MB. The daemon starts `agent-terminal.py BUNDLE` i
   (U+0080 to U+009F) are dropped there, and the log of a claude that ended
   (`client/stream-format.py`) prints its control characters as `?`. An ops window keeps every
   link.
-- A claude that ends on an error leaves the terminal open on its exit code and on the tool calls
+- A claude that ends on an error leaves the terminal open on its exit code, until Enter in a
+  terminal attached to it or `bctl close`, and on the tool calls
   and answers of the session (`client/stream-format.py` on its transcript): claude draws on the
   alternate screen, which empties when claude ends.
 - When no container could start (a failed `up`), the terminal stays open on the reason, and the
   wrapper writes it to `result.md` with `done` as `failed`: `bctl status` shows it to the bundle
   that queued the task, and the launch gives its slot back at the next check of the queue.
 
-With `AGENT_TERMINAL` set to `agent-terminator.py {bundle}`, the window is a terminator window
-that holds the agent alone, maximized, in a pane titled `in the container: claude` (Seb,
-2026-10-20: the host shell next to it, there since 2026-10-09, went unused). The shell to type in
-is the contained terminal of the VS Code window.
+The terminal of an agent is a tmux server of its own, with no window (Seb, 2026-11-25, Deck task
+c6824190: "no agent opens a desktop window at launch"; Seb follows and answers agents in Deck).
+`agent-tmux.py BUNDLE COMMAND...` starts it on `$XDG_RUNTIME_DIR/bundle-ctl/tmux/HASH.PID`, PID
+its own (`tmux.conf` here: no clipboard write, no passthrough), with the agent's command alone in
+its one pane, and ends with it. One server per holder, as a takeover starts a second holder while
+the first still runs. Until then it was a terminator window opened minimized (`AGENT_TERMINAL`,
+`agent-terminator.py`), which showed in the task bar, Alt+Tab and the window list.
 
-- A pane split by hand (Ctrl+Shift+O, Ctrl+Shift+E) and a new tab (Ctrl+Shift+T) are shells of
-  the host, as in any terminator window. Such a shell starts on `On the host, outside the
-  container of BUNDLE.` and on `ocode BUNDLE opens its VS Code window.`, which carries the same
-  link as `gbs`: the launcher exports `BUNDLE_CTL_AGENT_WINDOW`, and `.bashrc` prints the two
-  lines in an interactive shell that holds it.
-- The launcher runs terminator on a copy of `~/.config/terminator/config`, in
-  `$XDG_RUNTIME_DIR/bundle-ctl/`, with a layout added that runs the agent: preferences saved from
-  an agent window go to the copy. Not with `-x`: the command line of terminator would then hold
-  `agent-terminal.py BUNDLE`, which the process scans take for the agent itself.
-- When claude quits, its container stops and the window closes, unless a pane split by hand still
-  runs. A takeover by a VS Code window or another terminal closes the whole window (Seb,
-  2026-10-13): the wrapper sends SIGUSR1 to `agent-terminator.py` (`BUNDLE_CTL_WINDOW_PID`), which
-  ends its terminator.
-- With wmctrl, the window opens minimized (Seb, 2026-10-14), so that a new agent does not take
-  the screen: it waits in the window list (below). Terminator maps it minimized with `--hidden`,
-  so that it never shows first. It does so only while its `hide_window` key is not bound (with the
-  key bound, `--hidden` keeps the window unmapped until that key): the copy of the config sets
-  `hide_window = None`.
-- Shift+Enter starts a new line in claude, as in its VS Code tab. VTE sends the same carriage
-  return for Enter and Shift+Enter, so the copy of the config enables `shift_enter_newline.py`, a
-  terminator plugin that sends a line feed (Ctrl+J) instead: a shell runs the line on it, as on
-  Enter. The launcher links it into `~/.config/terminator/plugins/`, where terminator looks for
-  plugins; the other terminator windows of Seb do not enable it.
+- `ocode -t BUNDLE`, `pfb -t BUNDLE`, the Agent link of a Firefox group and the Terminal button
+  of Deck and of the agent list attach a terminator window to it (`window-picker.py`), in a
+  systemd scope of its own (started from deck-feed, it would die with a restart of Deck) and with
+  `--no-dbus` (the terminator windows Seb opens later stay out of it), starting
+  the agent first when it has none, or bring up the one already attached. Closing that window
+  detaches, the agent goes on. tmux there has no prefix key, so Ctrl+B reaches claude, the wheel
+  scrolls the history, and Escape goes at once. Shift+Enter sends the line as Enter does, as the
+  terminator plugin that made it a new line went with the windows: `\` then Enter, or Ctrl+J,
+  starts a new line in claude.
+- The holder keeps `tmux/HASH.PID.json` beside the socket: the title the window had (its marks
+  below, followed as the window did), the pid of the pane and whether a terminal is attached,
+  read every 3 seconds. The rows of the agent list and of Deck come from it, a ❌ too when the
+  pane waits on the end of its claude. The socket names the bundle by a hash: a unix socket path
+  holds 107 bytes, a bundle name up to 100.
+- A tmux that does not start ends the holder at once and drops its note: the daemon then takes
+  the agent for one that never started, not for one a shutdown closed.
+- While a terminal is attached, the daemon leaves the agent as it leaves a window on screen: no
+  restart on new code, no close after the verdict, no requeue (`is_watched`).
+- A shell started in that tmux (`tmux -S SOCKET split-window`) is a shell of the host. Such a
+  shell starts on `On the host, outside the container of BUNDLE.` and on `ocode BUNDLE opens its VS
+  Code window.`, which carries the same link as `gbs`: the holder exports
+  `BUNDLE_CTL_AGENT_WINDOW`, and `.bashrc` prints the two lines in an interactive shell that holds
+  it.
+- The scans that close an agent (`get_window_pids`, the lost windows) still take the
+  `agent-terminator.py` of a window opened before 2026-11-25, so `bctl close` and the queue close
+  it as before; the daemon moves such an agent to tmux once it is idle (restart on new code).
+- The command goes to the pane through the environment, not on the command line of tmux: that
+  line would hold `agent-terminal.py BUNDLE`, which the process scans take for the agent itself.
+- When claude quits, its container stops and the server ends. A takeover by a VS Code window or
+  another terminal ends it too (Seb, 2026-10-13): the wrapper sends SIGUSR1 to `agent-tmux.py`
+  (`BUNDLE_CTL_WINDOW_PID`), which kills the server; so do the daemon and Close of the agent list
+  to close an agent. `python3 test_agent_tmux.py` and `python3 test_window_title.py` run each
+  case.
+
 - The window title tells the windows apart in the task bar: an icon of what the work is about,
   the bundle, then that kind in words, as `📝 master-action-panel-aku (review)`. The word comes
   last, so that a narrow task bar button still shows the bundle. `client/window-title.py BUNDLE`
@@ -1113,11 +1123,11 @@ is the contained terminal of the VS Code window.
   in running"). `hok-answer --list` and `hok-answer N --watch` return at once: a call that holds
   them waits on nothing of his (2026-11-18: an ops session showed ✋ through a `waitbar` call
   that listed the cards after it).
-  `client/window-title.py BUNDLE SESSION=STATUS...` picks it. With wmctrl, `agent-terminator.py`
-  opens the window on 🚀 and follows the session of its claude every second until the window
-  closes, and keeps the last mark once that claude ended; a busy session is read again every 10
-  seconds, as such a call changes the mark and not the status. claude-autoopen follows the
-  sessions of its container, on a change of status only.
+  `client/window-title.py BUNDLE SESSION=STATUS...` picks it. `agent-tmux.py` starts on 🚀 and
+  follows the session of its claude every second until it ends, and keeps the last mark once that
+  claude ended; a busy session is read again every 10 seconds, as such a call changes the mark and
+  not the status. claude-autoopen follows the sessions of its container, on a change of status
+  only.
   `python3 test_window_title.py` runs each case.
 
 | icon | kind | bundle name |
@@ -1138,8 +1148,10 @@ is the contained terminal of the VS Code window.
 | ❌ | the run of an agent window ended before its claude started (`.agent/done` is `failed`) |
 | none | no live session |
 
-A minimized agent window leaves the task bar and Alt+Tab, and comes back when it is restored:
-25 agent windows left the task bar no room to show a title. To reach them:
+Since 2026-11-25 an agent has no window (`agent-tmux.py`, above): its holder stands for its window
+in the rofi list, the applet, the agent list and Deck, as `tmux:PID`, with the title it keeps,
+minimized while no terminal is attached to it, and bringing it up attaches a terminator window to
+its tmux. Before, 25 agent windows left the task bar no room to show a title. To reach them:
 
 - `window-picker.py`, a rofi script, lists the bundles first by mark (❌, ✅, ✋, ⏳, 🚀), then by
   kind (ops, fw, runbot, task, mine, analysis, review: Seb, 2026-10-15), one row each, then the
@@ -1150,7 +1162,8 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   task bar. A title counts for a bundle only when its name is a bundle name whose folder exists
   (`is_bundle`): a bundle sets the title of its own VS Code window, and with a path in place of
   the name, the picker removed that file of the host every 2 seconds (security check 11-03, B3).
-  Only a terminal (terminator, gnome-terminal) or a VS Code window gives a bundle its row: a page
+  Only the holder of its agent, a terminal (terminator, gnome-terminal) or a VS Code window gives
+  a bundle its row: a page
   open in Firefox took the row of a bundle with its title (B12). Left open: a bundle sets the
   title of its own VS Code window, so it can take the row of another bundle, and a click then
   brings up its window (the VS Code windows share one process, which tells no bundle). Any other
@@ -1163,7 +1176,7 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   `agent-terminal.py BUNDLE` process runs. A claude that ends on an error leaves its window on
   that error until Enter (`keep_open` in `agent-terminal.py`): the row then shows ❌ in place of
   the mark of the title (Seb, 2026-10-19: such ops windows looked like agents at rest). The picker
-  finds the `sh` that waits in the pane, a child of the terminator of the window. After the title, a row shows the close line of the last
+  finds the `sh` that waits in the pane, a child of the terminal of the window. After the title, a row shows the close line of the last
   answer of its session (Seb, 2026-10-16: he had asked "status?" 99 times and "can I close?" 147
   times), `Waiting for you: hok g12 for the 19.0 hop` say, cut by rofi to the width of its window:
   the session in `.agent/session` for a bundle, the one in the name of an ops window. A session
@@ -1180,17 +1193,17 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   click or Shift+Enter brings its terminal up. Until that VS Code window is up, the row of the
   bundle shows 🔄 (a file per bundle in `$XDG_RUNTIME_DIR/bundle-ctl/opening`, 5 minutes at most,
   dropped once the window is up). A Cinnamon shortcut runs it. `window-picker.py --agent BUNDLE`
-  brings up the terminal of its agent, else its VS Code window, which then holds the session,
-  else starts that agent again in a terminal (`bctl open BUNDLE --terminal`) and brings the window
-  up once it shows; `--terminal BUNDLE` does the same without the VS Code window, which bctl takes
-  the session from (`ocode -t`, Seb, 2026-10-20: "I'm expecting this to unminimize the terminal
-  so I can see it"); `--code BUNDLE` is the click on its row. The helper of firefox-gateway runs
+  attaches a terminator window to the tmux of its agent, else brings up its VS Code window, which
+  then holds the session, else starts that agent again (`bctl open BUNDLE --terminal`) and
+  attaches once its tmux listens; `--terminal BUNDLE` does the same without the VS Code window,
+  which bctl takes the session from (`ocode -t`, Seb, 2026-10-20: "I'm expecting this to
+  unminimize the terminal so I can see it"); `--code BUNDLE` is the click on its row. The helper of firefox-gateway runs
   them from a tab of the Firefox group of the bundle, and `bundle-info.py BUNDLE` for the bundle
   tab first in that group (Seb, 2026-10-20: "as much info as possible [...] or even better the
   conversation itself"): JSON with the session of its agent, the close line of its last answer,
-  and its last 120 prompts, answers and tool calls. `--agent ops-SESSION` brings up the ops agent
-  window of that session, else the ops window when a claude of the ops container runs the session
-  out of an agent window (in a tab), else goes on with it in a new agent window (`bctl open
+  and its last 120 prompts, answers and tool calls. `--agent ops-SESSION` attaches a terminal to
+  the ops agent of that session, else brings up the ops window when a claude of the ops container
+  runs the session out of an agent (in a tab), else goes on with it in a new agent (`bctl open
   ops-SESSION --terminal`). `hok` links the caller of a request there (Seb, 2026-10-20: "a direct
   link to open the agent from which they come from"), through `odoo-bundle://agent/NAME`.
 - `agent-list.py --select KEY` brings the window up on the row of KEY once its rows show it, 10
@@ -1264,8 +1277,7 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   front (his pick: no tiling); VS Code opens the window of each selected bundle; Show tabs brings
   up the Firefox tab group of the first selected bundle, and Close tabs closes the groups of each,
   at once (Seb, 2026-10-20: a closed tab comes back with Ctrl+Shift+T); Close closes the
-  window of each after a question, as the daemon does (SIGUSR1 to its `agent-terminator.py`), so
-  its claude stops and its tab groups close. Back to queue, after a question too, queues the
+  window of each after a question. Back to queue, after a question too, queues the
   session of each selected bundle again (`POST /requeue`, at the lowest priority of the queue, so last), and the daemon
   closes its window once its turn ended, 2 minutes at most: when its turn comes, a new terminal
   goes on with that session, told that its window closed and to check what changed since its last
@@ -1314,9 +1326,8 @@ A minimized agent window leaves the task bar and Alt+Tab, and comes back when it
   not), or 🪟 when no bundle has a mark. Its
   tooltip has the counts of each mark, and a click opens `agent-list.py`, or brings it up. The
   rofi list stays on its shortcut.
-  The label comes from `window-picker.py --counts` every 2 seconds. It also sets `skip_taskbar` on
-  an agent window (its terminator runs on a `bundle-ctl/terminator-` config) while it is
-  minimized: as it is minimized, and as it is created, since it opens minimized. It is a link to
+  The label comes from `window-picker.py --counts` every 2 seconds. Until 2026-11-25 it also took
+  a minimized agent window out of the task bar. It is a link to
   that folder, `~/.local/share/cinnamon/applets/bundle-windows@useful-things`, added to a panel in
   the `enabled-applets` key of `org.cinnamon`.
 
@@ -1357,8 +1368,7 @@ move to another process, so the window closes and the terminal starts the contai
 - It then starts the container, and resumes the session in the mode of the tab (the last
   `permissionMode` of the transcript), with `Continue from where you left off.` when the turn was
   cut: a tool call in flight, a test run say, runs again. About 20 s in all.
-- The terminal window opens minimized, as any agent window: the agent goes back to the window
-  list.
+- The terminal runs with no window, as any agent.
 
 `devcontainer/claude-config.py` marks the onboarding as done in the containers' Claude config: the
 interactive claude stops on its theme picker otherwise.
@@ -1411,7 +1421,7 @@ what to do: ask Seb to validate, or act.
   control character but a new line (a tab too) or with no letter first (a slash command, `!` for
   the shell of claude) all the same. No hook takes it. A terminal started before 2026-10-30
   12:21:57 (`TOLD_SINCE`) reads `.agent/pr-events/` alone, and keeps its code until the daemon
-  restarts it, idle and minimized: the host leaves its line there, as before. From 12:30 to the
+  restarts it, idle and unattached: the host leaves its line there, as before. From 12:30 to the
   fix, such lines waited in `told/` and reached no agent (Seb: "I no longer receive github
   events on my agents").
 - A line left for a session of the bundle that ended before taking it (a held line, then a new
@@ -1656,8 +1666,8 @@ says Seb said yes; `--hold` takes a task alone. The words Seb types with his yes
 `POST /hold-ops`, so a
 daemon that does not know it yet answers 404 and opens nothing (W9 of that check).
 
-- The window is named `ops-SESSION`, a new session id, where a bundle window has the bundle name:
-  the terminator config, `agent-terminal.py ops-SESSION`, `BUNDLE_CTL_AGENT_WINDOW`. The task
+- The agent is named `ops-SESSION`, a new session id, where a bundle agent has the bundle name:
+  its holder, `agent-terminal.py ops-SESSION`, `BUNDLE_CTL_AGENT_WINDOW`. The task
   waits in `~/.local/state/bundle-ctl/ops/SESSION/`, removed when the window closes.
 - `agent-terminal.py` runs `claude --session-id SESSION --model opus --permission-mode auto` in
   the ops container, in the repos, started first when it is not up. Other sessions work in that
@@ -1671,8 +1681,8 @@ daemon that does not know it yet answers 404 and opens nothing (W9 of that check
   A turn that ends on an API error gets `Continue from where you left off.`
   as in a bundle terminal (above), 5 times in a row at most; no queue takes it after that. Before,
   three ops windows sat two hours on `502 api.anthropic.com unreachable` (2026-10-23).
-- No cap and no queue: the window opens at once, as a tab would. Opened with a task it opens
-  minimized, as any agent window; with no task it shows in front, for the first prompt.
+- No cap and no queue: the agent starts at once, as a tab would, with no window: with no task, it
+  waits for a first prompt from Deck or a terminal attached to it.
 - Back to queue and Pause put it in the queue all the same, `bctl requeue ops-SESSION [--paused]`
   (Seb, 2026-10-29: Pause on an ops agent did nothing, and he chose to have it work as for a
   bundle). Its window closes once its turn ended, 2 minutes at most, its turn read in the sessions
@@ -1688,22 +1698,21 @@ daemon that does not know it yet answers 404 and opens nothing (W9 of that check
   2026-10-16), but for an idle session whose last answer has none: ✅ when that answer has a Done
   part and neither a Decide nor a Your action part, the parts of Seb's reports, ✋ otherwise (Seb,
   2026-10-14). The ops container has a sessions folder of its own, as
-  a bundle container has: `agent-terminator.py` looks there by session id. It reads the title
-  again every 10 seconds, and drops the mark once its claude ended.
-- `window-picker.py` lists the minimized ops windows with the bundles, by mark, and a click brings
-  one up.
-  Its first row, `➕ new ops agent` (Seb, 2026-10-14), runs `bctl open ops --terminal`. The applet
-  counts them with the bundles, and hides them from the task bar when minimized.
+  a bundle container has: `agent-tmux.py` looks there by session id. It reads the title again
+  every 10 seconds, and drops the mark once its claude ended.
+- `window-picker.py` lists the ops agents with the bundles, by mark, and a click attaches a
+  terminal to one. Its first row, `➕ new ops agent` (Seb, 2026-10-14), runs `bctl open ops
+  --terminal`. The applet counts them with the bundles.
 - A session of a tab of the ops VS Code window moves to an ops agent window (Seb, 2026-10-14: the
   icon of the bundles): an extension of that window stops the claude of the tab, closes the tab,
   and asks `bctl open ops-SESSION --terminal`. The daemon takes it from the host or the ops
   container, on a session that has a transcript and no `agent-terminal.py` running it. The window
   resumes the session in the mode of the tab, with `Continue from where you left off.` when the tab
-  cut a turn, and opens minimized, as any agent window that takes a session.
-- The way back is the `orepo` link that a pane of the window split by hand prints,
+  cut a turn, with no window, as any agent.
+- The way back is the `orepo` link that a pane split by hand in its tmux prints,
   `odoo-bundle://ops-SESSION` (Seb, 2026-10-14: "should automatically close the existing terminal
-  on that agent"): `bctl open ops-SESSION`. The daemon closes the window (SIGUSR1 to its
-  `agent-terminator.py`), waits up to 30 s for its claude to end, writes the mode of the session and `ops-window-open/SESSION` in the
+  on that agent"): `bctl open ops-SESSION`. The daemon closes the agent (SIGUSR1 to its
+  `agent-tmux.py`), waits up to 30 s for its claude to end, writes the mode of the session and `ops-window-open/SESSION` in the
   storage of the Claude extension of the ops container, and opens the ops window. The ops-window
   extension of host-ctl opens the tab within 2 s, with `Continue from where you left off.` in its
   input when the window cut a turn. Opening the ops window by hand moves no session: the ops agent
@@ -1731,7 +1740,7 @@ A session is cut (`cut.py`) when:
   the host, nor a claude of that container on its command line. The cut card reads the records
   of the ops container and of the host only, and a process of a container names any session on
   its command line: none counts by itself, as for the scans of `agent-terminal.py` and
-  `agent-terminator.py`, which take only a process of the host's pid namespace (security check
+  `agent-tmux.py`, which take only a process of the host's pid namespace (security check
   11-03, B20). For a bundle, its container is down too;
 - its transcript was written in the last 3 days;
 - its last turn had not ended: its last message is a tool call with no result, or a tool result
@@ -1770,7 +1779,7 @@ cut:
   window, is left as it is, and the answer in `hok` says why.
 
 Before that, the agent window where the claude of the session ended, on "Press Enter to close",
-closes as the daemon closes a window (SIGUSR1 to its `agent-terminator.py`), and the daemon waits
+closes as the daemon closes a window (SIGUSR1 to its `agent-tmux.py`), and the daemon waits
 up to 30 s for that process to end; a window that stays open leaves the session as it is. A
 window with an `agent-terminal.py` still running is not touched. On 2026-10-20 a rebuild of the
 ops container left 6 ops windows on "ops: claude ended with code 137", and Seb had to say yes to a
@@ -1796,12 +1805,10 @@ ops session found them in the journal of the daemon, as `--cut` lists the turns 
 only.
 
 Each agent window keeps a note while it is open, `windows/NAME.json` beside the state of the daemon
-(NAME is the bundle or `ops-SESSION`), with the process of its `agent-terminator.py` and the boot
-of the host. The window drops it when someone closes it: the daemon, the agent list or a takeover
-(SIGUSR1), a tab that takes an ops session, Seb on its close button, or its claude that ends
-(terminator ends on code 0), unless the host shuts down (`systemctl is-system-running` says
-`stopping`). An X server that goes ends terminator on code 1, and a shutdown kills it: the note
-stays. At each pass (10 to 60 seconds) the daemon touches the note of each live window, so its time
+(NAME is the bundle or `ops-SESSION`), with the process of its `agent-tmux.py` and the boot
+of the host. It drops it when someone closes the agent: the daemon or a takeover (SIGUSR1), a
+tab that takes an ops session, or its claude that ends, unless the host shuts down (`systemctl
+is-system-running` says `stopping`). A shutdown kills it: the note stays. At each pass (10 to 60 seconds) the daemon touches the note of each live window, so its time
 says when the window was last seen open, and takes a note whose process is gone for a lost window.
 A window opened before the notes gets one from the daemon, `adopted`: as its close drops none, it
 counts as lost after a reboot only (another boot id), and in the same boot its note goes 2 minutes
@@ -1932,7 +1939,7 @@ of its transcript) does not get the task: a new session starts on it, as with `-
 of a new session, and the extra context costs every call of the task more than finding back what
 it needs). Its prompt opens on the size, the last report of the old session and the path of its
 transcript in the container, to grep for why something was done, then the task. Its terminal
-closes once minimized, as after a verdict; on screen it is his, and the task waits for `the
+closes once unattached, as after a verdict; attached it is his, and the task waits for `the
 terminal of the previous agent of the bundle to close`. A session at work, going on alone
 (`Continue from where you left off.`) or named by the task stays the same session, whatever its
 size. A
@@ -1980,12 +1987,12 @@ or is open in a window, where the session goes on in its Claude tab.
 Closing the window of an agent is Seb's call, and so is closing its terminal before its verdict,
 but for an idle one with `bctl close` (see Agents in a terminal); nothing deletes a bundle without
 his yes. `done` says the run reached
-its verdict: Seb may still go on in the session, in its terminal while it is on screen, or with
+its verdict: Seb may still go on in the session, in its terminal while it runs, or with
 `bctl open BUNDLE --terminal` once it closed. A task for a bundle whose last
 session still has its terminal goes to that terminal once that session gave its verdict.
 
-There it is the next prompt of the same conversation, typed by the terminal, whether its window is
-minimized or on screen; no window opens or closes (Seb, 2026-10-21: "ideally it should auto fix",
+There it is the next prompt of the same conversation, typed by the terminal, whether a terminal is
+attached to it or not; no window opens or closes (Seb, 2026-10-21: "ideally it should auto fix",
 picked over a new terminal for a minimized window and a card in `hok` that asked him to close one
 on screen). The daemon moves the files of the last run to `.agent/history/` as for any new task,
 but leaves the session, the files of the terminal and of its PR watch, and the model and the

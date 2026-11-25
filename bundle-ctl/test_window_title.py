@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""The mark of what Claude does in the title of a bundle window, and agent-terminator.py following
-it with a fake wmctrl: python3 test_window_title.py"""
+"""The mark of what Claude does in the title of a bundle window, and agent-tmux.py following it in
+the title it keeps for the row of its agent: python3 test_window_title.py"""
 
 import importlib.util
 import json
@@ -185,20 +185,6 @@ TOPICS = {
     ],
     "seb": [("custom-title", "customTitle", "Pick a base"), ("ai-title", "aiTitle", "Base")],
 }
-PLUGINS = "  enabled_plugins = LaunchpadBugURLHandler, LaunchpadCodeURLHandler, APTURLHandler, "
-CONFIGS = [
-    (
-        "[global_config]\n  enabled_plugins = Logger\n[keybindings]\n  hide_window = <Control>h\n"
-        "  copy = <Control>c\n[layouts]\n",
-        "[global_config]\n  enabled_plugins = Logger, ShiftEnterNewline\n[keybindings]\n"
-        "  hide_window = None\n  copy = <Control>c\n[layouts]\n",
-    ),
-    (
-        "[layouts]\n",
-        f"[layouts]\n\n[global_config]\n{PLUGINS}ShiftEnterNewline\n\n[keybindings]\n"
-        "  hide_window = None\n",
-    ),
-]
 FOLLOWED = [
     [f"⏳ {TITLE}", f"✅ {TITLE}"],
     [f"❌ {TITLE}"],
@@ -545,11 +531,11 @@ def get_deep_lines(home):
 
 
 def get_loaded():
-    """agent-terminator.py loads with the standard library alone, as its python3 is the system one."""
-    path = HERE / "agent-terminator.py"
+    """agent-tmux.py loads with the standard library alone, as its python3 is the system one."""
+    path = HERE / "agent-tmux.py"
     load = (
         "import importlib.util as util;"
-        f"spec = util.spec_from_file_location('terminator', {str(path)!r});"
+        f"spec = util.spec_from_file_location('holder', {str(path)!r});"
         "spec.loader.exec_module(util.module_from_spec(spec))"
     )
     found = subprocess.run(
@@ -559,7 +545,7 @@ def get_loaded():
         text=True,
     )
     if found.returncode:
-        return [f"agent-terminator.py: {found.stderr.strip().splitlines()[-1]}"]
+        return [f"agent-tmux.py: {found.stderr.strip().splitlines()[-1]}"]
     return []
 
 
@@ -567,12 +553,12 @@ def get_records(home):
     """A record of a bundle whose fields have the wrong types is left out: it raised in the loop
     of the wrapper, which then died, and Pause, Back to queue and `bctl close` found no window
     (security check 11-03, B21)."""
-    spec = importlib.util.spec_from_file_location("terminator", HERE / "agent-terminator.py")
-    terminator = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(terminator)
+    spec = importlib.util.spec_from_file_location("holder", HERE / "agent-tmux.py")
+    holder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(holder)
     sessions = home / "records" / BUNDLE / "sessions"
     sessions.mkdir(parents=True)
-    terminator.CLAUDE_CONFIG = home / "records"
+    holder.CLAUDE_CONFIG = home / "records"
     for name, record in (
         ("1", {"name": BUNDLE, "sessionId": "s1", "startedAt": "late"}),
         ("2", {"name": BUNDLE, "sessionId": ["s2"], "startedAt": 5}),
@@ -580,39 +566,48 @@ def get_records(home):
     ):
         (sessions / f"{name}.json").write_text(json.dumps(record))
     try:
-        found = terminator.get_record(BUNDLE, 0)
+        found = holder.get_record(BUNDLE, 0)
     except Exception as error:  # noqa: BLE001
-        return [f"agent-terminator.py: a record of the wrong types raised {error!r}"]
+        return [f"agent-tmux.py: a record of the wrong types raised {error!r}"]
     if (found or {}).get("sessionId") != "s3":
-        return [f"agent-terminator.py: record {found!r}, expected the one of s3"]
+        return [f"agent-tmux.py: record {found!r}, expected the one of s3"]
     return []
 
 
 def get_followed(home):
-    """The titles agent-terminator.py gives its window while the session of its claude works,
-    then ends on a verdict, and when the run fails before its claude starts. A claude of the
-    bundle started before the window does not count, but on a worker one started since its run
-    does, as its window attaches to it later. Then how its terminator ends on SIGUSR1,
-    which agent-terminal.py sends after a takeover. Last, an ops window opened with no task: its
-    title follows the title of the conversation, and loses its mark once its claude ended. It
-    closes once a tab of the ops VS Code window resumes its session."""
-    spec = importlib.util.spec_from_file_location("terminator", HERE / "agent-terminator.py")
-    terminator = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(terminator)
+    """The titles agent-tmux.py keeps for its agent while the session of its claude works, then
+    ends on a verdict, and when the run fails before its claude starts. A claude of the bundle
+    started before the holder does not count, but on a worker one started since its run does, as
+    its terminal attaches to it later. Then how its pane ends on SIGUSR1, which agent-terminal.py
+    sends after a takeover. Last, an ops agent started with no task: its title follows the title
+    of the conversation, and loses its mark once its claude ended. It ends once a tab of the ops
+    VS Code window resumes its session."""
+    spec = importlib.util.spec_from_file_location("holder", HERE / "agent-tmux.py")
+    holder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(holder)
     sessions = home / BUNDLE / "sessions"
     sessions.mkdir(parents=True)
-    wmctrl = home / "wmctrl"
-    wmctrl.write_text(
-        "#!/bin/sh\n"
-        f'[ "$1" = -l ] && echo "0x0a 0 $(cat {home}/pid) box {TITLE}" || echo "$6" >> {home}/log\n'
-    )
-    wmctrl.chmod(0o755)
+    shown, panes = [], []
     agent = home / BUNDLE / ".agent"
     agent.mkdir()
-    terminator.CHECK = 0.1
-    terminator.CLAUDE_CONFIG = home
-    terminator.WMCTRL = str(wmctrl)
-    terminator.get_agent_folder = lambda bundle: agent
+    holder.CHECK = 0.1
+    holder.CLAUDE_CONFIG = home
+    holder.show = lambda **changes: holder.state.update(changes) or (
+        "title" in changes and shown.append(changes["title"])
+    )
+    holder.is_attached = lambda socket: False
+    holder.close = lambda socket: holder.closing.append(True) or panes[-1].terminate()
+
+    def follow(bundle, window, since):
+        panes.append(window)
+        holder.closing.clear()
+        holder.state.clear()
+        shown.clear()
+        holder.follow(bundle, home / "socket", window.pid, since)
+        (home / "log").write_text("".join(f"{title}\n" for title in shown))
+        return window.wait()
+
+    holder.get_agent_folder = lambda bundle: agent
 
     def write(file, **record):
         (sessions / file).write_text(json.dumps({"name": BUNDLE, **record}))
@@ -633,19 +628,17 @@ def get_followed(home):
     titles = []
     for run in (run_claude, fail_to_start):
         window = subprocess.Popen(["sleep", "2"])
-        (home / "pid").write_text(str(window.pid))
-        (home / "log").write_text("")
         threading.Thread(target=run, daemon=True).start()
-        terminator.follow(BUNDLE, window, time.time() * 1000 - 1000)
+        follow(BUNDLE, window, time.time() * 1000 - 1000)
         titles.append((home / "log").read_text().splitlines())
         for path in sessions.iterdir():
             path.unlink()
     ops_sessions = home / "host-ctl" / "sessions"
     ops_sessions.mkdir(parents=True)
     running = [True]
-    terminator.HOST_FOLDER = "/repo/host-ctl"
-    terminator.REFRESH = 0.4
-    terminator.is_agent_running = lambda bundle: running[0]
+    holder.HOST_FOLDER = "/repo/host-ctl"
+    holder.REFRESH = 0.4
+    holder.is_agent_running = lambda bundle: running[0]
 
     def run_ops():
         record = {"name": "repo-ab", "sessionId": "report", "startedAt": time.time() * 1000}
@@ -658,10 +651,8 @@ def get_followed(home):
         running[0] = False
 
     window = subprocess.Popen(["sleep", "2"])
-    (home / "pid").write_text(str(window.pid))
-    (home / "log").write_text("")
     threading.Thread(target=run_ops, daemon=True).start()
-    terminator.follow("ops-report", window, time.time() * 1000 - 1000)
+    follow("ops-report", window, time.time() * 1000 - 1000)
     titles.append((home / "log").read_text().splitlines())
 
     def wait_on_hok():
@@ -677,10 +668,8 @@ def get_followed(home):
             file.write(f"{json.dumps(entry)}\n")
 
     window = subprocess.Popen(["sleep", "2"])
-    (home / "pid").write_text(str(window.pid))
-    (home / "log").write_text("")
     threading.Thread(target=wait_on_hok, daemon=True).start()
-    terminator.follow(BUNDLE, window, time.time() * 1000 - 1000)
+    follow(BUNDLE, window, time.time() * 1000 - 1000)
     titles.append((home / "log").read_text().splitlines())
 
     def run_remote():
@@ -696,16 +685,14 @@ def get_followed(home):
     started = time.time() * 1000 - 60000
     write("18.json", sessionId="pushed", startedAt=started, status="busy")
     window = subprocess.Popen(["sleep", "2"])
-    (home / "pid").write_text(str(window.pid))
-    (home / "log").write_text("")
     threading.Thread(target=run_remote, daemon=True).start()
-    terminator.follow(BUNDLE, window, time.time() * 1000)
+    follow(BUNDLE, window, time.time() * 1000)
     titles.append((home / "log").read_text().splitlines())
     (agent / "run.lock").rmdir()
     (agent / "remote.json").unlink()
     window = subprocess.Popen(["sleep", "30"])
     threading.Timer(0.3, os.kill, (os.getpid(), signal.SIGUSR1)).start()
-    closed = terminator.follow(BUNDLE, window, time.time() * 1000)
+    closed = follow(BUNDLE, window, time.time() * 1000)
 
     def open_tab():
         time.sleep(0.3)
@@ -714,40 +701,20 @@ def get_followed(home):
 
     window = subprocess.Popen(["sleep", "30"])
     threading.Thread(target=open_tab, daemon=True).start()
-    taken = terminator.follow("ops-report", window, time.time() * 1000)
+    taken = follow("ops-report", window, time.time() * 1000)
     return titles, closed, taken
-
-
-def get_configs(home):
-    """The copy of the terminator config of an agent window: the user's, its hide_window key
-    unbound, as terminator maps a --hidden window minimized only then, the Shift+Enter plugin
-    enabled next to the user's, and the layout of the agent's pane added."""
-    spec = importlib.util.spec_from_file_location("terminator", HERE / "agent-terminator.py")
-    terminator = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(terminator)
-    terminator.CONFIG_ROOT = home / "config"
-    (home / "config" / "terminator").mkdir(parents=True)
-    command = ["agent-terminal.py", BUNDLE]
-    window = terminator.WINDOW.format(layout=terminator.LAYOUT, agent=" ".join(command))
-    failures = []
-    for config, expected in CONFIGS:
-        (home / "config" / "terminator" / "config").write_text(config)
-        found = terminator.get_config(command)
-        if found.count(window) != 1 or found.replace(window, "") != expected:
-            failures.append(f"agent-terminator.py: config {found!r}, expected {expected!r}")
-    return failures
 
 
 def get_running():
     """Whether an ops window has its agent left: an agent-terminal.py process of its name, and not
-    agent-terminator.py, which holds it as COMMAND."""
+    agent-tmux.py, which holds it as COMMAND."""
     script = str(HERE / "agent-terminal.py")
     sleep = [sys.executable, "-c", "import time; time.sleep(60)"]
     check = (
         "import importlib.util as util, sys;"
-        f"spec = util.spec_from_file_location('terminator', {str(HERE / 'agent-terminator.py')!r});"
-        "terminator = util.module_from_spec(spec); spec.loader.exec_module(terminator);"
-        "print(terminator.is_agent_running(sys.argv[-1]))"
+        f"spec = util.spec_from_file_location('holder', {str(HERE / 'agent-tmux.py')!r});"
+        "holder = util.module_from_spec(spec); spec.loader.exec_module(holder);"
+        "print(holder.is_agent_running(sys.argv[-1]))"
     )
     cases = [
         ([*sleep, script, "ops-a"], "ops-a", "True"),
@@ -757,7 +724,7 @@ def get_running():
     for command, name, expected in cases:
         agent = command and subprocess.Popen(command)
         time.sleep(0.2)
-        holder = [sys.executable, "-c", check, str(HERE / "agent-terminator.py"), name, script, name]
+        holder = [sys.executable, "-c", check, str(HERE / "agent-tmux.py"), name, script, name]
         found = subprocess.run(holder, capture_output=True, check=False, text=True).stdout.strip()
         if agent:
             agent.kill()
@@ -768,23 +735,23 @@ def get_running():
 
 
 def get_reloaded(home):
-    """agent-terminator.py loads client/window-title.py again once that file changed: its window
+    """agent-tmux.py loads client/window-title.py again once that file changed: its window
     stays open for days."""
-    spec = importlib.util.spec_from_file_location("terminator", HERE / "agent-terminator.py")
-    terminator = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(terminator)
+    spec = importlib.util.spec_from_file_location("holder", HERE / "agent-tmux.py")
+    holder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(holder)
     title = home / "window-title.py"
     title.write_text((HERE / "client" / "window-title.py").read_text())
-    terminator.TITLE = title
-    before = terminator.get_title(BUNDLE)
+    holder.TITLE = title
+    before = holder.get_title(BUNDLE)
     title.write_text(title.read_text().replace("def get_title(", "def get_old_title("))
     title.write_text(
         f"{title.read_text()}\n\ndef get_title(bundle, *args, **kwargs):\n    return 'new'\n"
     )
     os.utime(title, (time.time() + 5, time.time() + 5))
-    after = terminator.get_title(BUNDLE)
+    after = holder.get_title(BUNDLE)
     if (before == "new", after) != (False, "new"):
-        return [f"agent-terminator.py: titled {before!r}, then {after!r} on new code"]
+        return [f"agent-tmux.py: titled {before!r}, then {after!r} on new code"]
     return []
 
 
@@ -804,21 +771,20 @@ def main():
         failures += get_close_lines()
         failures += get_deep_lines(home)
         failures += get_loaded()
-        failures += get_configs(home)
         failures += get_running()
         failures += get_reloaded(home)
         failures += get_records(home)
         titles, closed, taken = get_followed(home)
         for found, expected in zip(titles, FOLLOWED, strict=True):
             if found != expected:
-                failures.append(f"agent-terminator.py: titled {found}, expected {expected}")
+                failures.append(f"agent-tmux.py: titled {found}, expected {expected}")
         if closed != -signal.SIGTERM:
-            failures.append(f"agent-terminator.py: SIGUSR1 left its terminator on {closed}")
+            failures.append(f"agent-tmux.py: SIGUSR1 left its holder on {closed}")
         if taken != -signal.SIGTERM:
-            failures.append(f"agent-terminator.py: a tab on its session left it on {taken}")
+            failures.append(f"agent-tmux.py: a tab on its session left it on {taken}")
     for line in failures:
         print(line)
-    cases = len(MARKS) + len(OPS_MARKS) + len(HOK_WAITS) + len(CLOSE_LINES) + len(CONFIGS)
+    cases = len(MARKS) + len(OPS_MARKS) + len(HOK_WAITS) + len(CLOSE_LINES)
     cases += len(API_ERRORS) + len(LOGIN_WAITS) + len(LIMIT_RESETS) + len(PROMPTS) + 1
     cases += len(FOLLOWED) + 12
     print(f"{cases - len(failures)}/{cases} cases as expected")

@@ -240,26 +240,15 @@ def check_quit(case):
 
 
 def check_clipboard(case):
-    """The clipboard escape of claude, even cut over two reads, goes to xclip and not to the
-    terminal, while the window has the focus: its terminator, the parent of the wrapper, here the
-    test. A query of the clipboard gets no answer."""
+    """The clipboard escape of claude, even cut over two reads, reaches neither the terminal nor
+    xclip: a process of the container may not fill the clipboard of the host."""
     case.start()
-    clipboard = case.state / "clipboard"
     (case.state / "copy").touch()
-    case.check("a copy reaches xclip", wait(clipboard.exists))
-    text = "clipboard: copied text\n"
-    copied = wait(lambda: clipboard.exists() and clipboard.read_text() == text)
-    case.check("xclip gets the text", copied)
     shown = wait(lambda: "beforeafter" in case.terminal.read())
     case.check("the terminal shows the output around the escape", shown)
     case.check("the terminal gets no clipboard escape", "\x1b]52" not in case.terminal.read())
-    (case.state / "focus").write_text("1\n")
-    (case.state / "copy").touch()
-    shown = wait(lambda: case.terminal.read().count("after") == 2)
-    case.check("a copy from a window without the focus shows", shown)
     time.sleep(0.5)
-    dropped = clipboard.exists() and clipboard.read_text().count("\n") == 1
-    case.check("a copy from a window without the focus is dropped", dropped)
+    case.check("nothing reaches xclip", not (case.state / "clipboard").exists())
     (case.state / "quit").touch()
     case.check_stopped("quitting claude")
 
