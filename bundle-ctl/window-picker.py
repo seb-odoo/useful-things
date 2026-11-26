@@ -10,6 +10,7 @@ after a ✅ fw, before a ✅ runbot.
     window-picker.py --agent BUNDLE
     window-picker.py --terminal BUNDLE
     window-picker.py --code BUNDLE
+    window-picker.py --deck BUNDLE
 
 --show opens rofi on this script, where the row under the mouse is selected. A click on a bundle
 brings its VS Code window up, or opens it through its `odoo-bundle://` link; a right click
@@ -43,7 +44,10 @@ its session, else starts that agent again in a terminal on its last session (bct
 --terminal), and brings it up once it runs. For an ops session, --agent ops-SESSION brings up its
 ops agent, else the ops window when a tab of it runs the session, else goes on with the session in
 a new agent: hok links the caller of a request there. --terminal is --agent without the VS Code window, which bctl then takes the session from:
-ocode -t. --code brings up its
+ocode -t. --deck is --agent with deck in place of the terminal: once the agent runs, it brings up
+the deck window on its chat (deck-window --select of DECK_WINDOW in config.env), and fails when
+DECK_WINDOW names none. A bundle open in VS Code has no row in deck (get_rows): --deck brings up
+that VS Code window, where its session runs. --code brings up its
 VS Code window, else opens it through its `odoo-bundle://` link. The helper of firefox-gateway runs
 them from a tab of the Firefox group of the bundle.
 """
@@ -72,12 +76,13 @@ from agents import (  # noqa: E402
     read_text,
 )
 from commands import BUNDLE_NAME, get_worktree_bundle_folder  # noqa: E402
-from config import CLAUDE_CONFIG_CONTAINER, HOST_FOLDER  # noqa: E402
+from config import CLAUDE_CONFIG_CONTAINER, DECK_WINDOW, HOST_FOLDER  # noqa: E402
 
 import agents  # noqa: E402
 from cut import get_live_sessions  # noqa: E402
 
 AGENT_WAIT = 60
+DECK_START = 5
 ATTACH = ("terminator", "--no-dbus", "-x", "tmux", "-S")
 SCOPE = ("systemd-run", "--user", "--scope", "--collect", "--quiet")
 FAILED = "❌"
@@ -483,14 +488,36 @@ def is_in_tab(name):
     return name.removeprefix(OPS) in get_live_sessions([records])
 
 
-def bring_up_agent(name, code=True):
+def show_in_deck(name):
+    deck = pathlib.Path(DECK_WINDOW) if DECK_WINDOW else None
+    if not deck or not deck.is_file():
+        print("no deck window: DECK_WINDOW of config.env names no deck-window", file=sys.stderr)
+        return 1
+    started = subprocess.Popen([str(deck), "--select", name], start_new_session=True, **QUIET)
+    try:
+        code = started.wait(DECK_START)
+    except subprocess.TimeoutExpired:
+        return 0
+    if code:
+        print(f"{deck} --select {name} ended with exit {code}", file=sys.stderr)
+    return code
+
+
+def bring_up_agent(name, code=True, deck=False):
+    if deck and not DECK_WINDOW:
+        return show_in_deck(name)
     if name.startswith(OPS):
         window = get_terminal(name)
         if not window and is_in_tab(name):
+            if deck:
+                return show_in_deck(name)
             subprocess.Popen(["xdg-open", "odoo-bundle://ops"], start_new_session=True, **QUIET)
             return 0
     else:
         windows = get_windows()[0].get(name, {})
+        if deck and windows.get("code"):
+            bring_up(windows["code"])
+            return 0
         window = windows.get("terminal") or (windows.get("code") if code else None)
     if not window:
         command = [sys.executable, str(HERE / "client" / "bctl.py"), "open", name, "--terminal"]
@@ -499,8 +526,10 @@ def bring_up_agent(name, code=True):
         deadline = time.monotonic() + AGENT_WAIT
         while not (window := get_terminal(name)):
             if time.monotonic() > deadline:
-                return 0
+                return show_in_deck(name) if deck else 0
             time.sleep(1)
+    if deck:
+        return show_in_deck(name)
     bring_up(window)
     return 0
 
@@ -510,6 +539,8 @@ def main():
         return bring_up_agent(sys.argv[2])
     if len(sys.argv) == 3 and sys.argv[1] == "--terminal":
         return bring_up_agent(sys.argv[2], code=False)
+    if len(sys.argv) == 3 and sys.argv[1] == "--deck":
+        return bring_up_agent(sys.argv[2], deck=True)
     if len(sys.argv) == 3 and sys.argv[1] == "--code":
         return pick(sys.argv[2], terminal=False)
     if sys.argv[1:] == ["--show"]:

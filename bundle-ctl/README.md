@@ -1197,8 +1197,13 @@ its tmux. Before, 25 agent windows left the task bar no room to show a title. To
   then holds the session, else starts that agent again (`bctl open BUNDLE --terminal`) and
   attaches once its tmux listens; `--terminal BUNDLE` does the same without the VS Code window,
   which bctl takes the session from (`ocode -t`, Seb, 2026-10-20: "I'm expecting this to
-  unminimize the terminal so I can see it"); `--code BUNDLE` is the click on its row. The helper of firefox-gateway runs
-  them from a tab of the Firefox group of the bundle, and `bundle-info.py BUNDLE` for the bundle
+  unminimize the terminal so I can see it"); `--code BUNDLE` is the click on its row. `--deck
+  NAME` starts the agent as `--agent` does when it runs nowhere, then brings up the deck window on
+  its chat (`deck-window --select NAME`, `DECK_WINDOW` of config.env) in place of a terminal. It
+  fails when `DECK_WINDOW` names none, or when deck-window ends with an error within 5 s. A bundle
+  open in VS Code has no row in deck: `--deck` brings up that VS Code window (Seb, 2026-11-26: the Firefox entries "should just open the
+  agent in deck instead now"). The helper of firefox-gateway runs `--deck` and `--code`
+  from a tab of the Firefox group of the bundle, and `bundle-info.py BUNDLE` for the bundle
   tab first in that group (Seb, 2026-10-20: "as much info as possible [...] or even better the
   conversation itself"): JSON with the session of its agent, the close line of its last answer,
   and its last 120 prompts, answers and tool calls. `--agent ops-SESSION` attaches a terminal to

@@ -256,6 +256,66 @@ def get_ops_agents():
     return found, f"{picker.CLAUDE_CONFIG_CONTAINER}/repo/sessions"
 
 
+def get_deck_agents(deck):
+    """What --deck runs: for a bundle with its terminal, for one with no window (bctl starts it),
+    for an ops session in a tab of the ops window, and with no DECK_WINDOW: the code it ends on and
+    the commands, never a terminal brought up."""
+    found = []
+    cases = (
+        (deck, "master-z--seb", [{"master-z--seb": {"terminal": "0x99"}}], set()),
+        (deck, "master-z--seb", [{}, {"master-z--seb": {"terminal": "0x99"}}], set()),
+        (deck, OPS_SESSION, [{}], {OPS_SESSION[4:]}),
+        (None, "master-z--seb", [{"master-z--seb": {"terminal": "0x99"}}], set()),
+    )
+    for window, name, shown, live in cases:
+        picker = load_picker()
+        picker.DECK_WINDOW = window
+        shown = iter(shown)
+        picker.get_windows = lambda shown=shown: (next(shown), [], [])
+        picker.HOST_FOLDER = "/home/seb/repo"
+        picker.get_live_sessions = lambda _folders, live=live: live
+        ran, done = [], types.SimpleNamespace(returncode=0)
+        picker.subprocess = types.SimpleNamespace(
+            run=lambda command, ran=ran, done=done, **_: ran.append(command) or done,
+            Popen=lambda command, ran=ran, **_: ran.append(command) or types.SimpleNamespace(wait=lambda _seconds: 0),
+            TimeoutExpired=subprocess.TimeoutExpired,
+        )
+        picker.time = types.SimpleNamespace(monotonic=time.monotonic, sleep=lambda _seconds: None)
+        found.append((picker.bring_up_agent(name, deck=True), ran))
+    return found
+
+
+def get_deck_window(deck):
+    """What --deck ends on, the VS Code windows brought up and the deck-window started: for a
+    deck-window that keeps running (a Chrome started), for a bundle open in VS Code, which deck
+    shows no row for, and for a deck-window that fails at once."""
+    found = []
+    cases = (
+        ({"terminal": "0x99"}, subprocess.TimeoutExpired("deck", 5)),
+        ({"terminal": "0x99", "code": "0x98"}, 0),
+        ({"terminal": "0x99"}, 3),
+    )
+    for windows, waited in cases:
+        picker = load_picker()
+        picker.DECK_WINDOW = deck
+        picker.get_windows = lambda windows=windows: ({"master-z--seb": windows}, [], [])
+        raised, started = [], []
+        picker.bring_up = raised.append
+
+        def wait(_seconds, waited=waited):
+            if isinstance(waited, Exception):
+                raise waited
+            return waited
+
+        picker.subprocess = types.SimpleNamespace(
+            TimeoutExpired=subprocess.TimeoutExpired,
+            Popen=lambda command, started=started, **_: started.append(command) or types.SimpleNamespace(wait=wait),
+        )
+        code = picker.bring_up_agent("master-z--seb", deck=True)
+        found.append((code, len(raised), len(started)))
+    return found
+
+
 def get_attach(name, pid):
     """The terminator window a pick of the holder PID of NAME opens on its tmux."""
     picker = load_picker()
@@ -561,9 +621,24 @@ def main():
     ]
     if found != started:
         failures.append(f"--agent {OPS_SESSION}: {found!r}, expected {started!r}")
+    with tempfile.TemporaryDirectory() as root:
+        deck = pathlib.Path(root) / "deck-window"
+        deck.touch()
+        bctl[3] = "master-z--seb"
+        shown = [str(deck), "--select", "master-z--seb"]
+        started = [
+            (0, [shown]),
+            (0, [bctl, shown]),
+            (0, [[str(deck), "--select", OPS_SESSION]]),
+            (1, []),
+        ]
+        if (found := get_deck_agents(str(deck))) != started:
+            failures.append(f"--deck: {found!r}, expected {started!r}")
+        if (found := get_deck_window(deck)) != [(0, 0, 1), (0, 1, 0), (3, 0, 1)]:
+            failures.append(f"--deck: (code, VS Code windows up, deck started) {found!r}")
     for line in failures:
         print(line)
-    cases = 28 + len(PICKS) + len(BRING_UPS) + len(CLOSE_LINES)
+    cases = 30 + len(PICKS) + len(BRING_UPS) + len(CLOSE_LINES)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 
