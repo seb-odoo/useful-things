@@ -8,7 +8,8 @@ first plain `git push` of a bundle made by `bctl new` cannot set its upstream th
 with no upstream gets it here, on the dev remote that push goes to.
 
 Also the commit each fetch of the host gave each upstream branch (keep_heads), which the start
-of a remote agent checks its base against: every bundle writes the refs of the base `.git`.
+of a remote agent checks its base against, and from which odoo_skills copies the Odoo skills:
+every bundle writes the refs of the base `.git`.
 """
 
 import fcntl
@@ -63,7 +64,8 @@ def keep_heads(repo):
     """Keep the commit the fetch of the host that just ended gave each branch of odoo/REPO, from
     the FETCH_HEAD of the base repo: no bundle writes it, where every bundle writes its refs
     (security check 11-05, G102). A fetch goes on when it cannot be kept: the start of a remote
-    agent then refuses that base, and the agent starts here."""
+    agent then refuses that base, and the agent starts here; the Odoo skills stay at the commit
+    kept before (odoo_skills)."""
     try:
         with open(pathlib.Path(get_repo_folder(repo), ".git", "FETCH_HEAD"), "rb") as file:
             lines = file.read(MAX_FETCH_HEAD).decode(errors="replace").splitlines()

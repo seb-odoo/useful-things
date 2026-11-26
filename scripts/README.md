@@ -453,9 +453,13 @@ Syncs git remotes: fetches locally checked-out branches + sticky bundles; prunes
   11-05, G102), so a seed after a fetch made by a bundle alone needs a gfa first
 - Copies the `.md` files of the skills named in `SKILLS` (`odoo_skills.py`) from `odoo/master`
   into `<WORKTREE_ROOT>/.claude/skills/`, which bundles see as `/workspace/.claude/skills/`;
-  `create_bundle.py` does the same. Read from git, swapped in by rename, skipped when
-  `.odoo-master-sha` holds the sha of the ref. A new skill at master prints its name until it is
-  added to the list; other files are skipped with a line (`test_odoo_skills.py`)
+  `create_bundle.py` does the same. Read at the commit the last fetch of the host gave master
+  (`upstream.read_heads`), never at the ref, and each object read is hashed again against its
+  name, with no replace object: every bundle writes the `objects/` and `refs/` of the shared
+  `.git`, and every bundle agent loads these skills (security check 11-26, B201). An object that
+  is missing or does not match prints its name and keeps the copy as it was. Swapped in by
+  rename, skipped when `.odoo-master-checked` holds that commit. A new skill at master prints its name
+  until it is added to the list; other files are skipped with a line (`test_odoo_skills.py`)
 - Asks before deleting a gone bundle of mine (`--seb`); `--keep-gone` keeps them all without
   asking, for a run with no keyboard (`hctl`) and for `gbs`
 - Creates the local branch of each open PR of mine and of each forward-port waiting on me
