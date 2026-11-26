@@ -279,8 +279,8 @@ def count_api_errors(session, most=RETRIES + 1, bundle=""):
 
 def is_login_wait(session, bundle=""):
     """Whether the last turn of a session ended on the 529 claude-switch gives a dummy login while
-    the main login expires: a new request passes once a laptop session or bundle-ctl renewed it,
-    not before."""
+    the main login expires: a new request passes once claude-switch-renew renewed it, not
+    before."""
     for entry in read_answers(session, bundle):
         return bool(entry.get("isApiErrorMessage")) and LOGIN_WAIT in str(entry.get("message"))
     return False

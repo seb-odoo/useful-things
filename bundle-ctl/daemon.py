@@ -397,6 +397,10 @@ SOCKET = STATE / "sock" / "ctl.sock"
 START_CHECK = 10
 STATUS_FRESH = 30
 SWITCH_STATUS = remote_agent.DUMMIES.parent / "status.json"
+SWITCH_LOGIN = SWITCH_STATUS.parent.with_name("claude-switch-login") / ".credentials.json"
+# A task that waits for the main login starts once it lives longer than this: claude-switch-renew
+# renews it 4 minutes before it expires (CLAUDE_SWITCH_RENEW_BEFORE, 1 to 5 minutes).
+LOGIN_BEFORE = 240
 TERMINAL_CODE = [
     HERE / "agent-terminal.py",
     HERE / "agent-tmux.py",
@@ -1675,9 +1679,25 @@ def get_resumed(item):
 
 
 def has_login():
-    """Whether the main login lives longer than the time before renew_login renews it."""
-    left = remote_agent.get_login_left()
-    return left is not None and left > remote_agent.RENEW_BEFORE
+    """Whether the main login of claude-switch lives longer than the time before
+    claude-switch-renew renews it."""
+    left = get_login_left(time.time())
+    return left is not None and left > LOGIN_BEFORE
+
+
+def get_login_left(now):
+    """The seconds the main login of claude-switch lives yet, None when it cannot be read or holds
+    no access token: `expiresAt` (milliseconds) of the copy the switch sends with, the file it reads
+    itself. It is the switch's own login of the main account (claude-switch README, main-login.sh),
+    never the host's ~/.claude, which may be any account. Not `login_expires` of its status.json:
+    it follows the copy a minute late, and stops once the thread that writes it died. No token is
+    kept nor printed."""
+    try:
+        login = json.loads(read_text(SWITCH_LOGIN) or "")["claudeAiOauth"]
+        left = login["expiresAt"] / 1000 - now if login["accessToken"] else math.nan
+    except (KeyError, OverflowError, TypeError, ValueError):
+        return None
+    return left if math.isfinite(left) else None
 
 
 def ask_github():
@@ -1893,8 +1913,9 @@ def launch_queued():
                 item["waits_for"] = "the GitHub connection of the host"
                 ask_github()
             elif item.get("login") and not has_login():
-                item["waits_for"] = "the main login, which a laptop session or bundle-ctl renews"
-                remote_agent.renew_login_soon(folder.parent)
+                item["waits_for"] = (
+                    "the main login of claude-switch, which claude-switch-renew renews"
+                )
             elif remote_agent.is_remote(folder.parent):
                 if not (waits_for := type_remote(item)):
                     continue
@@ -2197,8 +2218,7 @@ def queue_here(bundle):
 
 def keep_remote_agents():
     """Each remote agent: its tunnel up, its end once its job ended, and its job ended once it
-    gave its verdict FREE_AFTER ago, as a terminal closes here. The main login is renewed while
-    a remote agent lives or a bundle container runs: neither can renew it. While a worker leaves,
+    gave its verdict FREE_AFTER ago, as a terminal closes here. While a worker leaves,
     a bundle placed on it with no agent there runs its next tasks here. An agent its worker no
     longer lists ends as lost, and a start no job of this daemon runs is dropped with its
     stand-in, its task queued here, each with a `stale wait` line: the tasks behind them waited
@@ -2206,12 +2226,6 @@ def keep_remote_agents():
     """
     root = pathlib.Path(get_worktree_container_folder())
     remotes = [folder / ".agent" / "remote.json" for folder in get_remote_folders()]
-    users = [found.parent.parent for found in remotes]
-    users = users or sorted(map(pathlib.Path, get_open_windows()))
-    if not users and HOST_FOLDER and HOST_FOLDER in read_open_folders():
-        users = [pathlib.Path(HOST_FOLDER)]
-    if users:
-        remote_agent.renew_login_soon(users[0])
     remote_agent.take_left_notes(get_bundle_path)
     for found in remotes:
         folder = found.parent.parent

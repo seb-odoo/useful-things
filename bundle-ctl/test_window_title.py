@@ -327,7 +327,7 @@ def get_api_errors(home):
     spec.loader.exec_module(title)
     text = {"content": [{"type": "text", "text": "API Error"}]}
     error = {"type": "assistant", "isApiErrorMessage": True, "error": "server_error"}
-    login = "API Error: 529 claude-switch: the main login expires: a laptop session renews it"
+    login = "API Error: 529 claude-switch: the main login expires: claude-switch-renew renews it"
     messages = {
         "answer": {"type": "assistant", "message": {"content": [{"type": "text", "text": "ok"}]}},
         "call": {"type": "assistant", "message": {"content": [{"type": "tool_use"}]}},

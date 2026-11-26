@@ -133,7 +133,7 @@ agents of sebpc, and nothing showed for how long).
 | the end or the verdict of its agent on a worker, a place for an agent, its container here to stop | 2 h | agent runs on sebpc: 90% under 94 min, longest 105 min (19 runs) |
 | disk space, a slot, memory or the CPU of the host | 2 h | a slot frees when an agent ends |
 | its window to close, an agent to be idle | 1 h | a turn of Seb, or a dialog |
-| the main login, the agent of X to start, the link to a worker | 30 min | the login is renewed every 5 minutes; a start counts for 15 minutes |
+| the main login, the agent of X to start, the link to a worker | 30 min | claude-switch-renew tries every minute once the login is due, 30 minutes apart at most after failures; a start counts for 15 minutes |
 | the terminal of the previous agent to close, the deletion of its checkout, a build for a worker | 15 min | builds: 90% under 1.6 min, longest 2.9 min (86 jobs) |
 | any other | 1 h | `WAIT_LIMITS` in `daemon.py` names each reason, and `test_queue.py` fails on one it does not name |
 
@@ -431,16 +431,12 @@ necessary. but if we have a good setup, full remote should offer the same possib
   its last answer opens on a verdict: a turn after it may wait for a card of hok. A job lost on
   the worker (a reboot) is queued again on its session, and goes on from its tree there. A work tree that cannot come back (the worktree changed here
   meanwhile) stays in `.agent/remote-back` with the reason in `.agent/remote-conflict`, and the
-  bundle's next task runs here. While a remote agent lives, a bundle container or the ops
-  container runs, or a task waits for the main login (see Agents in a terminal), and the main
-  login expires within 4 minutes, a one-shot claude in a container that mounts the host's
-  `~/.claude` renews it: at night no claude here may, and a bundle and the ops container have a
-  dummy login (security check 11-03, K1). Its claude is the one of a bundle's extension store,
-  else of the ops container's (`~/.cache/host-ctl/vscode-server-extensions`) (`python3
-  test_queue.py`). It goes through claude-switch
-  as any claude, so it cannot when the switch does not reach the API: from 2026-10-30 to 11-02
-  it ran 180 s and was stopped 716 times, `the main login expires in N s, its renewal ran 180 s
-  and was stopped` in the journal. The journal says `BUNDLE: its agent started on NAME` and
+  bundle's next task runs here. bundle-ctl renews no login: a remote agent, a bundle and the
+  ops container have a dummy login (security check 11-03, K1), which claude-switch sends with its
+  own login of the main account, made by its `main-login.sh` and renewed by its
+  `claude-switch-renew` (claude-switch README). Until 2026-11-26 the switch sent the login of
+  the host's `~/.claude`, which may be any account, and a one-shot claude in a container that
+  mounted that folder renewed it here. The journal says `BUNDLE: its agent started on NAME` and
   `BUNDLE: its agent on NAME ended (WHY)`.
 - A task queued for a bundle whose agent is remote is typed in its session there, as its terminal
   here would type it (Seb, 2026-11-02, as 8 tasks waited an hour for the end of agents on sebpc:
@@ -948,13 +944,19 @@ a tmux server of its own (`agent-tmux.py`, below):
   in a bundle), and from 2026-10-30 to 11-02 the tail held 3 errors, never the 6 of the
   requeue, so two terminals typed `Continue from where you left off.` 423 times each, and their
   transcripts reached 53 MB.
-- A turn that ends on the 529 claude-switch gives a dummy login while the main login expires
-  (`the main login expires: a laptop session renews it`, gateway-core README) gets no
+- A turn that ends on the 529 claude-switch gives a dummy login while its main login expires
+  (`the main login expires: claude-switch-renew renews it`, claude-switch README) gets no
   `Continue from where you left off.`: a request passes once the login is renewed, not before.
   The daemon puts the agent back in the queue at once, unattached as above, and its task waits
-  for `the main login, which a laptop session or bundle-ctl renews`: a login that lives longer
-  than the 4 minutes before bundle-ctl renews it (see Remote agents), which meanwhile it tries
-  every 5 minutes. Then the queue starts the session again, told that it waited for the login.
+  for `the main login of claude-switch, which claude-switch-renew renews`: a login that lives
+  longer than the 4 minutes before claude-switch-renew renews it (`LOGIN_BEFORE`). The daemon
+  reads the `expiresAt` of the copy the switch sends with and reads itself,
+  `~/.local/state/claude-switch-login/.credentials.json`, never the host's `~/.claude`, which
+  may be any account, nor `login_expires` of the switch's `status.json`, which follows the copy a
+  minute late and stops once the thread that writes it died. No copy, a copy that cannot be
+  parsed, with no access token or with an expiry that is no number is no login, and the task
+  waits; bundle-ctl renews nothing (see Remote agents). Then the queue starts the session again,
+  told that it waited for the login.
   The journal says `BUNDLE: its claude waits for the main login, back to the queue`.
   `python3 test_terminal.py`, `python3 test_restart.py`, `python3 test_window_title.py` and
   `python3 test_queue.py` run each case.

@@ -1284,33 +1284,101 @@ def check_github(root):
     return [f"github: {name}: {state['queue']}" for name in failed], len(checks)
 
 
+def write_switch(status, login, now, main=None, expires=None, token="token"):
+    """The files of claude-switch: `main` as the main entry of its status.json, `expires` as the
+    expiry (seconds from now) of the copy of its login, with `token` as its access token. A text
+    is written as it is, None writes no such file."""
+    for path, value in ((status, main), (login, expires)):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.unlink(missing_ok=True)
+        if isinstance(value, str):
+            path.write_text(value)
+        elif value is not None and path == status:
+            path.write_text(json.dumps({"main": value}))
+        elif value is not None:
+            oauth = {"accessToken": token, "expiresAt": int((now + value) * 1000)}
+            path.write_text(json.dumps({"claudeAiOauth": oauth}))
+
+
+def check_login_left(root):
+    """The main login is the copy claude-switch sends with, in milliseconds, when it holds an
+    access token: never the host's ~/.claude, nor `login_expires` of the switch's status.json,
+    which lags; an expiry that is no number, or a file that cannot be parsed, is no login."""
+    status, login = root / "switch" / "status.json", root / "switch-login" / ".credentials.json"
+    stubs = {name: vars(daemon)[name] for name in ("SWITCH_STATUS", "SWITCH_LOGIN")}
+    vars(daemon).update(SWITCH_STATUS=status, SWITCH_LOGIN=login)
+    now = 1_800_000_000
+    oauth = '{"claudeAiOauth": {"accessToken": "token", "expiresAt": %s}}'
+    cases = [
+        ("no file", None, None, None),
+        ("the copy", None, 3600, 3600),
+        ("the copy, expired", None, -60, -60),
+        ("the copy over a status.json that lags", {"login_expires": now - 300}, 3600, 3600),
+        ("no copy, whatever status.json says", {"login_expires": now + 3600}, None, None),
+        ("a copy with no access token", None, 3600, None, ""),
+        ("a copy cut", None, '{"claudeAiOauth": ', None),
+        ("an expiry that is no number", None, oauth % '"soon"', None),
+        ("an expiry that never ends", None, oauth % "Infinity", None),
+        ("an expiry past any float", None, oauth % ("9" * 400), None),
+    ]
+    failures = []
+    try:
+        for name, main, expires, expected, *token in cases:
+            write_switch(status, login, now, main, expires, *token)
+            found = daemon.get_login_left(now)
+            if found != expected:
+                failures.append(f"login left: {name}: {found}, expected {expected}")
+    finally:
+        vars(daemon).update(stubs)
+    return failures, len(cases)
+
+
 def check_login(root):
-    """A session the daemon queued again on the wait for the main login waits for a login that
-    lives past RENEW_BEFORE, has bundle-ctl renew it meanwhile, and starts once it does, told so;
-    a force of the queue leaves it, a force or a schedule of its bundle lets it go."""
+    """A session the daemon queued again on the wait for the main login waits for the login of
+    claude-switch, whatever the host's ~/.claude holds, until it lives past LOGIN_BEFORE, and starts
+    once it does, told so; a force of the queue leaves it, a force or a schedule of its bundle lets
+    it go."""
     checks = []
     state, launched = prepare(root, {"expired": {"session": "s\n"}}, 8)
-    stubs = {name: vars(daemon)[name] for name in ("get_window_pids", "stop_after_turn")}
-    remote = {name: vars(daemon.remote_agent)[name] for name in ("get_login_left", "renew_login_soon")}
-    left, renewed = [None], []
-    vars(daemon).update(get_window_pids=lambda bundle: [1], stop_after_turn=lambda *args: None)
-    vars(daemon.remote_agent).update(get_login_left=lambda: left[0], renew_login_soon=renewed.append)
+    names = ("get_window_pids", "stop_after_turn", "SWITCH_STATUS", "SWITCH_LOGIN")
+    stubs = {name: vars(daemon)[name] for name in names}
+    status, login = root / "switch" / "status.json", root / "switch-login" / ".credentials.json"
+    host = root / "home" / ".claude" / ".credentials.json"
+    host.parent.mkdir(parents=True)
+    fresh = {"accessToken": "host", "expiresAt": int((time.time() + 3600) * 1000)}
+    host.write_text(json.dumps({"claudeAiOauth": fresh}))
+    home, environ = daemon.remote_agent.HOME, os.environ.get("HOME")
+    daemon.remote_agent.HOME = root / "home"
+    os.environ["HOME"] = str(root / "home")
+    vars(daemon).update(
+        get_window_pids=lambda bundle: [1],
+        stop_after_turn=lambda *args: None,
+        SWITCH_STATUS=status,
+        SWITCH_LOGIN=login,
+    )
     try:
         state["queue"].clear()
         daemon.requeue_agent(daemon.HOST, {}, {"bundle": "expired"}, login=True)
         daemon.force_queue(daemon.HOST, {}, {})
-        found = launched, state["queue"][0].get("waits_for"), renewed[-1:]
-        waits = ([], "the main login, which a laptop session or bundle-ctl renews")
-        checks.append(("it waits, renewing it", found == (*waits, [root / "master" / "expired"])))
-        left[0] = daemon.remote_agent.RENEW_BEFORE - 1
+        found = launched, [item.get("waits_for") for item in state["queue"]]
+        waits = ([], ["the main login of claude-switch, which claude-switch-renew renews"])
+        checks.append(("with no login of the switch, it waits, the host's fresh", found == waits))
+        write_switch(status, login, time.time(), {"login_expires": time.time() + 3600}, -60)
         daemon.launch_queued()
-        checks.append(("a login renew_login renews is not enough", launched == []))
-        left[0] = 3600
+        checks.append(("an expired login of the switch is none", launched == []))
+        write_switch(status, login, time.time(), None, "{")
+        daemon.launch_queued()
+        checks.append(("a copy that cannot be parsed is none", launched == []))
+        write_switch(status, login, time.time(), None, daemon.LOGIN_BEFORE - 30)
+        daemon.launch_queued()
+        checks.append(("a login claude-switch-renew renews is not enough", launched == []))
+        host.unlink()
+        write_switch(status, login, time.time(), {"login_expires": 0}, 3600)
         daemon.launch_queued()
         task = (daemon.get_agent_folder("expired") / "task.md").read_text()
         back = task.startswith(daemon.GO_ON) and "The main login is renewed" in task
         checks.append(("it starts once renewed, told so", (launched, back) == (["expired"], True)))
-        left[0] = None
+        write_switch(status, login, time.time())
         for name, action, body in (
             ("a force of its bundle", daemon.force_queue, {"bundle": "later"}),
             ("a schedule", daemon.schedule_task, {"bundle": "later", "when": "spot"}),
@@ -1321,7 +1389,11 @@ def check_login(root):
             checks.append((f"{name} lets it go", launched == ["later"]))
     finally:
         vars(daemon).update(stubs)
-        vars(daemon.remote_agent).update(remote)
+        daemon.remote_agent.HOME = home
+        if environ is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = environ
     failed = [name for name, passed in checks if not passed]
     return [f"login: {name}: {state['queue']}" for name in failed], len(checks)
 
@@ -2128,7 +2200,6 @@ def check_remote_type(root):
         is_remote=lambda folder: True,
         keep=lambda bundle, folder, workers: (None, False),
         read_remote=lambda folder: {"worker": "sebpc", "job": "1"},
-        renew_login_soon=lambda folder: None,
         type_keys=type_keys,
     )
     agent = daemon.get_agent_folder("ended")
@@ -3145,21 +3216,6 @@ def check_ramp(root):
     return [] if found == 1 else [f"ramp: {found} agents counted, expected 1"], 1
 
 
-def check_renew(root):
-    """The main login is renewed while a bundle container runs, with no remote agent."""
-    prepare(root, {"open": {"session": "s\n", "task.md": TASK, "window": ""}}, 8)
-    renewed = []
-    renew = daemon.remote_agent.renew_login_soon
-    daemon.remote_agent.renew_login_soon = renewed.append
-    try:
-        daemon.keep_remote_agents()
-    finally:
-        daemon.remote_agent.renew_login_soon = renew
-    if renewed != [root / "master" / "open"]:
-        return [f"renew: {renewed}"], 1
-    return [], 1
-
-
 def check_leaving(root):
     """The agents of a worker that answers `leaving` come back, once each, however many passes
     while their move runs: one at work, or busy again after its verdict, goes on here in a
@@ -3210,7 +3266,6 @@ def check_leaving(root):
         keep=lambda bundle, folder, workers: (None, False),
         move_back=move_back,
         read_remote=read_written(module),
-        renew_login_soon=lambda folder: None,
     )
     daemon.get_session_status = lambda bundle, session: "busy" if bundle == "answering" else "idle"
     daemon.get_transcript = lambda session, *_: session != "unborn" and root / "t"
@@ -3640,7 +3695,6 @@ def check_stale(root):
         take_left_notes=lambda get_folder: None,
         keep=lambda bundle, folder, workers: (None, False),
         read_remote=read_written(module),
-        renew_login_soon=lambda folder: None,
     )
     journal = io.StringIO()
     try:
@@ -3736,6 +3790,7 @@ def main():
         check_ops_requeue,
         check_place,
         check_github,
+        check_login_left,
         check_login,
         check_build,
         check_gate_push,
@@ -3760,7 +3815,6 @@ def main():
         check_dialog_comments,
         check_remote_dialog,
         check_ramp,
-        check_renew,
         check_leaving,
         check_orphans,
         check_choose_agent,

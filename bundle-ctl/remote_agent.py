@@ -65,8 +65,6 @@ MAX_WRITTEN_FILE = 4 << 20
 MAX_ENDED = 64 * 1024
 MAX_LOSSES = 3
 MAX_PART = 2 << 30
-RENEW_BEFORE = 240
-RENEW_EVERY = 300
 REMOTE_FORMS = {
     "worker": re.compile(r"[a-z][a-z0-9-]{0,39}"),
     "job": re.compile(r"[0-9]{1,12}"),
@@ -100,8 +98,6 @@ PROPOSED = {
 MAX_READ = 64 * 1024
 MAX_REMOTE = 4096
 finishing = {}
-renewing = threading.Lock()
-renewed = [0]
 # Each mount of a bundle (devcontainer/base.jsonc) for a remote agent, its way there: a mount
 # added to the bundles without a line here fails test_remote_agent.py.
 MOUNTS = {
@@ -1246,73 +1242,6 @@ def move_back(log, bundle, bundle_folder, workers):
             line, _lost = finish(bundle, bundle_folder, {"reason": "cancelled"})
             return line or f"{bundle}: its agent ended meanwhile"
         time.sleep(2)
-
-
-def renew_login_soon(bundle_folder):
-    """renew_login in a thread of its own, one at a time: the daemon's pass goes on."""
-    if renewing.acquire(blocking=False):
-
-        def run():
-            try:
-                if line := renew_login(bundle_folder):
-                    print(line, flush=True)
-            finally:
-                renewing.release()
-
-        threading.Thread(target=run, daemon=True).start()
-
-
-def renew_login(bundle_folder):
-    """While a remote agent, a bundle or the ops container needs it, the main login renewed before
-    it expires: claude-switch sends their requests with it, as all hold a dummy login, and at
-    night no session of the laptop may renew it. A one-shot claude in a container that mounts the
-    host's ~/.claude renews it, with the lock of the host's claude.
-    """
-    left = get_login_left()
-    if left is None or left > RENEW_BEFORE or time.time() - renewed[0] < RENEW_EVERY:
-        return None
-    renewed[0] = time.time()
-    command = [
-        "podman",
-        "run",
-        "--rm",
-        "--userns=keep-id",
-        "--network=devnet",
-        "--cap-drop=ALL",
-        "--security-opt=no-new-privileges",
-        "-e",
-        "CLAUDE_CONFIG_DIR=/home/vscode/.claude",
-        "-e",
-        "HTTPS_PROXY=http://10.89.255.20:3128",
-        "-v",
-        f"{HOME / '.claude'}:/home/vscode/.claude",
-        "-v",
-        f"{find_claude(bundle_folder)}:/usr/local/bin/claude:ro",
-        "-v",
-        f"{HOME / '.config' / 'gateway-ca' / 'ca-certificates.crt'}:/etc/ssl/certs/ca-certificates.crt:ro",
-        STANDIN_IMAGE,
-        "claude",
-        "-p",
-        "--model",
-        "haiku",
-        "Answer ok.",
-    ]
-    try:
-        done = subprocess.run(command, capture_output=True, check=False, timeout=180)
-    except subprocess.TimeoutExpired:
-        return f"the main login expires in {left:.0f} s, its renewal ran 180 s and was stopped"
-    return (
-        f"the main login expired in {left:.0f} s, renewed for the remote agents ({done.returncode})"
-    )
-
-
-def get_login_left():
-    """The seconds the main login lives yet, None when it cannot be read."""
-    try:
-        login = json.loads((HOME / ".claude" / ".credentials.json").read_text())["claudeAiOauth"]
-        return login["expiresAt"] / 1000 - time.time()
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
 
 
 def read(path):
