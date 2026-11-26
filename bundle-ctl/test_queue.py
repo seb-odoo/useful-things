@@ -2006,14 +2006,14 @@ def check_fresh(root):
             "get_own_transcript",
             "get_session_status",
             "get_terminals",
-            "is_terminal_minimized",
+            "is_watched",
         )
     }
     daemon.close_freed = closed.append
     daemon.get_session_status = lambda bundle, session: "idle"
     daemon.get_own_transcript = lambda session, bundle: transcripts / f"{bundle}.jsonl"
     daemon.get_terminals = lambda: dict.fromkeys(set(bundles) - {"closed"}, 1)
-    daemon.is_terminal_minimized = lambda agent, env: agent.parent.name == "minimized"
+    daemon.is_watched = lambda bundle: bundle != "minimized"
     daemon.TOLD_DIR = root / "told"
     try:
         daemon.launch_queued()

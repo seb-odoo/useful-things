@@ -23,7 +23,6 @@ import pathlib
 import re
 import secrets
 import select
-import shlex
 import shutil
 import signal
 import socket
@@ -68,12 +67,15 @@ from agents import (  # noqa: E402
     get_session_records,
     get_session_status,
     get_transcript,
+    get_holders,
     get_window_notes,
     get_window_pids,
     has_window,
     is_agent_running,
     is_host_process,
+    is_watched,
     open_unlinked,
+    WINDOW_SCRIPTS,
     read_stat,
     read_state,
     read_text,
@@ -166,7 +168,6 @@ AGENT_CPU_STALL = 20
 AGENT_GIGABYTES = 2
 AGENT_RAMP = 10 * 60
 AGENT_RAMP_GIGABYTES = 1
-AGENT_TERMINAL = CONFIG.get("AGENT_TERMINAL") or "gnome-terminal --window --title {bundle} --"
 BARE_FOLDER = frozenset({".agent", ".claude", ".devcontainer", ".vscode", "odools.toml", "tasks"})
 BRANCHES_TIMEOUT = 120
 CARD_NAME = re.compile(r"[befgprt]?[0-9]{1,6}")
@@ -398,8 +399,8 @@ STATUS_FRESH = 30
 SWITCH_STATUS = remote_agent.DUMMIES.parent / "status.json"
 TERMINAL_CODE = [
     HERE / "agent-terminal.py",
-    HERE / "agent-terminator.py",
-    HERE / "shift_enter_newline.py",
+    HERE / "agent-tmux.py",
+    HERE / "tmux.conf",
     *(SCRIPTS / f"{name}.py" for name in ("agents", "commands", "config", "tab_groups")),
 ]
 TERMINAL_FILES = (
@@ -1294,13 +1295,14 @@ def open_window(log, bundle):
 
 
 def open_terminal(log, bundle, takeover=None):
-    """takeover: the line the new terminal shows when it takes the session from an old one."""
-    log.write(f"starting the agent of {bundle} in a terminal\n")
+    """Start the agent of a bundle in a tmux server of its own, with no window (agent-tmux.py).
+    takeover: the line the new terminal shows when it takes the session from an old one."""
+    log.write(f"starting the agent of {bundle} in its tmux\n")
     log.flush()
-    terminal = shlex.split(AGENT_TERMINAL.format(bundle=bundle))
+    holder = [sys.executable, str(HERE / "agent-tmux.py"), bundle]
     agent = [sys.executable, str(HERE / "agent-terminal.py"), bundle]
     setenv = {"BUNDLE_CTL_TAKEOVER": takeover} if takeover else None
-    run_in_session(log, *terminal, *agent, scope=False, setenv=setenv)
+    run_in_session(log, *holder, *agent, scope=False, setenv=setenv)
 
 
 def run_job(job, work, locks):
@@ -2937,45 +2939,17 @@ def get_terminals(ops=False):
     return terminals
 
 
-def is_minimized(pid, env):
-    """Whether the windows of this process are all minimized, and it has one."""
-    out = subprocess.run(["wmctrl", "-l", "-p"], capture_output=True, check=False, text=True, env=env)
-    windows = [line.split()[0] for line in out.stdout.splitlines() if line.split()[2:3] == [str(pid)]]
-    return bool(windows) and all(
-        "_NET_WM_STATE_HIDDEN"
-        in subprocess.run(
-            ["xprop", "-id", window, "_NET_WM_STATE"],
-            capture_output=True,
-            check=False,
-            text=True,
-            env=env,
-        ).stdout
-        for window in windows
-    )
-
-
-def is_terminal_minimized(agent, env):
-    """Whether the window of the terminal that holds the session of an agent is minimized."""
-    try:
-        parent, _started = read_stat(int(read_text(agent / "terminal")))
-    except (OSError, IndexError, TypeError, ValueError):
-        return False
-    return is_minimized(parent, env)
-
-
 def restart_old_terminal():
     """Open a new terminal on the agent of a bundle whose terminal started before the last change
     of TERMINAL_CODE, which it does not load again: the new one takes the session over and the old
     window closes. Only when its session is idle, as a background command a turn left (a PR watch)
     would end with its claude, nor the reset of the usage limit, that its claude goes on with by
-    itself, and while its window is minimized, as Seb sees no window go and the new one opens
-    minimized. One per call, each bundle once an hour at most."""
+    itself, and while no terminal is attached to its tmux (is_watched). One per call, each bundle once an hour at most."""
     changed = max(get_mtime(path) or 0 for path in TERMINAL_CODE)
-    env = None
     for bundle, pid in get_terminals().items():
         agent = get_agent_folder(bundle)
         try:
-            parent, started = read_stat(pid)
+            _parent, started = read_stat(pid)
         except (OSError, IndexError, ValueError):
             continue
         if (
@@ -2988,8 +2962,7 @@ def restart_old_terminal():
             or TITLE.is_resuming(read_text(agent / "session"), bundle)
         ):
             continue
-        env = env or session_env()
-        if not is_minimized(parent, env):
+        if is_watched(bundle):
             continue
         restarted[bundle] = time.time()
         print(f"{bundle}: its terminal restarts on the code of {format_time(changed)}", flush=True)
@@ -3002,12 +2975,11 @@ def free_done_terminals():
     """Close the terminal of each bundle whose agent ended its run on a verdict, so that its
     container gives its memory back: the CI, the staging and the reviews of its PRs are for the
     next triage. Only once its session is idle on a last answer that opens on a verdict, for
-    FREE_AFTER, and while its window is minimized, as for restart_old_terminal. A task queued for
+    FREE_AFTER, and while no terminal is attached to it, as for restart_old_terminal. A task queued for
     the bundle goes on in that session instead (can_go_on)."""
     with state_lock:
         state = read_state()
     queued = {item["bundle"] for item in state["queue"]} | set(state.get("deletions", []))
-    env = None
     for bundle, pid in get_terminals().items():
         agent = get_agent_folder(bundle)
         session = read_text(agent / "session")
@@ -3027,8 +2999,7 @@ def free_done_terminals():
         lines = (get_last_text(transcript) or "").strip().splitlines()
         if not lines or not cut.VERDICT.match(lines[0].strip().lstrip("#*_` ")):
             continue
-        env = env or session_env()
-        if not is_terminal_minimized(agent, env):
+        if is_watched(bundle):
             continue
         print(f"{bundle}: its agent ended on its verdict, its terminal closes", flush=True)
         threading.Thread(target=close_freed, args=(bundle,), daemon=True).start()
@@ -3039,12 +3010,11 @@ def requeue_failed_terminals():
     API error than its terminal tries again (TITLE.RETRIES), so that it frees its slot: the queue
     starts it again with GO_ON after REQUEUE_AFTER minutes, longer at each turn that ends so again.
     One whose last turn ended on the wait for the main login goes at once, and waits for that login
-    in the queue. Not after its verdict, as it holds no slot then, and only while its window is
-    minimized, as for free_done_terminals."""
+    in the queue. Not after its verdict, as it holds no slot then, and only while no terminal is
+    attached to it, as for free_done_terminals."""
     with state_lock:
         state = read_state()
     queued = {item["bundle"] for item in state["queue"]} | set(state.get("deletions", []))
-    env = None
     for bundle, pid in get_terminals().items():
         agent = get_agent_folder(bundle)
         session = read_text(agent / "session")
@@ -3062,8 +3032,7 @@ def requeue_failed_terminals():
         errors = TITLE.count_api_errors(session, TITLE.RETRIES + len(REQUEUE_AFTER), bundle)
         if not login and errors <= TITLE.RETRIES:
             continue
-        env = env or session_env()
-        if not is_terminal_minimized(agent, env):
+        if is_watched(bundle):
             continue
         if login:
             print(f"{bundle}: its claude waits for the main login, back to the queue", flush=True)
@@ -3085,7 +3054,7 @@ def requeue_usage_limited():
     weekly one of 2026-11-18, and a new claude on its session sends through the switch again. An
     agent terminal or an ops window goes as Back to queue does. An agent on a worker stops there,
     and its session is queued to go on there. Not when its reset comes within LIMIT_SOON, and only
-    while its window here, when it has one, is minimized, as for free_done_terminals. Once per
+    while no terminal here is attached to it, as for free_done_terminals. Once per
     state of the switch: an agent that stops on the limit again waits for an account to change.
     A session that waits goes too: with the limit message last, its dialog is the
     /rate-limit-options menu Claude opens by itself at the limit, which held 14 agents from
@@ -3101,7 +3070,6 @@ def requeue_usage_limited():
         state = read_state()
     queued = {item["bundle"] for item in state["queue"]} | set(state.get("deletions", []))
     terminals, remotes = get_terminals(ops=True), get_remote_agents()
-    env = None
     for name in sorted({*terminals, *remotes} - queued):
         agent = get_agent_folder(name)
         ops = name.startswith(OPS)
@@ -3124,14 +3092,8 @@ def requeue_usage_limited():
         resets = TITLE.get_limit_reset(session, name)
         if not resets or resets < now + LIMIT_SOON:
             continue
-        if name in terminals:
-            env = env or session_env()
-            try:
-                parent, _started = read_stat(terminals[name])
-            except (OSError, IndexError, ValueError):
-                continue
-            if not is_minimized(parent, env):
-                continue
+        if name in terminals and is_watched(name):
+            continue
         limit_requeues["agents"].add((name, session))
         where = f" on {remotes[name]}" if name in remotes else ""
         print(
@@ -3228,12 +3190,12 @@ def make_fresh(item, folder, context):
 
 
 def leave_large_terminal(item, folder, context):
-    """Close the terminal of a large session that gave its verdict and is idle, once minimized as
-    free_done_terminals does, so that the task starts a new session. A terminal on screen is
-    Seb's: the task waits for him to close it."""
+    """Close the terminal of a large session that gave its verdict and is idle, while no terminal is
+    attached to it as for free_done_terminals, so that the task starts a new session. An attached
+    one is Seb's: the task waits for him to close it."""
     if not item.get("fresh"):
         make_fresh(item, folder, context)
-    if (folder / "pause").exists() or not is_terminal_minimized(folder, session_env()):
+    if (folder / "pause").exists() or is_watched(item["bundle"]):
         return
     print(f"{item['bundle']}: its terminal closes for a new session", flush=True)
     threading.Thread(target=close_freed, args=(item["bundle"],), daemon=True).start()
@@ -4783,24 +4745,15 @@ def is_window_name(name):
 
 
 def get_window_processes():
-    """The agent-terminator.py process of each agent window of the host, by its bundle or ops
-    session: the process of a container shows in /proc too, with the command line it chose."""
-    windows = {}
-    for path in pathlib.Path("/proc").glob("[0-9]*/cmdline"):
-        try:
-            args = path.read_bytes().split(b"\0")
-        except OSError:
-            continue
-        found = [at for at, arg in enumerate(args) if arg.endswith(b"agent-terminator.py")]
-        if found and len(args) > found[0] + 1 and is_host_process(path.parent.name):
-            windows[args[found[0] + 1].decode(errors="replace")] = int(path.parent.name)
-    return windows
+    """The agent-tmux.py process that holds each agent of the host, by its bundle or ops session,
+    or the agent-terminator.py of a window opened before 2026-11-25."""
+    return {name: pid for pid, name in get_holders(WINDOW_SCRIPTS).items()}
 
 
 def find_lost_windows():
     """The agent windows whose note stays though their process is gone, with the note and when
     each was last seen open: no one closed them, a shutdown, a crash of the X server or a kill did,
-    as a close drops the note (agent-terminator.py). The note of a window opened before the notes,
+    as a close drops the note (agent-tmux.py). The note of a window opened before the notes,
     which the daemon writes for it (adopted), counts after a reboot only, as its close drops none:
     one of this boot whose process is gone for LOST_AFTER is dropped."""
     boot, now = get_boot(), time.time()

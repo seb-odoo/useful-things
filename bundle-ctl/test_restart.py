@@ -164,7 +164,7 @@ def restart(root, terminals):
     daemon.TITLE.is_resuming = lambda session, *_: any(
         case["resuming"] for case in terminals.values()
     )
-    daemon.is_minimized = lambda pid, env: by_pid[pid]["minimized"]
+    daemon.is_watched = lambda bundle: not terminals[bundle]["minimized"]
     daemon.session_env = dict
     daemon.open_terminal = lambda log, bundle, takeover: opened.append((bundle, takeover))
     daemon.print = lambda *args, **kwargs: None
@@ -219,7 +219,7 @@ def free(root, bundle, case):
     daemon.get_session_status = lambda bundle, session: case["status"]
     daemon.TITLE.is_resuming = lambda session, *_: case["resuming"]
     daemon.read_stat = lambda pid: (pid, 0)
-    daemon.is_minimized = lambda pid, env: case["minimized"]
+    daemon.is_watched = lambda bundle: not case["minimized"]
     daemon.session_env = dict
     daemon.close_freed = closed.append
     daemon.TITLE.count_api_errors = lambda session, most, *_: min(case.get("errors", 0), most)
@@ -309,7 +309,7 @@ def limit(root, case, at, lines=None, fresh=True):
         at + case["resets"] if case["resets"] and (asked, bundle) == (session, name) else None
     )
     daemon.read_stat = lambda pid: (pid + 1, 0)
-    daemon.is_minimized = lambda pid, env: pid == 1001 and case["minimized"]
+    daemon.is_watched = lambda name: not case["minimized"]
     daemon.session_env = dict
     daemon.requeue_agent = lambda caller, query, body, **kwargs: done.append(
         ("here", caller, body, kwargs)

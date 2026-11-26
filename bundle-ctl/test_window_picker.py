@@ -172,10 +172,11 @@ def start_agent(name):
 
 
 def start_window(name):
-    """The agent-terminator.py of a window, which holds agent-terminal.py NAME as its COMMAND."""
+    """The agent-terminator.py of a window of before 2026-11-25, which holds agent-terminal.py NAME
+    as its COMMAND: a holder of today (agent-tmux.py) gives a row of its own (get_holder_rows)."""
     code = "import time; time.sleep(60)"
     terminal = [sys.executable, str(HERE / "agent-terminal.py"), name]
-    command = [sys.executable, "-c", code, str(HERE / "agent-terminator.py"), name, *terminal]
+    command = [sys.executable, "-c", code, "agent-terminator.py", name, *terminal]
     return subprocess.Popen(command)
 
 
@@ -235,13 +236,12 @@ def get_ops_agents():
     the ops window runs it, then with neither, when bctl starts it: the commands, and the sessions
     folders the live claudes are read from."""
     found = []
-    refactor, other = ("🔧 Refactor (ops)", "0x0b"), ("✋ 🔧 Ops list layout (ops)", "0x0a")
+    refactor, other = ("🔧 Refactor (ops)", "tmux:11"), ("✋ 🔧 Ops list layout (ops)", "tmux:10")
     for windows, live in (([other, refactor], set()), ([], {OPS_SESSION[4:]}), ([other], set())):
         picker = load_picker()
         shown = iter([windows, [other], [other, refactor]])
         picker.get_windows = lambda shown=shown: ({}, next(shown), [])
-        picker.read_window_pids = lambda: {"0x0a": "10", "0x0b": "11"}
-        picker.get_terminator = lambda pid: (1, {"10": "ops-other", "11": OPS_SESSION}[pid])
+        picker.get_holder = lambda window: {"tmux:10": (10, "ops-other"), "tmux:11": (11, OPS_SESSION)}.get(window)
         picker.HOST_FOLDER = "/home/seb/repo"
         records, ran, done = [], [], types.SimpleNamespace(returncode=0)
         picker.get_live_sessions = lambda folders, live=live, records=records: (
@@ -254,6 +254,79 @@ def get_ops_agents():
         picker.time = types.SimpleNamespace(monotonic=time.monotonic, sleep=lambda _seconds: None)
         found.append((picker.bring_up_agent(OPS_SESSION), ran, records))
     return found, f"{picker.CLAUDE_CONFIG_CONTAINER}/repo/sessions"
+
+
+def get_attach(name, pid):
+    """The terminator window a pick of the holder PID of NAME opens on its tmux."""
+    picker = load_picker()
+    socket = str(picker.get_tmux_socket(name, pid))
+    return [*picker.SCOPE, *picker.ATTACH, socket, "attach-session"]
+
+
+def get_holder_rows(folder):
+    """The rows of agents with no window: an agent-tmux.py process each, with the title, the pane
+    and whether a terminal is attached in its holder file. A bundle row minimized while none is,
+    an ops row of its own keyed by its `tmux:PID`, ❌ once the pane waits on the end of its claude,
+    the session of the ops row from its name, and a pick that attaches a terminal to its tmux."""
+    picker = load_picker()
+    agents = sys.modules["agents"]
+    agents.TMUX = folder / "holders"
+    agents.TMUX.mkdir()
+    picker.get_worktree_bundle_folder = lambda name: str(folder / name)
+    (folder / "master-h--seb").mkdir(exist_ok=True)
+    picker.get_hidden = lambda windows: set()
+    picker.subprocess = types.SimpleNamespace(
+        run=lambda command, **_: types.SimpleNamespace(stdout="", returncode=0),
+        Popen=lambda command, **_: started.append(command),
+        DEVNULL=subprocess.DEVNULL,
+    )
+    started, processes = [], []
+    sleep = [sys.executable, "-c", "import time; time.sleep(60)"]
+    ending = "master-h--seb: claude ended with code 137"
+    pane = subprocess.Popen(["sh", "-c", WAIT, ending], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL)
+    try:
+        for name, title, attached in (
+            ("master-h--seb", "⏳ ⭐ master-h--seb (mine)", False),
+            ("ops-S-h", "✋ 🔧 Holder (ops)", True),
+        ):
+            holder = subprocess.Popen([*sleep, str(HERE / "agent-tmux.py"), name, "agent-terminal.py", name])
+            processes.append(holder)
+            note = {"name": name, "title": title, "pane": pane.pid if name == "master-h--seb" else None}
+            agents.get_holder_file(name, holder.pid).write_text(json.dumps({**note, "attached": attached}))
+        time.sleep(0.3)
+        rows = picker.get_rows(picker.get_windows(), shown=True)
+        found = [(row.key, row.window, row.title, row.minimized) for row in rows]
+        session = picker.get_session(next(row for row in rows if row.key.startswith("tmux:")))
+        picker.bring_up(f"tmux:{processes[0].pid}")
+    finally:
+        for process in [*processes, pane]:
+            process.kill()
+            process.wait()
+    bundle, ops = (f"tmux:{process.pid}" for process in processes)
+    expected = [
+        ("master-h--seb", bundle, "❌ ⭐ master-h--seb (mine)", True),
+        (ops, ops, "✋ 🔧 Holder (ops)", False),
+    ]
+    socket = str(agents.get_tmux_socket("master-h--seb", processes[0].pid))
+    attach = [[*picker.SCOPE, *picker.ATTACH, socket, "attach-session"]]
+    failures = []
+    if found != expected:
+        failures.append(f"rows of holders {found!r}, expected {expected!r}")
+    if session != "S-h":
+        failures.append(f"session of an ops holder {session!r}, expected S-h")
+    if started != attach:
+        failures.append(f"pick of a holder ran {started!r}, expected {attach!r}")
+    window = subprocess.Popen([*sleep, *picker.ATTACH, socket, "attach-session"])
+    try:
+        time.sleep(0.3)
+        picker.read_window_pids = lambda: {"0x5": str(window.pid)}
+        found = picker.get_attached_window(socket)
+    finally:
+        window.kill()
+        window.wait()
+    if found != "0x5":
+        failures.append(f"the window attached to a holder: {found!r}, expected 0x5")
+    return failures
 
 
 def write_answer(folder, session, answer, bundle=None):
@@ -275,10 +348,9 @@ def get_close_lines(folder):
     the transcript changed."""
     picker = load_picker()
     picker.get_agent_folder = lambda name: folder / name / ".agent"
-    picker.get_terminator = lambda pid: (5, "ops-S-ops") if pid == "77" else None
+    picker.get_holder = lambda window: (5, "ops-S-ops") if window == "0x0a" else None
     picker.load_title().PROJECTS = folder / "projects"
     picker.load_title().HOST_PROJECT = "-home-seb-repo"
-    picker.read_window_pids = lambda: {"0x0a": "77", "0x0b": "78"}
     rows = [
         picker.Row(None, 0, "", key, window, True)
         for key, window in (
@@ -363,6 +435,7 @@ def main():
         listed = f'{{ [ "$2" = -p ] && cat {folder}/pids || cat {folder}/windows; }}'
         write_fake(folder, "wmctrl", f'[ "$1" = -l ] && {listed} || echo wmctrl "$@" >> {log}')
         write_fake(folder, "xdg-open", f'echo xdg-open "$@" >> {log}; echo code --folder-uri x')
+        write_fake(folder, "terminator", f'echo terminator "$@" >> {log}')
         write_fake(folder, "rofi", f'for arg in "$@"; do echo "[$arg]"; done > {folder}/rofi.log')
         (folder / "shown").write_text("")
         agents = {name: start_agent(name) for name in AGENTS}
@@ -468,6 +541,7 @@ def main():
             if found != expected:
                 failures.append(f"close lines {found!r}, expected {expected!r}")
         failures += get_named(folder, log)
+        failures += get_holder_rows(folder)
         failures += get_spoofed(folder)
     new_ops = [str(HERE / "client" / "bctl.py"), "open", "ops", "--terminal"]
     if (started := get_new_ops()) != [new_ops]:
@@ -479,16 +553,17 @@ def main():
         failures.append(f"--agent with no window: {found!r}, expected {started!r}")
     found, records = get_ops_agents()
     bctl[3] = OPS_SESSION
+    attach = [*get_attach(OPS_SESSION, 11)]
     started = [
-        (0, [["wmctrl", "-i", "-a", "0x0b"]], []),
+        (0, [attach], []),
         (0, [["xdg-open", "odoo-bundle://ops"]], [records]),
-        (0, [bctl, ["wmctrl", "-i", "-a", "0x0b"]], [records]),
+        (0, [bctl, attach], [records]),
     ]
     if found != started:
         failures.append(f"--agent {OPS_SESSION}: {found!r}, expected {started!r}")
     for line in failures:
         print(line)
-    cases = 24 + len(PICKS) + len(BRING_UPS) + len(CLOSE_LINES)
+    cases = 28 + len(PICKS) + len(BRING_UPS) + len(CLOSE_LINES)
     print(f"{cases - len(failures)}/{cases} cases as expected")
     sys.exit(1 if failures else 0)
 

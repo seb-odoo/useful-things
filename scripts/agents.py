@@ -4,6 +4,7 @@ Read by the bundle-ctl daemon and by branch_status.py.
 """
 
 import errno
+import hashlib
 import importlib.util
 import json
 import os
@@ -47,6 +48,8 @@ VALUE_FORMS = {
     "where": re.compile(r"auto|local|worker(?::[a-z][a-z0-9-]{0,39})?"),
 }
 WINDOWS = STATE / "windows"
+WINDOW_SCRIPTS = (b"agent-tmux.py", b"agent-terminator.py")
+TMUX = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR") or pathlib.Path.home() / ".cache") / "bundle-ctl" / "tmux"
 
 title_by_session = {}
 
@@ -242,8 +245,8 @@ def is_host_process(pid, proc="/proc"):
 
 def is_agent_running(bundle):
     """Whether the agent of a bundle or an ops window runs: agent-terminal.py BUNDLE, a process of
-    the host. The agent-terminator.py of the window holds the same words as COMMAND, and does not
-    count."""
+    the host. The agent-tmux.py that holds it has the same words as COMMAND, and does not count, nor
+    the agent-terminator.py of a window opened before 2026-11-25."""
     for path in pathlib.Path("/proc").glob("[0-9]*/cmdline"):
         try:
             args = path.read_bytes().split(b"\0")
@@ -251,7 +254,7 @@ def is_agent_running(bundle):
             continue
         if bundle.encode() not in args or not is_host_process(path.parent.name):
             continue
-        if any(arg.endswith(b"agent-terminator.py") for arg in args):
+        if any(arg.endswith((b"agent-tmux.py", b"agent-terminator.py")) for arg in args):
             continue
         if any(arg.endswith(b"agent-terminal.py") for arg in args):
             return True
@@ -287,21 +290,10 @@ def reads_told(bundle):
 
 
 def get_window_pids(bundle):
-    """The agent-terminator.py processes of the host that hold an agent window of a bundle or an
-    ops window."""
-    pids = []
-    for path in pathlib.Path("/proc").glob("[0-9]*/cmdline"):
-        try:
-            args = path.read_bytes().split(b"\0")
-        except OSError:
-            continue
-        if (
-            bundle.encode() in args
-            and any(arg.endswith(b"agent-terminator.py") for arg in args)
-            and is_host_process(path.parent.name)
-        ):
-            pids.append(int(path.parent.name))
-    return pids
+    """The agent-tmux.py processes of the host that hold the agent of a bundle or of an ops session
+    (the "window" of the agent, though it has none), and the agent-terminator.py of a window
+    opened before 2026-11-25: SIGUSR1 closes both."""
+    return [pid for pid, name in get_holders(WINDOW_SCRIPTS).items() if name == bundle]
 
 
 def is_handled(bundle, news, is_open=False):
@@ -470,7 +462,7 @@ def is_host_stopping():
 
 def write_window_note(name, pid, adopted=False):
     """Note that the agent window of a bundle or of an ops session (NAME) is open in the process
-    PID, its agent-terminator.py: the note stays when a shutdown or a crash closes the window, and
+    PID, its agent-tmux.py: the note stays when a shutdown or a crash ends it, and
     the daemon then brings its agent back (README.md of bundle-ctl, "After a shutdown"). `adopted`
     is a window the daemon found with no note, opened before the notes: its close drops none."""
     WINDOWS.mkdir(parents=True, exist_ok=True)
@@ -492,6 +484,54 @@ def read_window_note(path):
 def get_window_notes():
     """The note of each window, by its name: (name, path, note), the note None when unreadable."""
     return [(path.stem, path, read_window_note(path)) for path in sorted(WINDOWS.glob("*.json"))]
+
+
+def get_holders(scripts=(b"agent-tmux.py",)):
+    """The agent-tmux.py processes of the host, each with the bundle or the ops session (NAME) whose
+    agent it holds. The tmux server of each has agent-tmux.py last, with no name after it. With
+    WINDOW_SCRIPTS, the agent-terminator.py of a window opened before 2026-11-25 too."""
+    holders = {}
+    for path in pathlib.Path("/proc").glob("[0-9]*/cmdline"):
+        try:
+            args = path.read_bytes().split(b"\0")
+        except OSError:
+            continue
+        found = [at for at, arg in enumerate(args) if arg.endswith(scripts)]
+        if found and len(args) > found[0] + 1 and args[found[0] + 1]:
+            if is_host_process(path.parent.name):
+                holders[int(path.parent.name)] = args[found[0] + 1].decode(errors="replace")
+    return holders
+
+
+def get_tmux_socket(name, pid):
+    """The socket of the tmux server of the agent-tmux.py process PID, which holds the agent of
+    NAME. One per process, as a takeover starts a second one while the first still runs. NAME goes
+    as a hash, as a socket path holds 107 bytes and a bundle name up to 100."""
+    return TMUX / f"{hashlib.sha256(name.encode()).hexdigest()[:16]}.{pid}"
+
+
+def get_holder_file(name, pid):
+    """The file where agent-tmux.py keeps the title of its agent, the pid of its pane and whether
+    a terminal is attached to it."""
+    socket = get_tmux_socket(name, pid)
+    return socket.with_name(f"{socket.name}.json")
+
+
+def read_holder(name, pid):
+    try:
+        found = json.loads(read_bytes(get_holder_file(name, pid), MAX_NOTE) or b"")
+    except ValueError:
+        return {}
+    return found if isinstance(found, dict) else {}
+
+
+def is_watched(name):
+    """Whether Seb follows the agent of NAME in a terminal attached to its tmux."""
+    return any(
+        read_holder(name, pid).get("attached") is True
+        for pid, held in get_holders().items()
+        if held == name
+    )
 
 
 def drop_window_note(name, pid):

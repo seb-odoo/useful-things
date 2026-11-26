@@ -27,8 +27,8 @@ a double click or Terminal brings up the terminal of each selected row (Ctrl+cli
 where it was, the first row last, so that it ends in front. VS Code opens the window of each
 selected bundle, which takes its session over. Show tabs brings up the Firefox tab group of the
 first selected bundle, and Close tabs closes the groups of each, at once. Close closes the window
-of each selected row after a question, as the daemon does: SIGUSR1 to its agent-terminator.py,
-and its claude stops.
+of each selected row after a question, as the daemon does: SIGUSR1 to its agent-tmux.py, and its
+claude stops.
 Back to queue queues the session of each selected bundle again, at the end of the queue (the lowest
 priority there), and the daemon closes its window once its turn ended, 2 minutes
 at most (bctl requeue): the queue starts it again with "Continue from where you left off." when its
@@ -326,11 +326,10 @@ def format_size(size):
 def close_windows(windows):
     """Close agent windows as the daemon does, so that their claude stops. Another window closes as
     by its close button."""
-    pids = picker.read_window_pids()
     for window in windows:
-        if terminator := picker.get_terminator(pids.get(window)):
+        if holder := picker.get_holder(window):
             with contextlib.suppress(ProcessLookupError):
-                os.kill(terminator[0], signal.SIGUSR1)
+                os.kill(holder[0], signal.SIGUSR1)
         else:
             subprocess.run(["wmctrl", "-i", "-c", window], check=False)
 
@@ -419,8 +418,8 @@ class Usage:
                 cgroup = containers.get(get_worktree_bundle_folder(key))
                 sample = cgroup and read_cgroup(cgroup)
             else:
-                terminator = picker.get_terminator(pids.get(window))
-                sample = terminator and read_tree(processes, terminator[1].removeprefix(OPS))
+                holder = picker.get_holder(window)
+                sample = holder and read_tree(processes, holder[1].removeprefix(OPS))
             if not sample:
                 continue
             samples[key] = (sample[0], now)
@@ -1155,7 +1154,7 @@ class Agents:
 
     def bring_up(self, *_args):
         for row in reversed(self.get_selected()):
-            subprocess.run(["wmctrl", "-i", "-a", row[WINDOW]], check=False)
+            picker.bring_up(row[WINDOW])
 
     def open_code(self, *_args):
         for row in self.get_selected():

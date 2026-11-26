@@ -20,8 +20,9 @@ agent in the agent list").
   (`odoo-bundle://tabs/BUNDLE`). `scripts/bundle_open.py` opens the three on the host.
 - A Ctrl+click opens a link, as for any link of the terminal. The band shows only in a terminal:
   VS Code draws a link that is not https as plain text. `agent-terminal.py` passes the
-  `VTE_VERSION` of terminator to the claude of the container: without it, claude writes each link
-  as its text and its URL, which no click opens.
+  `VTE_VERSION` of its terminal to the claude of the container: without it, claude writes each
+  link as its text and its URL, which no click opens. An agent runs in tmux with no window
+  (`agent-tmux.py`), which has none: its links show so in a terminal attached to it.
 
 Every 10 seconds it asks bundle-ctl, on its socket in the container (`/run/bundle-ctl/ctl.sock`,
 with `curl`): `GET /whoami` once, then `GET /hok`, the requests of the bundle, or for the ops

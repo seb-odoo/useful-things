@@ -10,9 +10,10 @@ STATUS is the `status` Claude writes in `~/.claude/sessions/<pid>.json` for a li
 session, no mark. --starting marks a window whose claude did not start yet, --failed one whose run
 ended before its claude started.
 
-agent-terminator.py names its window with it on the host, and claude-autoopen its VS Code window in
-the container. The kind comes from the name alone, so a window opened by hand gets it too. The own
-suffix is BUNDLE_SUFFIX, which the containers have, else `--$USER`, the default of config.py.
+agent-tmux.py titles the row of an agent with it on the host, and claude-autoopen the VS Code
+window of a bundle in the container. The kind comes from the name alone, so a window opened by
+hand gets it too. The own suffix is BUNDLE_SUFFIX, which the
+containers have, else `--$USER`, the default of config.py.
 
 An idle session is finished when the close line of its last answer, the line that ends Seb's
 reports, starts with "Nothing left", and waits for him when it starts with "Waiting for you". With

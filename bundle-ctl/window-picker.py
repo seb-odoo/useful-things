@@ -31,17 +31,18 @@ the kind is already in words. The line above the rows counts the bundles of each
 prints the mark that needs Seb most with its count (PRIORITY), or 🪟 when no bundle has a mark,
 then that line, for window-applet/.
 
-A minimized ops agent window has a row of its own, ranked by its mark, and a click brings it up:
-its title shows the title of its conversation in place of a name, and agent-terminator.py drops its
-mark once its claude ended. The first row, `➕ new ops agent`, opens a new one: bctl open ops
---terminal.
+An agent runs with no window, in a tmux server of its own (agent-tmux.py): its holder stands for
+its window, as `tmux:PID`, with the title it keeps, minimized while no terminal is attached to it.
+Bringing it up attaches a terminator window to its tmux. An ops agent has a row of its own, ranked
+by its mark: its title shows the title of its conversation in place of a name, and agent-tmux.py
+drops its mark once its claude ended. The first row, `➕ new ops agent`, opens a new one: bctl
+open ops --terminal.
 
 --agent brings up the terminal of the agent of a bundle, else its VS Code window, which then holds
 its session, else starts that agent again in a terminal on its last session (bctl open
---terminal), and brings the window up once it shows, as it opens minimized. For an ops session,
---agent ops-SESSION brings up its ops agent window, else the ops window when a tab of it runs the
-session, else goes on with the session in a new agent window: hok links the caller of a request
-there. --terminal is --agent without the VS Code window, which bctl then takes the session from:
+--terminal), and brings it up once it runs. For an ops session, --agent ops-SESSION brings up its
+ops agent, else the ops window when a tab of it runs the session, else goes on with the session in
+a new agent: hok links the caller of a request there. --terminal is --agent without the VS Code window, which bctl then takes the session from:
 ocode -t. --code brings up its
 VS Code window, else opens it through its `odoo-bundle://` link. The helper of firefox-gateway runs
 them from a tab of the Firefox group of the bundle.
@@ -62,13 +63,23 @@ import unicodedata
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
-from agents import OPS, get_agent_folder, is_host_process, read_text  # noqa: E402
+from agents import (  # noqa: E402
+    OPS,
+    get_agent_folder,
+    get_tmux_socket,
+    is_host_process,
+    read_holder,
+    read_text,
+)
 from commands import BUNDLE_NAME, get_worktree_bundle_folder  # noqa: E402
 from config import CLAUDE_CONFIG_CONTAINER, HOST_FOLDER  # noqa: E402
 
+import agents  # noqa: E402
 from cut import get_live_sessions  # noqa: E402
 
 AGENT_WAIT = 60
+ATTACH = ("terminator", "--no-dbus", "-x", "tmux", "-S")
+SCOPE = ("systemd-run", "--user", "--scope", "--collect", "--quiet")
 FAILED = "❌"
 FIRST_KINDS = ("fw", "mine", "ops", "runbot")
 KIND_BY_CLASS = {"code": "code", "gnome-terminal-server": "terminal", "terminator": "terminal"}
@@ -94,6 +105,7 @@ WAIT = b"Press Enter to close."
 XCB_ATOM_ATOM = 4
 
 close_by_session = {}
+holders = {"at": float("-inf"), "found": {}}
 
 
 class AtomReply(ctypes.Structure):
@@ -109,6 +121,14 @@ class AtomReply(ctypes.Structure):
 class Cookie(ctypes.Structure):
     _fields_ = [("sequence", ctypes.c_uint)]
 SKIPPED = ("nemo-desktop.",)
+
+
+def get_holders():
+    """agents.get_holders, read again after a second: each row asks it, and a scan of the
+    processes takes about 15 ms."""
+    if time.monotonic() - holders["at"] > 1:
+        holders.update(at=time.monotonic(), found=agents.get_holders())
+    return holders["found"]
 
 
 @functools.cache
@@ -153,12 +173,14 @@ def get_place(title):
 
 def get_agent_bundles():
     """The bundles whose claude runs in a terminal: agent-terminal.py BUNDLE ends with it. The
-    agent-terminator.py of the window holds the same words as COMMAND for as long as the window
-    lives. The command lines are read as bytes and most are left at once: a thousand processes
-    read as text took 70 ms, every 2 seconds.
+    agent-tmux.py that holds it has the same words as COMMAND for as long as it runs, as the
+    agent-terminator.py of a window opened before 2026-11-25 does. The command
+    lines are read as bytes and most are left at once: a thousand processes read as text took 70
+    ms, every 2 seconds.
 
-    Also the end each agent window shows once its claude ended, by the pid of its terminator: the
-    keep_open of agent-terminal.py then runs `sh -c WAIT ENDING` in the pane, until Enter."""
+    Also the end each agent shows once its claude ended, by the pid of its pane, and by that of
+    its parent, the terminal of a window of before: the keep_open of agent-terminal.py then runs
+    `sh -c WAIT ENDING` in the pane, until Enter."""
     bundles, ended = set(), {}
     for pid in os.listdir("/proc"):
         try:
@@ -171,13 +193,14 @@ def get_agent_bundles():
                 stat = pathlib.Path(f"/proc/{pid}/stat").read_text()
             except OSError:
                 continue
-            ended[stat.rpartition(")")[2].split()[1]] = data.decode(errors="replace").split("\0")[3]
+            ending = data.decode(errors="replace").split("\0")[3]
+            ended[stat.rpartition(")")[2].split()[1]] = ended[pid] = ending
             continue
         if b"agent-terminal.py" not in data or not is_host_process(pid):
             continue
         args = data.decode(errors="replace").split("\0")
         scripts = [at for at, arg in enumerate(args) if arg.endswith("agent-terminal.py")]
-        if scripts and not any(arg.endswith("agent-terminator.py") for arg in args):
+        if scripts and not any(arg.endswith(("agent-tmux.py", "agent-terminator.py")) for arg in args):
             bundles.add(args[scripts[0] + 1])
     return bundles, ended
 
@@ -192,7 +215,7 @@ def get_loading(name):
 
 def get_windows():
     """The windows of each bundle, by kind, with the title of its row, the ops agent windows, and
-    the other windows."""
+    the other windows. The holder of an agent (agent-tmux.py) is its terminal, `tmux:PID`."""
     out = subprocess.run(["wmctrl", "-l", "-x"], capture_output=True, check=False, text=True)
     pattern, ops_pattern = get_title_patterns()
     bundles, ops, others = {}, [], []
@@ -212,6 +235,15 @@ def get_windows():
         bundle[kind] = window
         if kind == "code" or "title" not in bundle:
             bundle["title"] = match[0]
+    for pid, name in sorted(get_holders().items()):
+        window, title = f"tmux:{pid}", read_holder(name, pid).get("title")
+        title = title if isinstance(title, str) and title else name
+        if name.startswith(OPS):
+            ops.append((title, window))
+        elif is_bundle(name):
+            bundle = bundles.setdefault(name, {})
+            bundle["terminal"] = window
+            bundle.setdefault("title", title)
     return bundles, ops, others
 
 
@@ -283,7 +315,9 @@ def get_rows(windows, shown=False):
         del bundles[name]
     agents, ended = get_agent_bundles()
     pids = read_window_pids() if ended else {}
-    hidden = get_hidden([bundle["terminal"] for bundle in bundles.values()] + [w for _, w in ops])
+    terminals = [bundle["terminal"] for bundle in bundles.values()] + [w for _, w in ops]
+    hidden = get_hidden([window for window in terminals if window.startswith("0x")])
+    hidden |= {window for window in terminals if window.startswith("tmux:") and not is_attached(window)}
     rows = []
     for name, bundle in bundles.items():
         title, window = bundle["title"], bundle["terminal"]
@@ -311,29 +345,68 @@ def get_counts(rows):
 
 
 def read_window_pids():
+    """The pid of each window, and of the pane of each holder (`tmux:PID`)."""
     out = subprocess.run(["wmctrl", "-l", "-p"], capture_output=True, check=False, text=True)
-    return {line.split()[0]: line.split()[2] for line in out.stdout.splitlines()}
+    pids = {line.split()[0]: line.split()[2] for line in out.stdout.splitlines()}
+    for pid, name in get_holders().items():
+        pane = read_holder(name, pid).get("pane")
+        if type(pane) is int:
+            pids[f"tmux:{pid}"] = str(pane)
+    return pids
 
 
-def get_terminator(pid):
-    """The agent-terminator.py process whose terminator is pid, and the bundle of its window, None
-    for another window."""
-    try:
-        parent = pathlib.Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()[1]
-        args = pathlib.Path(f"/proc/{parent}/cmdline").read_text(errors="replace").split("\0")
-        script = next(at for at, arg in enumerate(args) if arg.endswith("agent-terminator.py"))
-        return int(parent), args[script + 1]
-    except (IndexError, OSError, StopIteration):
+def get_holder(window):
+    """The pid of the holder of an agent and its NAME, for its `tmux:PID`, None for a window."""
+    if not window.startswith("tmux:") or not window[5:].isdigit():
         return None
+    pid = int(window[5:])
+    name = get_holders().get(pid)
+    return name and (pid, name)
 
 
-def get_session(row, pids):
-    """The session of a row: the one in the .agent/ folder of a bundle, the one an ops window is
+def get_attached_window(socket):
+    """The window of a terminator that bring_up attached to the tmux of SOCKET, None when none is."""
+    words = [*ATTACH, str(socket)]
+    for path in pathlib.Path("/proc").glob("[0-9]*/cmdline"):
+        try:
+            args = path.read_text(errors="replace").split("\0")
+        except OSError:
+            continue
+        at = next((at for at, arg in enumerate(args) if arg.endswith("terminator")), None)
+        if at is not None and args[at + 1 : at + len(words)] == words[1:]:
+            windows = read_window_pids().items()
+            return next((window for window, pid in windows if pid == path.parent.name), None)
+    return None
+
+
+def is_attached(window):
+    holder = get_holder(window)
+    return bool(holder) and read_holder(holder[1], holder[0]).get("attached") is True
+
+
+def bring_up(window):
+    """Bring a window up, or the terminator window attached to the tmux of a holder, else attach
+    one, in a scope of its own: started from deck-feed or the agent list, it would die with their
+    unit. With no DBus, so that the terminator windows Seb opens later do not go into it, and its
+    process stays for get_attached_window."""
+    if holder := get_holder(window):
+        socket = get_tmux_socket(holder[1], holder[0])
+        if attached := get_attached_window(socket):
+            subprocess.run(["wmctrl", "-i", "-a", attached], check=False)
+        else:
+            command = [*SCOPE, *ATTACH, str(socket), "attach-session"]
+            subprocess.Popen(command, start_new_session=True, **QUIET)
+    elif window.startswith("0x"):
+        subprocess.run(["wmctrl", "-i", "-a", window], check=False)
+
+
+def get_session(row, _pids=None):
+    """The session of a row: the one in the .agent/ folder of a bundle, the one an ops agent is
     named after."""
     if row.key != row.window:
         return read_text(get_agent_folder(row.key) / "session")
-    terminator = get_terminator(pids.get(row.window))
-    return terminator and terminator[1].removeprefix(OPS)
+    holder = get_holder(row.window)
+    return holder and holder[1].removeprefix(OPS)
 
 
 def get_owner(row, session):
@@ -358,8 +431,7 @@ def get_close_line(session, bundle):
 
 def get_close_lines(rows):
     """The close line of the session of each row, by key, "" when it has none."""
-    pids = read_window_pids() if any(row.key == row.window for row in rows) else {}
-    sessions = {row: get_session(row, pids) for row in rows}
+    sessions = {row: get_session(row) for row in rows}
     return {row.key: get_close_line(session, get_owner(row, session)) for row, session in sessions.items()}
 
 
@@ -379,7 +451,7 @@ def pick(name, terminal):
     windows = get_windows()[0].get(name, {})
     window = (terminal and windows.get("terminal")) or windows.get("code")
     if window:
-        subprocess.run(["wmctrl", "-i", "-a", window], check=False)
+        bring_up(window)
     else:
         OPENING.mkdir(parents=True, exist_ok=True)
         (OPENING / name).touch()
@@ -395,10 +467,9 @@ def get_terminal(name):
     """The agent window of a bundle, or of an ops session (ops-SESSION), None when it has none."""
     if not name.startswith(OPS):
         return get_windows()[0].get(name, {}).get("terminal")
-    pids = read_window_pids()
     for _title, window in get_windows()[1]:
-        terminator = get_terminator(pids.get(window))
-        if terminator and terminator[1] == name:
+        holder = get_holder(window)
+        if holder and holder[1] == name:
             return window
     return None
 
@@ -430,7 +501,7 @@ def bring_up_agent(name, code=True):
             if time.monotonic() > deadline:
                 return 0
             time.sleep(1)
-    subprocess.run(["wmctrl", "-i", "-a", window], check=False)
+    bring_up(window)
     return 0
 
 
@@ -451,8 +522,8 @@ def main():
         info = os.environ["ROFI_INFO"]
         if info == "new-ops":
             open_ops()
-        elif info.startswith("0x"):
-            subprocess.run(["wmctrl", "-i", "-a", info], check=False)
+        elif info.startswith(("0x", "tmux:")):
+            bring_up(info)
         else:
             pick(info, terminal=retv == "10")
         return

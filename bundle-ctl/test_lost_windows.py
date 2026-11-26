@@ -42,32 +42,30 @@ def check(checks, prefix):
 
 def check_notes(root):
     """A window writes its note; a close of another window of the same name keeps it, its own
-    close drops it. A window closed by SIGUSR1 or that ends by itself drops it, not one that X or a
-    shutdown ended."""
+    close drops it. An agent closed by SIGUSR1 or that ends by itself drops it, not one a shutdown
+    ended."""
     path = agents.WINDOWS / f"{CUT}.json"
     agents.write_window_note(CUT, 10)
     written = json.loads(path.read_text())
     agents.drop_window_note(CUT, 11)
     kept = path.exists()
     agents.drop_window_note(CUT, 10)
-    spec = importlib.util.spec_from_file_location("terminator", HERE / "agent-terminator.py")
-    terminator = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(terminator)
+    spec = importlib.util.spec_from_file_location("holder", HERE / "agent-tmux.py")
+    holder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(holder)
     stopping = []
-    terminator.is_host_stopping = lambda: bool(stopping)
-    on_purpose = [terminator.is_closed_on_purpose(code) for code in (0, 1, -15)]
+    holder.is_host_stopping = lambda: bool(stopping)
+    on_purpose = [holder.is_closed_on_purpose()]
     stopping.append(True)
-    on_purpose.append(terminator.is_closed_on_purpose(0))
-    terminator.closing.append(True)
-    on_purpose.append(terminator.is_closed_on_purpose(-15))
+    on_purpose.append(holder.is_closed_on_purpose())
+    holder.closing.append(True)
+    on_purpose.append(holder.is_closed_on_purpose())
     return check(
         [
             ("the note names its process and boot", written == {"boot": BOOT, "pid": 10}),
             ("the close of another window keeps it", kept),
             ("its own close drops it", not path.exists()),
-            ("closed by itself, by X, by a kill, at a shutdown, by SIGUSR1", on_purpose == [
-                True, False, False, False, True,
-            ]),
+            ("ended by itself, at a shutdown, by SIGUSR1", on_purpose == [True, False, True]),
         ],
         "notes",
     )

@@ -160,7 +160,7 @@ def open_twice(root, agent, start_job):
 
     def open_terminal(log, name):
         opened.append(name)
-        window = [sys.executable, "-c", "import time; time.sleep(30)", "agent-terminator.py", name]
+        window = [sys.executable, "-c", "import time; time.sleep(30)", "agent-tmux.py", name]
         windows.append(subprocess.Popen(window))
 
     daemon.STATE = root
@@ -439,7 +439,7 @@ def get_moved(root):
     ]
     transcript.write_text("".join(f"{json.dumps(entry)}\n" for entry in entries))
     window = "import signal, time; signal.signal(signal.SIGUSR1, lambda *args: exit()); time.sleep(30)"
-    terminator = subprocess.Popen([sys.executable, "-c", window, "agent-terminator.py", MOVED])
+    terminator = subprocess.Popen([sys.executable, "-c", window, "agent-tmux.py", MOVED])
     daemon.CLAUDE_CONFIG_CONTAINER = str(root / "config")
     daemon.HOST_FOLDER = "/repo/host-ctl"
     daemon.get_transcript = lambda session, *_: transcript

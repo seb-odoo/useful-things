@@ -23,7 +23,7 @@ sudo -u postgres createuser --createdb $USER
 
 # sudo apt-get install sublime-text
 
-sudo apt-get install git-cola vim terminator htop python3-pip \
+sudo apt-get install git-cola vim terminator tmux htop python3-pip \
 postgresql python3-dev libxml2-dev libxslt1-dev libldap2-dev libsasl2-dev \
 build-essential libsasl2-dev libldap2-dev libssl-dev python3-pypdf2 \
 python3-venv python3-flake8 meld gimp flake8

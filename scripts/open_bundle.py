@@ -1,4 +1,4 @@
-"""Open VS Code attached to a bundle's dev container, or with -t the terminator window of its agent.
+"""Open VS Code attached to a bundle's dev container, or with -t a terminal on its agent.
 A bundle that is not local is fetched first, with pfb.
 
 Example:
@@ -24,7 +24,7 @@ parser.add_argument(
     "-t",
     "--terminal",
     action="store_true",
-    help="the terminator window of its agent, a new one when it has none, rather than VS Code",
+    help="a terminal on its agent, started when it has none, rather than VS Code",
 )
 args = parser.parse_args()
 bundle_name = clean_bundle_name(args.name)
