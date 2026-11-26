@@ -20,6 +20,7 @@ import build  # noqa: E402
 
 BUNDLE = "master-probe--seb"
 REAL = {"accessToken": "sk-ant-oat01-real", "refreshToken": "sk-ant-ort01-real"}
+MAIN = {"accessToken": "sk-ant-oat01-main", "refreshToken": "sk-ant-ort01-main"}
 results = []
 
 
@@ -58,6 +59,10 @@ def check_bundle(root):
     claude.mkdir(parents=True)
     real = {**REAL, "subscriptionType": "team", "rateLimitTier": "tier"}
     (claude / ".credentials.json").write_text(json.dumps({"claudeAiOauth": real}))
+    main = root / "config" / "claude-switch-main"
+    main.mkdir(parents=True)
+    oauth = {**MAIN, "subscriptionType": "enterprise", "rateLimitTier": "main-tier"}
+    (main / ".credentials.json").write_text(json.dumps({"claudeAiOauth": oauth}))
     (claude / "settings.json").write_text('{"model": "opus"}\n')
     gh = root / "home" / ".config" / "gh"
     gh.mkdir(parents=True)
@@ -70,8 +75,10 @@ def check_bundle(root):
     login = read_login(own)
     check("a dummy login in its folder", login["accessToken"].startswith("sk-ant-oat01-rr-"), True)
     check("nothing of the host's", REAL["refreshToken"] in json.dumps(login), False)
+    found = [MAIN[key] in json.dumps(login) for key in MAIN]
+    check("no token of the main login", found, [False] * 2)
     plan = (login["subscriptionType"], login["rateLimitTier"])
-    check("of the plan of the host", plan, ("team", "tier"))
+    check("the plan of the switch's main login, not the host's", plan, ("enterprise", "main-tier"))
     mode = (own / "home" / ".credentials.json").stat().st_mode & 0o777
     check("for its owner only", oct(mode), "0o600")
     name = hashlib.sha256(login["accessToken"].encode()).hexdigest()
@@ -142,9 +149,13 @@ def check_ops(root):
     (root / "home" / ".claude").mkdir(parents=True)
     (root / "home" / ".claude" / "settings.json").write_text("{}\n")
     res = run(root, "ops", str(root / "repo"))
-    check("the ops container: exit code", (res.returncode, res.stderr), (0, ""))
+    check("the ops container: exit code", res.returncode, 0)
+    said = f"no plan in {root / 'config'}/claude-switch-main/.credentials.json"
+    check("with no main login of the switch, says so", res.stderr.startswith(said), True)
     own = root / "cache" / "devcontainer" / "claude-config" / "ops"
     login = read_login(own)
+    plan = (login["subscriptionType"], "rateLimitTier" in login)
+    check("and its dummy says max, with no tier", plan, ("max", False))
     check("a dummy login of its own", login["accessToken"].startswith("sk-ant-oat01-rr-"), True)
     dummies = root / "state" / "claude-switch" / "dummies"
     named = dummies / hashlib.sha256(login["accessToken"].encode()).hexdigest()

@@ -212,8 +212,26 @@ def write_settings(claude, own, token=None):
     path.write_text(json.dumps(settings, indent=2) + "\n")
 
 
-def write_login(claude, own, name, values):
-    """The dummy login of the bundle, named for the Claude switch, in its folder of its own."""
+def read_plan(values):
+    """subscriptionType and rateLimitTier of the switch's own login of the main account
+    (claude-switch README, main-login.sh), the account the switch sends a dummy's requests with;
+    never the host's login, which may be any account. Nothing else of it is read: {} when it cannot
+    be."""
+    login = pathlib.Path(values["CONFIG_ROOT"]) / "claude-switch-main" / ".credentials.json"
+    try:
+        oauth = json.loads(login.read_text())["claudeAiOauth"]
+        return {
+            key: oauth[key]
+            for key in ("subscriptionType", "rateLimitTier")
+            if isinstance(oauth.get(key), str) and oauth[key]
+        }
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return {}
+
+
+def write_login(own, name, values):
+    """The dummy login of the bundle, named for the Claude switch, in its folder of its own, of the
+    plan of the switch's main login."""
     home = own / "home"
     if home.is_symlink():
         home.unlink()
@@ -226,19 +244,22 @@ def write_login(claude, own, name, values):
     dummies = pathlib.Path(values["STATE_ROOT"]) / "claude-switch" / "dummies"
     dummies.mkdir(parents=True, exist_ok=True)
     (dummies / hashlib.sha256(dummy.encode()).hexdigest()).write_text(f"{name}\n")
-    try:
-        real = json.loads((claude / ".credentials.json").read_text())["claudeAiOauth"]
-    except (OSError, ValueError, KeyError, TypeError):
-        real = {}
+    plan = read_plan(values)
+    if "subscriptionType" not in plan:
+        print(
+            f"no plan in {values['CONFIG_ROOT']}/claude-switch-main/.credentials.json"
+            " (claude-switch main-login.sh makes it): the dummy login says max",
+            file=sys.stderr,
+        )
     login = {
         "accessToken": dummy,
         "refreshToken": "sk-ant-ort01-rr-dummy",
         "expiresAt": 4102444800000,
         "scopes": DUMMY_SCOPES,
-        "subscriptionType": real.get("subscriptionType") or "max",
+        "subscriptionType": plan.get("subscriptionType", "max"),
     }
-    if real.get("rateLimitTier"):
-        login["rateLimitTier"] = real["rateLimitTier"]
+    if "rateLimitTier" in plan:
+        login["rateLimitTier"] = plan["rateLimitTier"]
     path = home / ".credentials.json"
     if path.is_symlink():
         path.unlink()
@@ -292,7 +313,7 @@ def main():
     (pathlib.Path(values["SHARE_ROOT"]) / "claude-plans" / "dev").mkdir(parents=True, exist_ok=True)
     token = write_fakes(own, args[0], values) if bundle else None
     write_settings(claude, own, token)
-    write_login(claude, own, args[0], values)
+    write_login(own, args[0], values)
     make_files(claude, own)
     link_project(pathlib.Path(values["SHARED_CLAUDE"]), own / "project")
 

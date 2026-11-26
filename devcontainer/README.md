@@ -170,8 +170,11 @@ Its login is a dummy one, made by [`claude-config.py`](claude-config.py) at each
 for the Claude switch, which sends its requests with the main login in its place (its README):
 no credential of the host is in a bundle, so code in a bundle has no login to send away or swap.
 The bundle's Claude cannot renew it, and needs not: the
-switch takes the access token of the host's login, which bundle-ctl renews while a bundle, a remote
-agent or the ops container runs, and the host sessions. What it costs (Seb, 2026-10-28): Remote
+switch takes the access token of its own login of the main account (`~/.config/claude-switch-main`,
+made by its `main-login.sh`), which its `claude-switch-renew` renews, never the host's login, which
+may be any account. The dummy says the plan of that login (`subscriptionType`, `rateLimitTier`,
+nothing else of it is read), `max` with a line on stderr while it has none. What it costs (Seb,
+2026-10-28): Remote
 Control and the claude.ai connectors of the account, which the settings of a bundle do not load
 (`disableClaudeAiConnectors`). The ops container has the same since 11-03 (security check, K1: his
 pick "Own folder and dummy login"), with a `~/.claude` of its own (host-ctl README): never give a
